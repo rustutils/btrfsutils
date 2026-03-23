@@ -1,12 +1,11 @@
 //! Safe wrappers for the btrfs filesystem label ioctls.
 
-use std::ffi::{CStr, CString};
-use std::os::fd::AsRawFd;
-use std::os::unix::io::BorrowedFd;
-
-use nix::libc::c_char;
-
 use crate::raw::{btrfs_ioc_get_fslabel, btrfs_ioc_set_fslabel};
+use nix::libc::c_char;
+use std::{
+    ffi::{CStr, CString},
+    os::{fd::AsRawFd, unix::io::BorrowedFd},
+};
 
 /// Maximum label length including the null terminator (BTRFS_LABEL_SIZE).
 const BTRFS_LABEL_SIZE: usize = crate::raw::BTRFS_LABEL_SIZE as usize;

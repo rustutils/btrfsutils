@@ -1,9 +1,7 @@
 //! Safe wrapper for the btrfs sync ioctl.
 
-use std::os::fd::AsRawFd;
-use std::os::unix::io::BorrowedFd;
-
 use crate::raw::btrfs_ioc_sync;
+use std::os::{fd::AsRawFd, unix::io::BorrowedFd};
 
 /// Force a sync on the btrfs filesystem referred to by `fd`.
 ///

@@ -6,8 +6,10 @@
 //! bindings provided by this crate rather than the types and functions
 //! of this module directly.
 
-use nix::libc::{c_char, c_int};
-use nix::{ioctl_none, ioctl_read, ioctl_readwrite, ioctl_write_int, ioctl_write_ptr};
+use nix::{
+    ioctl_none, ioctl_read, ioctl_readwrite, ioctl_write_int, ioctl_write_ptr,
+    libc::{c_char, c_int},
+};
 
 // this is in a nested module so that we can suppress warnings from bindgen.
 mod bindings {

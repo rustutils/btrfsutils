@@ -5,11 +5,7 @@ use btrfs_uapi::balance::{
 };
 use clap::Parser;
 use nix::errno::Errno;
-use std::fs::File;
-use std::os::unix::io::AsFd;
-use std::path::PathBuf;
-use std::thread;
-use std::time::Duration;
+use std::{fs::File, os::unix::io::AsFd, path::PathBuf, thread, time::Duration};
 
 /// Balance data across devices, or change block groups using filters
 #[derive(Parser, Debug)]

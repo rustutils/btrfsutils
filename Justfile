@@ -39,3 +39,6 @@ test-priviledged:
         echo "error: one or more test binaries failed" >&2
         exit 1
     fi
+
+format:
+    cargo +nightly fmt --all

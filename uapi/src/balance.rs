@@ -5,13 +5,10 @@
 //! - [`balance_ctl`] — pause or cancel an in-progress balance
 //! - [`balance_progress`] — query the current balance state and progress
 
-use std::os::fd::AsRawFd;
-use std::os::unix::io::BorrowedFd;
-
+use crate::raw::*;
 use bitflags::bitflags;
 use nix::libc::c_int;
-
-use crate::raw::*;
+use std::os::{fd::AsRawFd, unix::io::BorrowedFd};
 
 bitflags! {
     /// Top-level flags for a balance operation (`btrfs_ioctl_balance_args.flags`).

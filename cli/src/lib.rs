@@ -4,8 +4,7 @@ use clap::{Parser, ValueEnum};
 pub mod balance;
 pub mod filesystem;
 
-use crate::balance::BalanceCommand;
-use crate::filesystem::FilesystemCommand;
+use crate::{balance::BalanceCommand, filesystem::FilesystemCommand};
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Format {

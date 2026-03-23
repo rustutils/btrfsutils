@@ -4,13 +4,6 @@
 //! information for a mounted btrfs filesystem. This is the data underlying
 //! the `btrfs filesystem df` command.
 
-use std::fmt;
-use std::mem;
-use std::os::fd::AsRawFd;
-use std::os::unix::io::BorrowedFd;
-
-use bitflags::bitflags;
-
 use crate::raw::{
     BTRFS_AVAIL_ALLOC_BIT_SINGLE, BTRFS_BLOCK_GROUP_DATA, BTRFS_BLOCK_GROUP_DUP,
     BTRFS_BLOCK_GROUP_METADATA, BTRFS_BLOCK_GROUP_RAID0, BTRFS_BLOCK_GROUP_RAID1,
@@ -18,6 +11,11 @@ use crate::raw::{
     BTRFS_BLOCK_GROUP_RAID6, BTRFS_BLOCK_GROUP_RAID10, BTRFS_BLOCK_GROUP_SYSTEM,
     BTRFS_SPACE_INFO_GLOBAL_RSV, btrfs_ioc_space_info, btrfs_ioctl_space_args,
     btrfs_ioctl_space_info,
+};
+use bitflags::bitflags;
+use std::{
+    fmt, mem,
+    os::{fd::AsRawFd, unix::io::BorrowedFd},
 };
 
 bitflags! {

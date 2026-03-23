@@ -3,13 +3,12 @@
 //! Provides [`resize`], which resizes a device within a mounted btrfs
 //! filesystem.
 
-use std::mem;
-use std::os::fd::AsRawFd;
-use std::os::unix::io::BorrowedFd;
-
-use nix::libc::c_char;
-
 use crate::raw::{btrfs_ioc_resize, btrfs_ioctl_vol_args};
+use nix::libc::c_char;
+use std::{
+    mem,
+    os::{fd::AsRawFd, unix::io::BorrowedFd},
+};
 
 /// The target size for a resize operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

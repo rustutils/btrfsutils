@@ -1,22 +1,29 @@
 use super::{Format, Runnable};
 use anyhow::{Context, Result};
-use btrfs_uapi::defrag::{CompressSpec, CompressType, DefragRangeArgs, defrag_range};
-use btrfs_uapi::label::{label_get, label_set};
-use btrfs_uapi::resize::{ResizeAmount, ResizeArgs, resize};
-use btrfs_uapi::space::space_info;
-use btrfs_uapi::sync::sync;
+use btrfs_uapi::{
+    defrag::{CompressSpec, CompressType, DefragRangeArgs, defrag_range},
+    label::{label_get, label_set},
+    resize::{ResizeAmount, ResizeArgs, resize},
+    space::space_info,
+    sync::sync,
+};
 use clap::{Args, Parser};
-use nix::fcntl::{FallocateFlags, fallocate};
-use nix::libc;
-use std::ffi::CString;
-use std::fs::{File, OpenOptions};
-use std::str::FromStr;
+use nix::{
+    fcntl::{FallocateFlags, fallocate},
+    libc,
+};
+use std::{
+    ffi::CString,
+    fs::{File, OpenOptions},
+    os::unix::{
+        ffi::OsStrExt,
+        fs::OpenOptionsExt,
+        io::{AsFd, AsRawFd},
+    },
+    path::PathBuf,
+    str::FromStr,
+};
 use uuid::Uuid;
-
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::{AsFd, AsRawFd};
-use std::path::PathBuf;
 
 /// Overall filesystem tasks and information
 #[derive(Parser, Debug)]

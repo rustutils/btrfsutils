@@ -6,15 +6,16 @@
 //! To run:
 //!   just test-privileged
 
-use std::fs::{self, File};
-use std::os::unix::io::AsFd;
-use std::path::PathBuf;
-use std::process::Command;
-
 use btrfs_uapi::balance::{
     BalanceCtl, BalanceFlags, BalanceState, balance, balance_ctl, balance_progress,
 };
 use nix::errno::Errno;
+use std::{
+    fs::{self, File},
+    os::unix::io::AsFd,
+    path::PathBuf,
+    process::Command,
+};
 
 /// Expands to the name of the function it is invoked from.
 ///

@@ -3,13 +3,13 @@
 //! Provides [`defrag_range`], which defragments a byte range within a file or
 //! an entire file on a btrfs filesystem.
 
-use std::mem;
-use std::os::fd::AsRawFd;
-use std::os::unix::io::BorrowedFd;
-
 use crate::raw::{
     BTRFS_DEFRAG_RANGE_COMPRESS, BTRFS_DEFRAG_RANGE_COMPRESS_LEVEL, BTRFS_DEFRAG_RANGE_NOCOMPRESS,
     BTRFS_DEFRAG_RANGE_START_IO, btrfs_ioc_defrag_range, btrfs_ioctl_defrag_range_args,
+};
+use std::{
+    mem,
+    os::{fd::AsRawFd, unix::io::BorrowedFd},
 };
 
 /// Compression algorithm to use when defragmenting.
