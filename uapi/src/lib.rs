@@ -1,6 +1,7 @@
 pub mod balance;
 pub mod defrag;
-pub mod fs_info;
+pub mod device;
+pub mod filesystem;
 pub mod label;
 pub mod raw;
 pub mod resize;

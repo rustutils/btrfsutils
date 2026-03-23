@@ -25,7 +25,7 @@ bitflags! {
     /// upper bits encode the RAID profile. A `Display` implementation formats
     /// the flags as `"<type>, <profile>"`, matching the output of
     /// `btrfs filesystem df`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct BlockGroupFlags: u64 {
         // --- chunk types ---
         const DATA            = BTRFS_BLOCK_GROUP_DATA as u64;

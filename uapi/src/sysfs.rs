@@ -1,7 +1,4 @@
-use std::fs;
-use std::io;
-use std::path::PathBuf;
-
+use std::{fs, io, path::PathBuf};
 use uuid::Uuid;
 
 /// Returns the sysfs directory path for the btrfs filesystem with the given

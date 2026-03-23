@@ -1,10 +1,9 @@
-use std::mem;
-use std::os::fd::AsRawFd;
-use std::os::unix::io::BorrowedFd;
-
-use uuid::Uuid;
-
 use crate::raw::{BTRFS_FS_INFO_FLAG_GENERATION, btrfs_ioc_fs_info, btrfs_ioctl_fs_info_args};
+use std::{
+    mem,
+    os::{fd::AsRawFd, unix::io::BorrowedFd},
+};
+use uuid::Uuid;
 
 /// Information about a mounted btrfs filesystem, as returned by
 /// `BTRFS_IOC_FS_INFO`.

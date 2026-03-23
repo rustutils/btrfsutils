@@ -3,6 +3,7 @@ use clap::{Parser, ValueEnum};
 
 pub mod balance;
 pub mod filesystem;
+pub mod util;
 
 use crate::{balance::BalanceCommand, filesystem::FilesystemCommand};
 
