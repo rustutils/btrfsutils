@@ -2,7 +2,7 @@
 #ifndef _BTRFS_CTREE_H_
 #define _BTRFS_CTREE_H_
 
-#include "kernel-shared/uapi/btrfs.h"
+#include "btrfs.h"
 #include <linux/types.h>
 #ifdef __KERNEL__
 #include <linux/stddef.h>

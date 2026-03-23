@@ -1,4 +1,4 @@
-//! Raw BTRFS ioctl bindings.
+//! Raw BTRFS bindings.
 //!
 //! These are the raw ioctl bindings for the BTRFS filesystem. The types
 //! are automatically generated using bindgen, and wrapper functions are

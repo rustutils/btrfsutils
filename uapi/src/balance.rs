@@ -11,7 +11,7 @@ use std::os::unix::io::BorrowedFd;
 use bitflags::bitflags;
 use nix::libc::c_int;
 
-use crate::ioctls::*;
+use crate::raw::*;
 
 // ---------------------------------------------------------------------------
 // Flag types

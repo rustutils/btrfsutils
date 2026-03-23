@@ -2,8 +2,10 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 
 pub mod balance;
+pub mod filesystem;
 
 use crate::balance::BalanceCommand;
+use crate::filesystem::FilesystemCommand;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Format {
@@ -65,7 +67,7 @@ pub enum Command {
     /// Manage and query devices in the filesystem
     Device,
     /// Overall filesystem tasks and information
-    Filesystem,
+    Filesystem(FilesystemCommand),
     /// Query various internal information
     InspectInternal,
     /// Modify properties of filesystem objects
@@ -94,7 +96,7 @@ impl Runnable for Command {
         match self {
             Command::Balance(cmd) => cmd.run(format, dry_run),
             Command::Device => todo!(),
-            Command::Filesystem => todo!(),
+            Command::Filesystem(cmd) => cmd.run(format, dry_run),
             Command::InspectInternal => todo!(),
             Command::Property => todo!(),
             Command::Qgroup => todo!(),
