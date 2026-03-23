@@ -137,6 +137,7 @@ dependencies = [
  "bindgen",
  "bitflags",
  "nix",
+ "uuid",
 ]
 
 [[package]]

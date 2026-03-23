@@ -2,10 +2,12 @@ use super::{Format, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     defrag::{CompressSpec, CompressType, DefragRangeArgs, defrag_range},
+    fs_info::fs_info,
     label::{label_get, label_set},
     resize::{ResizeAmount, ResizeArgs, resize},
     space::space_info,
     sync::sync,
+    sysfs::SysfsBtrfs,
 };
 use clap::{Args, Parser};
 use nix::{
@@ -612,6 +614,45 @@ impl Runnable for FilesystemMkswapfileCommand {
 
 impl Runnable for FilesystemCommitStatsCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        anyhow::bail!("unimplemented")
+        let file = File::open(&self.path)
+            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+
+        let info = fs_info(file.as_fd()).with_context(|| {
+            format!(
+                "failed to get filesystem info for '{}'",
+                self.path.display()
+            )
+        })?;
+
+        let sysfs = SysfsBtrfs::new(&info.uuid);
+
+        let stats = sysfs
+            .commit_stats()
+            .context("failed to read commit_stats from sysfs")?;
+
+        println!("UUID: {}", info.uuid.as_hyphenated());
+        println!("Commit stats since mount:");
+        println!("  {:<28}{:>8}", "Total commits:", stats.commits);
+        println!(
+            "  {:<28}{:>8}ms",
+            "Last commit duration:", stats.last_commit_ms
+        );
+        println!(
+            "  {:<28}{:>8}ms",
+            "Max commit duration:", stats.max_commit_ms
+        );
+        println!(
+            "  {:<28}{:>8}ms",
+            "Total time spent in commit:", stats.total_commit_ms
+        );
+
+        if self.reset {
+            sysfs
+                .reset_commit_stats()
+                .context("failed to reset commit_stats (requires root)")?;
+            println!("NOTE: Max commit duration has been reset");
+        }
+
+        Ok(())
     }
 }
