@@ -6,10 +6,16 @@ use btrfs_uapi::resize::{ResizeAmount, ResizeArgs, resize};
 use btrfs_uapi::space::space_info;
 use btrfs_uapi::sync::sync;
 use clap::{Args, Parser};
+use nix::fcntl::{FallocateFlags, fallocate};
+use nix::libc;
 use std::ffi::CString;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
+use std::str::FromStr;
+use uuid::Uuid;
+
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::io::AsFd;
+use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::io::{AsFd, AsRawFd};
 use std::path::PathBuf;
 
 /// Overall filesystem tasks and information
@@ -216,14 +222,14 @@ pub struct FilesystemLabelCommand {
 /// Create a swapfile on a btrfs filesystem
 #[derive(Parser, Debug)]
 pub struct FilesystemMkswapfileCommand {
-    /// Size of the swapfile (default: 2GiB)
-    #[clap(long, short)]
-    pub size: Option<String>,
+    /// Size of the swapfile
+    #[clap(long, short, default_value = "2G")]
+    pub size: String,
 
     /// UUID to embed in the swap header (clear, random, time, or explicit UUID;
     /// default: random)
     #[clap(long = "uuid", short = 'U')]
-    pub uuid: Option<String>,
+    pub uuid: Option<ParsedUuid>,
 
     /// Path to the swapfile to create
     pub path: PathBuf,
@@ -490,9 +496,110 @@ impl Runnable for FilesystemLabelCommand {
     }
 }
 
+const FS_NOCOW_FL: libc::c_long = 0x00800000;
+const MIN_SWAP_SIZE: u64 = 40 * 1024;
+
+fn system_page_size() -> Result<u64> {
+    let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    anyhow::ensure!(size > 0, "failed to get system page size");
+    Ok(size as u64)
+}
+
+/// A UUID value parsed from a CLI argument.
+///
+/// Accepts `clear` (nil UUID), `random` (random v4 UUID), or any standard
+/// UUID string (with or without hyphens).
+#[derive(Debug, Clone, Copy)]
+pub struct ParsedUuid(Uuid);
+
+impl std::ops::Deref for ParsedUuid {
+    type Target = Uuid;
+    fn deref(&self) -> &Uuid {
+        &self.0
+    }
+}
+
+impl FromStr for ParsedUuid {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "clear" => Ok(Self(Uuid::nil())),
+            "random" => Ok(Self(Uuid::new_v4())),
+            "time" => Ok(Self(Uuid::now_v7())),
+            _ => Uuid::parse_str(s)
+                .map(Self)
+                .map_err(|e| format!("invalid UUID: {e}")),
+        }
+    }
+}
+
+fn write_swap_header(file: &File, page_count: u32, uuid: &Uuid, page_size: u64) -> Result<()> {
+    let mut header = vec![0u8; page_size as usize];
+    header[0x400] = 0x01;
+    header[0x404..0x408].copy_from_slice(&page_count.to_le_bytes());
+    header[0x40c..0x41c].copy_from_slice(uuid.as_bytes());
+
+    // The SWAPSPACE2 signature occupies the last 10 bytes of the first page.
+    let sig_offset = page_size as usize - 10;
+    header[sig_offset..].copy_from_slice(b"SWAPSPACE2");
+    use std::os::unix::fs::FileExt;
+    file.write_at(&header, 0)
+        .context("failed to write swap header")?;
+    Ok(())
+}
+
 impl Runnable for FilesystemMkswapfileCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        anyhow::bail!("unimplemented")
+        let size = parse_size_with_suffix(&self.size)
+            .with_context(|| format!("invalid size: '{}'", self.size))?;
+
+        let page_size = system_page_size()?;
+
+        anyhow::ensure!(
+            size >= MIN_SWAP_SIZE,
+            "swapfile needs to be at least 40 KiB, got {} bytes",
+            size
+        );
+
+        let uuid = self.uuid.as_deref().copied().unwrap_or_else(Uuid::new_v4);
+
+        let size = size - (size % page_size);
+        let total_pages = size / page_size;
+
+        anyhow::ensure!(total_pages > 10, "swapfile too small after page alignment");
+
+        // The first page holds the header; the kernel counts the rest.
+        let page_count = total_pages - 1;
+        anyhow::ensure!(
+            page_count <= u32::MAX as u64,
+            "swapfile too large: page count exceeds u32"
+        );
+
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&self.path)
+            .with_context(|| format!("failed to create '{}'", self.path.display()))?;
+
+        // Set the NOCOW attribute before allocating space.
+        let ret = unsafe { libc::ioctl(file.as_raw_fd(), libc::FS_IOC_SETFLAGS, &FS_NOCOW_FL) };
+        nix::errno::Errno::result(ret).context("failed to set NOCOW attribute")?;
+
+        fallocate(&file, FallocateFlags::empty(), 0, size as libc::off_t)
+            .context("failed to allocate space for swapfile")?;
+
+        write_swap_header(&file, page_count as u32, &uuid, page_size)?;
+
+        println!(
+            "created swapfile '{}' size {} bytes",
+            self.path.display(),
+            human_bytes(size),
+        );
+
+        Ok(())
     }
 }
 
