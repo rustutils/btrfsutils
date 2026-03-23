@@ -5,6 +5,7 @@ pub mod filesystem;
 pub mod label;
 pub mod raw;
 pub mod resize;
+pub mod scrub;
 pub mod space;
 pub mod sync;
 pub mod sysfs;

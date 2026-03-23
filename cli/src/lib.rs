@@ -2,10 +2,15 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 
 pub mod balance;
+pub mod device;
 pub mod filesystem;
+pub mod scrub;
 pub mod util;
 
-use crate::{balance::BalanceCommand, filesystem::FilesystemCommand};
+use crate::{
+    balance::BalanceCommand, device::DeviceCommand, filesystem::FilesystemCommand,
+    scrub::ScrubCommand,
+};
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Format {
@@ -65,7 +70,7 @@ pub enum Command {
     /// Balance data across devices, or change block groups using filters
     Balance(BalanceCommand),
     /// Manage and query devices in the filesystem
-    Device,
+    Device(DeviceCommand),
     /// Overall filesystem tasks and information
     Filesystem(FilesystemCommand),
     /// Query various internal information
@@ -81,7 +86,7 @@ pub enum Command {
     /// Toolbox for specific rescue operations
     Rescue,
     /// Verify checksums of data and metadata
-    Scrub,
+    Scrub(ScrubCommand),
     /// Manage subvolumes: create, delete, list, etc
     Subvolume,
 
@@ -95,7 +100,7 @@ impl Runnable for Command {
     fn run(&self, format: Format, dry_run: bool) -> Result<()> {
         match self {
             Command::Balance(cmd) => cmd.run(format, dry_run),
-            Command::Device => todo!(),
+            Command::Device(cmd) => cmd.run(format, dry_run),
             Command::Filesystem(cmd) => cmd.run(format, dry_run),
             Command::InspectInternal => todo!(),
             Command::Property => todo!(),
@@ -103,7 +108,7 @@ impl Runnable for Command {
             Command::Quota => todo!(),
             Command::Replace => todo!(),
             Command::Rescue => todo!(),
-            Command::Scrub => todo!(),
+            Command::Scrub(cmd) => cmd.run(format, dry_run),
             Command::Subvolume => todo!(),
             Command::Check => todo!(),
             Command::Receive => todo!(),
