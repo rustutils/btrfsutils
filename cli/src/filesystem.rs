@@ -1,6 +1,8 @@
 use super::{Format, Runnable};
 use anyhow::{Context, Result};
+use btrfs_uapi::defrag::{CompressSpec, CompressType, DefragRangeArgs, defrag_range};
 use btrfs_uapi::label::{label_get, label_set};
+use btrfs_uapi::resize::{ResizeAmount, ResizeArgs, resize};
 use btrfs_uapi::space::space_info;
 use btrfs_uapi::sync::sync;
 use clap::{Args, Parser};
@@ -146,15 +148,15 @@ pub struct FilesystemDefragCommand {
     pub flush: bool,
 
     /// Compress the file while defragmenting (optionally specify type: zlib, lzo, zstd)
-    #[clap(long, short)]
+    #[clap(long, short, conflicts_with = "nocomp")]
     pub compress: Option<Option<String>>,
 
     /// Compression level (used together with --compress)
-    #[clap(long = "level", short = 'L')]
+    #[clap(long = "level", short = 'L', requires = "compress")]
     pub compress_level: Option<i8>,
 
     /// Disable compression during defragmentation
-    #[clap(long)]
+    #[clap(long, conflicts_with = "compress")]
     pub nocomp: bool,
 
     /// Defragment only bytes starting at this offset
@@ -162,7 +164,7 @@ pub struct FilesystemDefragCommand {
     pub start: Option<u64>,
 
     /// Defragment only this many bytes
-    #[clap(long, short)]
+    #[clap(long)]
     pub len: Option<u64>,
 
     /// Target extent size threshold in bytes; extents larger than this are
@@ -322,13 +324,144 @@ impl Runnable for FilesystemSyncCommand {
 
 impl Runnable for FilesystemDefragCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        anyhow::bail!("unimplemented")
+        if self.recursive {
+            // TODO: implement recursive directory walking
+            anyhow::bail!("--recursive is not yet implemented");
+        }
+
+        if self.step.is_some() {
+            // TODO: implement chunked defrag
+            anyhow::bail!("--step is not yet implemented");
+        }
+
+        // Build the compress spec from --compress and --level.
+        let compress = match &self.compress {
+            None => None,
+            Some(type_str) => {
+                let compress_type = match type_str.as_deref() {
+                    // -c with no argument defaults to zlib, matching the C tool.
+                    None | Some("") => CompressType::Zlib,
+                    Some(s) => CompressType::from_str(s)
+                        .with_context(|| format!("unknown compress type: {s}"))?,
+                };
+                Some(CompressSpec {
+                    compress_type,
+                    level: self.compress_level,
+                })
+            }
+        };
+
+        let mut args = DefragRangeArgs::new();
+        if let Some(start) = self.start {
+            args = args.start(start);
+        }
+        if let Some(len) = self.len {
+            args = args.len(len);
+        }
+        if let Some(thresh) = self.target {
+            args = args.extent_thresh(thresh as u32);
+        }
+        if self.flush {
+            args = args.flush();
+        }
+        if self.nocomp {
+            args = args.nocomp();
+        } else if let Some(spec) = compress {
+            args = args.compress(spec);
+        }
+
+        for path in &self.paths {
+            if self.verbose {
+                println!("{}", path.display());
+            }
+            let file =
+                File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
+            defrag_range(file.as_fd(), &args)
+                .with_context(|| format!("defrag failed on '{}'", path.display()))?;
+        }
+
+        Ok(())
     }
+}
+
+fn parse_size_with_suffix(s: &str) -> Result<u64> {
+    let (num_str, suffix) = match s.find(|c: char| c.is_alphabetic()) {
+        Some(i) => (&s[..i], &s[i..]),
+        None => (s, ""),
+    };
+    let n: u64 = num_str
+        .parse()
+        .with_context(|| format!("invalid size number: '{num_str}'"))?;
+    let multiplier: u64 = match suffix.to_uppercase().as_str() {
+        "" => 1,
+        "K" => 1024,
+        "M" => 1024 * 1024,
+        "G" => 1024 * 1024 * 1024,
+        "T" => 1024u64.pow(4),
+        "P" => 1024u64.pow(5),
+        "E" => 1024u64.pow(6),
+        _ => anyhow::bail!("unknown size suffix: '{suffix}'"),
+    };
+    n.checked_mul(multiplier)
+        .ok_or_else(|| anyhow::anyhow!("size overflow: '{s}'"))
+}
+
+fn parse_resize_amount(s: &str) -> Result<ResizeAmount> {
+    if s == "cancel" {
+        return Ok(ResizeAmount::Cancel);
+    }
+    if s == "max" {
+        return Ok(ResizeAmount::Max);
+    }
+    let (modifier, rest) = if let Some(r) = s.strip_prefix('+') {
+        (1i32, r)
+    } else if let Some(r) = s.strip_prefix('-') {
+        (-1i32, r)
+    } else {
+        (0i32, s)
+    };
+    let bytes = parse_size_with_suffix(rest)?;
+    Ok(match modifier {
+        1 => ResizeAmount::Add(bytes),
+        -1 => ResizeAmount::Sub(bytes),
+        _ => ResizeAmount::Set(bytes),
+    })
+}
+
+fn parse_resize_args(s: &str) -> Result<ResizeArgs> {
+    // A leading "<number>:" means a devid was specified.
+    if let Some(colon) = s.find(':') {
+        if let Ok(devid) = s[..colon].parse::<u64>() {
+            let amount = parse_resize_amount(&s[colon + 1..])?;
+            return Ok(ResizeArgs::new(amount).with_devid(devid));
+        }
+    }
+    Ok(ResizeArgs::new(parse_resize_amount(s)?))
 }
 
 impl Runnable for FilesystemResizeCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        anyhow::bail!("unimplemented")
+        if self.offline {
+            // TODO: offline resize requires opening the image as a btrfs
+            // filesystem directly without a mount point.
+            anyhow::bail!("--offline is not yet implemented");
+        }
+
+        if self.enqueue {
+            // TODO: check for a running exclusive operation and wait.
+            anyhow::bail!("--enqueue is not yet implemented");
+        }
+
+        let args = parse_resize_args(&self.size)
+            .with_context(|| format!("invalid resize argument: '{}'", self.size))?;
+
+        let file = File::open(&self.path)
+            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+
+        resize(file.as_fd(), args)
+            .with_context(|| format!("resize failed on '{}'", self.path.display()))?;
+
+        Ok(())
     }
 }
 

@@ -13,10 +13,6 @@ use nix::libc::c_int;
 
 use crate::raw::*;
 
-// ---------------------------------------------------------------------------
-// Flag types
-// ---------------------------------------------------------------------------
-
 bitflags! {
     /// Top-level flags for a balance operation (`btrfs_ioctl_balance_args.flags`).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,10 +71,6 @@ bitflags! {
         const CANCEL_REQ = BTRFS_BALANCE_STATE_CANCEL_REQ as u64;
     }
 }
-
-// ---------------------------------------------------------------------------
-// BalanceArgs builder
-// ---------------------------------------------------------------------------
 
 /// Per-type filter arguments for a balance operation, corresponding to
 /// `btrfs_balance_args`.
@@ -218,10 +210,6 @@ impl BalanceArgs {
     }
 }
 
-// ---------------------------------------------------------------------------
-// BalanceProgress
-// ---------------------------------------------------------------------------
-
 /// Progress counters returned by the kernel for an in-progress balance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BalanceProgress {
@@ -232,10 +220,6 @@ pub struct BalanceProgress {
     /// Number of chunks relocated so far.
     pub completed: u64,
 }
-
-// ---------------------------------------------------------------------------
-// BalanceCtl
-// ---------------------------------------------------------------------------
 
 /// Control command for [`balance_ctl`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,10 +238,6 @@ impl BalanceCtl {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /// Start or resume a balance operation on the filesystem referred to by `fd`.
 ///

@@ -20,10 +20,6 @@ use crate::raw::{
     btrfs_ioctl_space_info,
 };
 
-// ---------------------------------------------------------------------------
-// BlockGroupFlags
-// ---------------------------------------------------------------------------
-
 bitflags! {
     /// Flags describing the type and RAID profile of a btrfs block group.
     ///
@@ -106,10 +102,6 @@ impl fmt::Display for BlockGroupFlags {
     }
 }
 
-// ---------------------------------------------------------------------------
-// SpaceInfo
-// ---------------------------------------------------------------------------
-
 /// Space usage information for one block group type/profile combination.
 ///
 /// Returned by [`space_info`]. The `flags` field describes the chunk type and
@@ -131,10 +123,6 @@ impl From<btrfs_ioctl_space_info> for SpaceInfo {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// space_info()
-// ---------------------------------------------------------------------------
 
 /// Query space usage by block group type for the filesystem referred to by
 /// `fd`.

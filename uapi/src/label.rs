@@ -1,8 +1,4 @@
 //! Safe wrappers for the btrfs filesystem label ioctls.
-//!
-//! Provides two public functions:
-//! - [`label_get`] — read the current filesystem label
-//! - [`label_set`] — write a new filesystem label
 
 use std::ffi::{CStr, CString};
 use std::os::fd::AsRawFd;
@@ -13,7 +9,7 @@ use nix::libc::c_char;
 use crate::raw::{btrfs_ioc_get_fslabel, btrfs_ioc_set_fslabel};
 
 /// Maximum label length including the null terminator (BTRFS_LABEL_SIZE).
-const BTRFS_LABEL_SIZE: usize = 256;
+const BTRFS_LABEL_SIZE: usize = crate::raw::BTRFS_LABEL_SIZE as usize;
 
 /// Read the label of the btrfs filesystem referred to by `fd`.
 ///

@@ -9,6 +9,7 @@
 use nix::libc::{c_char, c_int};
 use nix::{ioctl_none, ioctl_read, ioctl_readwrite, ioctl_write_int, ioctl_write_ptr};
 
+// this is in a nested module so that we can suppress warnings from bindgen.
 mod bindings {
     #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
