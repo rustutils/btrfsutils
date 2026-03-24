@@ -225,6 +225,27 @@ impl SysfsBtrfs {
         self.read_bool("temp_fsid")
     }
 
+    /// Read the per-device scrub throughput limit for the given device, in
+    /// bytes per second. A value of `0` means no limit is set (unlimited).
+    /// `/sys/fs/btrfs/<uuid>/devinfo/<devid>/scrub_speed_max`
+    pub fn scrub_speed_max_get(&self, devid: u64) -> io::Result<u64> {
+        let path = format!("devinfo/{devid}/scrub_speed_max");
+        match self.read_u64(&path) {
+            Ok(v) => Ok(v),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(0),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Set the per-device scrub throughput limit for the given device, in
+    /// bytes per second. Pass `0` to remove the limit (unlimited).
+    /// Requires root.
+    /// `/sys/fs/btrfs/<uuid>/devinfo/<devid>/scrub_speed_max`
+    pub fn scrub_speed_max_set(&self, devid: u64, limit: u64) -> io::Result<()> {
+        let path = self.base.join(format!("devinfo/{devid}/scrub_speed_max"));
+        fs::write(path, format!("{limit}\n"))
+    }
+
     /// Quota status for this filesystem, read from
     /// `/sys/fs/btrfs/<uuid>/qgroups/`.
     ///

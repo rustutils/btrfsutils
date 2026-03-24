@@ -67,7 +67,7 @@ pub struct GlobalOptions {
     pub dry_run: bool,
 
     /// Set log level
-    #[clap(global = true, short, long)]
+    #[clap(global = true, long)]
     pub log: Option<Level>,
 
     /// If supported, print subcommand output in that format
