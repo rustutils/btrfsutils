@@ -1,13 +1,13 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
-use std::path::PathBuf;
+use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
 use crate::{Format, Runnable};
 
 /// Get subvolume ID and tree ID of the given path
 #[derive(Parser, Debug)]
 pub struct SubvolidResolveCommand {
-    /// Subvolume ID
+    /// Subvolume ID to resolve
     subvolid: u64,
 
     /// Path to a file or directory on the btrfs filesystem
@@ -16,6 +16,14 @@ pub struct SubvolidResolveCommand {
 
 impl Runnable for SubvolidResolveCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        todo!("implement subvolid-resolve")
+        let file = File::open(&self.path)
+            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let fd = file.as_fd();
+
+        let resolved_path = btrfs_uapi::inode::subvolid_resolve(fd, self.subvolid)
+            .context("failed to resolve subvolume ID (is this a btrfs filesystem?)")?;
+
+        println!("{}", resolved_path);
+        Ok(())
     }
 }

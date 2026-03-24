@@ -1,4 +1,8 @@
-//! Safe wrapper for the btrfs sync ioctl.
+//! Filesystem sync — flushing all pending writes to disk.
+//!
+//! Forces the kernel to commit all dirty btrfs metadata and data to stable
+//! storage.  Equivalent to calling `sync(2)` scoped to a single btrfs
+//! filesystem rather than all mounted filesystems.
 
 use crate::raw::btrfs_ioc_sync;
 use std::os::{fd::AsRawFd, unix::io::BorrowedFd};

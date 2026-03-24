@@ -1,7 +1,8 @@
-//! Safe wrapper for the btrfs resize ioctl.
+//! Device resizing — growing or shrinking a device within a mounted filesystem.
 //!
-//! Provides [`resize`], which resizes a device within a mounted btrfs
-//! filesystem.
+//! Resizing adjusts how much of a block device's capacity btrfs uses, without
+//! unmounting.  A device can be grown up to its physical size, shrunk to the
+//! minimum space currently occupied, or set to an explicit byte count.
 
 use crate::raw::{btrfs_ioc_resize, btrfs_ioctl_vol_args};
 use nix::libc::c_char;

@@ -55,6 +55,23 @@ impl std::ops::Deref for ParsedUuid {
     }
 }
 
+/// Parse a qgroup ID string of the form `"<level>/<subvolid>"` into a packed u64.
+///
+/// The packed form is `(level as u64) << 48 | subvolid`.
+/// Example: `"0/5"` → `5`, `"1/256"` → `0x0001_0000_0000_0100`.
+pub fn parse_qgroupid(s: &str) -> anyhow::Result<u64> {
+    let (level_str, id_str) = s
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("invalid qgroup ID '{}': expected <level>/<id>", s))?;
+    let level: u64 = level_str
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid qgroup level '{}' in '{}'", level_str, s))?;
+    let subvolid: u64 = id_str
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid qgroup subvolid '{}' in '{}'", id_str, s))?;
+    Ok((level << 48) | subvolid)
+}
+
 impl FromStr for ParsedUuid {
     type Err = String;
 

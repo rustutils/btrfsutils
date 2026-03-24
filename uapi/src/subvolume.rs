@@ -1,14 +1,11 @@
-//! Safe wrappers for btrfs subvolume and snapshot management ioctls.
+//! Subvolume and snapshot management — creating, deleting, and querying subvolumes.
 //!
-//! Covers:
-//! * [`subvolume_create`] — `BTRFS_IOC_SUBVOL_CREATE_V2`
-//! * [`subvolume_delete`] — `BTRFS_IOC_SNAP_DESTROY_V2`
-//! * [`snapshot_create`]  — `BTRFS_IOC_SNAP_CREATE_V2`
-//! * [`subvolume_info`]   — `BTRFS_IOC_GET_SUBVOL_INFO`
-//! * [`subvolume_flags_get`] / [`subvolume_flags_set`] — `BTRFS_IOC_SUBVOL_{GET,SET}FLAGS`
-//! * [`subvolume_default_get`] — tree search on the root tree
-//! * [`subvolume_default_set`] — `BTRFS_IOC_DEFAULT_SUBVOL`
-//! * [`subvolume_list`]   — tree search (ROOT_ITEM_KEY + ROOT_BACKREF_KEY)
+//! Subvolumes are independently snapshotable subtrees within a btrfs filesystem.
+//! Snapshots are subvolumes created as copy-on-write clones of an existing
+//! subvolume.  This module covers the full lifecycle: creating and deleting
+//! subvolumes and snapshots, reading subvolume metadata and flags, listing all
+//! subvolumes in a filesystem, and getting or setting the default subvolume
+//! that is mounted when no subvolume is explicitly requested.
 
 use std::{
     ffi::CStr,

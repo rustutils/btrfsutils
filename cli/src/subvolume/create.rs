@@ -16,29 +16,78 @@ pub struct SubvolumeCreateCommand {
 
 impl Runnable for SubvolumeCreateCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+        let mut had_error = false;
+
         for path in &self.paths {
-            let parent = path
+            let parent = match path
                 .parent()
-                .ok_or_else(|| anyhow::anyhow!("'{}' has no parent directory", path.display()))?;
+                .ok_or_else(|| anyhow::anyhow!("'{}' has no parent directory", path.display()))
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("error creating '{}': {e}", path.display());
+                    had_error = true;
+                    continue;
+                }
+            };
 
-            let name_os = path
+            let name_os = match path
                 .file_name()
-                .ok_or_else(|| anyhow::anyhow!("'{}' has no file name", path.display()))?;
+                .ok_or_else(|| anyhow::anyhow!("'{}' has no file name", path.display()))
+            {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("error creating '{}': {e}", path.display());
+                    had_error = true;
+                    continue;
+                }
+            };
 
-            let name_str = name_os
+            let name_str = match name_os
                 .to_str()
-                .ok_or_else(|| anyhow::anyhow!("'{}' is not valid UTF-8", path.display()))?;
+                .ok_or_else(|| anyhow::anyhow!("'{}' is not valid UTF-8", path.display()))
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("error creating '{}': {e}", path.display());
+                    had_error = true;
+                    continue;
+                }
+            };
 
-            let cname = CString::new(name_str)
-                .with_context(|| format!("subvolume name contains a null byte: '{}'", name_str))?;
+            let cname = match CString::new(name_str)
+                .with_context(|| format!("subvolume name contains a null byte: '{}'", name_str))
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("error creating '{}': {e}", path.display());
+                    had_error = true;
+                    continue;
+                }
+            };
 
-            let file = File::open(parent)
-                .with_context(|| format!("failed to open '{}'", parent.display()))?;
+            let file = match File::open(parent)
+                .with_context(|| format!("failed to open '{}'", parent.display()))
+            {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("error creating '{}': {e}", path.display());
+                    had_error = true;
+                    continue;
+                }
+            };
 
-            subvolume_create(file.as_fd(), &cname)
-                .with_context(|| format!("failed to create subvolume '{}'", path.display()))?;
+            match subvolume_create(file.as_fd(), &cname) {
+                Ok(()) => println!("Create subvolume '{}'", path.display()),
+                Err(e) => {
+                    eprintln!("error creating '{}': {e}", path.display());
+                    had_error = true;
+                }
+            }
+        }
 
-            println!("Create subvolume '{}'", path.display());
+        if had_error {
+            anyhow::bail!("one or more subvolumes could not be created");
         }
 
         Ok(())

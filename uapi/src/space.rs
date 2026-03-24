@@ -1,8 +1,8 @@
-//! Safe wrapper for the btrfs space info ioctl.
+//! Block group space usage — how much space each chunk type allocates and uses.
 //!
-//! Provides [`space_info`], which returns per-block-group-type usage
-//! information for a mounted btrfs filesystem. This is the data underlying
-//! the `btrfs filesystem df` command.
+//! Reports the allocated and used byte counts for each combination of block
+//! group type (data, metadata, system) and RAID profile.  This is the data
+//! underlying the `btrfs filesystem df` command.
 
 use crate::raw::{
     BTRFS_AVAIL_ALLOC_BIT_SINGLE, BTRFS_BLOCK_GROUP_DATA, BTRFS_BLOCK_GROUP_DUP,

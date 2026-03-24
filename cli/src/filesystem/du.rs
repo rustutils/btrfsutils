@@ -68,6 +68,8 @@ fn process_top_level(path: &Path, summarize: bool) -> Result<()> {
     let meta =
         fs::symlink_metadata(path).with_context(|| format!("cannot stat '{}'", path.display()))?;
 
+    let root_dev = meta.dev();
+
     let total = if meta.is_file() {
         let file = File::open(path).with_context(|| format!("cannot open '{}'", path.display()))?;
         let info = file_extents(file.as_fd())
@@ -75,7 +77,7 @@ fn process_top_level(path: &Path, summarize: bool) -> Result<()> {
         shared_ranges.extend_from_slice(&info.shared_extents);
         info.total_bytes
     } else if meta.is_dir() {
-        walk_dir(path, &mut seen, &mut shared_ranges, summarize)?
+        walk_dir(path, root_dev, &mut seen, &mut shared_ranges, summarize)?
     } else {
         0
     };
@@ -96,8 +98,14 @@ fn process_top_level(path: &Path, summarize: bool) -> Result<()> {
 
 /// Walk `dir` recursively, printing one line per entry (unless `summarize`),
 /// and return the total bytes for the whole subtree.
+///
+/// `root_dev` is the device number of the top-level path.  Subdirectories on
+/// a different device (i.e. other mounted filesystems) are silently skipped so
+/// that the walk stays within a single filesystem, matching the behaviour of
+/// the C reference implementation.
 fn walk_dir(
     dir: &Path,
+    root_dev: u64,
     seen: &mut HashSet<(u64, u64)>,
     shared_ranges: &mut Vec<(u64, u64)>,
     summarize: bool,
@@ -120,6 +128,11 @@ fn walk_dir(
         };
 
         if !meta.is_file() && !meta.is_dir() {
+            continue;
+        }
+
+        // Don't cross mount boundaries.
+        if meta.dev() != root_dev {
             continue;
         }
 
@@ -159,7 +172,7 @@ fn walk_dir(
             shared_ranges.extend_from_slice(&info.shared_extents);
             dir_total += info.total_bytes;
         } else {
-            let sub_total = walk_dir(&entry_path, seen, shared_ranges, summarize)?;
+            let sub_total = walk_dir(&entry_path, root_dev, seen, shared_ranges, summarize)?;
 
             if !summarize {
                 // For non-top-level directories, set shared is shown as "-".

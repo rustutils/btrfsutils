@@ -1,8 +1,8 @@
-use anyhow::Result;
+use crate::{Format, Runnable, util::parse_qgroupid};
+use anyhow::{Context, Result};
 use clap::Parser;
-use std::path::PathBuf;
-
-use crate::{Format, Runnable};
+use nix::errno::Errno;
+use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
 /// Destroy a quota group
 #[derive(Parser, Debug)]
@@ -16,6 +16,26 @@ pub struct QgroupDestroyCommand {
 
 impl Runnable for QgroupDestroyCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        todo!("implement qgroup destroy")
+        let qgroupid = parse_qgroupid(&self.qgroupid)?;
+
+        let file = File::open(&self.path)
+            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+
+        match btrfs_uapi::qgroup::qgroup_destroy(file.as_fd(), qgroupid) {
+            Ok(()) => {
+                println!("qgroup {} destroyed", self.qgroupid);
+                Ok(())
+            }
+            Err(Errno::ENOTCONN) => {
+                anyhow::bail!("quota not enabled on '{}'", self.path.display())
+            }
+            Err(e) => Err(e).with_context(|| {
+                format!(
+                    "failed to destroy qgroup '{}' on '{}'",
+                    self.qgroupid,
+                    self.path.display()
+                )
+            }),
+        }
     }
 }

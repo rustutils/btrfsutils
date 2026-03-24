@@ -1,9 +1,11 @@
-//! Safe high-level wrappers for the btrfs balance ioctls.
+//! Balance operations — redistributing data and metadata across devices.
 //!
-//! This module provides three public functions:
-//! - [`balance`] — start or resume a balance operation
-//! - [`balance_ctl`] — pause or cancel an in-progress balance
-//! - [`balance_progress`] — query the current balance state and progress
+//! A balance rewrites chunks across the filesystem's devices according to
+//! optional filter criteria (usage threshold, device selection, profile
+//! conversion).  It is also used to change the RAID profile of a block group
+//! type, or to reduce the number of devices in a filesystem.
+//!
+//! Requires `CAP_SYS_ADMIN`.
 
 use crate::raw::*;
 use bitflags::bitflags;

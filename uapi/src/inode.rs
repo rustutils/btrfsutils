@@ -1,4 +1,9 @@
-//! Inode-related operations for querying filesystem metadata.
+//! Inode and path resolution — mapping between inodes, logical addresses, and paths.
+//!
+//! Covers looking up the subvolume root ID that contains a given file, resolving
+//! an inode number to its filesystem paths, mapping a logical byte address back
+//! to the inodes that reference it, and resolving a subvolume ID to its path
+//! within the filesystem.
 
 use nix::libc::c_int;
 use std::os::fd::{AsRawFd, BorrowedFd};
@@ -6,6 +11,7 @@ use std::os::fd::{AsRawFd, BorrowedFd};
 use crate::raw::{
     BTRFS_FIRST_FREE_OBJECTID, btrfs_ioc_ino_lookup, btrfs_ioc_ino_paths, btrfs_ioc_logical_ino_v2,
 };
+use crate::tree_search::{SearchKey, tree_search};
 
 /// Look up the tree ID (root ID) of the subvolume containing the given file or directory.
 ///
@@ -191,4 +197,136 @@ pub fn logical_ino(
     }
 
     Ok(results)
+}
+
+/// Resolve a subvolume ID to its full path on the filesystem.
+///
+/// Recursively resolves the path to a subvolume by walking the root tree and using
+/// INO_LOOKUP to get directory names. The path is built from the subvolume's name
+/// and the names of all parent directories up to the mount point.
+///
+/// # Arguments
+///
+/// * `fd` - File descriptor to a file or directory on the btrfs filesystem
+/// * `subvol_id` - The subvolume ID to resolve
+///
+/// # Returns
+///
+/// The full path to the subvolume relative to the filesystem root, or an empty string
+/// for the filesystem root itself (FS_TREE_OBJECTID).
+///
+/// # Errors
+///
+/// Returns an error if:
+/// * The ioctl fails (fd is not on a btrfs filesystem)
+/// * The subvolume ID does not exist
+/// * The path buffer overflows
+///
+/// # Example
+///
+/// ```ignore
+/// let path = subvolid_resolve(fd, 5)?;
+/// println!("Subvolume 5 is at: {}", path);
+/// ```
+pub fn subvolid_resolve(fd: BorrowedFd<'_>, subvol_id: u64) -> nix::Result<String> {
+    let mut path = String::new();
+    subvolid_resolve_sub(fd, &mut path, subvol_id)?;
+    Ok(path)
+}
+
+fn subvolid_resolve_sub(fd: BorrowedFd<'_>, path: &mut String, subvol_id: u64) -> nix::Result<()> {
+    use crate::raw::BTRFS_FS_TREE_OBJECTID;
+
+    // If this is the filesystem root, we're done (empty path means root)
+    if subvol_id == BTRFS_FS_TREE_OBJECTID as u64 {
+        return Ok(());
+    }
+
+    // Search the root tree for ROOT_BACKREF_KEY entries for this subvolume.
+    // ROOT_BACKREF_KEY (item type 156) has:
+    // - objectid: the subvolume ID
+    // - offset: the parent subvolume ID
+    // - data: btrfs_root_ref struct containing the subvolume name
+    let mut found = false;
+
+    tree_search(
+        fd,
+        SearchKey::for_objectid_range(
+            crate::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+            crate::raw::BTRFS_ROOT_BACKREF_KEY as u32,
+            subvol_id,
+            subvol_id,
+        ),
+        |hdr, data| {
+            found = true;
+
+            // The parent subvolume ID is stored in the offset field
+            let parent_subvol_id = hdr.offset;
+
+            // Recursively resolve the parent path first
+            subvolid_resolve_sub(fd, path, parent_subvol_id)?;
+
+            // data is the btrfs_root_ref struct.
+            // Layout: dirid (u64) + transid (u64) + name_len (u32) + name[name_len]
+            if data.len() < 20 {
+                return Err(nix::errno::Errno::EOVERFLOW);
+            }
+
+            let dirid = u64::from_le_bytes(data[0..8].try_into().unwrap());
+
+            // Skip to name_len (offset 16)
+            let name_len = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
+
+            if data.len() < 20 + name_len {
+                return Err(nix::errno::Errno::EOVERFLOW);
+            }
+
+            // Get the subvolume name
+            let name_bytes = &data[20..20 + name_len];
+
+            // If dirid is not the first free objectid, we need to resolve the directory path too
+            if dirid != BTRFS_FIRST_FREE_OBJECTID as u64 {
+                // Look up the directory in the parent subvolume
+                let mut ino_lookup_args = crate::raw::btrfs_ioctl_ino_lookup_args {
+                    treeid: parent_subvol_id,
+                    objectid: dirid,
+                    ..unsafe { std::mem::zeroed() }
+                };
+
+                unsafe {
+                    btrfs_ioc_ino_lookup(fd.as_raw_fd() as c_int, &mut ino_lookup_args)?;
+                }
+
+                // Get the directory name (it's a null-terminated C string)
+                let dir_name = unsafe { std::ffi::CStr::from_ptr(ino_lookup_args.name.as_ptr()) }
+                    .to_str()
+                    .map_err(|_| nix::errno::Errno::EINVAL)?;
+
+                if !dir_name.is_empty() {
+                    if !path.is_empty() {
+                        path.push('/');
+                    }
+                    path.push_str(dir_name);
+                }
+            }
+
+            // Append the subvolume name
+            if !path.is_empty() {
+                path.push('/');
+            }
+
+            // Convert name bytes to string
+            let name_str =
+                std::str::from_utf8(name_bytes).map_err(|_| nix::errno::Errno::EINVAL)?;
+            path.push_str(name_str);
+
+            Ok(())
+        },
+    )?;
+
+    if !found {
+        return Err(nix::errno::Errno::ENOENT);
+    }
+
+    Ok(())
 }

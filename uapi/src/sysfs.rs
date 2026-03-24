@@ -1,3 +1,28 @@
+//! Sysfs interface — reading filesystem and device state from `/sys/fs/btrfs/`.
+//!
+//! The kernel exposes per-filesystem information under
+//! `/sys/fs/btrfs/<uuid>/`, where `<uuid>` is the filesystem UUID as returned
+//! by [`crate::filesystem::fs_info`].  This includes commit statistics, feature
+//! flags, quota state, and per-device scrub limits.
+//!
+//! The primary entry point is [`SysfsBtrfs`], which is constructed from a
+//! filesystem UUID and provides typed accessors for each sysfs file:
+//!
+//! ```no_run
+//! # use btrfs_uapi::{filesystem::fs_info, sysfs::SysfsBtrfs};
+//! # use std::{fs::File, os::unix::io::AsFd};
+//! # let file = File::open("/mnt/btrfs").unwrap();
+//! # let fd = file.as_fd();
+//! let info = fs_info(fd).unwrap();
+//! let sysfs = SysfsBtrfs::new(&info.uuid);
+//! println!("label: {}", sysfs.label().unwrap());
+//! println!("quota status: {:?}", sysfs.quota_status().unwrap());
+//! ```
+//!
+//! All accessors return [`std::io::Result`] and will return an error with kind
+//! [`std::io::ErrorKind::NotFound`] if the filesystem is not currently mounted.
+
+use std::ffi::OsStr;
 use std::{fs, io, path::PathBuf};
 use uuid::Uuid;
 
@@ -199,4 +224,102 @@ impl SysfsBtrfs {
     pub fn temp_fsid(&self) -> io::Result<bool> {
         self.read_bool("temp_fsid")
     }
+
+    /// Quota status for this filesystem, read from
+    /// `/sys/fs/btrfs/<uuid>/qgroups/`.
+    ///
+    /// Returns `Ok(QuotaStatus { enabled: false, .. })` when quota is not
+    /// enabled (the `qgroups/` directory does not exist). Returns an
+    /// [`io::Error`] with kind `NotFound` if the sysfs entry for this UUID
+    /// does not exist (i.e. the filesystem is not currently mounted).
+    pub fn quota_status(&self) -> io::Result<QuotaStatus> {
+        let qgroups = self.base.join("qgroups");
+
+        if !qgroups.exists() {
+            return Ok(QuotaStatus {
+                enabled: false,
+                mode: None,
+                inconsistent: None,
+                override_limits: None,
+                drop_subtree_threshold: None,
+                total_count: None,
+                level0_count: None,
+            });
+        }
+
+        let mode = {
+            let s = fs::read_to_string(qgroups.join("mode"))?;
+            s.trim_end().to_owned()
+        };
+        let inconsistent = fs::read_to_string(qgroups.join("inconsistent"))?
+            .trim()
+            .parse::<u64>()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
+            != 0;
+        let override_limits = self.read_bool("quota_override")?;
+        let drop_subtree_threshold = fs::read_to_string(qgroups.join("drop_subtree_threshold"))?
+            .trim()
+            .parse::<u64>()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        let mut total_count: u64 = 0;
+        let mut level0_count: u64 = 0;
+        for entry in fs::read_dir(&qgroups)? {
+            let entry = entry?;
+            let raw_name = entry.file_name();
+            let name = raw_name.to_string_lossy();
+            if let Some((level, _id)) = parse_qgroup_entry_name(OsStr::new(name.as_ref())) {
+                total_count += 1;
+                if level == 0 {
+                    level0_count += 1;
+                }
+            }
+        }
+
+        Ok(QuotaStatus {
+            enabled: true,
+            mode: Some(mode),
+            inconsistent: Some(inconsistent),
+            override_limits: Some(override_limits),
+            drop_subtree_threshold: Some(drop_subtree_threshold),
+            total_count: Some(total_count),
+            level0_count: Some(level0_count),
+        })
+    }
+}
+
+/// Parse a qgroups sysfs directory entry name of the form `<level>_<id>`.
+///
+/// Returns `Some((level, id))` for valid entries, `None` for anything else
+/// (e.g. `mode`, `inconsistent`, and other non-qgroup files in the directory).
+fn parse_qgroup_entry_name(name: &OsStr) -> Option<(u64, u64)> {
+    let s = name.to_str()?;
+    let (level_str, id_str) = s.split_once('_')?;
+    let level: u64 = level_str.parse().ok()?;
+    let id: u64 = id_str.parse().ok()?;
+    Some((level, id))
+}
+
+/// Quota status for a mounted btrfs filesystem, read from sysfs under
+/// `/sys/fs/btrfs/<uuid>/qgroups/`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuotaStatus {
+    /// Whether quota accounting is currently enabled.
+    pub enabled: bool,
+    /// Accounting mode: `"qgroup"` (full backref accounting) or `"squota"`
+    /// (simplified lifetime accounting). `None` when quotas are disabled.
+    pub mode: Option<String>,
+    /// Whether the quota tree is inconsistent; a rescan is needed to restore
+    /// accurate numbers. `None` when quotas are disabled.
+    pub inconsistent: Option<bool>,
+    /// Whether the quota override flag is active (limits are bypassed for
+    /// the current mount). `None` when quotas are disabled.
+    pub override_limits: Option<bool>,
+    /// Drop-subtree threshold: qgroup hierarchy levels below this value skip
+    /// detailed tracking during heavy write workloads. `None` when disabled.
+    pub drop_subtree_threshold: Option<u64>,
+    /// Total number of qgroups tracked by the kernel. `None` when disabled.
+    pub total_count: Option<u64>,
+    /// Number of level-0 qgroups (one per subvolume). `None` when disabled.
+    pub level0_count: Option<u64>,
 }

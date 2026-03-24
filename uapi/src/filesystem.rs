@@ -1,3 +1,8 @@
+//! Filesystem-level metadata — UUID, device count, node size, and generation.
+//!
+//! Reads the top-level filesystem information that applies to the filesystem as
+//! a whole rather than to any individual device or subvolume.
+
 use crate::raw::{BTRFS_FS_INFO_FLAG_GENERATION, btrfs_ioc_fs_info, btrfs_ioctl_fs_info_args};
 use std::{
     mem,

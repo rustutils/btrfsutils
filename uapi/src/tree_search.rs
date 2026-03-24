@@ -1,28 +1,23 @@
-//! Safe wrapper for `BTRFS_IOC_TREE_SEARCH`.
+//! Generic B-tree search — walking any internal btrfs tree via `BTRFS_IOC_TREE_SEARCH`.
 //!
-//! The kernel exposes a generalised B-tree search ioctl that lets userspace
-//! walk any internal btrfs tree (chunk, root, extent, …) one batch of items
-//! at a time.  This module provides:
+//! The kernel's tree search ioctl lets userspace read any internal btrfs tree
+//! (chunk, root, quota, …) by specifying a key range.  Items are returned in
+//! batches; [`tree_search`] advances the cursor automatically and calls a
+//! closure once per item until the range is exhausted.
 //!
-//! * [`SearchKey`] — the search range parameters.
-//! * [`SearchHeader`] — per-item metadata returned alongside each item.
-//! * [`tree_search`] — the cursor-advancing loop; calls a closure for every
-//!   matching item until the range is exhausted or the closure returns `Err`.
+//! # Byte order
 //!
-//! # Buffer and ioctl version
+//! [`SearchHeader`] fields (objectid, offset, type) are in host byte order —
+//! the kernel fills them in through the ioctl layer.  The `data` slice passed
+//! to the callback contains the raw on-disk item payload, which is
+//! **little-endian**; callers must use `u64::from_le_bytes` and friends when
+//! interpreting it.
 //!
-//! This module uses `BTRFS_IOC_TREE_SEARCH` (v1), which has a fixed 3 992-byte
-//! result buffer embedded in the ioctl struct.  This is sufficient for all
-//! common item types (chunk, root-item, root-ref, …); the v2 variant that
-//! supports larger buffers is not needed here.
+//! # Ioctl version
 //!
-//! # Item data byte order
-//!
-//! The `btrfs_ioctl_search_header` fields are written by the kernel in
-//! host byte order (they pass through the ioctl layer).  The item *data*
-//! bytes, however, are the raw on-disk representation and are therefore
-//! **little-endian** — callers must use `u64::from_le_bytes` and friends when
-//! interpreting them.
+//! This module uses `BTRFS_IOC_TREE_SEARCH` (v1) with its fixed 3 992-byte
+//! result buffer.  This is sufficient for all item types used by this crate;
+//! the v2 variant with a configurable buffer size is not needed.
 
 use std::{mem, os::fd::AsRawFd, os::unix::io::BorrowedFd};
 

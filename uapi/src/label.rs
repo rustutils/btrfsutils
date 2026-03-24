@@ -1,4 +1,9 @@
-//! Safe wrappers for the btrfs filesystem label ioctls.
+//! Filesystem label — reading and writing the human-readable name of a filesystem.
+//!
+//! The label is a short null-terminated string (up to 255 bytes) stored in the
+//! superblock.  It is visible in `/sys/fs/btrfs/<uuid>/label` and is used by
+//! tools like `blkid` to identify the filesystem.  Labels are stored as
+//! [`CString`] values to preserve the kernel's null-termination contract.
 
 use crate::raw::{btrfs_ioc_get_fslabel, btrfs_ioc_set_fslabel};
 use nix::libc::c_char;

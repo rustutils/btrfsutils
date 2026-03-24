@@ -1,13 +1,9 @@
-//! Safe wrapper for `FS_IOC_FIEMAP`.
+//! Physical extent layout of files via `FS_IOC_FIEMAP`.
 //!
-//! Queries the physical extent layout of a file.  This is a standard VFS ioctl
-//! (not btrfs-specific), but it is the mechanism `btrfs filesystem du` uses to
-//! determine how much disk space each file occupies and which extents are shared
-//! with other files.
-//!
-//! The main entry point is [`file_extents`], which calls the ioctl in a loop
-//! until all extents have been enumerated and returns a [`FileExtentInfo`]
-//! describing the totals.
+//! `FS_IOC_FIEMAP` is a standard VFS ioctl (not btrfs-specific) that reports
+//! the physical extents backing a file.  It is the mechanism `btrfs filesystem
+//! du` uses to determine how much disk space each file occupies and which
+//! extents are shared with other files.
 
 use nix::libc;
 use std::os::unix::io::BorrowedFd;

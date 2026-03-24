@@ -1,10 +1,13 @@
-//! Raw BTRFS bindings.
+//! Raw bindgen output and ioctl declarations for the btrfs UAPI.
 //!
-//! These are the raw ioctl bindings for the BTRFS filesystem. The types
-//! are automatically generated using bindgen, and wrapper functions are
-//! provided for convenience. Generally, you should use the higher-level
-//! bindings provided by this crate rather than the types and functions
-//! of this module directly.
+//! The types in this module are generated automatically from
+//! `uapi/src/raw/btrfs.h` and `btrfs_tree.h` by bindgen.  The `ioctl_*!`
+//! macro declarations translate each `BTRFS_IOC_*` C macro into a callable
+//! Rust function with the correct direction and argument type.
+//!
+//! Prefer the typed wrappers in the sibling modules over using this module
+//! directly.  The functions here operate on raw bindgen structs, require
+//! `unsafe`, and do not map errno values to meaningful errors.
 
 use nix::{
     ioctl_none, ioctl_read, ioctl_readwrite, ioctl_write_int, ioctl_write_ptr,

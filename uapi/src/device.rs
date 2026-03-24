@@ -1,8 +1,11 @@
-//! Safe wrappers for btrfs device management ioctls.
+//! Device management — adding, removing, and querying block devices in a filesystem.
 //!
-//! Covers `BTRFS_IOC_ADD_DEV`, `BTRFS_IOC_RM_DEV_V2`, `BTRFS_IOC_SCAN_DEV`,
-//! `BTRFS_IOC_FORGET_DEV`, `BTRFS_IOC_DEVICES_READY`, `BTRFS_IOC_GET_DEV_STATS`,
-//! and `BTRFS_IOC_DEV_INFO`.
+//! Covers adding and removing devices from a mounted filesystem, scanning a
+//! device to register it with the kernel, querying per-device I/O error
+//! statistics, and checking whether all devices of a multi-device filesystem
+//! are present and ready.
+//!
+//! Most operations require `CAP_SYS_ADMIN`.
 
 use crate::{
     filesystem::FsInfo,

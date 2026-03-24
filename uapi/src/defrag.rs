@@ -1,7 +1,8 @@
-//! Safe wrapper for the btrfs defragment ioctl.
+//! File defragmentation — rewriting fragmented extents into contiguous runs.
 //!
-//! Provides [`defrag_range`], which defragments a byte range within a file or
-//! an entire file on a btrfs filesystem.
+//! Defragmenting a file rewrites its extents contiguously on disk, which can
+//! improve sequential read performance.  Optionally applies or removes
+//! transparent compression at the same time.
 
 use crate::raw::{
     BTRFS_DEFRAG_RANGE_COMPRESS, BTRFS_DEFRAG_RANGE_COMPRESS_LEVEL, BTRFS_DEFRAG_RANGE_NOCOMPRESS,

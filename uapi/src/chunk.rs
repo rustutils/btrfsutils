@@ -1,35 +1,10 @@
 //! Per-device physical allocation data from the chunk tree.
 //!
-//! Walks `BTRFS_CHUNK_ITEM_KEY` entries in the chunk tree and aggregates the
-//! physical bytes each device has allocated, broken down by block-group
-//! profile flags.  This is the data source for the per-device breakdown in
-//! `btrfs filesystem usage`.
+//! Walks the chunk tree to determine how many bytes each device has allocated,
+//! broken down by block-group profile flags.  This is the data source for the
+//! per-device breakdown in `btrfs filesystem usage`.
 //!
-//! # Chunk layout in the search buffer
-//!
-//! A `CHUNK_ITEM_KEY` item payload is a packed `btrfs_chunk` struct (80 bytes)
-//! immediately followed by `num_stripes - 1` additional `btrfs_stripe` structs
-//! (32 bytes each).  The first stripe is embedded as the last field of
-//! `btrfs_chunk`.  All multi-byte fields are **little-endian**.
-//!
-//! ```text
-//! btrfs_chunk (80 bytes):
-//!   [0..8]   length       LE u64  — logical size of the chunk
-//!   [8..16]  owner        LE u64
-//!   [16..24] stripe_len   LE u64  — physical size of each stripe on-device
-//!   [24..32] type_        LE u64  — BlockGroupFlags (type + profile bits)
-//!   [32..36] io_align     LE u32
-//!   [36..40] io_width     LE u32
-//!   [40..44] sector_size  LE u32
-//!   [44..46] num_stripes  LE u16
-//!   [46..48] sub_stripes  LE u16
-//!   [48..80] stripe[0]    btrfs_stripe (32 bytes)
-//!
-//! btrfs_stripe (32 bytes):
-//!   [0..8]   devid        LE u64
-//!   [8..16]  offset       LE u64  — physical start on the device
-//!   [16..32] dev_uuid     [u8; 16]
-//! ```
+//! Requires `CAP_SYS_ADMIN`.
 
 use std::os::unix::io::BorrowedFd;
 
@@ -76,7 +51,10 @@ const CHUNK_MIN_LEN: usize = CHUNK_FIRST_STRIPE_OFF + STRIPE_SIZE; // 80
 /// `DATA|SINGLE` and `METADATA|DUP`).  Entries with the same `(devid, flags)`
 /// pair are merged — there will be at most one entry per unique pair.
 ///
-/// Requires `CAP_SYS_ADMIN`.
+/// Internally, each `BTRFS_CHUNK_ITEM_KEY` payload is a packed `btrfs_chunk`
+/// struct followed by `num_stripes - 1` additional `btrfs_stripe` structs.
+/// The `stripe_len` field of each stripe is accumulated per `(devid, flags)`
+/// to produce the physical byte counts in the returned list.
 pub fn device_chunk_allocations(fd: BorrowedFd) -> nix::Result<Vec<DeviceAllocation>> {
     let mut allocs: Vec<DeviceAllocation> = Vec::new();
 
