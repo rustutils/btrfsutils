@@ -3,7 +3,7 @@ use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     chunk::device_chunk_allocations,
-    device::all_dev_info,
+    device::device_info_all,
     filesystem::fs_info,
     space::{BlockGroupFlags, SpaceInfo, space_info},
 };
@@ -94,7 +94,7 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
 
     let fs = fs_info(fd)
         .with_context(|| format!("failed to get filesystem info for '{}'", path.display()))?;
-    let devices = all_dev_info(fd, &fs)
+    let devices = device_info_all(fd, &fs)
         .with_context(|| format!("failed to get device info for '{}'", path.display()))?;
     let spaces = space_info(fd)
         .with_context(|| format!("failed to get space info for '{}'", path.display()))?;

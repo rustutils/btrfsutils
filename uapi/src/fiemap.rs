@@ -1,4 +1,4 @@
-//! Physical extent layout of files via `FS_IOC_FIEMAP`.
+//! # Physical extent layout of files via `FS_IOC_FIEMAP`
 //!
 //! `FS_IOC_FIEMAP` is a standard VFS ioctl (not btrfs-specific) that reports
 //! the physical extents backing a file.  It is the mechanism `btrfs filesystem

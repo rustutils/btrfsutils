@@ -1,4 +1,4 @@
-//! Generic B-tree search — walking any internal btrfs tree via `BTRFS_IOC_TREE_SEARCH`.
+//! # Generic B-tree search: walking any internal btrfs tree via `BTRFS_IOC_TREE_SEARCH`
 //!
 //! The kernel's tree search ioctl lets userspace read any internal btrfs tree
 //! (chunk, root, quota, …) by specifying a key range.  Items are returned in
@@ -7,7 +7,7 @@
 //!
 //! # Byte order
 //!
-//! [`SearchHeader`] fields (objectid, offset, type) are in host byte order —
+//! [`SearchHeader`] fields (objectid, offset, type) are in host byte order:
 //! the kernel fills them in through the ioctl layer.  The `data` slice passed
 //! to the callback contains the raw on-disk item payload, which is
 //! **little-endian**; callers must use `u64::from_le_bytes` and friends when
@@ -15,7 +15,7 @@
 //!
 //! # Ioctl version
 //!
-//! This module uses `BTRFS_IOC_TREE_SEARCH` (v1) with its fixed 3 992-byte
+//! This module uses `BTRFS_IOC_TREE_SEARCH` (v1) with its fixed 3992-byte
 //! result buffer.  This is sufficient for all item types used by this crate;
 //! the v2 variant with a configurable buffer size is not needed.
 

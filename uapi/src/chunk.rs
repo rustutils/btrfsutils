@@ -1,4 +1,4 @@
-//! Per-device physical allocation data from the chunk tree.
+//! # Per-device physical allocation data from the chunk tree
 //!
 //! Walks the chunk tree to determine how many bytes each device has allocated,
 //! broken down by block-group profile flags.  This is the data source for the

@@ -1,4 +1,4 @@
-//! Raw bindgen output and ioctl declarations for the btrfs UAPI.
+//! # Raw bindgen output and ioctl declarations for the btrfs UAPI
 //!
 //! The types in this module are generated automatically from
 //! `uapi/src/raw/btrfs.h` and `btrfs_tree.h` by bindgen.  The `ioctl_*!`

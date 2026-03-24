@@ -1,7 +1,7 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
-    device::{DevStats, all_dev_info, dev_stats},
+    device::{DevStats, device_info_all, device_stats},
     filesystem::fs_info,
 };
 use clap::Parser;
@@ -41,7 +41,7 @@ impl Runnable for DeviceStatsCommand {
             )
         })?;
 
-        let devices = all_dev_info(fd, &fs)
+        let devices = device_info_all(fd, &fs)
             .with_context(|| format!("failed to get device info for '{}'", self.path.display()))?;
 
         if devices.is_empty() {
@@ -51,7 +51,7 @@ impl Runnable for DeviceStatsCommand {
         let mut any_nonzero = false;
 
         for dev in &devices {
-            let stats = dev_stats(fd, dev.devid, self.reset).with_context(|| {
+            let stats = device_stats(fd, dev.devid, self.reset).with_context(|| {
                 format!(
                     "failed to get stats for device {} ({})",
                     dev.devid, dev.path

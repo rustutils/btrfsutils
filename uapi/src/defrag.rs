@@ -1,4 +1,4 @@
-//! File defragmentation — rewriting fragmented extents into contiguous runs.
+//! # File defragmentation: rewriting fragmented extents into contiguous runs
 //!
 //! Defragmenting a file rewrites its extents contiguously on disk, which can
 //! improve sequential read performance.  Optionally applies or removes

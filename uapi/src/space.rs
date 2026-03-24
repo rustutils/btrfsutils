@@ -1,4 +1,4 @@
-//! Block group space usage — how much space each chunk type allocates and uses.
+//! # Block group space usage: how much space each chunk type allocates and uses
 //!
 //! Reports the allocated and used byte counts for each combination of block
 //! group type (data, metadata, system) and RAID profile.  This is the data

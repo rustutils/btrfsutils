@@ -1,4 +1,4 @@
-//! Data integrity scrubbing — verifying and repairing filesystem checksums.
+//! # Data integrity scrubbing: verifying and repairing filesystem checksums
 //!
 //! A scrub reads every data and metadata block on the filesystem, verifies it
 //! against its stored checksum, and repairs any errors it finds using redundant

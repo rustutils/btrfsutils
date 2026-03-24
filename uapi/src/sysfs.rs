@@ -1,9 +1,9 @@
-//! Sysfs interface — reading filesystem and device state from `/sys/fs/btrfs/`.
+//! # Sysfs interface: reading filesystem and device state from `/sys/fs/btrfs/`
 //!
 //! The kernel exposes per-filesystem information under
 //! `/sys/fs/btrfs/<uuid>/`, where `<uuid>` is the filesystem UUID as returned
-//! by [`crate::filesystem::fs_info`].  This includes commit statistics, feature
-//! flags, quota state, and per-device scrub limits.
+//! by [`fs_info`][`crate::filesystem::fs_info`]. This includes commit statistics,
+//! feature flags, quota state, and per-device scrub limits.
 //!
 //! The primary entry point is [`SysfsBtrfs`], which is constructed from a
 //! filesystem UUID and provides typed accessors for each sysfs file:

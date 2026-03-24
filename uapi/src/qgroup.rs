@@ -1,4 +1,4 @@
-//! Quota group (qgroup) management — hierarchical accounting of disk usage.
+//! # Quota group (qgroup) management: hierarchical accounting of disk usage
 //!
 //! Qgroups track how much disk space a subvolume (or a group of subvolumes)
 //! uses.  Every subvolume automatically gets a level-0 qgroup whose ID matches

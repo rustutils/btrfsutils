@@ -1,7 +1,7 @@
 use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
-    device::all_dev_info,
+    device::device_info_all,
     filesystem::fs_info,
     scrub::{ScrubProgress, scrub_cancel, scrub_progress, scrub_start},
 };
@@ -101,7 +101,7 @@ impl Runnable for ScrubStartCommand {
                 self.path.display()
             )
         })?;
-        let devices = all_dev_info(fd, &fs)
+        let devices = device_info_all(fd, &fs)
             .with_context(|| format!("failed to get device info for '{}'", self.path.display()))?;
 
         println!("UUID: {}", fs.uuid.as_hyphenated());
@@ -158,7 +158,7 @@ impl Runnable for ScrubResumeCommand {
                 self.path.display()
             )
         })?;
-        let devices = all_dev_info(fd, &fs)
+        let devices = device_info_all(fd, &fs)
             .with_context(|| format!("failed to get device info for '{}'", self.path.display()))?;
 
         println!("UUID: {}", fs.uuid.as_hyphenated());
@@ -192,7 +192,7 @@ impl Runnable for ScrubStatusCommand {
                 self.path.display()
             )
         })?;
-        let devices = all_dev_info(fd, &fs)
+        let devices = device_info_all(fd, &fs)
             .with_context(|| format!("failed to get device info for '{}'", self.path.display()))?;
 
         println!("UUID: {}", fs.uuid.as_hyphenated());

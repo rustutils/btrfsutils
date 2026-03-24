@@ -10,6 +10,15 @@ use get::PropertyGetCommand;
 use list::PropertyListCommand;
 use set::PropertySetCommand;
 
+/// Object type for property operations
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PropertyObjectType {
+    Inode,
+    Subvol,
+    Filesystem,
+    Device,
+}
+
 /// Modify properties of filesystem objects
 #[derive(Parser, Debug)]
 pub struct PropertyCommand {

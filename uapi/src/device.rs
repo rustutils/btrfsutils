@@ -1,4 +1,4 @@
-//! Device management — adding, removing, and querying block devices in a filesystem.
+//! # Device management: adding, removing, and querying block devices in a filesystem
 //!
 //! Covers adding and removing devices from a mounted filesystem, scanning a
 //! device to register it with the kernel, querying per-device I/O error
@@ -120,7 +120,7 @@ fn open_control() -> nix::Result<std::fs::File> {
 /// referred to by `fd`.
 ///
 /// Returns `None` if no device with that ID exists (`ENODEV`).
-pub fn dev_info(fd: BorrowedFd, devid: u64) -> nix::Result<Option<DevInfo>> {
+pub fn device_info(fd: BorrowedFd, devid: u64) -> nix::Result<Option<DevInfo>> {
     let mut raw: btrfs_ioctl_dev_info_args = unsafe { mem::zeroed() };
     raw.devid = devid;
 
@@ -148,10 +148,10 @@ pub fn dev_info(fd: BorrowedFd, devid: u64) -> nix::Result<Option<DevInfo>> {
 ///
 /// Iterates devids `1..=max_id`, skipping any that return `ENODEV` (holes in
 /// the devid space are normal when devices have been removed).
-pub fn all_dev_info(fd: BorrowedFd, fs_info: &FsInfo) -> nix::Result<Vec<DevInfo>> {
+pub fn device_info_all(fd: BorrowedFd, fs_info: &FsInfo) -> nix::Result<Vec<DevInfo>> {
     let mut devices = Vec::with_capacity(fs_info.num_devices as usize);
     for devid in 1..=fs_info.max_id {
-        if let Some(info) = dev_info(fd, devid)? {
+        if let Some(info) = device_info(fd, devid)? {
             devices.push(info);
         }
     }
@@ -257,7 +257,7 @@ pub fn device_ready(path: &CStr) -> nix::Result<()> {
 ///
 /// If `reset` is `true`, the kernel atomically returns the current values and
 /// then resets all counters to zero. The kernel requires `CAP_SYS_ADMIN`.
-pub fn dev_stats(fd: BorrowedFd, devid: u64, reset: bool) -> nix::Result<DevStats> {
+pub fn device_stats(fd: BorrowedFd, devid: u64, reset: bool) -> nix::Result<DevStats> {
     let mut raw: btrfs_ioctl_get_dev_stats = unsafe { mem::zeroed() };
     raw.devid = devid;
     raw.nr_items = btrfs_dev_stat_values_BTRFS_DEV_STAT_VALUES_MAX as u64;

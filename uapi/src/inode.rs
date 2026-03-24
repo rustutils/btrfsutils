@@ -1,4 +1,4 @@
-//! Inode and path resolution — mapping between inodes, logical addresses, and paths.
+//! # Inode and path resolution: mapping between inodes, logical addresses, and paths
 //!
 //! Covers looking up the subvolume root ID that contains a given file, resolving
 //! an inode number to its filesystem paths, mapping a logical byte address back

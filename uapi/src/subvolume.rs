@@ -1,4 +1,4 @@
-//! Subvolume and snapshot management — creating, deleting, and querying subvolumes.
+//! # Subvolume and snapshot management: creating, deleting, and querying subvolumes
 //!
 //! Subvolumes are independently snapshotable subtrees within a btrfs filesystem.
 //! Snapshots are subvolumes created as copy-on-write clones of an existing

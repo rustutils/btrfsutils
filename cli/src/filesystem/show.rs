@@ -1,6 +1,8 @@
 use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
-use btrfs_uapi::{device::all_dev_info, filesystem::fs_info, label::label_get, space::space_info};
+use btrfs_uapi::{
+    device::device_info_all, filesystem::fs_info, label::label_get, space::space_info,
+};
 use clap::Parser;
 use std::{collections::HashSet, fs::File, os::unix::io::AsFd};
 
@@ -63,7 +65,7 @@ impl Runnable for FilesystemShowCommand {
                 .map(|l| l.to_string_lossy().into_owned())
                 .unwrap_or_default();
 
-            let devices = all_dev_info(fd, &info)
+            let devices = device_info_all(fd, &info)
                 .with_context(|| format!("failed to get device info for '{mount}'"))?;
 
             let used_bytes = space_info(fd)

@@ -1,4 +1,4 @@
-//! Filesystem quota — enabling, disabling, and rescanning quota accounting.
+//! # Filesystem quota: enabling, disabling, and rescanning quota accounting
 //!
 //! Quota accounting tracks disk usage per subvolume via qgroups.  It must be
 //! explicitly enabled before any qgroup limits or usage data are available.

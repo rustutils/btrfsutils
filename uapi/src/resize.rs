@@ -1,4 +1,4 @@
-//! Device resizing — growing or shrinking a device within a mounted filesystem.
+//! # Device resizing: growing or shrinking a device within a mounted filesystem
 //!
 //! Resizing adjusts how much of a block device's capacity btrfs uses, without
 //! unmounting.  A device can be grown up to its physical size, shrunk to the

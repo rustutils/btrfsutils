@@ -1,24 +1,40 @@
-//! # Btrfs Userspace API
+//! # btrfs-uapi: typed Rust wrappers around the btrfs kernel interface
 //!
-//! This crate provides a safe Rust interface to the Btrfs userspace API. Communication
-//! with the kernel is done via ioctl calls, and in some cases sysfs is used
-//! for status queries.
+//! This crate provides typed, safe access to the btrfs kernel interface.
+//! Kernel communication uses two mechanisms:
 //!
-//! This crate uses bindgen to generate Rust bindings for the raw structs defined
-//! in the kernel headers that are used by the ioctl interface. It uses the nix
-//! crate to provide raw, unsafe wrappers for these ioctls. Both of these are in
-//! the `raw` module.
+//! - **ioctls** for most operations (balance, scrub, subvolume management, …)
+//! - **sysfs** under `/sys/fs/btrfs/<uuid>/` for status that the kernel does
+//!   not expose via ioctl (quota state, commit statistics, scrub speed limits)
 //!
-//! Further, the crate provides safe, high-level wrappers for the ioctls in the
-//! `balance`, `chunk`, `defrag`, `device`, `fiemap`, `filesystem`, `inode`,
-//! `label`, `qgroup`, `quota`, `resize`, `scrub`, `space`, `subvolume`, `sync`,
-//! `sysfs`, and `tree_search` modules.
+//! ## Safety
+//!
+//! All `unsafe` code is confined to the [`raw`] module, which contains
+//! bindgen-generated types from the kernel UAPI headers (`btrfs.h` and
+//! `btrfs_tree.h`) and `nix` ioctl macro declarations for every `BTRFS_IOC_*`
+//! call.
+//!
+//! Every other module wraps [`raw`] into a public API that is entirely safe,
+//! exposes no kernel types, and uses idiomatic Rust types throughout:
+//! `BorrowedFd`, `Uuid`, `bitflags`, `SystemTime`, `CString`, and so on.
+//!
+//! ## Usage
+//!
+//! Every function that issues an ioctl takes a [`BorrowedFd`][`std::os::unix::io::BorrowedFd`]
+//! open on any file within the target btrfs filesystem. Functions in [`sysfs`]
+//! instead take a [`uuid::Uuid`], which can be obtained from
+//! [`filesystem::fs_info`].
+//!
+//! Most ioctl-based operations require `CAP_SYS_ADMIN`.
 //!
 //! ## Portability
 //!
-//! This crate should work on any platform that supports the Btrfs userspace API,
-//! but it has only been tested on Linux. It is possible that earlier versions
-//! of the kernel may not support all the ioctls used by this crate.
+//! btrfs is Linux-only; this crate does not support other operating systems.
+//! Some ioctls used here were introduced in relatively recent kernel versions,
+//! the crate targets modern kernels (5.x and later) and does not attempt to
+//! detect or work around missing ioctls on older kernels. It is only tested
+//! on `amd64`, but all architectures supported by the kernel (and Rust) should
+//! work.
 
 pub mod balance;
 pub mod chunk;

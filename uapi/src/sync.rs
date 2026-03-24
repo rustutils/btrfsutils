@@ -1,4 +1,4 @@
-//! Filesystem sync — flushing all pending writes to disk.
+//! # Filesystem sync: flushing all pending writes to disk
 //!
 //! Forces the kernel to commit all dirty btrfs metadata and data to stable
 //! storage.  Equivalent to calling `sync(2)` scoped to a single btrfs

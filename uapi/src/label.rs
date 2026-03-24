@@ -1,4 +1,4 @@
-//! Filesystem label — reading and writing the human-readable name of a filesystem.
+//! # Filesystem label: reading and writing the human-readable name of a filesystem
 //!
 //! The label is a short null-terminated string (up to 255 bytes) stored in the
 //! superblock.  It is visible in `/sys/fs/btrfs/<uuid>/label` and is used by

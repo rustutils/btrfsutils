@@ -1,4 +1,4 @@
-//! Balance operations — redistributing data and metadata across devices.
+//! # Balance operations: redistributing data and metadata across devices
 //!
 //! A balance rewrites chunks across the filesystem's devices according to
 //! optional filter criteria (usage threshold, device selection, profile

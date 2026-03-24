@@ -1,4 +1,4 @@
-//! Filesystem-level metadata — UUID, device count, node size, and generation.
+//! # Filesystem-level metadata: UUID, device count, node size, and generation
 //!
 //! Reads the top-level filesystem information that applies to the filesystem as
 //! a whole rather than to any individual device or subvolume.
