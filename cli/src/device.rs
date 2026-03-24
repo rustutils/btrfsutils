@@ -7,12 +7,14 @@ mod ready;
 mod remove;
 mod scan;
 mod stats;
+mod usage;
 
 use add::DeviceAddCommand;
 use ready::DeviceReadyCommand;
 use remove::DeviceRemoveCommand;
 use scan::DeviceScanCommand;
 use stats::DeviceStatsCommand;
+use usage::DeviceUsageCommand;
 
 /// Manage devices in a btrfs filesystem
 #[derive(Parser, Debug)]
@@ -30,6 +32,7 @@ impl Runnable for DeviceCommand {
             DeviceSubcommand::Stats(cmd) => cmd.run(format, dry_run),
             DeviceSubcommand::Scan(cmd) => cmd.run(format, dry_run),
             DeviceSubcommand::Ready(cmd) => cmd.run(format, dry_run),
+            DeviceSubcommand::Usage(cmd) => cmd.run(format, dry_run),
         }
     }
 }
@@ -49,4 +52,6 @@ pub enum DeviceSubcommand {
     Scan(DeviceScanCommand),
     /// Check whether all devices of a filesystem are present and ready to mount
     Ready(DeviceReadyCommand),
+    /// Show detailed information about internal allocations in devices
+    Usage(DeviceUsageCommand),
 }

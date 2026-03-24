@@ -2,16 +2,28 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 
 pub mod balance;
+pub mod check;
 pub mod device;
 pub mod filesystem;
 pub mod inspect;
+pub mod property;
+pub mod qgroup;
+pub mod quota;
+pub mod receive;
+pub mod replace;
+pub mod rescue;
+pub mod restore;
 pub mod scrub;
+pub mod send;
 pub mod subvolume;
 pub mod util;
 
 use crate::{
-    balance::BalanceCommand, device::DeviceCommand, filesystem::FilesystemCommand,
-    inspect::InspectCommand, scrub::ScrubCommand, subvolume::SubvolumeCommand,
+    balance::BalanceCommand, check::CheckCommand, device::DeviceCommand,
+    filesystem::FilesystemCommand, inspect::InspectCommand, property::PropertyCommand,
+    qgroup::QgroupCommand, quota::QuotaCommand, receive::ReceiveCommand, replace::ReplaceCommand,
+    rescue::RescueCommand, restore::RestoreCommand, scrub::ScrubCommand, send::SendCommand,
+    subvolume::SubvolumeCommand,
 };
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -71,6 +83,8 @@ pub trait Runnable {
 pub enum Command {
     /// Balance data across devices, or change block groups using filters
     Balance(BalanceCommand),
+    /// Check structural integrity of a filesystem (unmounted)
+    Check(CheckCommand),
     /// Manage and query devices in the filesystem
     Device(DeviceCommand),
     /// Overall filesystem tasks and information
@@ -79,44 +93,45 @@ pub enum Command {
     #[command(alias = "inspect-internal")]
     Inspect(InspectCommand),
     /// Modify properties of filesystem objects
-    Property,
+    Property(PropertyCommand),
     /// Manage quota groups
-    Qgroup,
+    Qgroup(QgroupCommand),
     /// Manage filesystem quota settings
-    Quota,
+    Quota(QuotaCommand),
+    /// Receive subvolumes from a stream
+    Receive(ReceiveCommand),
     /// Replace a device in the filesystem
-    Replace,
+    Replace(ReplaceCommand),
     /// Toolbox for specific rescue operations
-    Rescue,
+    Rescue(RescueCommand),
+    /// Try to restore files from a damaged filesystem (unmounted)
+    Restore(RestoreCommand),
     /// Verify checksums of data and metadata
     Scrub(ScrubCommand),
+    /// Send the subvolume(s) to stdout
+    Send(SendCommand),
     /// Manage subvolumes: create, delete, list, etc
     Subvolume(SubvolumeCommand),
-
-    Check,
-    Receive,
-    Restore,
-    Send,
 }
 
 impl Runnable for Command {
     fn run(&self, format: Format, dry_run: bool) -> Result<()> {
         match self {
             Command::Balance(cmd) => cmd.run(format, dry_run),
+            Command::Check(cmd) => cmd.run(format, dry_run),
             Command::Device(cmd) => cmd.run(format, dry_run),
             Command::Filesystem(cmd) => cmd.run(format, dry_run),
             Command::Inspect(cmd) => cmd.run(format, dry_run),
-            Command::Property => todo!(),
-            Command::Qgroup => todo!(),
-            Command::Quota => todo!(),
-            Command::Replace => todo!(),
-            Command::Rescue => todo!(),
+            Command::Property(cmd) => cmd.run(format, dry_run),
+            Command::Qgroup(cmd) => cmd.run(format, dry_run),
+            Command::Quota(cmd) => cmd.run(format, dry_run),
+            Command::Receive(cmd) => cmd.run(format, dry_run),
+            Command::Replace(cmd) => cmd.run(format, dry_run),
+            Command::Rescue(cmd) => cmd.run(format, dry_run),
+            Command::Restore(cmd) => cmd.run(format, dry_run),
             Command::Scrub(cmd) => cmd.run(format, dry_run),
+            Command::Send(cmd) => cmd.run(format, dry_run),
             Command::Subvolume(cmd) => cmd.run(format, dry_run),
-            Command::Check => todo!(),
-            Command::Receive => todo!(),
-            Command::Restore => todo!(),
-            Command::Send => todo!(),
         }
     }
 }
