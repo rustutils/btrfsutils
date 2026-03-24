@@ -1,5 +1,5 @@
 [workspace]
-members = ["uapi", "cli", "util"]
+members = ["uapi", "disk", "cli"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -11,3 +11,9 @@ clap = { version = "4.6.0", features = ["derive", "wrap_help"] }
 env_logger = "0.11.9"
 log = "0.4.29"
 bindgen = "0.72.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

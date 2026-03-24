@@ -22,7 +22,12 @@ use fix_device_size::RescueFixDeviceSizeCommand;
 use super_recover::RescueSuperRecoverCommand;
 use zero_log::RescueZeroLogCommand;
 
-/// Toolbox for specific rescue operations
+/// Toolbox for specific rescue operations.
+///
+/// Provide emergency recovery tools for damaged or unrecoverable filesystems.
+/// These operations are potentially dangerous and should only be used when
+/// the filesystem cannot be mounted or accessed through normal means.
+/// Most rescue operations require CAP_SYS_ADMIN and an unmounted filesystem.
 #[derive(Parser, Debug)]
 pub struct RescueCommand {
     #[clap(subcommand)]
@@ -47,22 +52,13 @@ impl Runnable for RescueCommand {
 
 #[derive(Parser, Debug)]
 pub enum RescueSubcommand {
-    /// Recover the chunk tree by scanning the devices one by one
     ChunkRecover(RescueChunkRecoverCommand),
-    /// Recover bad superblocks from good copies
     SuperRecover(RescueSuperRecoverCommand),
-    /// Clear the tree log (usable if it's corrupted and prevents mount)
     ZeroLog(RescueZeroLogCommand),
-    /// Re-align device and super block sizes
     FixDeviceSize(RescueFixDeviceSizeCommand),
-    /// Fix data checksum mismatches
     FixDataChecksum(RescueFixDataChecksumCommand),
-    /// Create /dev/btrfs-control
     CreateControlDevice(RescueCreateControlDeviceCommand),
-    /// Remove leftover items pertaining to the deprecated inode cache feature
     ClearInoCache(RescueClearInoCacheCommand),
-    /// Completely remove the v1 or v2 free space cache
     ClearSpaceCache(RescueClearSpaceCacheCommand),
-    /// Delete uuid tree so that kernel can rebuild it at mount time
     ClearUuidTree(RescueClearUuidTreeCommand),
 }

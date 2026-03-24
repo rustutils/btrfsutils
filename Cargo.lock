@@ -122,11 +122,20 @@ name = "btrfs-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "btrfs-disk",
  "btrfs-uapi",
  "clap",
  "env_logger",
  "log",
  "nix",
+ "uuid",
+]
+
+[[package]]
+name = "btrfs-disk"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
  "uuid",
 ]
 
@@ -139,10 +148,6 @@ dependencies = [
  "nix",
  "uuid",
 ]
-
-[[package]]
-name = "btrfs-util"
-version = "0.1.0"
 
 [[package]]
 name = "bumpalo"

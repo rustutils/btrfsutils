@@ -223,11 +223,19 @@ fn fill_search_key(sk: &mut btrfs_ioctl_search_key, key: &SearchKey) {
 /// item immediately after it in the 136-bit key space
 /// `(objectid << 72) | (type << 64) | offset`.
 ///
+/// The kernel interprets `(min_objectid, min_type, min_offset)` as a compound
+/// tuple key, so all three fields must be updated together to point past the
+/// last returned item.  Advancing only `min_offset` while leaving
+/// `min_objectid` at its original value would cause items from lower objectids
+/// that were already returned to satisfy the new minimum and be yielded again.
+///
 /// Returns `false` when the objectid also overflows, meaning the full key
 /// space has been exhausted.
 fn advance_cursor(sk: &mut btrfs_ioctl_search_key, last: &SearchHeader) -> bool {
     let (new_offset, offset_overflow) = last.offset.overflowing_add(1);
     if !offset_overflow {
+        sk.min_objectid = last.objectid;
+        sk.min_type = last.item_type;
         sk.min_offset = new_offset;
         return true;
     }
@@ -235,6 +243,7 @@ fn advance_cursor(sk: &mut btrfs_ioctl_search_key, last: &SearchHeader) -> bool 
     sk.min_offset = 0;
     let (new_type, type_overflow) = last.item_type.overflowing_add(1);
     if !type_overflow {
+        sk.min_objectid = last.objectid;
         sk.min_type = new_type;
         return true;
     }

@@ -10,7 +10,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    mem,
+    mem::{self, offset_of, size_of},
     os::{fd::AsRawFd, unix::io::BorrowedFd},
 };
 
@@ -18,6 +18,7 @@ use bitflags::bitflags;
 use nix::errno::Errno;
 
 use crate::{
+    field_size,
     raw::{
         BTRFS_FIRST_FREE_OBJECTID, BTRFS_LAST_FREE_OBJECTID, BTRFS_QGROUP_INFO_KEY,
         BTRFS_QGROUP_LIMIT_EXCL_CMPR, BTRFS_QGROUP_LIMIT_KEY, BTRFS_QGROUP_LIMIT_MAX_EXCL,
@@ -27,7 +28,8 @@ use crate::{
         BTRFS_QGROUP_STATUS_KEY, BTRFS_QUOTA_TREE_OBJECTID, BTRFS_ROOT_ITEM_KEY,
         BTRFS_ROOT_TREE_OBJECTID, btrfs_ioc_qgroup_assign, btrfs_ioc_qgroup_create,
         btrfs_ioc_qgroup_limit, btrfs_ioctl_qgroup_assign_args, btrfs_ioctl_qgroup_create_args,
-        btrfs_ioctl_qgroup_limit_args, btrfs_qgroup_limit,
+        btrfs_ioctl_qgroup_limit_args, btrfs_qgroup_info_item, btrfs_qgroup_limit,
+        btrfs_qgroup_limit_item, btrfs_qgroup_status_item,
     },
     tree_search::{SearchKey, tree_search},
 };
@@ -176,61 +178,42 @@ impl QgroupEntryBuilder {
     }
 }
 
-// ---------------------------------------------------------------------------
-// On-disk struct parsers (all fields LE)
-// ---------------------------------------------------------------------------
-
-/// `btrfs_qgroup_status_item` field offsets.
-mod status_off {
-    pub const FLAGS: usize = 16;
-}
-
-/// `btrfs_qgroup_info_item` field offsets.
-mod info_off {
-    pub const RFER: usize = 8;
-    pub const RFER_CMPR: usize = 16;
-    pub const EXCL: usize = 24;
-    pub const EXCL_CMPR: usize = 32;
-}
-
-/// `btrfs_qgroup_limit_item` field offsets.
-mod limit_off {
-    pub const FLAGS: usize = 0;
-    pub const MAX_RFER: usize = 8;
-    pub const MAX_EXCL: usize = 16;
-}
-
 #[inline]
 fn rle64(buf: &[u8], off: usize) -> u64 {
     u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
 }
 
 fn parse_status_flags(data: &[u8]) -> Option<u64> {
-    if data.len() < status_off::FLAGS + 8 {
+    let off = offset_of!(btrfs_qgroup_status_item, flags);
+    if data.len() < off + field_size!(btrfs_qgroup_status_item, flags) {
         return None;
     }
-    Some(rle64(data, status_off::FLAGS))
+    Some(rle64(data, off))
 }
 
 fn parse_info(builder: &mut QgroupEntryBuilder, data: &[u8]) {
-    if data.len() < info_off::EXCL_CMPR + 8 {
+    if data.len() < size_of::<btrfs_qgroup_info_item>() {
         return;
     }
+
     builder.has_info = true;
-    builder.rfer = rle64(data, info_off::RFER);
-    builder.rfer_cmpr = rle64(data, info_off::RFER_CMPR);
-    builder.excl = rle64(data, info_off::EXCL);
-    builder.excl_cmpr = rle64(data, info_off::EXCL_CMPR);
+    builder.rfer = rle64(data, offset_of!(btrfs_qgroup_info_item, rfer));
+    builder.rfer_cmpr = rle64(data, offset_of!(btrfs_qgroup_info_item, rfer_cmpr));
+    builder.excl = rle64(data, offset_of!(btrfs_qgroup_info_item, excl));
+    builder.excl_cmpr = rle64(data, offset_of!(btrfs_qgroup_info_item, excl_cmpr));
 }
 
 fn parse_limit(builder: &mut QgroupEntryBuilder, data: &[u8]) {
-    if data.len() < limit_off::MAX_EXCL + 8 {
+    let end = offset_of!(btrfs_qgroup_limit_item, max_excl)
+        + field_size!(btrfs_qgroup_limit_item, max_excl);
+    if data.len() < end {
         return;
     }
+
     builder.has_limit = true;
-    builder.limit_flags = rle64(data, limit_off::FLAGS);
-    builder.max_rfer = rle64(data, limit_off::MAX_RFER);
-    builder.max_excl = rle64(data, limit_off::MAX_EXCL);
+    builder.limit_flags = rle64(data, offset_of!(btrfs_qgroup_limit_item, flags));
+    builder.max_rfer = rle64(data, offset_of!(btrfs_qgroup_limit_item, max_rfer));
+    builder.max_excl = rle64(data, offset_of!(btrfs_qgroup_limit_item, max_excl));
 }
 
 // ---------------------------------------------------------------------------

@@ -24,7 +24,12 @@ use show::FilesystemShowCommand;
 use sync::FilesystemSyncCommand;
 use usage::FilesystemUsageCommand;
 
-/// Overall filesystem tasks and information
+/// Overall filesystem tasks and information.
+///
+/// Perform filesystem-level operations including checking available space,
+/// disk usage analysis, defragmentation, resizing, labeling, and
+/// synchronization. These commands provide views into filesystem state and
+/// allow configuration of filesystem-wide settings.
 #[derive(Parser, Debug)]
 pub struct FilesystemCommand {
     #[clap(subcommand)]
@@ -64,6 +69,10 @@ pub enum FilesystemSubcommand {
 }
 
 /// Unit display mode flags, shared by subcommands that output sizes.
+///
+/// Control how sizes are displayed in output. By default, human-readable
+/// format with base 1024 (KiB, MiB, GiB, TiB) is used. You can specify
+/// exact units or enable base 1000 (kB, MB, GB, TB) with --si.
 #[derive(Args, Debug)]
 pub struct UnitMode {
     /// Show raw numbers in bytes

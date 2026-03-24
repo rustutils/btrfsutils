@@ -18,7 +18,12 @@ use limit::QgroupLimitCommand;
 use remove::QgroupRemoveCommand;
 use show::QgroupShowCommand;
 
-/// Manage quota groups
+/// Manage quota groups.
+///
+/// Create, destroy, and configure quota groups to enforce storage limits and
+/// track usage for subvolumes and hierarchies of subvolumes. Quota groups
+/// provide flexible quota management that can be applied at different levels
+/// in the subvolume hierarchy. Most operations require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 pub struct QgroupCommand {
     #[clap(subcommand)]
@@ -41,19 +46,12 @@ impl Runnable for QgroupCommand {
 
 #[derive(Parser, Debug)]
 pub enum QgroupSubcommand {
-    /// Assign a qgroup as the child of another
     Assign(QgroupAssignCommand),
-    /// Remove a child qgroup relation
     Remove(QgroupRemoveCommand),
-    /// Create a subvolume quota group
     Create(QgroupCreateCommand),
-    /// Destroy a quota group
     Destroy(QgroupDestroyCommand),
-    /// List subvolume quota groups
     Show(QgroupShowCommand),
-    /// Set the limits for a subvolume quota group
     Limit(QgroupLimitCommand),
-    /// Clear all stale qgroups without a subvolume
     #[command(name = "clear-stale")]
     ClearStale(QgroupClearStaleCommand),
 }

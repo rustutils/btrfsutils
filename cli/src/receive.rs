@@ -4,7 +4,12 @@ use std::path::PathBuf;
 
 use crate::{Format, Runnable};
 
-/// Receive subvolumes from a stream
+/// Receive subvolumes from a stream.
+///
+/// Read a btrfs send stream and recreate subvolumes on the destination filesystem.
+/// Streams can be received incrementally based on a parent subvolume to only
+/// apply changes. Multiple streams can be received in sequence. The destination
+/// filesystem must be mounted and writable. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 pub struct ReceiveCommand {
     /// Mount point of the destination filesystem (not required with --dump)

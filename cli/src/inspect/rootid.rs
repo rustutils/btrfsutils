@@ -4,6 +4,7 @@ use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
 use crate::{Format, Runnable};
 
+/// Get tree ID of the containing subvolume of path
 #[derive(Parser, Debug)]
 pub struct RootidCommand {
     /// Path to a file or directory on the btrfs filesystem

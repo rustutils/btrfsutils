@@ -9,7 +9,8 @@ use nix::libc::c_int;
 use std::os::fd::{AsRawFd, BorrowedFd};
 
 use crate::raw::{
-    BTRFS_FIRST_FREE_OBJECTID, btrfs_ioc_ino_lookup, btrfs_ioc_ino_paths, btrfs_ioc_logical_ino_v2,
+    BTRFS_FIRST_FREE_OBJECTID, btrfs_ioc_ino_lookup, btrfs_ioc_ino_paths,
+    btrfs_ioc_logical_ino_v2, btrfs_root_ref,
 };
 use crate::tree_search::{SearchKey, tree_search};
 
@@ -266,23 +267,29 @@ fn subvolid_resolve_sub(fd: BorrowedFd<'_>, path: &mut String, subvol_id: u64) -
             // Recursively resolve the parent path first
             subvolid_resolve_sub(fd, path, parent_subvol_id)?;
 
-            // data is the btrfs_root_ref struct.
-            // Layout: dirid (u64) + transid (u64) + name_len (u32) + name[name_len]
-            if data.len() < 20 {
+            // data is a packed btrfs_root_ref followed by name bytes.
+            use std::mem::{offset_of, size_of};
+
+            let header_size = size_of::<btrfs_root_ref>();
+            if data.len() < header_size {
                 return Err(nix::errno::Errno::EOVERFLOW);
             }
 
-            let dirid = u64::from_le_bytes(data[0..8].try_into().unwrap());
+            let dirid = u64::from_le_bytes(
+                data[offset_of!(btrfs_root_ref, dirid)..][..8]
+                    .try_into()
+                    .unwrap(),
+            );
 
-            // Skip to name_len (offset 16)
-            let name_len = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize;
+            let name_off = offset_of!(btrfs_root_ref, name_len);
+            let name_len =
+                u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
 
-            if data.len() < 20 + name_len {
+            if data.len() < header_size + name_len {
                 return Err(nix::errno::Errno::EOVERFLOW);
             }
 
-            // Get the subvolume name
-            let name_bytes = &data[20..20 + name_len];
+            let name_bytes = &data[header_size..header_size + name_len];
 
             // If dirid is not the first free objectid, we need to resolve the directory path too
             if dirid != BTRFS_FIRST_FREE_OBJECTID as u64 {

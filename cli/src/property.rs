@@ -19,7 +19,13 @@ pub enum PropertyObjectType {
     Device,
 }
 
-/// Modify properties of filesystem objects
+/// Modify properties of filesystem objects.
+///
+/// Get, set, and list properties of filesystem objects including subvolumes,
+/// inodes, the filesystem itself, and devices. Properties control various
+/// aspects of filesystem behavior such as read-only status, compression,
+/// and labels. Most property operations require CAP_SYS_ADMIN or appropriate
+/// filesystem permissions.
 #[derive(Parser, Debug)]
 pub struct PropertyCommand {
     #[clap(subcommand)]
@@ -38,10 +44,7 @@ impl Runnable for PropertyCommand {
 
 #[derive(Parser, Debug)]
 pub enum PropertySubcommand {
-    /// Get a property value of a btrfs object
     Get(PropertyGetCommand),
-    /// Set a property on a btrfs object
     Set(PropertySetCommand),
-    /// List available properties with their descriptions for the given object
     List(PropertyListCommand),
 }

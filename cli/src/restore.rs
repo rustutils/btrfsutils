@@ -4,7 +4,13 @@ use std::path::PathBuf;
 
 use crate::{Format, Runnable};
 
-/// Try to restore files from a damaged filesystem (unmounted)
+/// Try to restore files from a damaged filesystem (unmounted).
+///
+/// Attempt to recover files from a damaged or inaccessible btrfs filesystem
+/// by scanning the raw filesystem structures. This command works on unmounted
+/// devices and can recover files even when the filesystem cannot be mounted
+/// normally. Recovery options allow selective restoration of files, metadata,
+/// and extended attributes. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 pub struct RestoreCommand {
     /// Block device containing the damaged filesystem

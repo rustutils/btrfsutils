@@ -16,7 +16,11 @@ use scan::DeviceScanCommand;
 use stats::DeviceStatsCommand;
 use usage::DeviceUsageCommand;
 
-/// Manage devices in a btrfs filesystem
+/// Manage devices in a btrfs filesystem.
+///
+/// Perform operations on block devices that are part of a btrfs filesystem,
+/// including adding and removing devices, viewing device statistics, and
+/// checking device readiness. Most operations require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 pub struct DeviceCommand {
     #[clap(subcommand)]
@@ -39,19 +43,12 @@ impl Runnable for DeviceCommand {
 
 #[derive(Parser, Debug)]
 pub enum DeviceSubcommand {
-    /// Add one or more devices to a mounted filesystem
     Add(DeviceAddCommand),
-    /// Remove one or more devices from a mounted filesystem
     Remove(DeviceRemoveCommand),
-    /// Remove one or more devices from a mounted filesystem (alias for remove)
     #[clap(alias = "del")]
     Delete(DeviceRemoveCommand),
-    /// Show per-device I/O error statistics
     Stats(DeviceStatsCommand),
-    /// Register or unregister devices with the kernel device scanner
     Scan(DeviceScanCommand),
-    /// Check whether all devices of a filesystem are present and ready to mount
     Ready(DeviceReadyCommand),
-    /// Show detailed information about internal allocations in devices
     Usage(DeviceUsageCommand),
 }

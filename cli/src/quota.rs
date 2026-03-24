@@ -12,7 +12,11 @@ use enable::QuotaEnableCommand;
 use rescan::QuotaRescanCommand;
 use status::QuotaStatusCommand;
 
-/// Manage filesystem quota settings
+/// Manage filesystem quota settings.
+///
+/// Enable or disable quotas, configure quota rescan operations, and view
+/// quota status. Quotas allow enforcing limits on filesystem usage by
+/// subvolume or quota group. Quota operations require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 pub struct QuotaCommand {
     #[clap(subcommand)]
@@ -32,12 +36,8 @@ impl Runnable for QuotaCommand {
 
 #[derive(Parser, Debug)]
 pub enum QuotaSubcommand {
-    /// Enable subvolume quota support for a filesystem
     Enable(QuotaEnableCommand),
-    /// Disable subvolume quota support for a filesystem
     Disable(QuotaDisableCommand),
-    /// Trash all qgroup numbers and scan the metadata again
     Rescan(QuotaRescanCommand),
-    /// Show status information about quota on the filesystem
     Status(QuotaStatusCommand),
 }

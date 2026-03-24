@@ -4,7 +4,13 @@ use std::path::PathBuf;
 
 use crate::{Format, Runnable};
 
-/// Send the subvolume(s) to stdout
+/// Send the subvolume(s) to stdout.
+///
+/// Generate a stream representation of one or more subvolumes that can be
+/// transmitted over the network or stored for later restoration. Streams
+/// are incremental and can be based on a parent subvolume to only send
+/// changes. The stream output is in btrfs send format and can be received
+/// with the receive command. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 pub struct SendCommand {
     /// Subvolume(s) to send

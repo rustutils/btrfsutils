@@ -42,6 +42,15 @@ pub enum Level {
     Error,
 }
 
+/// A Rust implementation of the btrfs command-line tool for managing Btrfs filesystems.
+///
+/// btrfs is a modern copy-on-write filesystem for Linux that provides advanced features
+/// including subvolumes, snapshots, RAID support, compression, quotas, and checksumming.
+/// This tool allows you to create and manage filesystems, devices, subvolumes, snapshots,
+/// quotas, and perform various maintenance operations.
+///
+/// Most operations require CAP_SYS_ADMIN (root privileges) or special permissions for
+/// the specific filesystem.
 #[derive(Parser, Debug)]
 #[clap(version, infer_subcommands = true)]
 pub struct Arguments {
@@ -81,36 +90,21 @@ pub trait Runnable {
 
 #[derive(Parser, Debug)]
 pub enum Command {
-    /// Balance data across devices, or change block groups using filters
     Balance(BalanceCommand),
-    /// Check structural integrity of a filesystem (unmounted)
     Check(CheckCommand),
-    /// Manage and query devices in the filesystem
     Device(DeviceCommand),
-    /// Overall filesystem tasks and information
     Filesystem(FilesystemCommand),
-    /// Query various internal information
     #[command(alias = "inspect-internal")]
     Inspect(InspectCommand),
-    /// Modify properties of filesystem objects
     Property(PropertyCommand),
-    /// Manage quota groups
     Qgroup(QgroupCommand),
-    /// Manage filesystem quota settings
     Quota(QuotaCommand),
-    /// Receive subvolumes from a stream
     Receive(ReceiveCommand),
-    /// Replace a device in the filesystem
     Replace(ReplaceCommand),
-    /// Toolbox for specific rescue operations
     Rescue(RescueCommand),
-    /// Try to restore files from a damaged filesystem (unmounted)
     Restore(RestoreCommand),
-    /// Verify checksums of data and metadata
     Scrub(ScrubCommand),
-    /// Send the subvolume(s) to stdout
     Send(SendCommand),
-    /// Manage subvolumes: create, delete, list, etc
     Subvolume(SubvolumeCommand),
 }
 

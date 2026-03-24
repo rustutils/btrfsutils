@@ -1,0 +1,221 @@
+//! # Device replacement: replacing a device with another while the filesystem is online
+//!
+//! A replace operation copies all data from a source device to a target device,
+//! then swaps the target into the filesystem in place of the source. The
+//! filesystem remains mounted and usable throughout.
+//!
+//! Requires `CAP_SYS_ADMIN`.
+
+use std::ffi::CStr;
+use std::mem;
+use std::os::fd::AsRawFd;
+use std::os::unix::io::BorrowedFd;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::raw::{
+    BTRFS_IOCTL_DEV_REPLACE_CMD_CANCEL, BTRFS_IOCTL_DEV_REPLACE_CMD_START,
+    BTRFS_IOCTL_DEV_REPLACE_CMD_STATUS,
+    BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_ALWAYS,
+    BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_AVOID,
+    BTRFS_IOCTL_DEV_REPLACE_RESULT_ALREADY_STARTED, BTRFS_IOCTL_DEV_REPLACE_RESULT_NOT_STARTED,
+    BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR, BTRFS_IOCTL_DEV_REPLACE_RESULT_SCRUB_INPROGRESS,
+    BTRFS_IOCTL_DEV_REPLACE_STATE_CANCELED, BTRFS_IOCTL_DEV_REPLACE_STATE_FINISHED,
+    BTRFS_IOCTL_DEV_REPLACE_STATE_NEVER_STARTED, BTRFS_IOCTL_DEV_REPLACE_STATE_STARTED,
+    BTRFS_IOCTL_DEV_REPLACE_STATE_SUSPENDED, btrfs_ioc_dev_replace,
+    btrfs_ioctl_dev_replace_args,
+};
+use nix::errno::Errno;
+
+/// Current state of a device replace operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplaceState {
+    NeverStarted,
+    Started,
+    Finished,
+    Canceled,
+    Suspended,
+}
+
+impl ReplaceState {
+    fn from_raw(val: u64) -> Option<ReplaceState> {
+        match val {
+            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_NEVER_STARTED as u64 => {
+                Some(ReplaceState::NeverStarted)
+            }
+            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_STARTED as u64 => {
+                Some(ReplaceState::Started)
+            }
+            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_FINISHED as u64 => {
+                Some(ReplaceState::Finished)
+            }
+            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_CANCELED as u64 => {
+                Some(ReplaceState::Canceled)
+            }
+            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_SUSPENDED as u64 => {
+                Some(ReplaceState::Suspended)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Status of a device replace operation, as returned by the status query.
+#[derive(Debug, Clone)]
+pub struct ReplaceStatus {
+    /// Current state of the replace operation.
+    pub state: ReplaceState,
+    /// Progress in tenths of a percent (0..=1000).
+    pub progress_1000: u64,
+    /// Time the replace operation was started.
+    pub time_started: Option<SystemTime>,
+    /// Time the replace operation stopped (finished, canceled, or suspended).
+    pub time_stopped: Option<SystemTime>,
+    /// Number of write errors encountered during the replace.
+    pub num_write_errors: u64,
+    /// Number of uncorrectable read errors encountered during the replace.
+    pub num_uncorrectable_read_errors: u64,
+}
+
+fn epoch_to_systemtime(secs: u64) -> Option<SystemTime> {
+    if secs == 0 {
+        None
+    } else {
+        Some(UNIX_EPOCH + Duration::from_secs(secs))
+    }
+}
+
+/// How to identify the source device for a replace operation.
+pub enum ReplaceSource<'a> {
+    /// Source device identified by its btrfs device ID.
+    DevId(u64),
+    /// Source device identified by its block device path.
+    Path(&'a CStr),
+}
+
+/// Query the status of a device replace operation on the filesystem referred
+/// to by `fd`.
+pub fn replace_status(fd: BorrowedFd) -> nix::Result<ReplaceStatus> {
+    let mut args: btrfs_ioctl_dev_replace_args = unsafe { mem::zeroed() };
+    args.cmd = BTRFS_IOCTL_DEV_REPLACE_CMD_STATUS as u64;
+
+    unsafe { btrfs_ioc_dev_replace(fd.as_raw_fd(), &mut args) }?;
+
+    // SAFETY: we issued CMD_STATUS so the status union member is active.
+    let status = unsafe { &args.__bindgen_anon_1.status };
+    let state = ReplaceState::from_raw(status.replace_state)
+        .ok_or(Errno::EINVAL)?;
+
+    Ok(ReplaceStatus {
+        state,
+        progress_1000: status.progress_1000,
+        time_started: epoch_to_systemtime(status.time_started),
+        time_stopped: epoch_to_systemtime(status.time_stopped),
+        num_write_errors: status.num_write_errors,
+        num_uncorrectable_read_errors: status.num_uncorrectable_read_errors,
+    })
+}
+
+/// Result of a replace start attempt that the kernel rejected at the
+/// application level (ioctl succeeded but the `result` field indicates a
+/// problem).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplaceStartError {
+    /// A replace operation is already in progress.
+    AlreadyStarted,
+    /// A scrub is in progress and must finish before replace can start.
+    ScrubInProgress,
+}
+
+impl std::fmt::Display for ReplaceStartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReplaceStartError::AlreadyStarted => {
+                write!(f, "a device replace operation is already in progress")
+            }
+            ReplaceStartError::ScrubInProgress => {
+                write!(f, "a scrub is in progress; cancel it first")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ReplaceStartError {}
+
+/// Start a device replace operation, copying all data from `source` to the
+/// target device at `tgtdev_path`.
+///
+/// When `avoid_srcdev` is true, the kernel will only read from the source
+/// device when no other zero-defect mirror is available (useful for replacing
+/// a device with known read errors).
+///
+/// On success returns `Ok(Ok(()))`. If the kernel returns an application-level
+/// error in the result field, returns `Ok(Err(ReplaceStartError))`.
+pub fn replace_start(
+    fd: BorrowedFd,
+    source: ReplaceSource,
+    tgtdev_path: &CStr,
+    avoid_srcdev: bool,
+) -> nix::Result<Result<(), ReplaceStartError>> {
+    let mut args: btrfs_ioctl_dev_replace_args = unsafe { mem::zeroed() };
+    args.cmd = BTRFS_IOCTL_DEV_REPLACE_CMD_START as u64;
+
+    // SAFETY: we are filling in the start union member before issuing CMD_START.
+    let start = unsafe { &mut args.__bindgen_anon_1.start };
+
+    match source {
+        ReplaceSource::DevId(devid) => {
+            start.srcdevid = devid;
+        }
+        ReplaceSource::Path(path) => {
+            start.srcdevid = 0;
+            let bytes = path.to_bytes();
+            if bytes.len() >= start.srcdev_name.len() {
+                return Err(Errno::ENAMETOOLONG);
+            }
+            start.srcdev_name[..bytes.len()].copy_from_slice(bytes);
+        }
+    }
+
+    let tgt_bytes = tgtdev_path.to_bytes();
+    if tgt_bytes.len() >= start.tgtdev_name.len() {
+        return Err(Errno::ENAMETOOLONG);
+    }
+    start.tgtdev_name[..tgt_bytes.len()].copy_from_slice(tgt_bytes);
+
+    start.cont_reading_from_srcdev_mode = if avoid_srcdev {
+        BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_AVOID as u64
+    } else {
+        BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_ALWAYS as u64
+    };
+
+    unsafe { btrfs_ioc_dev_replace(fd.as_raw_fd(), &mut args) }?;
+
+    match args.result {
+        x if x == BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR as u64 => Ok(Ok(())),
+        x if x == BTRFS_IOCTL_DEV_REPLACE_RESULT_ALREADY_STARTED as u64 => {
+            Ok(Err(ReplaceStartError::AlreadyStarted))
+        }
+        x if x == BTRFS_IOCTL_DEV_REPLACE_RESULT_SCRUB_INPROGRESS as u64 => {
+            Ok(Err(ReplaceStartError::ScrubInProgress))
+        }
+        _ => Err(Errno::EINVAL),
+    }
+}
+
+/// Cancel a running device replace operation on the filesystem referred to
+/// by `fd`.
+///
+/// Returns `Ok(true)` if the replace was successfully cancelled, or
+/// `Ok(false)` if no replace operation was in progress.
+pub fn replace_cancel(fd: BorrowedFd) -> nix::Result<bool> {
+    let mut args: btrfs_ioctl_dev_replace_args = unsafe { mem::zeroed() };
+    args.cmd = BTRFS_IOCTL_DEV_REPLACE_CMD_CANCEL as u64;
+
+    unsafe { btrfs_ioc_dev_replace(fd.as_raw_fd(), &mut args) }?;
+
+    match args.result {
+        x if x == BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR as u64 => Ok(true),
+        x if x == BTRFS_IOCTL_DEV_REPLACE_RESULT_NOT_STARTED as u64 => Ok(false),
+        _ => Err(Errno::EINVAL),
+    }
+}

@@ -10,7 +10,11 @@ use cancel::ReplaceCancelCommand;
 use start::ReplaceStartCommand;
 use status::ReplaceStatusCommand;
 
-/// Replace a device in the filesystem
+/// Replace a device in the filesystem.
+///
+/// Replace a device with another device or a spare. During replacement,
+/// data is read from the old device and written to the new one. The replace
+/// operation can be monitored and cancelled. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 pub struct ReplaceCommand {
     #[clap(subcommand)]
@@ -29,10 +33,7 @@ impl Runnable for ReplaceCommand {
 
 #[derive(Parser, Debug)]
 pub enum ReplaceSubcommand {
-    /// Replace device of a btrfs filesystem
     Start(ReplaceStartCommand),
-    /// Print status of a running device replace operation
     Status(ReplaceStatusCommand),
-    /// Cancel a running device replace operation
     Cancel(ReplaceCancelCommand),
 }

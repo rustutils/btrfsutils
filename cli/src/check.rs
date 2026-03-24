@@ -4,14 +4,19 @@ use std::path::PathBuf;
 
 use crate::{Format, Runnable};
 
-/// Check structural integrity of a filesystem (unmounted)
+/// Check mode for filesystem verification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum CheckMode {
     Original,
     Lowmem,
 }
 
-/// Check structural integrity of a filesystem (unmounted)
+/// Check structural integrity of a filesystem (unmounted).
+///
+/// Verify the integrity of a btrfs filesystem by checking internal structures,
+/// extent trees, and data checksums. The filesystem must be unmounted before
+/// running this command. This is a potentially slow operation that requires
+/// CAP_SYS_ADMIN. Use --readonly to perform checks without attempting repairs.
 #[derive(Parser, Debug)]
 pub struct CheckCommand {
     /// Path to the device containing the btrfs filesystem

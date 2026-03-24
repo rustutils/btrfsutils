@@ -18,14 +18,18 @@ use bitflags::bitflags;
 use nix::libc::c_char;
 use uuid::Uuid;
 
+use std::collections::HashMap;
+
 use crate::{
+    field_size,
     raw::{
         BTRFS_DIR_ITEM_KEY, BTRFS_FIRST_FREE_OBJECTID, BTRFS_FS_TREE_OBJECTID,
         BTRFS_LAST_FREE_OBJECTID, BTRFS_ROOT_BACKREF_KEY, BTRFS_ROOT_ITEM_KEY,
         BTRFS_ROOT_TREE_DIR_OBJECTID, BTRFS_ROOT_TREE_OBJECTID, BTRFS_SUBVOL_RDONLY,
-        btrfs_ioc_default_subvol, btrfs_ioc_get_subvol_info, btrfs_ioc_snap_create_v2,
-        btrfs_ioc_snap_destroy_v2, btrfs_ioc_subvol_create_v2, btrfs_ioc_subvol_getflags,
-        btrfs_ioc_subvol_setflags, btrfs_ioctl_get_subvol_info_args, btrfs_ioctl_vol_args_v2,
+        btrfs_ioc_default_subvol, btrfs_ioc_get_subvol_info, btrfs_ioc_ino_lookup,
+        btrfs_ioc_snap_create_v2, btrfs_ioc_snap_destroy_v2, btrfs_ioc_subvol_create_v2,
+        btrfs_ioc_subvol_getflags, btrfs_ioc_subvol_setflags, btrfs_ioctl_get_subvol_info_args,
+        btrfs_ioctl_ino_lookup_args, btrfs_ioctl_vol_args_v2, btrfs_root_item, btrfs_timespec,
     },
     tree_search::{SearchKey, tree_search},
 };
@@ -256,25 +260,22 @@ pub fn subvolume_default_get(fd: BorrowedFd) -> nix::Result<u64> {
             BTRFS_ROOT_TREE_DIR_OBJECTID as u64,
         ),
         |_hdr, data| {
-            // btrfs_dir_item (30 bytes, packed):
-            //   [0..8]  location.objectid  LE u64 — target root ID
-            //   [8]     location.type_     u8
-            //   [9..17] location.offset    LE u64
-            //   [17..25] transid           LE u64
-            //   [25..27] data_len          LE u16
-            //   [27..29] name_len          LE u16
-            //   [29]    type_              u8
-            //   [30..]  name               (name_len bytes)
-            if data.len() < 30 {
+            use crate::raw::btrfs_dir_item;
+            use std::mem::{offset_of, size_of};
+
+            let header_size = size_of::<btrfs_dir_item>();
+            if data.len() < header_size {
                 return Ok(());
             }
-            let name_len = u16::from_le_bytes([data[27], data[28]]) as usize;
-            if data.len() < 30 + name_len {
+            let name_off = offset_of!(btrfs_dir_item, name_len);
+            let name_len = u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
+            if data.len() < header_size + name_len {
                 return Ok(());
             }
-            let item_name = &data[30..30 + name_len];
+            let item_name = &data[header_size..header_size + name_len];
             if item_name == b"default" {
-                let target_id = u64::from_le_bytes(data[0..8].try_into().unwrap());
+                let loc_off = offset_of!(btrfs_dir_item, location);
+                let target_id = u64::from_le_bytes(data[loc_off..loc_off + 8].try_into().unwrap());
                 default_id = Some(target_id);
             }
             Ok(())
@@ -338,57 +339,235 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
             let parent_id = hdr.offset;
 
             if let Some(item) = items.iter_mut().find(|i| i.root_id == root_id) {
-                item.parent_id = parent_id;
-                if let Some((dir_id, name)) = parse_root_ref(data) {
-                    item.dir_id = dir_id;
-                    item.name = name;
+                // Only take the first ROOT_BACKREF for each subvolume.  A
+                // subvolume can have multiple ROOT_BACKREF entries when it is
+                // referenced from more than one parent (e.g. the subvolume
+                // also appears as a snapshot inside another subvolume).
+                // Items are returned in offset-ascending order, so the first
+                // entry has the smallest parent_id — which is the canonical
+                // location btrfs-progs uses for "top level" and path.
+                if item.parent_id == 0 {
+                    item.parent_id = parent_id;
+                    if let Some((dir_id, name)) = parse_root_ref(data) {
+                        item.dir_id = dir_id;
+                        item.name = name;
+                    }
                 }
             }
             Ok(())
         },
     )?;
 
+    // Determine which subvolume the fd is open on.  Paths are expressed
+    // relative to this subvolume, matching btrfs-progs behaviour.
+    let top_id = crate::inode::lookup_path_rootid(fd).unwrap_or(FS_TREE_OBJECTID);
+
+    resolve_full_paths(fd, &mut items, top_id)?;
+
     Ok(items)
 }
 
-/// `btrfs_root_item` field offsets (packed, LE).
-mod root_item_off {
-    pub const GENERATION: usize = 160;
-    pub const FLAGS: usize = 208;
-    /// Byte offset of `generation_v2`; items shorter than this are "legacy"
-    /// and do not carry UUID / otime / otransid fields.
-    pub const LEGACY_BOUNDARY: usize = 239;
-    pub const UUID: usize = 247;
-    pub const PARENT_UUID: usize = 263;
-    pub const RECEIVED_UUID: usize = 279;
-    pub const OTRANSID: usize = 303;
-    /// `otime` is a packed `btrfs_timespec`: sec (LE u64) + nsec (LE u32).
-    pub const OTIME_SEC: usize = 339;
-    pub const OTIME_NSEC: usize = 347;
+/// Call `BTRFS_IOC_INO_LOOKUP` for `dir_id` within `parent_tree` and return
+/// the path from that tree's root to the directory.
+///
+/// The kernel returns the path with a trailing `/` when the directory is not
+/// the tree root, and an empty string when `dir_id` is the tree root itself.
+/// This prefix can be concatenated directly with the subvolume's leaf name to
+/// form the full segment within the parent.
+fn ino_lookup_dir_path(fd: BorrowedFd, parent_tree: u64, dir_id: u64) -> nix::Result<String> {
+    let mut args = btrfs_ioctl_ino_lookup_args {
+        treeid: parent_tree,
+        objectid: dir_id,
+        ..unsafe { mem::zeroed() }
+    };
+    // SAFETY: args is a valid, zeroed btrfs_ioctl_ino_lookup_args; the ioctl
+    // fills in args.name with a null-terminated path string.
+    unsafe { btrfs_ioc_ino_lookup(fd.as_raw_fd(), &mut args) }?;
+
+    // args.name is [c_char; 4080]; find the null terminator and decode.
+    let name_ptr: *const c_char = args.name.as_ptr();
+    // SAFETY: the ioctl guarantees null termination within the 4080-byte buffer.
+    let cstr = unsafe { CStr::from_ptr(name_ptr) };
+    Ok(cstr.to_string_lossy().into_owned())
 }
 
-fn parse_root_item(root_id: u64, data: &[u8]) -> Option<SubvolumeListItem> {
-    use root_item_off::*;
+/// Resolve the `name` field of every item in `items` from a bare leaf name to
+/// the full path relative to the filesystem root.
+///
+/// For each subvolume we already have `parent_id`, `dir_id`, and the leaf name
+/// from the ROOT_BACKREF pass.  A single `BTRFS_IOC_INO_LOOKUP` call per item
+/// gives the path from the parent tree's root down to the directory that
+/// contains the subvolume (the "dir prefix").  Concatenating that prefix with
+/// the leaf name yields the subvolume's segment within its parent.  Walking up
+/// the parent chain (using the in-memory items map) and joining segments with
+/// `/` gives the final full path.
+fn resolve_full_paths(
+    fd: BorrowedFd,
+    items: &mut Vec<SubvolumeListItem>,
+    top_id: u64,
+) -> nix::Result<()> {
+    // Map root_id → index for O(1) parent lookups.
+    let id_to_idx: HashMap<u64, usize> = items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| (item.root_id, i))
+        .collect();
 
-    if data.len() < LEGACY_BOUNDARY {
-        // Too short even for the legacy fields we need.
+    // Compute the "segment" for each item: the path of this subvolume within
+    // its immediate parent (dir prefix from INO_LOOKUP + leaf name).
+    // If INO_LOOKUP is not available (e.g. missing CAP_SYS_ADMIN), fall back
+    // to the bare leaf name so the list still works.
+    let segments: Vec<String> = items
+        .iter()
+        .map(|item| {
+            if item.parent_id == 0 || item.name.is_empty() {
+                return item.name.clone();
+            }
+            match ino_lookup_dir_path(fd, item.parent_id, item.dir_id) {
+                Ok(prefix) => format!("{}{}", prefix, item.name),
+                Err(_) => item.name.clone(),
+            }
+        })
+        .collect();
+
+    // Walk each item's parent chain, joining segments, and cache results so
+    // every ancestor is resolved at most once.
+    let mut full_paths: HashMap<u64, String> = HashMap::new();
+    let root_ids: Vec<u64> = items.iter().map(|i| i.root_id).collect();
+    for root_id in root_ids {
+        build_full_path(
+            root_id,
+            top_id,
+            &id_to_idx,
+            &segments,
+            items,
+            &mut full_paths,
+        );
+    }
+
+    for item in items.iter_mut() {
+        if let Some(path) = full_paths.remove(&item.root_id) {
+            item.name = path;
+        }
+    }
+
+    Ok(())
+}
+
+/// Compute the full path for `root_id`, memoizing into `cache`.
+///
+/// Walks the ancestor chain iteratively to avoid stack overflow on deep
+/// subvolume trees.  Collects segments from the target up to the FS tree
+/// root, then joins them in reverse order.
+///
+/// Cycle detection is included: ROOT_BACKREF entries can form mutual parent
+/// relationships (e.g. a snapshot stored inside the subvolume it was taken
+/// from), which would otherwise loop forever.
+fn build_full_path(
+    root_id: u64,
+    top_id: u64,
+    id_to_idx: &HashMap<u64, usize>,
+    segments: &[String],
+    items: &[SubvolumeListItem],
+    cache: &mut HashMap<u64, String>,
+) -> String {
+    // Collect the chain of root_ids from `root_id` up to the top subvolume
+    // (the one the fd is open on) or the FS tree root, stopping early if we
+    // hit an already-cached ancestor or a cycle.
+    let mut chain: Vec<u64> = Vec::new();
+    let mut visited: HashMap<u64, usize> = HashMap::new();
+    let mut cur = root_id;
+    loop {
+        if cache.contains_key(&cur) {
+            break;
+        }
+        if visited.contains_key(&cur) {
+            // Cycle detected: truncate the chain back to where the cycle
+            // starts so we don't join nonsensical repeated segments.
+            let cycle_start = visited[&cur];
+            chain.truncate(cycle_start);
+            break;
+        }
+        let Some(&idx) = id_to_idx.get(&cur) else {
+            break;
+        };
+        visited.insert(cur, chain.len());
+        chain.push(cur);
+        let parent = items[idx].parent_id;
+        if parent == 0
+            || parent == FS_TREE_OBJECTID
+            || parent == top_id
+            || !id_to_idx.contains_key(&parent)
+        {
+            break;
+        }
+        cur = parent;
+    }
+
+    // Resolve each node in the chain from root toward the target, building
+    // on any already-cached prefix we stopped at.
+    for &id in chain.iter().rev() {
+        let Some(&idx) = id_to_idx.get(&id) else {
+            cache.insert(id, String::new());
+            continue;
+        };
+        let segment = &segments[idx];
+        let parent_id = items[idx].parent_id;
+
+        let full_path = if parent_id == 0
+            || parent_id == FS_TREE_OBJECTID
+            || parent_id == top_id
+            || !id_to_idx.contains_key(&parent_id)
+        {
+            segment.clone()
+        } else if let Some(parent_path) = cache.get(&parent_id) {
+            if parent_path.is_empty() {
+                segment.clone()
+            } else {
+                format!("{}/{}", parent_path, segment)
+            }
+        } else {
+            segment.clone()
+        };
+
+        cache.insert(id, full_path);
+    }
+
+    cache.get(&root_id).cloned().unwrap_or_default()
+}
+
+/// `btrfs_root_item` field offsets (packed, LE).
+fn parse_root_item(root_id: u64, data: &[u8]) -> Option<SubvolumeListItem> {
+    use std::mem::offset_of;
+
+    // Items shorter than generation_v2 are "legacy" and do not carry
+    // UUID / otime / otransid fields.
+    let legacy_boundary = offset_of!(btrfs_root_item, generation_v2);
+    if data.len() < legacy_boundary {
         return None;
     }
 
-    let generation = rle64(data, GENERATION);
-    let flags_raw = rle64(data, FLAGS);
+    let generation = rle64(data, offset_of!(btrfs_root_item, generation));
+    let flags_raw = rle64(data, offset_of!(btrfs_root_item, flags));
     let flags = SubvolumeFlags::from_bits_truncate(flags_raw);
 
     // Extended fields exist only in non-legacy items.
-    let (uuid, parent_uuid, received_uuid, otransid, otime) = if data.len()
-        >= root_item_off::OTIME_NSEC + 4
+    let otime_nsec = offset_of!(btrfs_root_item, otime) + offset_of!(btrfs_timespec, nsec);
+    let (uuid, parent_uuid, received_uuid, otransid, otime) =
+        if data.len() >= otime_nsec + field_size!(btrfs_timespec, nsec)
     {
-        let uuid = Uuid::from_bytes(data[UUID..UUID + 16].try_into().unwrap());
-        let parent_uuid = Uuid::from_bytes(data[PARENT_UUID..PARENT_UUID + 16].try_into().unwrap());
+        let off_uuid = offset_of!(btrfs_root_item, uuid);
+        let off_parent = offset_of!(btrfs_root_item, parent_uuid);
+        let off_received = offset_of!(btrfs_root_item, received_uuid);
+        let uuid_size = field_size!(btrfs_root_item, uuid);
+        let uuid = Uuid::from_bytes(data[off_uuid..off_uuid + uuid_size].try_into().unwrap());
+        let parent_uuid =
+            Uuid::from_bytes(data[off_parent..off_parent + uuid_size].try_into().unwrap());
         let received_uuid =
-            Uuid::from_bytes(data[RECEIVED_UUID..RECEIVED_UUID + 16].try_into().unwrap());
-        let otransid = rle64(data, OTRANSID);
-        let otime = timespec_to_system_time(rle64(data, OTIME_SEC), rle32(data, OTIME_NSEC));
+            Uuid::from_bytes(data[off_received..off_received + uuid_size].try_into().unwrap());
+        let otransid = rle64(data, offset_of!(btrfs_root_item, otransid));
+        let otime_sec = offset_of!(btrfs_root_item, otime);
+        let otime = timespec_to_system_time(rle64(data, otime_sec), rle32(data, otime_nsec));
         (uuid, parent_uuid, received_uuid, otransid, otime)
     } else {
         (Uuid::nil(), Uuid::nil(), Uuid::nil(), 0, UNIX_EPOCH)
@@ -409,24 +588,23 @@ fn parse_root_item(root_id: u64, data: &[u8]) -> Option<SubvolumeListItem> {
     })
 }
 
-/// Parse a `btrfs_root_ref` payload (packed, LE):
-///
-/// ```text
-/// [0..8]   dirid     LE u64
-/// [8..16]  sequence  LE u64
-/// [16..18] name_len  LE u16
-/// [18..]   name      (name_len bytes, UTF-8)
-/// ```
+/// Parse a `btrfs_root_ref` payload (packed, LE). The name immediately
+/// follows the fixed-size header.
 fn parse_root_ref(data: &[u8]) -> Option<(u64, String)> {
-    if data.len() < 18 {
+    use crate::raw::btrfs_root_ref;
+    use std::mem::{offset_of, size_of};
+
+    let header_size = size_of::<btrfs_root_ref>();
+    if data.len() < header_size {
         return None;
     }
-    let dir_id = rle64(data, 0);
-    let name_len = u16::from_le_bytes([data[16], data[17]]) as usize;
-    if data.len() < 18 + name_len {
+    let dir_id = rle64(data, offset_of!(btrfs_root_ref, dirid));
+    let name_off = offset_of!(btrfs_root_ref, name_len);
+    let name_len = u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
+    if data.len() < header_size + name_len {
         return None;
     }
-    let name = String::from_utf8_lossy(&data[18..18 + name_len]).into_owned();
+    let name = String::from_utf8_lossy(&data[header_size..header_size + name_len]).into_owned();
     Some((dir_id, name))
 }
 

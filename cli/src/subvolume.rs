@@ -24,7 +24,12 @@ use show::SubvolumeShowCommand;
 use snapshot::SubvolumeSnapshotCommand;
 use sync::SubvolumeSyncCommand;
 
-/// Create, delete, list, and manage btrfs subvolumes and snapshots
+/// Create, delete, list, and manage btrfs subvolumes and snapshots.
+///
+/// Subvolumes are independent filesystem trees within a btrfs filesystem,
+/// allowing flexible storage organization, snapshots, and quota management.
+/// Snapshots are read-only or read-write copies of subvolumes at a point in time.
+/// Most operations require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 pub struct SubvolumeCommand {
     #[clap(subcommand)]
@@ -51,27 +56,16 @@ impl Runnable for SubvolumeCommand {
 
 #[derive(Parser, Debug)]
 pub enum SubvolumeSubcommand {
-    /// Create a new subvolume at each given path
     Create(SubvolumeCreateCommand),
-    /// Delete one or more subvolumes or snapshots
     #[clap(alias = "del")]
     Delete(SubvolumeDeleteCommand),
-    /// Create a snapshot of a subvolume
     Snapshot(SubvolumeSnapshotCommand),
-    /// Show detailed information about a subvolume
     Show(SubvolumeShowCommand),
-    /// List subvolumes and snapshots in the filesystem
     List(SubvolumeListCommand),
-    /// Show the default subvolume of a filesystem
     GetDefault(SubvolumeGetDefaultCommand),
-    /// Set the default subvolume of a filesystem
     SetDefault(SubvolumeSetDefaultCommand),
-    /// Show the flags of a subvolume
     GetFlags(SubvolumeGetFlagsCommand),
-    /// Set the flags of a subvolume
     SetFlags(SubvolumeSetFlagsCommand),
-    /// List recently modified files in a subvolume since a given generation
     FindNew(SubvolumeFindNewCommand),
-    /// Wait until given subvolume(s) are completely removed from the filesystem
     Sync(SubvolumeSyncCommand),
 }

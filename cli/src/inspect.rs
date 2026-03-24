@@ -24,7 +24,13 @@ use rootid::RootidCommand;
 use subvolid_resolve::SubvolidResolveCommand;
 use tree_stats::TreeStatsCommand;
 
-/// Query various internal filesystem information
+/// Query various internal filesystem information.
+///
+/// Access advanced information about filesystem internals including inode
+/// resolution, logical extent to physical block mapping, subvolume IDs,
+/// chunk layout, and other diagnostic data. These commands are primarily
+/// useful for debugging, analysis, and recovery operations. Most operations
+/// require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 pub struct InspectCommand {
     #[clap(subcommand)]
@@ -33,25 +39,15 @@ pub struct InspectCommand {
 
 #[derive(Parser, Debug)]
 pub enum InspectSubcommand {
-    /// Get tree ID of the containing subvolume of path
     Rootid(RootidCommand),
-    /// Get file system paths for the given inode
     InodeResolve(InodeResolveCommand),
-    /// Get file system paths for the given logical address
     LogicalResolve(LogicalResolveCommand),
-    /// Get subvolume ID and tree ID of the given path
     SubvolidResolve(SubvolidResolveCommand),
-    /// Print physical extents of a file suitable for swap
     MapSwapfile(MapSwapfileCommand),
-    /// Print minimum device size to resize a device
     MinDevSize(MinDevSizeCommand),
-    /// Dump tree blocks from a btrfs filesystem
     DumpTree(DumpTreeCommand),
-    /// Dump the superblock from a btrfs filesystem
     DumpSuper(DumpSuperCommand),
-    /// Print statistics about trees in a btrfs filesystem
     TreeStats(TreeStatsCommand),
-    /// List chunks in a btrfs filesystem
     ListChunks(ListChunksCommand),
 }
 

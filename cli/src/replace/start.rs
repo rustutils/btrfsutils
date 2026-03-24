@@ -1,7 +1,15 @@
 use crate::{Format, Runnable};
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
+use btrfs_uapi::replace::{ReplaceSource, ReplaceState, replace_start, replace_status};
 use clap::Parser;
-use std::path::PathBuf;
+use std::{
+    ffi::CString,
+    fs::File,
+    os::unix::io::AsFd,
+    path::PathBuf,
+    thread,
+    time::Duration,
+};
 
 /// Replace a device in the filesystem.
 ///
@@ -42,6 +50,89 @@ pub struct ReplaceStartCommand {
 
 impl Runnable for ReplaceStartCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        todo!("implement replace start")
+        let file = File::open(&self.mount_point)
+            .with_context(|| format!("failed to open '{}'", self.mount_point.display()))?;
+        let fd = file.as_fd();
+
+        // Check if a replace is already running.
+        let current = replace_status(fd).with_context(|| {
+            format!(
+                "failed to get replace status on '{}'",
+                self.mount_point.display()
+            )
+        })?;
+        if current.state == ReplaceState::Started {
+            bail!("a device replace operation is already in progress on '{}'", self.mount_point.display());
+        }
+
+        // Resolve source: if it parses as a number, treat it as a devid;
+        // otherwise treat it as a device path.
+        let source = if let Ok(devid) = self.source.parse::<u64>() {
+            ReplaceSource::DevId(devid)
+        } else {
+            ReplaceSource::Path(
+                &CString::new(self.source.as_bytes())
+                    .with_context(|| format!("invalid source device path '{}'", self.source))?,
+            )
+        };
+
+        let tgtdev = CString::new(self.target.as_os_str().as_encoded_bytes())
+            .with_context(|| {
+                format!("invalid target device path '{}'", self.target.display())
+            })?;
+
+        match replace_start(fd, source, &tgtdev, self.redundancy_only)
+            .with_context(|| {
+                format!(
+                    "failed to start replace on '{}'",
+                    self.mount_point.display()
+                )
+            })? {
+            Ok(()) => {}
+            Err(e) => bail!("{e}"),
+        }
+
+        println!(
+            "replace started: {} -> {}",
+            self.source,
+            self.target.display(),
+        );
+
+        if self.no_background {
+            // Poll until the replace finishes.
+            loop {
+                thread::sleep(Duration::from_secs(1));
+                let status = replace_status(fd).with_context(|| {
+                    format!(
+                        "failed to get replace status on '{}'",
+                        self.mount_point.display()
+                    )
+                })?;
+
+                let pct = status.progress_1000 as f64 / 10.0;
+                eprint!(
+                    "\r{pct:.1}% done, {} write errs, {} uncorr. read errs",
+                    status.num_write_errors, status.num_uncorrectable_read_errors,
+                );
+
+                if status.state != ReplaceState::Started {
+                    eprintln!();
+                    match status.state {
+                        ReplaceState::Finished => {
+                            println!("replace finished successfully");
+                        }
+                        ReplaceState::Canceled => {
+                            bail!("replace was cancelled");
+                        }
+                        _ => {
+                            bail!("replace ended in unexpected state: {:?}", status.state);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
