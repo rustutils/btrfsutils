@@ -1,11 +1,16 @@
 pub mod balance;
+pub mod chunk;
 pub mod defrag;
 pub mod device;
+pub mod fiemap;
 pub mod filesystem;
+pub mod inode;
 pub mod label;
 pub mod raw;
 pub mod resize;
 pub mod scrub;
 pub mod space;
+pub mod subvolume;
 pub mod sync;
 pub mod sysfs;
+pub mod tree_search;

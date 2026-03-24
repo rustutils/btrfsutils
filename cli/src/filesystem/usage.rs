@@ -2,12 +2,15 @@ use super::UnitMode;
 use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
+    chunk::device_chunk_allocations,
     device::all_dev_info,
     filesystem::fs_info,
     space::{BlockGroupFlags, SpaceInfo, space_info},
 };
 use clap::Parser;
-use std::{collections::HashSet, fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{
+    collections::HashMap, collections::HashSet, fs::File, os::unix::io::AsFd, path::PathBuf,
+};
 
 /// Show detailed information about internal filesystem usage
 #[derive(Parser, Debug)]
@@ -95,6 +98,14 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
         .with_context(|| format!("failed to get device info for '{}'", path.display()))?;
     let spaces = space_info(fd)
         .with_context(|| format!("failed to get space info for '{}'", path.display()))?;
+
+    // Per-device chunk allocations from the chunk tree.  This requires
+    // CAP_SYS_ADMIN; if it fails we degrade gracefully and note it below.
+    let chunk_allocs = device_chunk_allocations(fd).ok();
+
+    // Map devid -> path for display.
+    let devid_to_path: HashMap<u64, &str> =
+        devices.iter().map(|d| (d.devid, d.path.as_str())).collect();
 
     let mut r_data_chunks: u64 = 0;
     let mut r_data_used: u64 = 0;
@@ -212,10 +223,12 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
         if multiple { "yes" } else { "no" }
     );
 
-    eprintln!(
-        "WARNING: per-device usage breakdown is not yet implemented \
-         (requires BTRFS_IOC_TREE_SEARCH_V2)"
-    );
+    if chunk_allocs.is_none() {
+        eprintln!(
+            "NOTE: per-device usage breakdown unavailable \
+             (chunk tree requires CAP_SYS_ADMIN)"
+        );
+    }
 
     for s in &spaces {
         if s.flags.contains(BlockGroupFlags::GLOBAL_RSV) {
@@ -234,6 +247,21 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
             human_bytes(s.used_bytes),
             pct
         );
+
+        // Per-device lines: one row per device that holds stripes for this
+        // exact profile.  Sorted by devid for stable output.
+        if let Some(allocs) = &chunk_allocs {
+            let mut profile_allocs: Vec<_> = allocs.iter().filter(|a| a.flags == s.flags).collect();
+            profile_allocs.sort_by_key(|a| a.devid);
+
+            for alloc in profile_allocs {
+                let path = devid_to_path
+                    .get(&alloc.devid)
+                    .copied()
+                    .unwrap_or("<unknown>");
+                println!("   {}\t\t{:>10}", path, human_bytes(alloc.bytes));
+            }
+        }
     }
 
     println!("\nUnallocated:");

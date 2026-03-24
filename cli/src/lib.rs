@@ -4,12 +4,14 @@ use clap::{Parser, ValueEnum};
 pub mod balance;
 pub mod device;
 pub mod filesystem;
+pub mod inspect;
 pub mod scrub;
+pub mod subvolume;
 pub mod util;
 
 use crate::{
     balance::BalanceCommand, device::DeviceCommand, filesystem::FilesystemCommand,
-    scrub::ScrubCommand,
+    inspect::InspectCommand, scrub::ScrubCommand, subvolume::SubvolumeCommand,
 };
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -74,7 +76,8 @@ pub enum Command {
     /// Overall filesystem tasks and information
     Filesystem(FilesystemCommand),
     /// Query various internal information
-    InspectInternal,
+    #[command(alias = "inspect-internal")]
+    Inspect(InspectCommand),
     /// Modify properties of filesystem objects
     Property,
     /// Manage quota groups
@@ -88,7 +91,7 @@ pub enum Command {
     /// Verify checksums of data and metadata
     Scrub(ScrubCommand),
     /// Manage subvolumes: create, delete, list, etc
-    Subvolume,
+    Subvolume(SubvolumeCommand),
 
     Check,
     Receive,
@@ -102,14 +105,14 @@ impl Runnable for Command {
             Command::Balance(cmd) => cmd.run(format, dry_run),
             Command::Device(cmd) => cmd.run(format, dry_run),
             Command::Filesystem(cmd) => cmd.run(format, dry_run),
-            Command::InspectInternal => todo!(),
+            Command::Inspect(cmd) => cmd.run(format, dry_run),
             Command::Property => todo!(),
             Command::Qgroup => todo!(),
             Command::Quota => todo!(),
             Command::Replace => todo!(),
             Command::Rescue => todo!(),
             Command::Scrub(cmd) => cmd.run(format, dry_run),
-            Command::Subvolume => todo!(),
+            Command::Subvolume(cmd) => cmd.run(format, dry_run),
             Command::Check => todo!(),
             Command::Receive => todo!(),
             Command::Restore => todo!(),
