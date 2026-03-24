@@ -31,7 +31,7 @@ pub enum Level {
 }
 
 #[derive(Parser, Debug)]
-#[clap(version)]
+#[clap(version, infer_subcommands = true)]
 pub struct Arguments {
     #[clap(flatten)]
     pub global: GlobalOptions,
