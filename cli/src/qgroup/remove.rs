@@ -17,20 +17,16 @@ pub struct QgroupRemoveCommand {
     pub path: PathBuf,
 
     /// Schedule quota rescan if needed (default)
-    #[clap(long, overrides_with = "no_rescan")]
+    #[clap(long, conflicts_with = "no_rescan")]
     pub rescan: bool,
 
     /// Don't schedule quota rescan
-    #[clap(long, overrides_with = "rescan")]
+    #[clap(long)]
     pub no_rescan: bool,
 }
 
 impl Runnable for QgroupRemoveCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        if self.rescan && self.no_rescan {
-            bail!("--rescan and --no-rescan are mutually exclusive");
-        }
-
         let src = parse_qgroupid(&self.src)?;
         let dst = parse_qgroupid(&self.dst)?;
 

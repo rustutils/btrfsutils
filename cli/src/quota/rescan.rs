@@ -1,5 +1,5 @@
 use crate::{Format, Runnable};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::Parser;
 use nix::errno::Errno;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
@@ -8,7 +8,7 @@ use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 #[derive(Parser, Debug)]
 pub struct QuotaRescanCommand {
     /// Show status of a running rescan operation
-    #[clap(short = 's', long)]
+    #[clap(short = 's', long, conflicts_with = "wait")]
     pub status: bool,
 
     /// Start rescan and wait for it to finish
@@ -25,10 +25,6 @@ pub struct QuotaRescanCommand {
 
 impl Runnable for QuotaRescanCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        if self.status && self.wait {
-            bail!("option -w/--wait cannot be used together with -s/--status");
-        }
-
         let file = File::open(&self.path)
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
         let fd = file.as_fd();

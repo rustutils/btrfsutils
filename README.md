@@ -39,9 +39,9 @@ Most commands that talk to the kernel require root privileges or `CAP_SYS_ADMIN`
 
 | Crate | Description |
 |-------|-------------|
-| `uapi/` (`btrfs-uapi`) | Safe Rust wrappers around btrfs kernel ioctls, sysfs, and procfs. Linux-only. |
-| `disk/` (`btrfs-disk`) | Platform-independent parsing of btrfs on-disk structures (superblocks, tree nodes, etc.) from block devices or image files. |
-| `cli/` (`btrfs-cli`) | The command-line tool, built on top of `uapi` and `disk`. |
+| `btrfs-uapi` | Safe Rust wrappers around btrfs kernel ioctls, sysfs, and procfs. Linux-only. |
+| `btrfs-disk` | Platform-independent parsing of btrfs on-disk structures (superblocks, tree nodes, etc.) from block devices or image files. |
+| `btrfs-cli` | The command-line tool, built on top of `uapi` and `disk`. |
 
 Not all commands from btrfs-progs are implemented yet. Run `btrfs help` to see
 what is available.

@@ -9,17 +9,18 @@ use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 /// Without options, shows the current limit for each device. Use -l with
 /// either -a or -d to set a limit. Pass 0 to -l to remove a limit.
 #[derive(Parser, Debug)]
+#[command(group = clap::ArgGroup::new("target").args(["all", "devid"]).multiple(false))]
 pub struct ScrubLimitCommand {
     /// Apply the limit to all devices
-    #[clap(long, short)]
+    #[clap(long, short, requires = "limit")]
     pub all: bool,
 
     /// Select a single device by devid
-    #[clap(long, short, value_name = "DEVID")]
+    #[clap(long, short, value_name = "DEVID", requires = "limit")]
     pub devid: Option<u64>,
 
     /// Set the throughput limit (e.g. 100m, 1g); 0 removes the limit
-    #[clap(long, short, value_name = "SIZE", value_parser = parse_size_with_suffix)]
+    #[clap(long, short, value_name = "SIZE", value_parser = parse_size_with_suffix, requires = "target")]
     pub limit: Option<u64>,
 
     /// Path to a mounted btrfs filesystem
@@ -28,19 +29,6 @@ pub struct ScrubLimitCommand {
 
 impl Runnable for ScrubLimitCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        if self.all && self.devid.is_some() {
-            anyhow::bail!("--all and --devid cannot be used at the same time");
-        }
-        if self.devid.is_some() && self.limit.is_none() {
-            anyhow::bail!("--devid and --limit must be set together");
-        }
-        if self.all && self.limit.is_none() {
-            anyhow::bail!("--all and --limit must be set together");
-        }
-        if !self.all && self.devid.is_none() && self.limit.is_some() {
-            anyhow::bail!("--limit must be used with either --all or --devid");
-        }
-
         let file = File::open(&self.path)
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
         let fd = file.as_fd();

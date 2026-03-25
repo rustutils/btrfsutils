@@ -15,19 +15,15 @@ pub struct QgroupAssignCommand {
     /// Path to a mounted btrfs filesystem
     pub path: PathBuf,
     /// Schedule a quota rescan if needed (default)
-    #[clap(long, overrides_with = "no_rescan")]
+    #[clap(long, conflicts_with = "no_rescan")]
     pub rescan: bool,
     /// Do not schedule a quota rescan
-    #[clap(long, overrides_with = "rescan")]
+    #[clap(long)]
     pub no_rescan: bool,
 }
 
 impl Runnable for QgroupAssignCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        if self.rescan && self.no_rescan {
-            bail!("--rescan and --no-rescan are mutually exclusive");
-        }
-
         let src = parse_qgroupid(&self.src)?;
         let dst = parse_qgroupid(&self.dst)?;
 
