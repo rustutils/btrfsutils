@@ -112,6 +112,159 @@ pub struct SpaceInfo {
     pub used_bytes: u64,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- type_name ---
+
+    #[test]
+    fn type_name_data() {
+        assert_eq!(BlockGroupFlags::DATA.type_name(), "Data");
+    }
+
+    #[test]
+    fn type_name_metadata() {
+        assert_eq!(BlockGroupFlags::METADATA.type_name(), "Metadata");
+    }
+
+    #[test]
+    fn type_name_system() {
+        assert_eq!(BlockGroupFlags::SYSTEM.type_name(), "System");
+    }
+
+    #[test]
+    fn type_name_data_metadata() {
+        let flags = BlockGroupFlags::DATA | BlockGroupFlags::METADATA;
+        assert_eq!(flags.type_name(), "Data+Metadata");
+    }
+
+    #[test]
+    fn type_name_global_rsv() {
+        assert_eq!(BlockGroupFlags::GLOBAL_RSV.type_name(), "GlobalReserve");
+    }
+
+    #[test]
+    fn type_name_global_rsv_takes_precedence() {
+        let flags = BlockGroupFlags::GLOBAL_RSV | BlockGroupFlags::METADATA;
+        assert_eq!(flags.type_name(), "GlobalReserve");
+    }
+
+    // --- profile_name ---
+
+    #[test]
+    fn profile_name_single_no_bits() {
+        assert_eq!(BlockGroupFlags::DATA.profile_name(), "single");
+    }
+
+    #[test]
+    fn profile_name_single_explicit() {
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::SINGLE).profile_name(),
+            "single"
+        );
+    }
+
+    #[test]
+    fn profile_name_raid0() {
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID0).profile_name(),
+            "RAID0"
+        );
+    }
+
+    #[test]
+    fn profile_name_raid1() {
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID1).profile_name(),
+            "RAID1"
+        );
+    }
+
+    #[test]
+    fn profile_name_dup() {
+        assert_eq!(
+            (BlockGroupFlags::METADATA | BlockGroupFlags::DUP).profile_name(),
+            "DUP"
+        );
+    }
+
+    #[test]
+    fn profile_name_raid10() {
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID10).profile_name(),
+            "RAID10"
+        );
+    }
+
+    #[test]
+    fn profile_name_raid5() {
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID5).profile_name(),
+            "RAID5"
+        );
+    }
+
+    #[test]
+    fn profile_name_raid6() {
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID6).profile_name(),
+            "RAID6"
+        );
+    }
+
+    #[test]
+    fn profile_name_raid1c3() {
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID1C3).profile_name(),
+            "RAID1C3"
+        );
+    }
+
+    #[test]
+    fn profile_name_raid1c4() {
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID1C4).profile_name(),
+            "RAID1C4"
+        );
+    }
+
+    // --- Display ---
+
+    #[test]
+    fn display_data_single() {
+        assert_eq!(format!("{}", BlockGroupFlags::DATA), "Data, single");
+    }
+
+    #[test]
+    fn display_metadata_dup() {
+        let flags = BlockGroupFlags::METADATA | BlockGroupFlags::DUP;
+        assert_eq!(format!("{flags}"), "Metadata, DUP");
+    }
+
+    #[test]
+    fn display_system_raid1() {
+        let flags = BlockGroupFlags::SYSTEM | BlockGroupFlags::RAID1;
+        assert_eq!(format!("{flags}"), "System, RAID1");
+    }
+
+    #[test]
+    fn display_global_rsv() {
+        let flags = BlockGroupFlags::GLOBAL_RSV | BlockGroupFlags::METADATA;
+        assert_eq!(format!("{flags}"), "GlobalReserve, single");
+    }
+
+    // --- from_bits_truncate ---
+
+    #[test]
+    fn from_bits_preserves_known_flags() {
+        let raw = BTRFS_BLOCK_GROUP_DATA as u64 | BTRFS_BLOCK_GROUP_RAID1 as u64;
+        let flags = BlockGroupFlags::from_bits_truncate(raw);
+        assert!(flags.contains(BlockGroupFlags::DATA));
+        assert!(flags.contains(BlockGroupFlags::RAID1));
+    }
+}
+
 impl From<btrfs_ioctl_space_info> for SpaceInfo {
     fn from(raw: btrfs_ioctl_space_info) -> Self {
         Self {

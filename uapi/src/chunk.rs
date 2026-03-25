@@ -264,3 +264,149 @@ fn read_le_u64(buf: &[u8], off: usize) -> u64 {
 fn read_le_u16(buf: &[u8], off: usize) -> u16 {
     u16::from_le_bytes(buf[off..off + 2].try_into().unwrap())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal valid single-stripe chunk item buffer.
+    fn build_chunk_buf(
+        length: u64,
+        stripe_len: u64,
+        type_bits: u64,
+        num_stripes: u16,
+        stripes: &[(u64, u64)], // (devid, offset) per stripe
+    ) -> Vec<u8> {
+        let total = CHUNK_FIRST_STRIPE_OFF + stripes.len() * STRIPE_SIZE;
+        let mut buf = vec![0u8; total];
+        buf[CHUNK_LENGTH_OFF..CHUNK_LENGTH_OFF + 8].copy_from_slice(&length.to_le_bytes());
+        buf[CHUNK_STRIPE_LEN_OFF..CHUNK_STRIPE_LEN_OFF + 8]
+            .copy_from_slice(&stripe_len.to_le_bytes());
+        buf[CHUNK_TYPE_OFF..CHUNK_TYPE_OFF + 8].copy_from_slice(&type_bits.to_le_bytes());
+        buf[CHUNK_NUM_STRIPES_OFF..CHUNK_NUM_STRIPES_OFF + 2]
+            .copy_from_slice(&num_stripes.to_le_bytes());
+        for (i, &(devid, offset)) in stripes.iter().enumerate() {
+            let s = CHUNK_FIRST_STRIPE_OFF + i * STRIPE_SIZE;
+            buf[s + STRIPE_DEVID_OFF..s + STRIPE_DEVID_OFF + 8]
+                .copy_from_slice(&devid.to_le_bytes());
+            buf[s + STRIPE_OFFSET_OFF..s + STRIPE_OFFSET_OFF + 8]
+                .copy_from_slice(&offset.to_le_bytes());
+        }
+        buf
+    }
+
+    // --- read_le_u64 / read_le_u16 ---
+
+    #[test]
+    fn read_le_u64_basic() {
+        let buf = 0x0102030405060708u64.to_le_bytes();
+        assert_eq!(read_le_u64(&buf, 0), 0x0102030405060708);
+    }
+
+    #[test]
+    fn read_le_u16_basic() {
+        let buf = 0x0102u16.to_le_bytes();
+        assert_eq!(read_le_u16(&buf, 0), 0x0102);
+    }
+
+    // --- parse_chunk ---
+
+    #[test]
+    fn parse_chunk_single_stripe() {
+        let data_flags = BlockGroupFlags::DATA.bits();
+        let buf = build_chunk_buf(1024 * 1024, 65536, data_flags, 1, &[(1, 0)]);
+        let (stripe_len, flags, devids) = parse_chunk(&buf).unwrap();
+        assert_eq!(stripe_len, 65536);
+        assert_eq!(flags, BlockGroupFlags::DATA);
+        let devids: Vec<u64> = devids.collect();
+        assert_eq!(devids, vec![1]);
+    }
+
+    #[test]
+    fn parse_chunk_two_stripes() {
+        let flags_bits = (BlockGroupFlags::DATA | BlockGroupFlags::RAID1).bits();
+        let buf = build_chunk_buf(1 << 30, 1 << 30, flags_bits, 2, &[(1, 0), (2, 4096)]);
+        let (_, flags, devids) = parse_chunk(&buf).unwrap();
+        assert_eq!(flags, BlockGroupFlags::DATA | BlockGroupFlags::RAID1);
+        let devids: Vec<u64> = devids.collect();
+        assert_eq!(devids, vec![1, 2]);
+    }
+
+    #[test]
+    fn parse_chunk_too_short() {
+        let buf = vec![0u8; CHUNK_MIN_LEN - 1];
+        assert!(parse_chunk(&buf).is_none());
+    }
+
+    #[test]
+    fn parse_chunk_zero_stripes() {
+        // num_stripes = 0 is invalid
+        let buf = build_chunk_buf(1024, 1024, 0, 0, &[]);
+        // buf is only CHUNK_FIRST_STRIPE_OFF bytes, but num_stripes says 0
+        // which means expected_len = CHUNK_FIRST_STRIPE_OFF + 0*STRIPE_SIZE
+        // but the function also checks num_stripes == 0
+        let mut padded = vec![0u8; CHUNK_MIN_LEN];
+        padded[..buf.len().min(CHUNK_MIN_LEN)].copy_from_slice(&buf[..buf.len().min(CHUNK_MIN_LEN)]);
+        padded[CHUNK_NUM_STRIPES_OFF..CHUNK_NUM_STRIPES_OFF + 2]
+            .copy_from_slice(&0u16.to_le_bytes());
+        assert!(parse_chunk(&padded).is_none());
+    }
+
+    #[test]
+    fn parse_chunk_claims_more_stripes_than_fit() {
+        // num_stripes says 5 but buffer only has room for 1
+        let buf = build_chunk_buf(1024, 1024, 0, 5, &[(1, 0)]);
+        assert!(parse_chunk(&buf).is_none());
+    }
+
+    // --- parse_chunk_stripes ---
+
+    #[test]
+    fn parse_chunk_stripes_returns_devid_and_offset() {
+        let buf = build_chunk_buf(1 << 20, 1 << 20, 0, 2, &[(3, 8192), (7, 16384)]);
+        let stripes: Vec<(u64, u64)> = parse_chunk_stripes(&buf).unwrap().collect();
+        assert_eq!(stripes, vec![(3, 8192), (7, 16384)]);
+    }
+
+    #[test]
+    fn parse_chunk_stripes_too_short() {
+        let buf = vec![0u8; 10];
+        assert!(parse_chunk_stripes(&buf).is_none());
+    }
+
+    // --- accumulate ---
+
+    #[test]
+    fn accumulate_new_entry() {
+        let mut allocs = Vec::new();
+        accumulate(&mut allocs, 1, BlockGroupFlags::DATA, 1000);
+        assert_eq!(allocs.len(), 1);
+        assert_eq!(allocs[0].devid, 1);
+        assert_eq!(allocs[0].bytes, 1000);
+    }
+
+    #[test]
+    fn accumulate_merge_same_devid_flags() {
+        let mut allocs = Vec::new();
+        accumulate(&mut allocs, 1, BlockGroupFlags::DATA, 1000);
+        accumulate(&mut allocs, 1, BlockGroupFlags::DATA, 2000);
+        assert_eq!(allocs.len(), 1);
+        assert_eq!(allocs[0].bytes, 3000);
+    }
+
+    #[test]
+    fn accumulate_separate_different_flags() {
+        let mut allocs = Vec::new();
+        accumulate(&mut allocs, 1, BlockGroupFlags::DATA, 1000);
+        accumulate(&mut allocs, 1, BlockGroupFlags::METADATA, 2000);
+        assert_eq!(allocs.len(), 2);
+    }
+
+    #[test]
+    fn accumulate_separate_different_devids() {
+        let mut allocs = Vec::new();
+        accumulate(&mut allocs, 1, BlockGroupFlags::DATA, 1000);
+        accumulate(&mut allocs, 2, BlockGroupFlags::DATA, 2000);
+        assert_eq!(allocs.len(), 2);
+    }
+}
