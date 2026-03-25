@@ -1,0 +1,22 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"-v\", \"filesystem\", \"df\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: true,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Filesystem(
+        FilesystemCommand {
+            subcommand: Df(
+                FilesystemDfCommand {
+                    path: "/mnt",
+                },
+            ),
+        },
+    ),
+}

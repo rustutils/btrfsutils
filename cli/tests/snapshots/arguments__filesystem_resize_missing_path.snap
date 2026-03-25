@@ -1,0 +1,6 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse_err(&[\"btrfs\", \"filesystem\", \"resize\", \"+1G\"])"
+---
+error: the following required arguments were not provided:
+  <PATH>

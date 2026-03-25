@@ -1,0 +1,29 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"receive\", \"-f\", \"/tmp/stream\", \"/mnt/dest\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Receive(
+        ReceiveCommand {
+            mount: Some(
+                "/mnt/dest",
+            ),
+            file: Some(
+                "/tmp/stream",
+            ),
+            terminate_on_end: false,
+            chroot: false,
+            max_errors: None,
+            root_mount: None,
+            force_decompress: false,
+            dump: false,
+        },
+    ),
+}

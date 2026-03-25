@@ -1,0 +1,24 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"subvolume\", \"snapshot\", \"/mnt/src\", \"/mnt/dst\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Subvolume(
+        SubvolumeCommand {
+            subcommand: Snapshot(
+                SubvolumeSnapshotCommand {
+                    readonly: false,
+                    source: "/mnt/src",
+                    dest: "/mnt/dst",
+                },
+            ),
+        },
+    ),
+}

@@ -1,0 +1,25 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"subvolume\", \"set-default\", \"256\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Subvolume(
+        SubvolumeCommand {
+            subcommand: SetDefault(
+                SubvolumeSetDefaultCommand {
+                    subvol_or_id: "256",
+                    path: Some(
+                        "/mnt",
+                    ),
+                },
+            ),
+        },
+    ),
+}

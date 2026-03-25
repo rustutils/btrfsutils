@@ -1,0 +1,7 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse_err(&[\"btrfs\", \"inspect-internal\", \"inode-resolve\"])"
+---
+error: the following required arguments were not provided:
+  <INODE>
+  <PATH>

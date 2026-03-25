@@ -1,0 +1,26 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"inspect-internal\", \"logical-resolve\", \"12345\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Inspect(
+        InspectCommand {
+            subcommand: LogicalResolve(
+                LogicalResolveCommand {
+                    logical: 12345,
+                    path: "/mnt",
+                    skip_paths: false,
+                    ignore_offset: false,
+                    bufsize: None,
+                },
+            ),
+        },
+    ),
+}

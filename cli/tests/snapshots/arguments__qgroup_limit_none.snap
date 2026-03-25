@@ -1,0 +1,26 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"qgroup\", \"limit\", \"none\", \"0/256\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Qgroup(
+        QgroupCommand {
+            subcommand: Limit(
+                QgroupLimitCommand {
+                    size: None,
+                    target: "0/256",
+                    path: None,
+                    compress: false,
+                    exclusive: false,
+                },
+            ),
+        },
+    ),
+}

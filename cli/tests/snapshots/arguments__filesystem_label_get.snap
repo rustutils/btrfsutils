@@ -1,0 +1,23 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"filesystem\", \"label\", \"/dev/sda1\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Filesystem(
+        FilesystemCommand {
+            subcommand: Label(
+                FilesystemLabelCommand {
+                    path: "/dev/sda1",
+                    new_label: None,
+                },
+            ),
+        },
+    ),
+}

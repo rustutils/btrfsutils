@@ -1,0 +1,31 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"balance\", \"start\", \"-d\", \"usage=50\", \"-f\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Balance(
+        BalanceCommand {
+            subcommand: Start(
+                BalanceStartCommand {
+                    data_filters: Some(
+                        "usage=50",
+                    ),
+                    metadata_filters: None,
+                    system_filters: None,
+                    force: true,
+                    full_balance: false,
+                    background: false,
+                    enqueue: false,
+                    path: "/mnt",
+                },
+            ),
+        },
+    ),
+}

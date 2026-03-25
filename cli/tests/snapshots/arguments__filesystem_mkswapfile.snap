@@ -1,0 +1,24 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"filesystem\", \"mkswapfile\", \"/mnt/swap\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Filesystem(
+        FilesystemCommand {
+            subcommand: Mkswapfile(
+                FilesystemMkswapfileCommand {
+                    size: "2G",
+                    uuid: None,
+                    path: "/mnt/swap",
+                },
+            ),
+        },
+    ),
+}

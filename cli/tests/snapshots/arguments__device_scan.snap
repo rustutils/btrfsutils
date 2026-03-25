@@ -1,0 +1,23 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"device\", \"scan\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Device(
+        DeviceCommand {
+            subcommand: Scan(
+                DeviceScanCommand {
+                    forget: false,
+                    devices: [],
+                },
+            ),
+        },
+    ),
+}

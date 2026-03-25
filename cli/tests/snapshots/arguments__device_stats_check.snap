@@ -1,0 +1,24 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"device\", \"stats\", \"-c\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Device(
+        DeviceCommand {
+            subcommand: Stats(
+                DeviceStatsCommand {
+                    check: true,
+                    reset: false,
+                    path: "/mnt",
+                },
+            ),
+        },
+    ),
+}

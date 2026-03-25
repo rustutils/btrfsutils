@@ -1,0 +1,38 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"qgroup\", \"show\", \"-pcre\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Qgroup(
+        QgroupCommand {
+            subcommand: Show(
+                QgroupShowCommand {
+                    path: "/mnt",
+                    print_parent: true,
+                    print_child: true,
+                    print_rfer_limit: true,
+                    print_excl_limit: true,
+                    filter_all: false,
+                    filter_direct: false,
+                    raw: false,
+                    human_readable: false,
+                    iec: false,
+                    si: false,
+                    kbytes: false,
+                    mbytes: false,
+                    gbytes: false,
+                    tbytes: false,
+                    sort: None,
+                    sync: false,
+                },
+            ),
+        },
+    ),
+}

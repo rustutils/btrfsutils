@@ -1,0 +1,5 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse_err(&[\"btrfs\"])"
+---
+A Rust implementation of the btrfs command-line tool for managing Btrfs filesystems

@@ -1,0 +1,5 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse_err(&[\"btrfs\", \"frobnicate\"])"
+---
+error: unrecognized subcommand 'frobnicate'

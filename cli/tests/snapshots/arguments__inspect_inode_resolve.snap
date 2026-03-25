@@ -1,0 +1,23 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"inspect-internal\", \"inode-resolve\", \"256\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Inspect(
+        InspectCommand {
+            subcommand: InodeResolve(
+                InodeResolveCommand {
+                    inode: 256,
+                    path: "/mnt",
+                },
+            ),
+        },
+    ),
+}

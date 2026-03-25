@@ -1,0 +1,7 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse_err(&[\"btrfs\", \"replace\", \"start\", \"/dev/sda\"])"
+---
+error: the following required arguments were not provided:
+  <TARGET>
+  <MOUNT_POINT>

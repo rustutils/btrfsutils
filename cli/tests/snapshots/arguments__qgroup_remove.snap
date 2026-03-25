@@ -1,0 +1,26 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"qgroup\", \"remove\", \"0/256\", \"1/100\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Qgroup(
+        QgroupCommand {
+            subcommand: Remove(
+                QgroupRemoveCommand {
+                    src: "0/256",
+                    dst: "1/100",
+                    path: "/mnt",
+                    rescan: false,
+                    no_rescan: false,
+                },
+            ),
+        },
+    ),
+}

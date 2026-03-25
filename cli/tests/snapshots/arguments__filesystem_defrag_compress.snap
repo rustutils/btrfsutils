@@ -1,0 +1,38 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"filesystem\", \"defragment\", \"-czstd\", \"/mnt/file\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Filesystem(
+        FilesystemCommand {
+            subcommand: Defragment(
+                FilesystemDefragCommand {
+                    verbose: false,
+                    recursive: false,
+                    flush: false,
+                    compress: Some(
+                        Some(
+                            Zstd,
+                        ),
+                    ),
+                    compress_level: None,
+                    nocomp: false,
+                    start: None,
+                    len: None,
+                    target: None,
+                    step: None,
+                    paths: [
+                        "/mnt/file",
+                    ],
+                },
+            ),
+        },
+    ),
+}

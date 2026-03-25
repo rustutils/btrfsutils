@@ -1,0 +1,23 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"scrub\", \"start\", \"-r\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Scrub(
+        ScrubCommand {
+            subcommand: Start(
+                ScrubStartCommand {
+                    readonly: true,
+                    path: "/mnt",
+                },
+            ),
+        },
+    ),
+}

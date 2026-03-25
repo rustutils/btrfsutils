@@ -1,0 +1,23 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"inspect-internal\", \"min-dev-size\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Inspect(
+        InspectCommand {
+            subcommand: MinDevSize(
+                MinDevSizeCommand {
+                    devid: 1,
+                    path: "/mnt",
+                },
+            ),
+        },
+    ),
+}

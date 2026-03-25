@@ -1,0 +1,35 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"filesystem\", \"du\", \"/mnt/file\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Filesystem(
+        FilesystemCommand {
+            subcommand: Du(
+                FilesystemDuCommand {
+                    summarize: false,
+                    units: UnitMode {
+                        raw: false,
+                        human_readable: false,
+                        iec: false,
+                        si: false,
+                        kbytes: false,
+                        mbytes: false,
+                        gbytes: false,
+                        tbytes: false,
+                    },
+                    paths: [
+                        "/mnt/file",
+                    ],
+                },
+            ),
+        },
+    ),
+}

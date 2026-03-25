@@ -1,0 +1,22 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"scrub\", \"cancel\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Scrub(
+        ScrubCommand {
+            subcommand: Cancel(
+                ScrubCancelCommand {
+                    path: "/mnt",
+                },
+            ),
+        },
+    ),
+}

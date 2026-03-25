@@ -1,0 +1,6 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse_err(&[\"btrfs\", \"subvolume\", \"delete\"])"
+---
+error: the following required arguments were not provided:
+  <PATHS>...

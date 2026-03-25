@@ -1,0 +1,6 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse_err(&[\"btrfs\", \"property\", \"set\", \"/mnt/subvol\", \"ro\"])"
+---
+error: the following required arguments were not provided:
+  <VALUE>

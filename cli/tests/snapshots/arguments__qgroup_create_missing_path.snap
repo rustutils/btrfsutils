@@ -1,0 +1,6 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse_err(&[\"btrfs\", \"qgroup\", \"create\", \"1/100\"])"
+---
+error: the following required arguments were not provided:
+  <PATH>

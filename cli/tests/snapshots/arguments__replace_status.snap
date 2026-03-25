@@ -1,0 +1,23 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"replace\", \"status\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Replace(
+        ReplaceCommand {
+            subcommand: Status(
+                ReplaceStatusCommand {
+                    once: false,
+                    mount_point: "/mnt",
+                },
+            ),
+        },
+    ),
+}

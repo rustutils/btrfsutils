@@ -1,0 +1,23 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"property\", \"list\", \"/mnt/subvol\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Property(
+        PropertyCommand {
+            subcommand: List(
+                PropertyListCommand {
+                    object: "/mnt/subvol",
+                    object_type: None,
+                },
+            ),
+        },
+    ),
+}

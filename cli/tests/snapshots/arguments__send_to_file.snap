@@ -1,0 +1,29 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"send\", \"-f\", \"/tmp/stream\", \"/mnt/snap\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Send(
+        SendCommand {
+            subvolumes: [
+                "/mnt/snap",
+            ],
+            omit_end_cmd: false,
+            parent: None,
+            clone_src: [],
+            outfile: Some(
+                "/tmp/stream",
+            ),
+            no_data: false,
+            proto: None,
+            compressed_data: false,
+        },
+    ),
+}

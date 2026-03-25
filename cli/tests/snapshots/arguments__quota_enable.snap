@@ -1,0 +1,23 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"quota\", \"enable\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Quota(
+        QuotaCommand {
+            subcommand: Enable(
+                QuotaEnableCommand {
+                    path: "/mnt",
+                    simple: false,
+                },
+            ),
+        },
+    ),
+}

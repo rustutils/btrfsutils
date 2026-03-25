@@ -1,0 +1,25 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"device\", \"add\", \"/dev/sdb\", \"/mnt\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Device(
+        DeviceCommand {
+            subcommand: Add(
+                DeviceAddCommand {
+                    args: [
+                        "/dev/sdb",
+                        "/mnt",
+                    ],
+                },
+            ),
+        },
+    ),
+}
