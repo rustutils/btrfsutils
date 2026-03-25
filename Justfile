@@ -47,8 +47,8 @@ coverage:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    cargo llvm-cov clean
     eval "$(cargo llvm-cov show-env --sh --no-cfg-coverage)"
+    cargo llvm-cov clean --workspace
 
     just test
 
