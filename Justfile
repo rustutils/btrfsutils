@@ -46,18 +46,15 @@ test:
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
-
+    # ran into an issue where building coverage left instrumented binaries in target,
+    # which would then spam .profraw files when I run regular tests, so we use a separate
+    # target dir for coverage builds.
+    export CARGO_TARGET_DIR=target/coverage
     eval "$(cargo llvm-cov show-env --sh --no-cfg-coverage)"
     cargo llvm-cov clean --workspace
-
     just test
-
-    # Reclaim profraw files written by root.
-    sudo chown -R "$(id -u):$(id -g)" target/
-
+    sudo chown -R "$(id -u):$(id -g)" target/coverage/
     cargo llvm-cov report --html
-    echo ""
-    echo "Coverage report: target/llvm-cov/html/index.html"
 
 format:
     cargo +nightly fmt --all
