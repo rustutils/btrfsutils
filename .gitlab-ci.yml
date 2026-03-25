@@ -6,6 +6,7 @@ stages:
 variables:
   CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
   RUSTUP_HOME: "${CI_PROJECT_DIR}/.rustup"
+  DEBIAN_FRONTEND: noninteractive
 
 default:
   image: rust:latest
