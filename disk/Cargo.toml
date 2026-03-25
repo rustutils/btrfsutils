@@ -2,6 +2,13 @@
 name = "btrfs-disk"
 version = "0.1.0"
 edition = "2024"
+description = "Platform-independent parsing of btrfs on-disk structures"
+license = "GPL-2.0-only"
+repository = "https://github.com/rustutils/btrfs-progrs"
+homepage = "https://github.com/rustutils/btrfs-progrs"
+readme = "README.md"
+categories = ["filesystem", "parser-implementations"]
+keywords = ["btrfs", "filesystem", "parser", "userspace"]
 
 [dependencies]
 uuid = { workspace = true }

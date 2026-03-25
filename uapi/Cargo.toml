@@ -2,6 +2,13 @@
 name = "btrfs-uapi"
 version = "0.1.0"
 edition = "2024"
+description = "Typed Rust wrappers around the btrfs userspace interface (ioctls and sysfs)"
+license = "GPL-2.0-only"
+repository = "https://github.com/rustutils/btrfs-progrs"
+homepage = "https://github.com/rustutils/btrfs-progrs"
+readme = "README.md"
+categories = ["filesystem", "os::linux-apis"]
+keywords = ["btrfs", "ioctl", "filesystem", "linux", "sysfs"]
 autobenches = false
 autotests = false
 
