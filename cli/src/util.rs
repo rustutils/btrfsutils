@@ -86,3 +86,150 @@ impl FromStr for ParsedUuid {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- human_bytes ---
+
+    #[test]
+    fn human_bytes_zero() {
+        assert_eq!(human_bytes(0), "0B");
+    }
+
+    #[test]
+    fn human_bytes_small() {
+        assert_eq!(human_bytes(1), "1B");
+        assert_eq!(human_bytes(1023), "1023B");
+    }
+
+    #[test]
+    fn human_bytes_exact_powers() {
+        assert_eq!(human_bytes(1024), "1.00KiB");
+        assert_eq!(human_bytes(1024 * 1024), "1.00MiB");
+        assert_eq!(human_bytes(1024 * 1024 * 1024), "1.00GiB");
+        assert_eq!(human_bytes(1024u64.pow(4)), "1.00TiB");
+        assert_eq!(human_bytes(1024u64.pow(5)), "1.00PiB");
+    }
+
+    #[test]
+    fn human_bytes_fractional() {
+        // 1.5 GiB = 1024^3 + 512*1024^2
+        assert_eq!(human_bytes(1024 * 1024 * 1024 + 512 * 1024 * 1024), "1.50GiB");
+    }
+
+    #[test]
+    fn human_bytes_u64_max() {
+        // Should not panic; lands in PiB range
+        let s = human_bytes(u64::MAX);
+        assert!(s.ends_with("PiB"), "expected PiB suffix, got: {s}");
+    }
+
+    // --- parse_size_with_suffix ---
+
+    #[test]
+    fn parse_size_bare_number() {
+        assert_eq!(parse_size_with_suffix("0").unwrap(), 0);
+        assert_eq!(parse_size_with_suffix("42").unwrap(), 42);
+    }
+
+    #[test]
+    fn parse_size_all_suffixes() {
+        assert_eq!(parse_size_with_suffix("1K").unwrap(), 1024);
+        assert_eq!(parse_size_with_suffix("1M").unwrap(), 1024 * 1024);
+        assert_eq!(parse_size_with_suffix("1G").unwrap(), 1024 * 1024 * 1024);
+        assert_eq!(parse_size_with_suffix("1T").unwrap(), 1024u64.pow(4));
+        assert_eq!(parse_size_with_suffix("1P").unwrap(), 1024u64.pow(5));
+        assert_eq!(parse_size_with_suffix("1E").unwrap(), 1024u64.pow(6));
+    }
+
+    #[test]
+    fn parse_size_case_insensitive() {
+        assert_eq!(parse_size_with_suffix("4k").unwrap(), 4 * 1024);
+        assert_eq!(parse_size_with_suffix("2g").unwrap(), 2 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn parse_size_overflow() {
+        assert!(parse_size_with_suffix("16385P").is_err());
+    }
+
+    #[test]
+    fn parse_size_bad_number() {
+        assert!(parse_size_with_suffix("abcM").is_err());
+        assert!(parse_size_with_suffix("").is_err());
+    }
+
+    #[test]
+    fn parse_size_unknown_suffix() {
+        assert!(parse_size_with_suffix("10X").is_err());
+    }
+
+    // --- parse_qgroupid ---
+
+    #[test]
+    fn parse_qgroupid_level0() {
+        assert_eq!(parse_qgroupid("0/5").unwrap(), 5);
+        assert_eq!(parse_qgroupid("0/256").unwrap(), 256);
+    }
+
+    #[test]
+    fn parse_qgroupid_higher_level() {
+        assert_eq!(parse_qgroupid("1/256").unwrap(), (1u64 << 48) | 256);
+        assert_eq!(parse_qgroupid("2/0").unwrap(), 2u64 << 48);
+    }
+
+    #[test]
+    fn parse_qgroupid_missing_slash() {
+        assert!(parse_qgroupid("5").is_err());
+    }
+
+    #[test]
+    fn parse_qgroupid_bad_level() {
+        assert!(parse_qgroupid("abc/5").is_err());
+    }
+
+    #[test]
+    fn parse_qgroupid_bad_subvolid() {
+        assert!(parse_qgroupid("0/abc").is_err());
+    }
+
+    // --- ParsedUuid ---
+
+    #[test]
+    fn parsed_uuid_clear() {
+        let u: ParsedUuid = "clear".parse().unwrap();
+        assert!(u.is_nil());
+    }
+
+    #[test]
+    fn parsed_uuid_random() {
+        let u: ParsedUuid = "random".parse().unwrap();
+        assert!(!u.is_nil());
+    }
+
+    #[test]
+    fn parsed_uuid_time() {
+        let u: ParsedUuid = "time".parse().unwrap();
+        assert!(!u.is_nil());
+    }
+
+    #[test]
+    fn parsed_uuid_explicit() {
+        let u: ParsedUuid = "550e8400-e29b-41d4-a716-446655440000".parse().unwrap();
+        assert_eq!(u.to_string(), "550e8400-e29b-41d4-a716-446655440000");
+    }
+
+    #[test]
+    fn parsed_uuid_no_hyphens() {
+        let u: ParsedUuid = "550e8400e29b41d4a716446655440000".parse().unwrap();
+        assert_eq!(u.to_string(), "550e8400-e29b-41d4-a716-446655440000");
+    }
+
+    #[test]
+    fn parsed_uuid_invalid() {
+        assert!("not-a-uuid".parse::<ParsedUuid>().is_err());
+        assert!("".parse::<ParsedUuid>().is_err());
+    }
+}
