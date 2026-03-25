@@ -11,7 +11,7 @@ use std::os::unix::io::BorrowedFd;
 // FS_IOC_FIEMAP = _IOWR('f', 11, struct fiemap)
 // struct fiemap (without flexible array member) = 32 bytes
 // On 64-bit Linux: (3 << 30) | (32 << 16) | (0x66 << 8) | 11 = 0xC020_660B
-const FS_IOC_FIEMAP: libc::Ioctl = 0xC020_660B;
+const FS_IOC_FIEMAP: libc::Ioctl = 0xC020_660Bu32 as libc::Ioctl;
 
 // fiemap header field offsets (all native byte order)
 const FM_START: usize = 0; // u64 — logical offset to start from
