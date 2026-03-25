@@ -21,7 +21,7 @@ pub struct FilesystemDefragCommand {
 
     /// Compress the file while defragmenting (optionally specify type: zlib, lzo, zstd)
     #[clap(long, short, conflicts_with = "nocomp")]
-    pub compress: Option<Option<String>>,
+    pub compress: Option<Option<CompressType>>,
 
     /// Compression level (used together with --compress)
     #[clap(long = "level", short = 'L', requires = "compress")]
@@ -63,20 +63,10 @@ impl Runnable for FilesystemDefragCommand {
             anyhow::bail!("--step is not yet implemented");
         }
 
-        let compress = match &self.compress {
-            None => None,
-            Some(type_str) => {
-                let compress_type = match type_str.as_deref() {
-                    None | Some("") => CompressType::Zlib,
-                    Some(s) => CompressType::from_str(s)
-                        .with_context(|| format!("unknown compress type: {s}"))?,
-                };
-                Some(CompressSpec {
-                    compress_type,
-                    level: self.compress_level,
-                })
-            }
-        };
+        let compress = self.compress.as_ref().map(|ct| CompressSpec {
+            compress_type: ct.unwrap_or(CompressType::Zlib),
+            level: self.compress_level,
+        });
 
         let mut args = DefragRangeArgs::new();
         if let Some(start) = self.start {

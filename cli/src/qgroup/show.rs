@@ -68,9 +68,9 @@ pub struct QgroupShowCommand {
     #[clap(long)]
     pub tbytes: bool,
 
-    /// Sort by a comma-separated list of fields (qgroupid, rfer, excl, max_rfer, max_excl, path)
+    /// Sort by a comma-separated list of fields (qgroupid, rfer, excl, max_rfer, max_excl)
     #[clap(long)]
-    pub sort: Option<String>,
+    pub sort: Option<SortKeys>,
 
     /// Force a sync before getting quota information
     #[clap(long)]
@@ -92,14 +92,13 @@ struct SortKey {
     descending: bool,
 }
 
-fn parse_sort_keys(s: &str) -> Option<Vec<SortKey>> {
-    let mut keys = Vec::new();
-    for part in s.split(',') {
-        let part = part.trim();
-        let (descending, name) = if let Some(stripped) = part.strip_prefix('-') {
-            (true, stripped)
-        } else {
-            (false, part)
+impl std::str::FromStr for SortKey {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (descending, name) = match s.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, s),
         };
         let field = match name {
             "qgroupid" => SortField::Qgroupid,
@@ -107,11 +106,33 @@ fn parse_sort_keys(s: &str) -> Option<Vec<SortKey>> {
             "excl" => SortField::Excl,
             "max_rfer" => SortField::MaxRfer,
             "max_excl" => SortField::MaxExcl,
-            _ => return None,
+            _ => {
+                return Err(format!(
+                    "unknown sort field '{name}'; expected qgroupid, rfer, excl, max_rfer, or max_excl"
+                ))
+            }
         };
-        keys.push(SortKey { field, descending });
+        Ok(SortKey { field, descending })
     }
-    if keys.is_empty() { None } else { Some(keys) }
+}
+
+/// Comma-separated list of sort keys (e.g. "rfer,-excl").
+#[derive(Debug, Clone)]
+pub struct SortKeys(Vec<SortKey>);
+
+impl std::str::FromStr for SortKeys {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let keys: Vec<SortKey> = s
+            .split(',')
+            .map(|part| part.trim().parse())
+            .collect::<Result<_, _>>()?;
+        if keys.is_empty() {
+            return Err("sort field list must not be empty".to_string());
+        }
+        Ok(SortKeys(keys))
+    }
 }
 
 fn fmt_size(bytes: u64, raw: bool, fixed_divisor: Option<u64>, use_si: bool) -> String {
@@ -200,19 +221,8 @@ impl Runnable for QgroupShowCommand {
         // Sort
         let mut qgroups: Vec<QgroupInfo> = list.qgroups.clone();
 
-        let sort_keys = self.sort.as_deref().and_then(|s| {
-            let keys = parse_sort_keys(s);
-            if keys.is_none() {
-                eprintln!(
-                    "WARNING: invalid sort field in '{}', using default sort by qgroupid",
-                    s
-                );
-            }
-            keys
-        });
-
-        match &sort_keys {
-            Some(keys) => {
+        match &self.sort {
+            Some(SortKeys(keys)) => {
                 qgroups.sort_by(|a, b| {
                     for key in keys {
                         let ord = match key.field {

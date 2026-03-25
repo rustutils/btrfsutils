@@ -24,15 +24,25 @@ pub enum CompressType {
     Zstd = 3,
 }
 
-impl CompressType {
-    /// Parse a compress type from a string name, as accepted by the
-    /// `btrfs filesystem defrag -c` option.
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::fmt::Display for CompressType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Zlib => f.write_str("zlib"),
+            Self::Lzo => f.write_str("lzo"),
+            Self::Zstd => f.write_str("zstd"),
+        }
+    }
+}
+
+impl std::str::FromStr for CompressType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
-            "zlib" => Some(Self::Zlib),
-            "lzo" => Some(Self::Lzo),
-            "zstd" => Some(Self::Zstd),
-            _ => None,
+            "zlib" => Ok(Self::Zlib),
+            "lzo" => Ok(Self::Lzo),
+            "zstd" => Ok(Self::Zstd),
+            _ => Err(format!("unknown compress type '{s}'; expected zlib, lzo, or zstd")),
         }
     }
 }

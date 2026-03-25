@@ -24,7 +24,7 @@ pub struct DumpSuperCommand {
     all: bool,
 
     /// Print only this superblock mirror (0, 1, or 2)
-    #[clap(short = 's', long = "super")]
+    #[clap(short = 's', long = "super", value_parser = clap::value_parser!(u32).range(..SUPER_MIRROR_MAX as i64))]
     mirror: Option<u32>,
 
     /// Attempt to print superblocks with bad magic
@@ -40,9 +40,6 @@ impl Runnable for DumpSuperCommand {
         let mirrors: Vec<u32> = if self.all {
             (0..SUPER_MIRROR_MAX).collect()
         } else if let Some(m) = self.mirror {
-            if m >= SUPER_MIRROR_MAX {
-                bail!("mirror index must be 0, 1, or 2 (got {m})");
-            }
             vec![m]
         } else {
             vec![0]

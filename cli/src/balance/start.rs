@@ -26,7 +26,7 @@ pub struct BalanceStartCommand {
     #[clap(long, short)]
     pub metadata_filters: Option<Filters>,
     /// Act on system chunks (requires force) with optional filters
-    #[clap(long, short)]
+    #[clap(long, short, requires = "force")]
     pub system_filters: Option<Filters>,
 
     /// Force a reduction of metadata integrity, or skip timeout when converting to RAID56 profiles
@@ -50,14 +50,6 @@ pub struct BalanceStartCommand {
 
 impl Runnable for BalanceStartCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        // -s requires --force
-        if self.system_filters.is_some() && !self.force {
-            anyhow::bail!(
-                "Refusing to explicitly operate on system chunks.\n\
-                 Pass --force if you really want to do that."
-            );
-        }
-
         // TODO: background mode (requires daemonizing the process)
         if self.background {
             anyhow::bail!("--background is not yet implemented");

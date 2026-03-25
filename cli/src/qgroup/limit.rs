@@ -8,11 +8,30 @@ use clap::Parser;
 use nix::errno::Errno;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
+/// A size limit that is either a byte count or "none" to remove the limit.
+#[derive(Debug, Clone)]
+pub enum QgroupLimitSize {
+    Bytes(u64),
+    None,
+}
+
+impl std::str::FromStr for QgroupLimitSize {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        if s.eq_ignore_ascii_case("none") {
+            Ok(Self::None)
+        } else {
+            parse_size_with_suffix(s).map(Self::Bytes)
+        }
+    }
+}
+
 /// Set limits on a subvolume quota group
 #[derive(Parser, Debug)]
 pub struct QgroupLimitCommand {
     /// Size limit in bytes (use suffix K/M/G/T), or "none" to remove the limit
-    pub size: String,
+    pub size: QgroupLimitSize,
 
     /// Qgroup ID (e.g. "0/5") or path if qgroupid is omitted
     #[clap(value_name = "QGROUPID_OR_PATH")]
@@ -45,10 +64,9 @@ impl Runnable for QgroupLimitCommand {
             }
         };
 
-        let size = if self.size.eq_ignore_ascii_case("none") {
-            u64::MAX
-        } else {
-            parse_size_with_suffix(&self.size)?
+        let size = match self.size {
+            QgroupLimitSize::Bytes(n) => n,
+            QgroupLimitSize::None => u64::MAX,
         };
 
         let mut flags = QgroupLimitFlags::empty();

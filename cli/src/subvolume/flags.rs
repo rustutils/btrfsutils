@@ -4,6 +4,22 @@ use btrfs_uapi::subvolume::{SubvolumeFlags, subvolume_flags_get, subvolume_flags
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
+/// Wrapper around [`SubvolumeFlags`] that implements [`FromStr`] for clap parsing.
+#[derive(Debug, Clone, Copy)]
+pub struct ParsedSubvolumeFlags(SubvolumeFlags);
+
+impl std::str::FromStr for ParsedSubvolumeFlags {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "readonly" => Ok(Self(SubvolumeFlags::RDONLY)),
+            "-" | "" | "none" => Ok(Self(SubvolumeFlags::empty())),
+            _ => Err(format!("unknown flag '{s}'; expected 'readonly' or '-'")),
+        }
+    }
+}
+
 /// Show the flags of a subvolume
 #[derive(Parser, Debug)]
 pub struct SubvolumeGetFlagsCommand {
@@ -29,8 +45,7 @@ impl Runnable for SubvolumeGetFlagsCommand {
 #[derive(Parser, Debug)]
 pub struct SubvolumeSetFlagsCommand {
     /// Flags to set ("readonly" or "-" to clear)
-    #[clap(value_parser = parse_flags)]
-    pub flags: SubvolumeFlags,
+    pub flags: ParsedSubvolumeFlags,
 
     /// Path to a subvolume
     pub path: PathBuf,
@@ -41,19 +56,11 @@ impl Runnable for SubvolumeSetFlagsCommand {
         let file = File::open(&self.path)
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
 
-        subvolume_flags_set(file.as_fd(), self.flags)
+        subvolume_flags_set(file.as_fd(), self.flags.0)
             .with_context(|| format!("failed to set flags on '{}'", self.path.display()))?;
 
-        println!("Set flags to {} on '{}'", self.flags, self.path.display());
+        println!("Set flags to {} on '{}'", self.flags.0, self.path.display());
 
         Ok(())
-    }
-}
-
-fn parse_flags(s: &str) -> std::result::Result<SubvolumeFlags, String> {
-    match s {
-        "readonly" => Ok(SubvolumeFlags::RDONLY),
-        "-" | "" | "none" => Ok(SubvolumeFlags::empty()),
-        _ => Err(format!("unknown flag '{}'; expected 'readonly' or '-'", s)),
     }
 }

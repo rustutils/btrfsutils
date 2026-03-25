@@ -111,6 +111,8 @@ fn qgroup_clear_stale_test() {
     let b_name = CStr::from_bytes_with_nul(b"sub-b\0").unwrap();
     subvolume_delete(mnt.fd(), b_name).expect("subvolume_delete failed");
 
+    // see this: https://www.spinics.net/lists/linux-btrfs/msg145753.html
+
     // The kernel deletes subvolumes lazily via a background cleaner thread.
     // We need to wait for the ROOT_ITEM to actually disappear before
     // qgroup_list will mark the qgroup as stale. Sync + short retry loop.
