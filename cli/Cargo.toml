@@ -1,6 +1,6 @@
 [package]
 name = "btrfs-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A Rust implementation of the btrfs command-line tool"
 license = "GPL-2.0-only"
@@ -21,5 +21,5 @@ env_logger = { workspace = true }
 log = { workspace = true }
 nix = { workspace = true }
 uuid = { workspace = true }
-btrfs-uapi = { path = "../uapi", version = "0.1.0" }
-btrfs-disk = { path = "../disk", version = "0.1.0" }
+btrfs-uapi = { path = "../uapi", version = "0.2.0" }
+btrfs-disk = { path = "../disk", version = "0.2.0" }
