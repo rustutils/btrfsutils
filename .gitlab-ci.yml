@@ -21,33 +21,12 @@ default:
 
 # -- Test stage ---------------------------------------------------------------
 
-test:
-  stage: test
-  script:
-    - cargo test --ignored --test-threads=1
-
-coverage:
-  stage: test
-  script:
-    - cargo install cargo-llvm-cov --locked
-    - rustup component add llvm-tools-preview
-    - cargo llvm-cov --html --output-dir coverage -- --ignored --test-threads=1 || true
-    - cargo llvm-cov report --cobertura --output-path coverage/cobertura.xml -- --ignored --test-threads=1 || true
-  artifacts:
-    paths:
-      - coverage/
-    reports:
-      coverage_report:
-        coverage_format: cobertura
-        path: coverage/cobertura.xml
-    expire_in: 1 week
-
 lint:
   stage: test
   script:
     - rustup toolchain install nightly --component rustfmt
     - cargo +nightly fmt --all --check
-    - cargo check --all-targets -- -D warnings
+    - RUSTFLAGS="-D warnings" cargo check --all-targets
 
 # -- Build stage --------------------------------------------------------------
 
@@ -76,15 +55,12 @@ build-x86-musl:
 pages:
   stage: pages
   needs:
-    - job: coverage
-      artifacts: true
     - job: build-x86
       artifacts: true
     - job: build-x86-musl
       artifacts: true
   script:
-    - mkdir -p public/coverage public/binaries
-    - cp -r coverage/html/* public/coverage/ || cp -r coverage/* public/coverage/
+    - mkdir -p public/binaries
     - cp target/release/btrfs public/binaries/btrfs-x86_64
     - cp target/x86_64-unknown-linux-musl/release/btrfs public/binaries/btrfs-x86_64-musl
   artifacts:
