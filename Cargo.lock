@@ -129,6 +129,7 @@ dependencies = [
  "insta",
  "log",
  "nix",
+ "tempfile",
  "uuid",
 ]
 

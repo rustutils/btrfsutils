@@ -26,3 +26,4 @@ btrfs-disk = { path = "../disk", version = "0.2.0" }
 
 [dev-dependencies]
 insta = "1"
+tempfile = "3"
