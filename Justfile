@@ -31,7 +31,7 @@ test-priviledged:
     for binary in "${binaries[@]}"; do
         echo ""
         echo "--- $binary ---"
-        sudo "$binary" --ignored || failed=1
+        sudo "$binary" --ignored --test-threads=1 || failed=1
     done
 
     if [[ $failed -ne 0 ]]; then
