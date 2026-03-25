@@ -2,18 +2,17 @@
 default:
     @just --list
 
-# Run unit tests (no privileges required)
-test:
-    cargo test --workspace
-
 # Build integration test binaries and run them with root privileges.
 #
 # Requires: jq, sudo, btrfs-progs
-test-priviledged:
+test:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    echo "--- Building test binaries ---"
+    # Build first so the user sees compile progress/warnings on stderr.
+    cargo test -p btrfs-uapi --no-run
+
+    # Then extract the binary paths from the JSON output.
     mapfile -t binaries < <(
         cargo test -p btrfs-uapi \
             --no-run \
@@ -26,11 +25,8 @@ test-priviledged:
         exit 1
     fi
 
-    echo "--- Running as root ---"
     failed=0
     for binary in "${binaries[@]}"; do
-        echo ""
-        echo "--- $binary ---"
         sudo "$binary" --ignored --test-threads=1 || failed=1
     done
 
