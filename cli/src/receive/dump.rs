@@ -136,3 +136,36 @@ pub fn dump_stream<R: Read>(input: R) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn fmt_timespec_zero() {
+        let ts = Timespec { sec: 0, nsec: 0 };
+        assert_eq!(fmt_timespec(&ts), "0.0");
+    }
+
+    #[test]
+    fn fmt_timespec_nonzero() {
+        let ts = Timespec {
+            sec: 1234567890,
+            nsec: 123456789,
+        };
+        assert_eq!(fmt_timespec(&ts), "1234567890.123456789");
+    }
+
+    #[test]
+    fn fmt_uuid_nil() {
+        let uuid = Uuid::nil();
+        assert_eq!(fmt_uuid(&uuid), "00000000-0000-0000-0000-000000000000");
+    }
+
+    #[test]
+    fn fmt_uuid_specific() {
+        let uuid = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        assert_eq!(fmt_uuid(&uuid), "550e8400-e29b-41d4-a716-446655440000");
+    }
+}

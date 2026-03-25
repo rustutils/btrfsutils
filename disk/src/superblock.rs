@@ -684,3 +684,196 @@ fn le16_raw(ct: CsumType) -> u16 {
         CsumType::Unknown(v) => v,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    // --- super_mirror_offset ---
+
+    #[test]
+    fn mirror_0_at_64k() {
+        assert_eq!(super_mirror_offset(0), 65536);
+    }
+
+    #[test]
+    fn mirror_1_at_64m() {
+        assert_eq!(super_mirror_offset(1), 64 * 1024 * 1024);
+    }
+
+    #[test]
+    fn mirror_2_at_256g() {
+        assert_eq!(super_mirror_offset(2), 256 * 1024 * 1024 * 1024);
+    }
+
+    // --- CsumType ---
+
+    #[test]
+    fn csum_type_from_raw_known() {
+        assert_eq!(
+            CsumType::from_raw(raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 as u16),
+            CsumType::Crc32
+        );
+        assert_eq!(
+            CsumType::from_raw(raw::btrfs_csum_type_BTRFS_CSUM_TYPE_XXHASH as u16),
+            CsumType::Xxhash
+        );
+        assert_eq!(
+            CsumType::from_raw(raw::btrfs_csum_type_BTRFS_CSUM_TYPE_SHA256 as u16),
+            CsumType::Sha256
+        );
+        assert_eq!(
+            CsumType::from_raw(raw::btrfs_csum_type_BTRFS_CSUM_TYPE_BLAKE2 as u16),
+            CsumType::Blake2
+        );
+    }
+
+    #[test]
+    fn csum_type_from_raw_unknown() {
+        assert_eq!(CsumType::from_raw(99), CsumType::Unknown(99));
+    }
+
+    #[test]
+    fn csum_type_size() {
+        assert_eq!(CsumType::Crc32.size(), 4);
+        assert_eq!(CsumType::Xxhash.size(), 8);
+        assert_eq!(CsumType::Sha256.size(), 32);
+        assert_eq!(CsumType::Blake2.size(), 32);
+        assert_eq!(CsumType::Unknown(99).size(), 32);
+    }
+
+    #[test]
+    fn csum_type_display() {
+        assert_eq!(format!("{}", CsumType::Crc32), "crc32c");
+        assert_eq!(format!("{}", CsumType::Xxhash), "xxhash64");
+        assert_eq!(format!("{}", CsumType::Sha256), "sha256");
+        assert_eq!(format!("{}", CsumType::Blake2), "blake2");
+        assert_eq!(format!("{}", CsumType::Unknown(99)), "unknown (99)");
+    }
+
+    // --- parse_label ---
+
+    #[test]
+    fn parse_label_normal() {
+        let mut raw_label = [0i8; 256];
+        for (i, &b) in b"my-volume".iter().enumerate() {
+            raw_label[i] = b as i8;
+        }
+        assert_eq!(parse_label(&raw_label), "my-volume");
+    }
+
+    #[test]
+    fn parse_label_empty() {
+        let raw_label = [0i8; 256];
+        assert_eq!(parse_label(&raw_label), "");
+    }
+
+    #[test]
+    fn parse_label_stops_at_nul() {
+        let mut raw_label = [0i8; 256];
+        for (i, &b) in b"hello\0world".iter().enumerate() {
+            raw_label[i] = b as i8;
+        }
+        assert_eq!(parse_label(&raw_label), "hello");
+    }
+
+    // --- format_flag_names ---
+
+    #[test]
+    fn format_flag_names_zero() {
+        assert_eq!(format_flag_names(0, &[]), "");
+    }
+
+    #[test]
+    fn format_flag_names_single() {
+        let known = &[(0x1, "FLAG_A"), (0x2, "FLAG_B")];
+        assert_eq!(format_flag_names(0x1, known), "FLAG_A");
+    }
+
+    #[test]
+    fn format_flag_names_multiple() {
+        let known = &[(0x1, "FLAG_A"), (0x2, "FLAG_B")];
+        assert_eq!(format_flag_names(0x3, known), "FLAG_A|FLAG_B");
+    }
+
+    #[test]
+    fn format_flag_names_unknown_bits() {
+        let known = &[(0x1, "FLAG_A")];
+        assert_eq!(format_flag_names(0x5, known), "FLAG_A|unknown(0x4)");
+    }
+
+    // --- format_magic ---
+
+    #[test]
+    fn format_magic_btrfs() {
+        // BTRFS_MAGIC = "_BHRfS_M" as LE u64
+        let s = format_magic(raw::BTRFS_MAGIC);
+        assert_eq!(s, "_BHRfS_M");
+    }
+
+    #[test]
+    fn format_magic_non_printable() {
+        assert_eq!(format_magic(0), "........");
+    }
+
+    // --- read_superblock with crafted image ---
+
+    #[test]
+    fn read_superblock_crafted() {
+        let total_size = SUPER_INFO_OFFSET as usize + SUPER_INFO_SIZE;
+        let mut buf = vec![0u8; total_size];
+
+        let sb_start = SUPER_INFO_OFFSET as usize;
+
+        // Set magic.
+        let magic_off = sb_start + mem::offset_of!(raw::btrfs_super_block, magic);
+        buf[magic_off..magic_off + 8].copy_from_slice(&raw::BTRFS_MAGIC.to_le_bytes());
+
+        // Set bytenr = SUPER_INFO_OFFSET.
+        let bytenr_off = sb_start + mem::offset_of!(raw::btrfs_super_block, bytenr);
+        buf[bytenr_off..bytenr_off + 8].copy_from_slice(&SUPER_INFO_OFFSET.to_le_bytes());
+
+        // Set generation.
+        let gen_off = sb_start + mem::offset_of!(raw::btrfs_super_block, generation);
+        buf[gen_off..gen_off + 8].copy_from_slice(&42u64.to_le_bytes());
+
+        // Set nodesize.
+        let ns_off = sb_start + mem::offset_of!(raw::btrfs_super_block, nodesize);
+        buf[ns_off..ns_off + 4].copy_from_slice(&16384u32.to_le_bytes());
+
+        // Set sectorsize.
+        let ss_off = sb_start + mem::offset_of!(raw::btrfs_super_block, sectorsize);
+        buf[ss_off..ss_off + 4].copy_from_slice(&4096u32.to_le_bytes());
+
+        // Set a label.
+        let label_off = sb_start + mem::offset_of!(raw::btrfs_super_block, label);
+        buf[label_off..label_off + 4].copy_from_slice(b"test");
+
+        let mut cursor = Cursor::new(buf);
+        let sb = read_superblock(&mut cursor, 0).unwrap();
+
+        assert!(sb.magic_is_valid());
+        assert_eq!(sb.bytenr, SUPER_INFO_OFFSET);
+        assert_eq!(sb.generation, 42);
+        assert_eq!(sb.nodesize, 16384);
+        assert_eq!(sb.sectorsize, 4096);
+        assert_eq!(sb.label, "test");
+    }
+
+    #[test]
+    fn read_superblock_bad_magic() {
+        let total_size = SUPER_INFO_OFFSET as usize + SUPER_INFO_SIZE;
+        let buf = vec![0u8; total_size];
+        let mut cursor = Cursor::new(buf);
+        let sb = read_superblock(&mut cursor, 0).unwrap();
+        assert!(!sb.magic_is_valid());
+    }
+
+    #[test]
+    fn read_superblock_too_short() {
+        let buf = vec![0u8; 100]; // way too short for mirror 0
+        let mut cursor = Cursor::new(buf);
+        assert!(read_superblock(&mut cursor, 0).is_err());
+    }
+}

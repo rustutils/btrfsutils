@@ -634,3 +634,269 @@ fn ioctl_timespec_to_system_time(sec: u64, nsec: u32) -> SystemTime {
     }
     UNIX_EPOCH + Duration::new(sec, nsec)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::time::{Duration, UNIX_EPOCH};
+    use uuid::Uuid;
+
+    fn test_item(root_id: u64, parent_id: u64) -> SubvolumeListItem {
+        SubvolumeListItem {
+            root_id,
+            parent_id,
+            dir_id: 0,
+            generation: 0,
+            flags: SubvolumeFlags::empty(),
+            uuid: Uuid::nil(),
+            parent_uuid: Uuid::nil(),
+            received_uuid: Uuid::nil(),
+            otransid: 0,
+            otime: UNIX_EPOCH,
+            name: String::new(),
+        }
+    }
+
+    #[test]
+    fn rle64_reads_little_endian() {
+        let buf = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        assert_eq!(rle64(&buf, 0), 0x0807060504030201);
+    }
+
+    #[test]
+    fn rle64_at_offset() {
+        let buf = [0xFF, 0xFF, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        assert_eq!(rle64(&buf, 2), 1);
+    }
+
+    #[test]
+    fn rle32_reads_little_endian() {
+        let buf = [0x78, 0x56, 0x34, 0x12];
+        assert_eq!(rle32(&buf, 0), 0x12345678);
+    }
+
+    #[test]
+    fn rle32_at_offset() {
+        let buf = [0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
+        assert_eq!(rle32(&buf, 2), 1);
+    }
+
+    #[test]
+    fn timespec_zero_returns_epoch() {
+        assert_eq!(timespec_to_system_time(0, 0), UNIX_EPOCH);
+    }
+
+    #[test]
+    fn timespec_zero_sec_with_nonzero_nsec_returns_epoch() {
+        // sec==0 triggers the early return regardless of nsec
+        assert_eq!(timespec_to_system_time(0, 500_000_000), UNIX_EPOCH);
+    }
+
+    #[test]
+    fn timespec_nonzero_returns_correct_time() {
+        let t = timespec_to_system_time(1000, 500);
+        assert_eq!(t, UNIX_EPOCH + Duration::new(1000, 500));
+    }
+
+    #[test]
+    fn subvolume_flags_display_readonly() {
+        let flags = SubvolumeFlags::RDONLY;
+        assert_eq!(format!("{}", flags), "readonly");
+    }
+
+    #[test]
+    fn subvolume_flags_display_empty() {
+        let flags = SubvolumeFlags::empty();
+        assert_eq!(format!("{}", flags), "-");
+    }
+
+    #[test]
+    fn parse_root_ref_valid() {
+        // btrfs_root_ref: dirid (8 LE) + sequence (8 LE) + name_len (2 LE) + name bytes
+        let name = b"mysubvol";
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&42u64.to_le_bytes()); // dirid
+        buf.extend_from_slice(&1u64.to_le_bytes()); // sequence
+        buf.extend_from_slice(&(name.len() as u16).to_le_bytes()); // name_len
+        buf.extend_from_slice(name);
+
+        let result = parse_root_ref(&buf);
+        assert!(result.is_some());
+        let (dir_id, parsed_name) = result.unwrap();
+        assert_eq!(dir_id, 42);
+        assert_eq!(parsed_name, "mysubvol");
+    }
+
+    #[test]
+    fn parse_root_ref_too_short_header() {
+        // Less than 18 bytes (sizeof btrfs_root_ref)
+        let buf = [0u8; 10];
+        assert!(parse_root_ref(&buf).is_none());
+    }
+
+    #[test]
+    fn parse_root_ref_too_short_name() {
+        // Header claims 10-byte name but buffer only has the header
+        let mut buf = vec![0u8; 18];
+        // Set name_len = 10 at offset 16
+        buf[16] = 10;
+        buf[17] = 0;
+        assert!(parse_root_ref(&buf).is_none());
+    }
+
+    #[test]
+    fn parse_root_ref_empty_name() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&100u64.to_le_bytes()); // dirid
+        buf.extend_from_slice(&0u64.to_le_bytes()); // sequence
+        buf.extend_from_slice(&0u16.to_le_bytes()); // name_len = 0
+
+        let result = parse_root_ref(&buf);
+        assert!(result.is_some());
+        let (dir_id, parsed_name) = result.unwrap();
+        assert_eq!(dir_id, 100);
+        assert_eq!(parsed_name, "");
+    }
+
+    #[test]
+    fn build_full_path_single_subvol_parent_fs_tree() {
+        // Subvolume 256, parent is FS_TREE (5)
+        let items = vec![test_item(256, FS_TREE_OBJECTID)];
+        let segments = vec!["mysub".to_string()];
+        let id_to_idx: HashMap<u64, usize> = [(256, 0)].into();
+        let mut cache = HashMap::new();
+
+        let path = build_full_path(256, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        assert_eq!(path, "mysub");
+    }
+
+    #[test]
+    fn build_full_path_nested_chain() {
+        // A (256) -> B (257) -> C (258), all parented under FS_TREE
+        let items = vec![
+            test_item(256, FS_TREE_OBJECTID),
+            test_item(257, 256),
+            test_item(258, 257),
+        ];
+        let segments = vec!["A".to_string(), "B".to_string(), "C".to_string()];
+        let id_to_idx: HashMap<u64, usize> = [(256, 0), (257, 1), (258, 2)].into();
+        let mut cache = HashMap::new();
+
+        let path = build_full_path(258, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        assert_eq!(path, "A/B/C");
+    }
+
+    #[test]
+    fn build_full_path_stops_at_top_id() {
+        // A (256) -> B (257) -> C (258), top_id = 257 (B)
+        // Paths are relative to top_id, so C's parent (257) == top_id means
+        // C's path is just its own segment, not "A/B/C".
+        let items = vec![
+            test_item(256, FS_TREE_OBJECTID),
+            test_item(257, 256),
+            test_item(258, 257),
+        ];
+        let segments = vec!["A".to_string(), "B".to_string(), "C".to_string()];
+        let id_to_idx: HashMap<u64, usize> = [(256, 0), (257, 1), (258, 2)].into();
+        let mut cache = HashMap::new();
+
+        let path = build_full_path(258, 257, &id_to_idx, &segments, &items, &mut cache);
+        assert_eq!(path, "C");
+
+        // B's path is also just "B" (its parent 256/A is below top_id in the
+        // tree, but B's own parent is not top_id — A's parent is FS_TREE).
+        // With top_id=257, building B: parent=256, 256 is in id_to_idx but
+        // 256's parent is FS_TREE (5) which triggers the stop, so chain = [257, 256],
+        // and A gets its segment, B gets "A/B".
+        let path_b = build_full_path(257, 257, &id_to_idx, &segments, &items, &mut cache);
+        // 257 itself: its parent is 256, 256 != top_id (257), so we walk up.
+        // 256's parent is FS_TREE (5), which triggers stop. chain = [257, 256].
+        // 256 resolves to "A" (parent is FS_TREE), 257 resolves to "A/B".
+        assert_eq!(path_b, "A/B");
+    }
+
+    #[test]
+    fn build_full_path_cycle_detection() {
+        // A (256) parent is B (257), B (257) parent is A (256) — mutual cycle
+        let items = vec![
+            test_item(256, 257),
+            test_item(257, 256),
+        ];
+        let segments = vec!["A".to_string(), "B".to_string()];
+        let id_to_idx: HashMap<u64, usize> = [(256, 0), (257, 1)].into();
+        let mut cache = HashMap::new();
+
+        // Must not hang. The result is truncated due to cycle detection.
+        let _path = build_full_path(256, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        // Just verify it terminates and returns something (exact value depends
+        // on cycle truncation heuristic).
+    }
+
+    #[test]
+    fn build_full_path_cached_ancestor() {
+        // A (256) -> B (257) -> C (258)
+        // Pre-cache B's path; building C should use it.
+        let items = vec![
+            test_item(256, FS_TREE_OBJECTID),
+            test_item(257, 256),
+            test_item(258, 257),
+        ];
+        let segments = vec!["A".to_string(), "B".to_string(), "C".to_string()];
+        let id_to_idx: HashMap<u64, usize> = [(256, 0), (257, 1), (258, 2)].into();
+        let mut cache = HashMap::new();
+        cache.insert(257, "A/B".to_string());
+
+        let path = build_full_path(258, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        assert_eq!(path, "A/B/C");
+    }
+
+    #[test]
+    fn build_full_path_unknown_parent() {
+        // Subvolume 256, parent 999 not in id_to_idx
+        let items = vec![test_item(256, 999)];
+        let segments = vec!["orphan".to_string()];
+        let id_to_idx: HashMap<u64, usize> = [(256, 0)].into();
+        let mut cache = HashMap::new();
+
+        let path = build_full_path(256, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        assert_eq!(path, "orphan");
+    }
+
+    #[test]
+    fn build_full_path_parent_id_zero() {
+        // Subvolume 256, parent_id == 0 (no backref found)
+        let items = vec![test_item(256, 0)];
+        let segments = vec!["noparent".to_string()];
+        let id_to_idx: HashMap<u64, usize> = [(256, 0)].into();
+        let mut cache = HashMap::new();
+
+        let path = build_full_path(256, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        assert_eq!(path, "noparent");
+    }
+
+    #[test]
+    fn build_full_path_already_cached_target() {
+        // If the target itself is already cached, return the cached value.
+        let items = vec![test_item(256, FS_TREE_OBJECTID)];
+        let segments = vec!["A".to_string()];
+        let id_to_idx: HashMap<u64, usize> = [(256, 0)].into();
+        let mut cache = HashMap::new();
+        cache.insert(256, "cached/path".to_string());
+
+        let path = build_full_path(256, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        assert_eq!(path, "cached/path");
+    }
+
+    #[test]
+    fn build_full_path_root_id_not_in_items() {
+        // root_id not present in id_to_idx at all
+        let items = vec![test_item(256, FS_TREE_OBJECTID)];
+        let segments = vec!["A".to_string()];
+        let id_to_idx: HashMap<u64, usize> = [(256, 0)].into();
+        let mut cache = HashMap::new();
+
+        let path = build_full_path(999, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        assert_eq!(path, "");
+    }
+}

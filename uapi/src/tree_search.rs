@@ -258,3 +258,184 @@ fn advance_cursor(sk: &mut btrfs_ioctl_search_key, last: &SearchHeader) -> bool 
     sk.min_objectid = new_oid;
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn header(objectid: u64, item_type: u32, offset: u64) -> SearchHeader {
+        SearchHeader {
+            transid: 0,
+            objectid,
+            offset,
+            item_type,
+            len: 0,
+        }
+    }
+
+    fn zeroed_search_key() -> btrfs_ioctl_search_key {
+        unsafe { mem::zeroed() }
+    }
+
+    // --- SearchKey constructors ---
+
+    #[test]
+    fn for_type_covers_all_objectids_and_offsets() {
+        let sk = SearchKey::for_type(5, 132);
+        assert_eq!(sk.tree_id, 5);
+        assert_eq!(sk.min_objectid, 0);
+        assert_eq!(sk.max_objectid, u64::MAX);
+        assert_eq!(sk.min_type, 132);
+        assert_eq!(sk.max_type, 132);
+        assert_eq!(sk.min_offset, 0);
+        assert_eq!(sk.max_offset, u64::MAX);
+        assert_eq!(sk.min_transid, 0);
+        assert_eq!(sk.max_transid, u64::MAX);
+    }
+
+    #[test]
+    fn for_objectid_range_restricts_objectids() {
+        let sk = SearchKey::for_objectid_range(1, 84, 100, 200);
+        assert_eq!(sk.tree_id, 1);
+        assert_eq!(sk.min_objectid, 100);
+        assert_eq!(sk.max_objectid, 200);
+        assert_eq!(sk.min_type, 84);
+        assert_eq!(sk.max_type, 84);
+        assert_eq!(sk.min_offset, 0);
+        assert_eq!(sk.max_offset, u64::MAX);
+    }
+
+    // --- fill_search_key ---
+
+    #[test]
+    fn fill_search_key_copies_all_fields() {
+        let key = SearchKey {
+            tree_id: 1,
+            min_objectid: 10,
+            max_objectid: 20,
+            min_type: 30,
+            max_type: 40,
+            min_offset: 50,
+            max_offset: 60,
+            min_transid: 70,
+            max_transid: 80,
+        };
+        let mut sk = zeroed_search_key();
+        fill_search_key(&mut sk, &key);
+        assert_eq!(sk.tree_id, 1);
+        assert_eq!(sk.min_objectid, 10);
+        assert_eq!(sk.max_objectid, 20);
+        assert_eq!(sk.min_type, 30);
+        assert_eq!(sk.max_type, 40);
+        assert_eq!(sk.min_offset, 50);
+        assert_eq!(sk.max_offset, 60);
+        assert_eq!(sk.min_transid, 70);
+        assert_eq!(sk.max_transid, 80);
+    }
+
+    // --- advance_cursor: normal case ---
+
+    #[test]
+    fn advance_increments_offset() {
+        let mut sk = zeroed_search_key();
+        let last = header(256, 132, 100);
+        assert!(advance_cursor(&mut sk, &last));
+        assert_eq!(sk.min_objectid, 256);
+        assert_eq!(sk.min_type, 132);
+        assert_eq!(sk.min_offset, 101);
+    }
+
+    #[test]
+    fn advance_tracks_objectid_from_last_item() {
+        // This is the bug that was fixed: the cursor must track the last
+        // item's objectid, not leave min_objectid at its original value.
+        let mut sk = zeroed_search_key();
+        sk.min_objectid = 100; // original search started at 100
+        let last = header(300, 132, 50); // batch ended at objectid 300
+        assert!(advance_cursor(&mut sk, &last));
+        assert_eq!(sk.min_objectid, 300, "must track last item's objectid");
+        assert_eq!(sk.min_type, 132);
+        assert_eq!(sk.min_offset, 51);
+    }
+
+    #[test]
+    fn advance_tracks_type_from_last_item() {
+        let mut sk = zeroed_search_key();
+        let last = header(256, 180, 42);
+        assert!(advance_cursor(&mut sk, &last));
+        assert_eq!(sk.min_objectid, 256);
+        assert_eq!(sk.min_type, 180);
+        assert_eq!(sk.min_offset, 43);
+    }
+
+    // --- advance_cursor: offset overflow ---
+
+    #[test]
+    fn advance_offset_overflow_bumps_type() {
+        let mut sk = zeroed_search_key();
+        let last = header(256, 132, u64::MAX);
+        assert!(advance_cursor(&mut sk, &last));
+        assert_eq!(sk.min_objectid, 256);
+        assert_eq!(sk.min_type, 133);
+        assert_eq!(sk.min_offset, 0);
+    }
+
+    // --- advance_cursor: type overflow ---
+
+    #[test]
+    fn advance_type_overflow_bumps_objectid() {
+        let mut sk = zeroed_search_key();
+        let last = header(256, u32::MAX, u64::MAX);
+        assert!(advance_cursor(&mut sk, &last));
+        assert_eq!(sk.min_objectid, 257);
+        assert_eq!(sk.min_type, 0);
+        assert_eq!(sk.min_offset, 0);
+    }
+
+    // --- advance_cursor: full keyspace exhaustion ---
+
+    #[test]
+    fn advance_all_overflow_returns_false() {
+        let mut sk = zeroed_search_key();
+        let last = header(u64::MAX, u32::MAX, u64::MAX);
+        assert!(!advance_cursor(&mut sk, &last));
+    }
+
+    // --- advance_cursor: edge cases ---
+
+    #[test]
+    fn advance_zero_key() {
+        let mut sk = zeroed_search_key();
+        let last = header(0, 0, 0);
+        assert!(advance_cursor(&mut sk, &last));
+        assert_eq!(sk.min_objectid, 0);
+        assert_eq!(sk.min_type, 0);
+        assert_eq!(sk.min_offset, 1);
+    }
+
+    #[test]
+    fn advance_objectid_max_type_zero_offset_max() {
+        // offset overflows, type bumps to 1
+        let mut sk = zeroed_search_key();
+        let last = header(u64::MAX, 0, u64::MAX);
+        assert!(advance_cursor(&mut sk, &last));
+        assert_eq!(sk.min_objectid, u64::MAX);
+        assert_eq!(sk.min_type, 1);
+        assert_eq!(sk.min_offset, 0);
+    }
+
+    #[test]
+    fn advance_preserves_unrelated_search_key_fields() {
+        let mut sk = zeroed_search_key();
+        sk.max_objectid = 999;
+        sk.max_type = 888;
+        sk.max_offset = 777;
+        sk.max_transid = 666;
+        let last = header(10, 20, 30);
+        advance_cursor(&mut sk, &last);
+        assert_eq!(sk.max_objectid, 999);
+        assert_eq!(sk.max_type, 888);
+        assert_eq!(sk.max_offset, 777);
+        assert_eq!(sk.max_transid, 666);
+    }
+}
