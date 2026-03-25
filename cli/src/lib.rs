@@ -17,6 +17,7 @@ pub mod rescue;
 pub mod restore;
 pub mod scrub;
 pub mod send;
+pub mod stream;
 pub mod subvolume;
 pub mod util;
 

@@ -1,6 +1,13 @@
+mod dump;
+mod ops;
+
+use crate::stream::{StreamCommand, StreamReader};
 use crate::{Format, Runnable};
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use clap::Parser;
+use ops::ReceiveContext;
+use std::fs::File;
+use std::io;
 use std::path::PathBuf;
 
 /// Receive subvolumes from a stream.
@@ -45,6 +52,97 @@ pub struct ReceiveCommand {
 
 impl Runnable for ReceiveCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        todo!("implement receive")
+        let input: Box<dyn io::Read> = match &self.file {
+            Some(path) => Box::new(
+                File::open(path)
+                    .with_context(|| format!("cannot open '{}'", path.display()))?,
+            ),
+            None => Box::new(io::stdin()),
+        };
+
+        if self.dump {
+            return dump::dump_stream(input);
+        }
+
+        let mount = self
+            .mount
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("mount point is required (unless --dump)"))?;
+
+        if !mount.is_dir() {
+            bail!("'{}' is not a directory", mount.display());
+        }
+
+        if self.chroot {
+            bail!("--chroot is not yet implemented");
+        }
+
+        let mut reader = StreamReader::new(input)?;
+        let mut ctx = ReceiveContext::new(mount)?;
+        let max_errors = self.max_errors.unwrap_or(0);
+        let mut error_count = 0u64;
+        let mut received_subvol = false;
+
+        loop {
+            match reader.next_command() {
+                Err(e) => {
+                    error_count += 1;
+                    eprintln!("ERROR: {e:#}");
+                    if max_errors > 0 && error_count >= max_errors {
+                        bail!("too many errors ({error_count}), aborting");
+                    }
+                    continue;
+                }
+                Ok(None) => {
+                    // EOF — finalize and exit.
+                    break;
+                }
+                Ok(Some(StreamCommand::End)) => {
+                    ctx.close_write_fd();
+                    ctx.finish_subvol()?;
+                    received_subvol = false;
+
+                    if self.terminate_on_end {
+                        return Ok(());
+                    }
+
+                    // Try to read the next stream header for multi-stream input.
+                    // If there's more data, the next call to next_command() on a
+                    // new reader will pick it up. We re-create the reader with the
+                    // remaining input.
+                    let inner = reader.into_inner();
+                    match StreamReader::new(inner) {
+                        Ok(new_reader) => {
+                            reader = new_reader;
+                        }
+                        Err(_) => {
+                            // No more streams.
+                            return Ok(());
+                        }
+                    }
+                    continue;
+                }
+                Ok(Some(cmd)) => {
+                    if matches!(&cmd, StreamCommand::Subvol { .. } | StreamCommand::Snapshot { .. })
+                    {
+                        received_subvol = true;
+                    }
+                    if let Err(e) = ctx.process_command(&cmd) {
+                        error_count += 1;
+                        eprintln!("ERROR: {e:#}");
+                        if max_errors > 0 && error_count >= max_errors {
+                            bail!("too many errors ({error_count}), aborting");
+                        }
+                    }
+                }
+            }
+        }
+
+        // Finalize the last subvolume if we received one.
+        if received_subvol {
+            ctx.finish_subvol()?;
+        }
+
+        Ok(())
     }
 }

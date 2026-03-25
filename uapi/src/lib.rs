@@ -12,6 +12,7 @@ pub mod label;
 pub mod qgroup;
 pub mod quota;
 pub mod raw;
+pub mod receive;
 pub mod replace;
 pub mod resize;
 pub mod scrub;
