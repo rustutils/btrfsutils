@@ -48,10 +48,19 @@ what is available.
 
 ## Testing
 
-Integration tests require root privileges and a real btrfs filesystem (no mocks).
+Integration tests require root privileges and recent Linux kernel. They work by
+creating file-backed btrfs filesystems, mounting them, and testing the operations
+in there. To run them, use the justfile target (assuming you have `just` installed):
 
 ```
-just test    # integration tests, builds as user, runs with sudo
+just test
+```
+
+You can generate a coverage report as well, assuming you have `cargo-llvm-cov`
+installed.
+
+```
+just coverage
 ```
 
 ## License
