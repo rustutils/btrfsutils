@@ -10,7 +10,7 @@ see what is available.
 
 ## Usage
 
-```
+```text
 btrfs <command> [<subcommand>] [<args>]
 ```
 

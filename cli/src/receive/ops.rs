@@ -1,4 +1,4 @@
-use crate::stream::{StreamCommand, Timespec};
+use btrfs_disk::stream::{StreamCommand, Timespec};
 use anyhow::{Context, Result, bail};
 use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};

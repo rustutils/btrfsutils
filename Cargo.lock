@@ -125,7 +125,6 @@ dependencies = [
  "btrfs-disk",
  "btrfs-uapi",
  "clap",
- "crc32c",
  "env_logger",
  "log",
  "nix",
@@ -136,7 +135,9 @@ dependencies = [
 name = "btrfs-disk"
 version = "0.2.0"
 dependencies = [
+ "anyhow",
  "bindgen",
+ "crc32c",
  "uuid",
 ]
 

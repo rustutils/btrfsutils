@@ -1,4 +1,4 @@
-use crate::stream::{StreamCommand, StreamReader, Timespec};
+use btrfs_disk::stream::{StreamCommand, StreamReader, Timespec};
 use anyhow::Result;
 use std::io::Read;
 

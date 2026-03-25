@@ -11,6 +11,8 @@ categories = ["filesystem", "parser-implementations"]
 keywords = ["btrfs", "filesystem", "parser", "userspace"]
 
 [dependencies]
+anyhow = { workspace = true }
+crc32c = { workspace = true }
 uuid = { workspace = true }
 
 [build-dependencies]

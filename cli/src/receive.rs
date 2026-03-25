@@ -1,7 +1,7 @@
 mod dump;
 mod ops;
 
-use crate::stream::{StreamCommand, StreamReader};
+use btrfs_disk::stream::{StreamCommand, StreamReader};
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
 use clap::Parser;
