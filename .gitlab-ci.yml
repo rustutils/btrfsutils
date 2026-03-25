@@ -1,0 +1,86 @@
+stages:
+  - test
+  - build
+  - pages
+
+variables:
+  CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
+  RUSTUP_HOME: "${CI_PROJECT_DIR}/.rustup"
+
+default:
+  image: rust:latest
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq clang btrfs-progs > /dev/null
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .cargo/registry
+      - .cargo/git
+      - target/
+
+# -- Test stage ---------------------------------------------------------------
+
+test:
+  stage: test
+  script:
+    - cargo test --ignored --test-threads=1
+
+coverage:
+  stage: test
+  script:
+    - cargo install cargo-llvm-cov --locked
+    - rustup component add llvm-tools-preview
+    - cargo llvm-cov --html --output-dir coverage
+  artifacts:
+    paths:
+      - coverage/
+    expire_in: 1 week
+
+lint:
+  stage: test
+  script:
+    - rustup toolchain install nightly --component rustfmt
+    - cargo +nightly fmt --all --check
+    - cargo clippy --all-targets -- -D warnings
+
+# -- Build stage --------------------------------------------------------------
+
+build-x86:
+  stage: build
+  script:
+    - cargo build --release
+  artifacts:
+    paths:
+      - target/release/btrfs
+    expire_in: 1 week
+
+build-x86-musl:
+  stage: build
+  script:
+    - apt-get install -y -qq musl-tools > /dev/null
+    - rustup target add x86_64-unknown-linux-musl
+    - cargo build --release --target x86_64-unknown-linux-musl
+  artifacts:
+    paths:
+      - target/x86_64-unknown-linux-musl/release/btrfs
+    expire_in: 1 week
+
+# -- Pages stage --------------------------------------------------------------
+
+pages:
+  stage: pages
+  needs:
+    - job: coverage
+      artifacts: true
+    - job: build-x86
+      artifacts: true
+    - job: build-x86-musl
+      artifacts: true
+  script:
+    - mkdir -p public/coverage public/binaries
+    - cp -r coverage/html/* public/coverage/ || cp -r coverage/* public/coverage/
+    - cp target/release/btrfs public/binaries/btrfs-x86_64
+    - cp target/x86_64-unknown-linux-musl/release/btrfs public/binaries/btrfs-x86_64-musl
+  artifacts:
+    paths:
+      - public
