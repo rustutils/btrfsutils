@@ -7,19 +7,6 @@
 //! subvolumes in a filesystem, and getting or setting the default subvolume
 //! that is mounted when no subvolume is explicitly requested.
 
-use std::{
-    ffi::CStr,
-    mem,
-    os::{fd::AsRawFd, unix::io::BorrowedFd},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-
-use bitflags::bitflags;
-use nix::libc::c_char;
-use uuid::Uuid;
-
-use std::collections::HashMap;
-
 use crate::{
     field_size,
     raw::{
@@ -33,6 +20,16 @@ use crate::{
     },
     tree_search::{SearchKey, tree_search},
 };
+use bitflags::bitflags;
+use nix::libc::c_char;
+use std::{
+    collections::HashMap,
+    ffi::CStr,
+    mem,
+    os::{fd::AsRawFd, unix::io::BorrowedFd},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use uuid::Uuid;
 
 /// The top-level subvolume (FS tree); objectid 5, always present.
 ///
@@ -554,24 +551,26 @@ fn parse_root_item(root_id: u64, data: &[u8]) -> Option<SubvolumeListItem> {
     // Extended fields exist only in non-legacy items.
     let otime_nsec = offset_of!(btrfs_root_item, otime) + offset_of!(btrfs_timespec, nsec);
     let (uuid, parent_uuid, received_uuid, otransid, otime) =
-        if data.len() >= otime_nsec + field_size!(btrfs_timespec, nsec)
-    {
-        let off_uuid = offset_of!(btrfs_root_item, uuid);
-        let off_parent = offset_of!(btrfs_root_item, parent_uuid);
-        let off_received = offset_of!(btrfs_root_item, received_uuid);
-        let uuid_size = field_size!(btrfs_root_item, uuid);
-        let uuid = Uuid::from_bytes(data[off_uuid..off_uuid + uuid_size].try_into().unwrap());
-        let parent_uuid =
-            Uuid::from_bytes(data[off_parent..off_parent + uuid_size].try_into().unwrap());
-        let received_uuid =
-            Uuid::from_bytes(data[off_received..off_received + uuid_size].try_into().unwrap());
-        let otransid = rle64(data, offset_of!(btrfs_root_item, otransid));
-        let otime_sec = offset_of!(btrfs_root_item, otime);
-        let otime = timespec_to_system_time(rle64(data, otime_sec), rle32(data, otime_nsec));
-        (uuid, parent_uuid, received_uuid, otransid, otime)
-    } else {
-        (Uuid::nil(), Uuid::nil(), Uuid::nil(), 0, UNIX_EPOCH)
-    };
+        if data.len() >= otime_nsec + field_size!(btrfs_timespec, nsec) {
+            let off_uuid = offset_of!(btrfs_root_item, uuid);
+            let off_parent = offset_of!(btrfs_root_item, parent_uuid);
+            let off_received = offset_of!(btrfs_root_item, received_uuid);
+            let uuid_size = field_size!(btrfs_root_item, uuid);
+            let uuid = Uuid::from_bytes(data[off_uuid..off_uuid + uuid_size].try_into().unwrap());
+            let parent_uuid =
+                Uuid::from_bytes(data[off_parent..off_parent + uuid_size].try_into().unwrap());
+            let received_uuid = Uuid::from_bytes(
+                data[off_received..off_received + uuid_size]
+                    .try_into()
+                    .unwrap(),
+            );
+            let otransid = rle64(data, offset_of!(btrfs_root_item, otransid));
+            let otime_sec = offset_of!(btrfs_root_item, otime);
+            let otime = timespec_to_system_time(rle64(data, otime_sec), rle32(data, otime_nsec));
+            (uuid, parent_uuid, received_uuid, otransid, otime)
+        } else {
+            (Uuid::nil(), Uuid::nil(), Uuid::nil(), 0, UNIX_EPOCH)
+        };
 
     Some(SubvolumeListItem {
         root_id,

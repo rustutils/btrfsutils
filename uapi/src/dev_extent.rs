@@ -4,13 +4,12 @@
 //! `BTRFS_DEV_EXTENT_KEY` items for a given device, then computes the
 //! minimum size to which the device can be shrunk.
 
-use std::os::unix::io::BorrowedFd;
-
 use crate::{
     field_size,
     raw::{BTRFS_DEV_EXTENT_KEY, BTRFS_DEV_TREE_OBJECTID, btrfs_dev_extent},
     tree_search::{SearchKey, tree_search},
 };
+use std::os::unix::io::BorrowedFd;
 
 const DEV_EXTENT_LENGTH_OFF: usize = std::mem::offset_of!(btrfs_dev_extent, length);
 

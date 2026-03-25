@@ -1,8 +1,7 @@
+use crate::{Format, Runnable};
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-
-use crate::{Format, Runnable};
 
 /// Dump tree blocks from a btrfs filesystem
 #[derive(Parser, Debug)]

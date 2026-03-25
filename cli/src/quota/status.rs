@@ -1,10 +1,8 @@
+use crate::{Format, Runnable};
 use anyhow::{Context, Result};
+use btrfs_uapi::sysfs::SysfsBtrfs;
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
-
-use btrfs_uapi::sysfs::SysfsBtrfs;
-
-use crate::{Format, Runnable};
 
 /// Show status information about quota on the filesystem
 #[derive(Parser, Debug)]

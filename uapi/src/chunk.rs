@@ -9,8 +9,6 @@
 //!
 //! Requires `CAP_SYS_ADMIN`.
 
-use std::os::unix::io::BorrowedFd;
-
 use crate::{
     field_size,
     raw::{
@@ -21,6 +19,7 @@ use crate::{
     space::BlockGroupFlags,
     tree_search::{SearchKey, tree_search},
 };
+use std::os::unix::io::BorrowedFd;
 
 /// Physical allocation of one block-group profile on one device, as read
 /// from the chunk tree.

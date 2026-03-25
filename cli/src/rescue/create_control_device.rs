@@ -1,7 +1,6 @@
+use crate::{Format, Runnable};
 use anyhow::Result;
 use clap::Parser;
-
-use crate::{Format, Runnable};
 
 /// Create /dev/btrfs-control
 #[derive(Parser, Debug)]

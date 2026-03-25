@@ -5,8 +5,10 @@ use btrfs_uapi::{label::label_get, subvolume::subvolume_flags_get};
 use clap::Parser;
 use std::{
     fs::File,
-    os::unix::fs::{FileTypeExt, MetadataExt},
-    os::unix::io::AsFd,
+    os::unix::{
+        fs::{FileTypeExt, MetadataExt},
+        io::AsFd,
+    },
     path::PathBuf,
 };
 

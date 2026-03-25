@@ -9,7 +9,10 @@ use btrfs_uapi::{
 };
 use clap::Parser;
 use std::{
-    collections::HashMap, collections::HashSet, fs::File, os::unix::io::AsFd, path::PathBuf,
+    collections::{HashMap, HashSet},
+    fs::File,
+    os::unix::io::AsFd,
+    path::PathBuf,
 };
 
 /// Show detailed information about internal filesystem usage

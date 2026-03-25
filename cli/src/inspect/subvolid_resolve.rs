@@ -1,8 +1,7 @@
+use crate::{Format, Runnable};
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
-
-use crate::{Format, Runnable};
 
 /// Get subvolume ID and tree ID of the given path
 #[derive(Parser, Debug)]

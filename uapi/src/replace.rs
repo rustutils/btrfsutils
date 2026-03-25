@@ -6,25 +6,24 @@
 //!
 //! Requires `CAP_SYS_ADMIN`.
 
-use std::ffi::CStr;
-use std::mem;
-use std::os::fd::AsRawFd;
-use std::os::unix::io::BorrowedFd;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
 use crate::raw::{
     BTRFS_IOCTL_DEV_REPLACE_CMD_CANCEL, BTRFS_IOCTL_DEV_REPLACE_CMD_START,
     BTRFS_IOCTL_DEV_REPLACE_CMD_STATUS,
     BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_ALWAYS,
     BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_AVOID,
-    BTRFS_IOCTL_DEV_REPLACE_RESULT_ALREADY_STARTED, BTRFS_IOCTL_DEV_REPLACE_RESULT_NOT_STARTED,
-    BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR, BTRFS_IOCTL_DEV_REPLACE_RESULT_SCRUB_INPROGRESS,
+    BTRFS_IOCTL_DEV_REPLACE_RESULT_ALREADY_STARTED, BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR,
+    BTRFS_IOCTL_DEV_REPLACE_RESULT_NOT_STARTED, BTRFS_IOCTL_DEV_REPLACE_RESULT_SCRUB_INPROGRESS,
     BTRFS_IOCTL_DEV_REPLACE_STATE_CANCELED, BTRFS_IOCTL_DEV_REPLACE_STATE_FINISHED,
     BTRFS_IOCTL_DEV_REPLACE_STATE_NEVER_STARTED, BTRFS_IOCTL_DEV_REPLACE_STATE_STARTED,
-    BTRFS_IOCTL_DEV_REPLACE_STATE_SUSPENDED, btrfs_ioc_dev_replace,
-    btrfs_ioctl_dev_replace_args,
+    BTRFS_IOCTL_DEV_REPLACE_STATE_SUSPENDED, btrfs_ioc_dev_replace, btrfs_ioctl_dev_replace_args,
 };
 use nix::errno::Errno;
+use std::{
+    ffi::CStr,
+    mem,
+    os::{fd::AsRawFd, unix::io::BorrowedFd},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 /// Current state of a device replace operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,15 +41,9 @@ impl ReplaceState {
             x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_NEVER_STARTED as u64 => {
                 Some(ReplaceState::NeverStarted)
             }
-            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_STARTED as u64 => {
-                Some(ReplaceState::Started)
-            }
-            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_FINISHED as u64 => {
-                Some(ReplaceState::Finished)
-            }
-            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_CANCELED as u64 => {
-                Some(ReplaceState::Canceled)
-            }
+            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_STARTED as u64 => Some(ReplaceState::Started),
+            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_FINISHED as u64 => Some(ReplaceState::Finished),
+            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_CANCELED as u64 => Some(ReplaceState::Canceled),
             x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_SUSPENDED as u64 => {
                 Some(ReplaceState::Suspended)
             }
@@ -102,8 +95,7 @@ pub fn replace_status(fd: BorrowedFd) -> nix::Result<ReplaceStatus> {
 
     // SAFETY: we issued CMD_STATUS so the status union member is active.
     let status = unsafe { &args.__bindgen_anon_1.status };
-    let state = ReplaceState::from_raw(status.replace_state)
-        .ok_or(Errno::EINVAL)?;
+    let state = ReplaceState::from_raw(status.replace_state).ok_or(Errno::EINVAL)?;
 
     Ok(ReplaceStatus {
         state,

@@ -7,13 +7,13 @@
 //!
 //! Requires `CAP_SYS_ADMIN`.
 
-use std::mem;
-use std::os::fd::AsRawFd;
-use std::os::unix::io::BorrowedFd;
-
 use crate::raw::{
     BTRFS_SCRUB_READONLY, btrfs_ioc_scrub, btrfs_ioc_scrub_cancel, btrfs_ioc_scrub_progress,
     btrfs_ioctl_scrub_args,
+};
+use std::{
+    mem,
+    os::{fd::AsRawFd, unix::io::BorrowedFd},
 };
 
 /// Progress counters for a scrub operation, as returned by `BTRFS_IOC_SCRUB`

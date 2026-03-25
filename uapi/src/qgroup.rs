@@ -8,15 +8,6 @@
 //! Quota must be enabled on the filesystem (see [`crate::quota`]) before any
 //! qgroup operations will succeed.  Most operations require `CAP_SYS_ADMIN`.
 
-use std::{
-    collections::{HashMap, HashSet},
-    mem::{self, offset_of, size_of},
-    os::{fd::AsRawFd, unix::io::BorrowedFd},
-};
-
-use bitflags::bitflags;
-use nix::errno::Errno;
-
 use crate::{
     field_size,
     raw::{
@@ -32,6 +23,13 @@ use crate::{
         btrfs_qgroup_limit_item, btrfs_qgroup_status_item,
     },
     tree_search::{SearchKey, tree_search},
+};
+use bitflags::bitflags;
+use nix::errno::Errno;
+use std::{
+    collections::{HashMap, HashSet},
+    mem::{self, offset_of, size_of},
+    os::{fd::AsRawFd, unix::io::BorrowedFd},
 };
 
 // ---------------------------------------------------------------------------

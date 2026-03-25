@@ -5,14 +5,15 @@
 //! to the inodes that reference it, and resolving a subvolume ID to its path
 //! within the filesystem.
 
+use crate::{
+    raw::{
+        BTRFS_FIRST_FREE_OBJECTID, btrfs_ioc_ino_lookup, btrfs_ioc_ino_paths,
+        btrfs_ioc_logical_ino_v2, btrfs_root_ref,
+    },
+    tree_search::{SearchKey, tree_search},
+};
 use nix::libc::c_int;
 use std::os::fd::{AsRawFd, BorrowedFd};
-
-use crate::raw::{
-    BTRFS_FIRST_FREE_OBJECTID, btrfs_ioc_ino_lookup, btrfs_ioc_ino_paths,
-    btrfs_ioc_logical_ino_v2, btrfs_root_ref,
-};
-use crate::tree_search::{SearchKey, tree_search};
 
 /// Look up the tree ID (root ID) of the subvolume containing the given file or directory.
 ///
@@ -282,8 +283,7 @@ fn subvolid_resolve_sub(fd: BorrowedFd<'_>, path: &mut String, subvol_id: u64) -
             );
 
             let name_off = offset_of!(btrfs_root_ref, name_len);
-            let name_len =
-                u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
+            let name_len = u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
 
             if data.len() < header_size + name_len {
                 return Err(nix::errno::Errno::EOVERFLOW);

@@ -1,9 +1,8 @@
+use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
 use btrfs_uapi::{chunk::chunk_list, filesystem::fs_info};
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
-
-use crate::{Format, Runnable, util::human_bytes};
 
 /// List all chunks in the filesystem, one row per stripe
 ///

@@ -8,12 +8,14 @@
 //! Quota status (whether quotas are on, which mode, inconsistency flag) is
 //! read from sysfs via [`crate::sysfs::SysfsBtrfs::quota_status`].
 
-use std::{mem, os::fd::AsRawFd, os::unix::io::BorrowedFd};
-
 use crate::raw::{
     BTRFS_QUOTA_CTL_DISABLE, BTRFS_QUOTA_CTL_ENABLE, BTRFS_QUOTA_CTL_ENABLE_SIMPLE_QUOTA,
     btrfs_ioc_quota_ctl, btrfs_ioc_quota_rescan, btrfs_ioc_quota_rescan_status,
     btrfs_ioc_quota_rescan_wait, btrfs_ioctl_quota_ctl_args, btrfs_ioctl_quota_rescan_args,
+};
+use std::{
+    mem,
+    os::{fd::AsRawFd, unix::io::BorrowedFd},
 };
 
 /// Enable quota accounting on the filesystem referred to by `fd`.

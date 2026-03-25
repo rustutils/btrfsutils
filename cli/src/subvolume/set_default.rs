@@ -2,7 +2,6 @@ use crate::{Format, Runnable};
 use anyhow::{Context, Result, anyhow};
 use btrfs_uapi::subvolume::{FS_TREE_OBJECTID, subvolume_default_set, subvolume_info};
 use clap::Parser;
-
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
 /// Set the default subvolume of a filesystem.

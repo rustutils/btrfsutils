@@ -1,10 +1,8 @@
+use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
 use btrfs_disk::superblock::{self, SUPER_MIRROR_MAX};
 use clap::Parser;
-use std::fs::File;
-use std::path::PathBuf;
-
-use crate::{Format, Runnable};
+use std::{fs::File, path::PathBuf};
 
 /// Dump the btrfs superblock from a device or image file.
 ///
@@ -56,7 +54,10 @@ impl Runnable for DumpSuperCommand {
             }
 
             let offset = superblock::super_mirror_offset(mirror);
-            println!("superblock: bytenr={offset}, device={}", self.path.display());
+            println!(
+                "superblock: bytenr={offset}, device={}",
+                self.path.display()
+            );
 
             let sb = match superblock::read_superblock(&mut file, mirror) {
                 Ok(sb) => sb,
@@ -76,7 +77,9 @@ impl Runnable for DumpSuperCommand {
 
             if !sb.magic_is_valid() && !self.force {
                 if self.all {
-                    println!("superblock mirror {mirror} has bad magic, skipping (use -F to force)");
+                    println!(
+                        "superblock mirror {mirror} has bad magic, skipping (use -F to force)"
+                    );
                     continue;
                 }
                 bail!(

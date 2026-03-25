@@ -19,11 +19,13 @@
 //! result buffer.  This is sufficient for all item types used by this crate;
 //! the v2 variant with a configurable buffer size is not needed.
 
-use std::{mem, os::fd::AsRawFd, os::unix::io::BorrowedFd};
-
 use crate::raw::{
     btrfs_ioc_tree_search, btrfs_ioctl_search_args, btrfs_ioctl_search_header,
     btrfs_ioctl_search_key,
+};
+use std::{
+    mem,
+    os::{fd::AsRawFd, unix::io::BorrowedFd},
 };
 
 /// Parameters specifying which items to return from a tree search.

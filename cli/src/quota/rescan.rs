@@ -1,9 +1,8 @@
+use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use nix::errno::Errno;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
-
-use crate::{Format, Runnable};
 
 /// Trash all qgroup numbers and scan the metadata again
 #[derive(Parser, Debug)]

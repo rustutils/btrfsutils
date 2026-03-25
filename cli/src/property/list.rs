@@ -4,8 +4,10 @@ use anyhow::{Result, anyhow, bail};
 use clap::Parser;
 use std::{
     fs::File,
-    os::unix::fs::{FileTypeExt, MetadataExt},
-    os::unix::io::AsFd,
+    os::unix::{
+        fs::{FileTypeExt, MetadataExt},
+        io::AsFd,
+    },
     path::PathBuf,
 };
 

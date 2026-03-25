@@ -2,14 +2,7 @@ use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
 use btrfs_uapi::replace::{ReplaceSource, ReplaceState, replace_start, replace_status};
 use clap::Parser;
-use std::{
-    ffi::CString,
-    fs::File,
-    os::unix::io::AsFd,
-    path::PathBuf,
-    thread,
-    time::Duration,
-};
+use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf, thread, time::Duration};
 
 /// Replace a device in the filesystem.
 ///
@@ -62,7 +55,10 @@ impl Runnable for ReplaceStartCommand {
             )
         })?;
         if current.state == ReplaceState::Started {
-            bail!("a device replace operation is already in progress on '{}'", self.mount_point.display());
+            bail!(
+                "a device replace operation is already in progress on '{}'",
+                self.mount_point.display()
+            );
         }
 
         // Resolve source: if it parses as a number, treat it as a devid;
@@ -77,17 +73,14 @@ impl Runnable for ReplaceStartCommand {
         };
 
         let tgtdev = CString::new(self.target.as_os_str().as_encoded_bytes())
-            .with_context(|| {
-                format!("invalid target device path '{}'", self.target.display())
-            })?;
+            .with_context(|| format!("invalid target device path '{}'", self.target.display()))?;
 
-        match replace_start(fd, source, &tgtdev, self.redundancy_only)
-            .with_context(|| {
-                format!(
-                    "failed to start replace on '{}'",
-                    self.mount_point.display()
-                )
-            })? {
+        match replace_start(fd, source, &tgtdev, self.redundancy_only).with_context(|| {
+            format!(
+                "failed to start replace on '{}'",
+                self.mount_point.display()
+            )
+        })? {
             Ok(()) => {}
             Err(e) => bail!("{e}"),
         }

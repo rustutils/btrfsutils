@@ -1,8 +1,7 @@
+use crate::{Format, Runnable};
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-
-use crate::{Format, Runnable};
 
 /// Clear the tree log (usable if it's corrupted and prevents mount)
 #[derive(Parser, Debug)]

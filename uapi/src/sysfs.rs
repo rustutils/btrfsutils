@@ -22,8 +22,7 @@
 //! All accessors return [`std::io::Result`] and will return an error with kind
 //! [`std::io::ErrorKind::NotFound`] if the filesystem is not currently mounted.
 
-use std::ffi::OsStr;
-use std::{fs, io, path::PathBuf};
+use std::{ffi::OsStr, fs, io, path::PathBuf};
 use uuid::Uuid;
 
 /// Returns the sysfs directory path for the btrfs filesystem with the given

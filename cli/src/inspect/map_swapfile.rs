@@ -1,8 +1,7 @@
+use crate::{Format, Runnable};
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-
-use crate::{Format, Runnable};
 
 /// Print physical extents of a file suitable for swap
 #[derive(Parser, Debug)]

@@ -1,8 +1,7 @@
 use crate::{Format, Runnable};
 use anyhow::Result;
 use clap::Parser;
-use std::fs::File;
-use std::path::PathBuf;
+use std::{fs::File, path::PathBuf};
 
 mod cancel;
 mod pause;

@@ -2,15 +2,17 @@ use super::PropertyObjectType;
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, anyhow, bail};
 use btrfs_uapi::{
-    label::label_set, subvolume::SubvolumeFlags, subvolume::subvolume_flags_get,
-    subvolume::subvolume_flags_set,
+    label::label_set,
+    subvolume::{SubvolumeFlags, subvolume_flags_get, subvolume_flags_set},
 };
 use clap::Parser;
 use std::{
     ffi::CString,
     fs::File,
-    os::unix::fs::{FileTypeExt, MetadataExt},
-    os::unix::io::AsFd,
+    os::unix::{
+        fs::{FileTypeExt, MetadataExt},
+        io::AsFd,
+    },
     path::PathBuf,
 };
 

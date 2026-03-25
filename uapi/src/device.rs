@@ -22,8 +22,7 @@ use crate::{
         btrfs_ioctl_get_dev_stats, btrfs_ioctl_vol_args, btrfs_ioctl_vol_args_v2,
     },
 };
-use nix::errno::Errno;
-use nix::libc::c_char;
+use nix::{errno::Errno, libc::c_char};
 use std::{
     ffi::CStr,
     fs::OpenOptions,

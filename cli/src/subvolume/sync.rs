@@ -1,8 +1,7 @@
+use crate::{Format, Runnable};
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-
-use crate::{Format, Runnable};
 
 /// Wait until given subvolume(s) are completely removed from the filesystem
 ///

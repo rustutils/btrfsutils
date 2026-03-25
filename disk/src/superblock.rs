@@ -5,13 +5,13 @@
 //! the root pointers and metadata needed to bootstrap access to the rest
 //! of the filesystem.
 
-use std::fmt;
-use std::io::{self, Read, Seek, SeekFrom};
-use std::mem;
-
-use uuid::Uuid;
-
 use crate::raw;
+use std::{
+    fmt,
+    io::{self, Read, Seek, SeekFrom},
+    mem,
+};
+use uuid::Uuid;
 
 /// Size of a superblock on disk (4096 bytes).
 /// From kernel-shared/ctree.h: BTRFS_SUPER_INFO_SIZE
@@ -184,7 +184,10 @@ impl Superblock {
 }
 
 /// Read the raw on-disk bytes into a packed bindgen struct.
-fn read_raw_superblock(reader: &mut (impl Read + Seek), offset: u64) -> io::Result<raw::btrfs_super_block> {
+fn read_raw_superblock(
+    reader: &mut (impl Read + Seek),
+    offset: u64,
+) -> io::Result<raw::btrfs_super_block> {
     reader.seek(SeekFrom::Start(offset))?;
 
     let mut buf = [0u8; SUPER_INFO_SIZE];
@@ -281,7 +284,11 @@ fn parse_backup_root(r: &raw::btrfs_root_backup) -> BackupRoot {
 }
 
 fn parse_label(raw_label: &[std::os::raw::c_char; 256]) -> String {
-    let bytes: Vec<u8> = raw_label.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
+    let bytes: Vec<u8> = raw_label
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as u8)
+        .collect();
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
@@ -347,13 +354,25 @@ fn format_super_flags(flags: u64) -> String {
         (raw::BTRFS_HEADER_FLAG_WRITTEN as u64, "WRITTEN"),
         (raw::BTRFS_HEADER_FLAG_RELOC as u64, "RELOC"),
         (raw::BTRFS_SUPER_FLAG_CHANGING_FSID as u64, "CHANGING_FSID"),
-        (raw::BTRFS_SUPER_FLAG_CHANGING_FSID_V2 as u64, "CHANGING_FSID_V2"),
+        (
+            raw::BTRFS_SUPER_FLAG_CHANGING_FSID_V2 as u64,
+            "CHANGING_FSID_V2",
+        ),
         (raw::BTRFS_SUPER_FLAG_SEEDING as u64, "SEEDING"),
         (raw::BTRFS_SUPER_FLAG_METADUMP as u64, "METADUMP"),
         (raw::BTRFS_SUPER_FLAG_METADUMP_V2 as u64, "METADUMP_V2"),
-        (raw::BTRFS_SUPER_FLAG_CHANGING_BG_TREE as u64, "CHANGING_BG_TREE"),
-        (raw::BTRFS_SUPER_FLAG_CHANGING_DATA_CSUM as u64, "CHANGING_DATA_CSUM"),
-        (raw::BTRFS_SUPER_FLAG_CHANGING_META_CSUM as u64, "CHANGING_META_CSUM"),
+        (
+            raw::BTRFS_SUPER_FLAG_CHANGING_BG_TREE as u64,
+            "CHANGING_BG_TREE",
+        ),
+        (
+            raw::BTRFS_SUPER_FLAG_CHANGING_DATA_CSUM as u64,
+            "CHANGING_DATA_CSUM",
+        ),
+        (
+            raw::BTRFS_SUPER_FLAG_CHANGING_META_CSUM as u64,
+            "CHANGING_META_CSUM",
+        ),
     ];
     format_flag_names(flags, known)
 }
@@ -361,10 +380,19 @@ fn format_super_flags(flags: u64) -> String {
 /// Format the compat_ro flags as human-readable names.
 fn format_compat_ro_flags(flags: u64) -> String {
     let known: &[(u64, &str)] = &[
-        (raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64, "FREE_SPACE_TREE"),
-        (raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID as u64, "FREE_SPACE_TREE_VALID"),
+        (
+            raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64,
+            "FREE_SPACE_TREE",
+        ),
+        (
+            raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID as u64,
+            "FREE_SPACE_TREE_VALID",
+        ),
         (raw::BTRFS_FEATURE_COMPAT_RO_VERITY as u64, "VERITY"),
-        (raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE as u64, "BLOCK_GROUP_TREE"),
+        (
+            raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE as u64,
+            "BLOCK_GROUP_TREE",
+        ),
     ];
     format_flag_names(flags, known)
 }
@@ -372,22 +400,58 @@ fn format_compat_ro_flags(flags: u64) -> String {
 /// Format the incompat flags as human-readable names.
 fn format_incompat_flags(flags: u64) -> String {
     let known: &[(u64, &str)] = &[
-        (raw::BTRFS_FEATURE_INCOMPAT_MIXED_BACKREF as u64, "MIXED_BACKREF"),
-        (raw::BTRFS_FEATURE_INCOMPAT_DEFAULT_SUBVOL as u64, "DEFAULT_SUBVOL"),
-        (raw::BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS as u64, "MIXED_GROUPS"),
-        (raw::BTRFS_FEATURE_INCOMPAT_COMPRESS_LZO as u64, "COMPRESS_LZO"),
-        (raw::BTRFS_FEATURE_INCOMPAT_COMPRESS_ZSTD as u64, "COMPRESS_ZSTD"),
-        (raw::BTRFS_FEATURE_INCOMPAT_BIG_METADATA as u64, "BIG_METADATA"),
-        (raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF as u64, "EXTENDED_IREF"),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_MIXED_BACKREF as u64,
+            "MIXED_BACKREF",
+        ),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_DEFAULT_SUBVOL as u64,
+            "DEFAULT_SUBVOL",
+        ),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS as u64,
+            "MIXED_GROUPS",
+        ),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_COMPRESS_LZO as u64,
+            "COMPRESS_LZO",
+        ),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_COMPRESS_ZSTD as u64,
+            "COMPRESS_ZSTD",
+        ),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_BIG_METADATA as u64,
+            "BIG_METADATA",
+        ),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF as u64,
+            "EXTENDED_IREF",
+        ),
         (raw::BTRFS_FEATURE_INCOMPAT_RAID56 as u64, "RAID56"),
-        (raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64, "SKINNY_METADATA"),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64,
+            "SKINNY_METADATA",
+        ),
         (raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES as u64, "NO_HOLES"),
-        (raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID as u64, "METADATA_UUID"),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID as u64,
+            "METADATA_UUID",
+        ),
         (raw::BTRFS_FEATURE_INCOMPAT_RAID1C34 as u64, "RAID1C34"),
         (raw::BTRFS_FEATURE_INCOMPAT_ZONED as u64, "ZONED"),
-        (raw::BTRFS_FEATURE_INCOMPAT_EXTENT_TREE_V2 as u64, "EXTENT_TREE_V2"),
-        (raw::BTRFS_FEATURE_INCOMPAT_RAID_STRIPE_TREE as u64, "RAID_STRIPE_TREE"),
-        (raw::BTRFS_FEATURE_INCOMPAT_SIMPLE_QUOTA as u64, "SIMPLE_QUOTA"),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_EXTENT_TREE_V2 as u64,
+            "EXTENT_TREE_V2",
+        ),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_RAID_STRIPE_TREE as u64,
+            "RAID_STRIPE_TREE",
+        ),
+        (
+            raw::BTRFS_FEATURE_INCOMPAT_SIMPLE_QUOTA as u64,
+            "SIMPLE_QUOTA",
+        ),
     ];
     format_flag_names(flags, known)
 }
@@ -414,7 +478,10 @@ fn format_flag_names(flags: u64, known: &[(u64, &str)]) -> String {
 /// Format the magic bytes as printable ASCII (replacing non-printable with '.').
 fn format_magic(magic: u64) -> String {
     let bytes = magic.to_le_bytes();
-    bytes.iter().map(|&b| if b.is_ascii_graphic() { b as char } else { '.' }).collect()
+    bytes
+        .iter()
+        .map(|&b| if b.is_ascii_graphic() { b as char } else { '.' })
+        .collect()
 }
 
 /// Print the superblock in the same format as `btrfs inspect-internal dump-super`.
@@ -438,7 +505,11 @@ pub fn print_superblock(sb: &Superblock, full: bool) {
     }
 
     let magic_str = format_magic(sb.magic);
-    let magic_match = if sb.magic_is_valid() { "[match]" } else { "[DON'T MATCH]" };
+    let magic_match = if sb.magic_is_valid() {
+        "[match]"
+    } else {
+        "[DON'T MATCH]"
+    };
     println!("magic\t\t\t{magic_str} {magic_match}");
 
     println!("fsid\t\t\t{}", sb.fsid.as_hyphenated());
@@ -490,7 +561,11 @@ pub fn print_superblock(sb: &Superblock, full: bool) {
     println!(
         "dev_item.fsid\t\t{} {}",
         d.fsid.as_hyphenated(),
-        if fsid_match { "[match]" } else { "[DON'T MATCH]" }
+        if fsid_match {
+            "[match]"
+        } else {
+            "[DON'T MATCH]"
+        }
     );
 
     println!("dev_item.type\t\t{}", d.dev_type);
@@ -573,8 +648,14 @@ fn print_backup_roots(sb: &Superblock) {
     for (i, r) in sb.backup_roots.iter().enumerate() {
         println!("\tbackup {i}:");
         println!("\t\ttree_root\t{}\tgen\t{}", r.tree_root, r.tree_root_gen);
-        println!("\t\tchunk_root\t{}\tgen\t{}", r.chunk_root, r.chunk_root_gen);
-        println!("\t\textent_root\t{}\tgen\t{}", r.extent_root, r.extent_root_gen);
+        println!(
+            "\t\tchunk_root\t{}\tgen\t{}",
+            r.chunk_root, r.chunk_root_gen
+        );
+        println!(
+            "\t\textent_root\t{}\tgen\t{}",
+            r.extent_root, r.extent_root_gen
+        );
         println!("\t\tfs_root\t\t{}\tgen\t{}", r.fs_root, r.fs_root_gen);
         println!("\t\tdev_root\t{}\tgen\t{}", r.dev_root, r.dev_root_gen);
         println!("\t\tcsum_root\t{}\tgen\t{}", r.csum_root, r.csum_root_gen);
