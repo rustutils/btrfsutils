@@ -10,12 +10,14 @@
 //!  umount      losetup -d             rm file
 //! ```
 
-use std::fs::{self, File};
-use std::io::Write;
-use std::mem::ManuallyDrop;
-use std::os::unix::io::{AsFd, BorrowedFd};
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::{
+    fs::{self, File},
+    io::Write,
+    mem::ManuallyDrop,
+    os::unix::io::{AsFd, BorrowedFd},
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 /// A file created via `set_len` (fallocate). Drop removes the file.
 pub struct BackingFile {
@@ -197,8 +199,8 @@ fn run(cmd: &str, args: &[&str]) {
 /// `byte = position % 251` (prime modulus avoids alignment artifacts).
 pub fn write_test_data(dir: &Path, name: &str, size: usize) {
     let path = dir.join(name);
-    let mut file = File::create(&path)
-        .unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
+    let mut file =
+        File::create(&path).unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
     let chunk_size = 64 * 1024;
     let mut buf = vec![0u8; chunk_size];
     let mut written = 0;
@@ -217,9 +219,13 @@ pub fn write_test_data(dir: &Path, name: &str, size: usize) {
 /// by [`write_test_data`].
 pub fn verify_test_data(dir: &Path, name: &str, size: usize) {
     let path = dir.join(name);
-    let data = fs::read(&path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    assert_eq!(data.len(), size, "file size mismatch for {}", path.display());
+    let data = fs::read(&path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    assert_eq!(
+        data.len(),
+        size,
+        "file size mismatch for {}",
+        path.display()
+    );
     for (i, &b) in data.iter().enumerate() {
         assert_eq!(b, (i % 251) as u8, "data mismatch at byte {i}");
     }
@@ -228,8 +234,8 @@ pub fn verify_test_data(dir: &Path, name: &str, size: usize) {
 /// Write highly compressible data (all zeros).
 pub fn write_compressible_data(dir: &Path, name: &str, size: usize) {
     let path = dir.join(name);
-    let mut file = File::create(&path)
-        .unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
+    let mut file =
+        File::create(&path).unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
     let chunk_size = 64 * 1024;
     let buf = vec![0u8; chunk_size];
     let mut written = 0;
@@ -239,6 +245,17 @@ pub fn write_compressible_data(dir: &Path, name: &str, size: usize) {
         written += n;
     }
     file.sync_all().unwrap();
+}
+
+/// Create a single-device 512MB btrfs filesystem. Returns the tempdir (must be
+/// kept alive) and the mount.
+pub fn single_mount() -> (tempfile::TempDir, Mount) {
+    let td = tempfile::tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
+    file.mkfs();
+    let lo = LoopbackDevice::new(file);
+    let mnt = Mount::new(lo, td.path());
+    (td, mnt)
 }
 
 /// Expands to the name of the function it is invoked from.
