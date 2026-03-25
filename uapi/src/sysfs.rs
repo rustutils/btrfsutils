@@ -245,6 +245,20 @@ impl SysfsBtrfs {
         fs::write(path, format!("{limit}\n"))
     }
 
+    /// Maximum send stream protocol version supported by the kernel.
+    ///
+    /// Returns `1` if the sysfs file does not exist (older kernels without
+    /// versioned send stream support).
+    /// `/sys/fs/btrfs/features/send_stream_version`
+    pub fn send_stream_version(&self) -> u32 {
+        // This is a global feature file, not per-filesystem.
+        let path = std::path::Path::new("/sys/fs/btrfs/features/send_stream_version");
+        match fs::read_to_string(path) {
+            Ok(s) => s.trim().parse::<u32>().unwrap_or(1),
+            Err(_) => 1,
+        }
+    }
+
     /// Quota status for this filesystem, read from
     /// `/sys/fs/btrfs/<uuid>/qgroups/`.
     ///

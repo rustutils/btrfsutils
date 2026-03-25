@@ -15,6 +15,7 @@ pub mod raw;
 pub mod replace;
 pub mod resize;
 pub mod scrub;
+pub mod send;
 pub mod space;
 pub mod subvolume;
 pub mod sync;
