@@ -2,7 +2,7 @@
 //!
 //! A balance rewrites chunks across the filesystem's devices according to
 //! optional filter criteria (usage threshold, device selection, profile
-//! conversion).  It is also used to change the RAID profile of a block group
+//! conversion). It is also used to change the RAID profile of a block group
 //! type, or to reduce the number of devices in a filesystem.
 //!
 //! Requires `CAP_SYS_ADMIN`.

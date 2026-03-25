@@ -2,11 +2,20 @@
 name = "btrfs-uapi"
 version = "0.1.0"
 edition = "2024"
+autobenches = false
+autotests = false
+
+[[test]]
+name = "tests"
+path = "tests/tests.rs"
 
 [dependencies]
 nix = { workspace = true }
 bitflags = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
 
 [build-dependencies]
 bindgen = { workspace = true }
