@@ -706,7 +706,7 @@ impl ReceiveContext {
         let file = File::open(&full)
             .with_context(|| format!("cannot open '{}' for verity", full.display()))?;
 
-        btrfs_uapi::verity::enable_verity(file.as_fd(), algorithm, block_size, salt, sig)
+        crate::verity::enable_verity(file.as_fd(), algorithm, block_size, salt, sig)
             .with_context(|| format!("FS_IOC_ENABLE_VERITY failed on '{}'", full.display()))?;
 
         Ok(())

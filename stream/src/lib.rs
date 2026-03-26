@@ -4,6 +4,8 @@ mod stream;
 
 #[cfg(feature = "receive")]
 mod receive;
+#[cfg(feature = "receive")]
+mod verity;
 
 pub use stream::{StreamCommand, StreamReader, Timespec};
 

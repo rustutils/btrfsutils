@@ -16,6 +16,5 @@ pub mod send_receive;
 pub mod space;
 pub mod subvolume;
 pub mod sysfs;
-pub mod verity;
 pub mod tree_search;
 pub(crate) mod util;
