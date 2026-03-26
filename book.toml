@@ -1,0 +1,9 @@
+[book]
+title = "btrfs-progrs"
+authors = ["Patrick Elsen"]
+language = "en"
+src = "docs"
+
+[build]
+build-dir = "target/book"
+create-missing = true
