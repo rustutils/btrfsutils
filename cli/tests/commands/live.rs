@@ -213,6 +213,34 @@ fn property_get_set_ro() {
     assert!(out.contains("false"), "expected ro=false:\n{out}");
 }
 
+// ── receive --chroot ─────────────────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn receive_chroot() {
+    let (_td1, mnt1) = single_mount();
+    let (_td2, mnt2) = single_mount();
+    let mp1 = mnt1.path().to_str().unwrap();
+    let mp2 = mnt2.path().to_str().unwrap();
+    let stream_file = format!("{}/chroot.bin", _td1.path().to_str().unwrap());
+
+    // Create and send a subvolume.
+    let src = format!("{mp1}/chroot_test");
+    btrfs_ok(&["subvolume", "create", &src]);
+    write_test_data(Path::new(&src), "data.bin", 8192);
+    btrfs_ok(&["property", "set", "-t", "subvol", &src, "ro", "true"]);
+    btrfs_ok(&["send", "-f", &stream_file, &src]);
+
+    // Receive with --chroot. The -f path is opened before chroot, so
+    // it uses the real filesystem path.
+    btrfs_ok(&["receive", "-C", "-f", &stream_file, mp2]);
+
+    // Verify the received subvolume.
+    let received = format!("{mp2}/chroot_test");
+    assert!(Path::new(&received).is_dir(), "received subvol not found");
+    verify_test_data(Path::new(&received), "data.bin", 8192);
+}
+
 // ── property force clear received_uuid ───────────────────────────────
 
 #[test]

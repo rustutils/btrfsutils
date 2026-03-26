@@ -73,12 +73,32 @@ impl Runnable for ReceiveCommand {
             bail!("'{}' is not a directory", mount.display());
         }
 
-        if self.chroot {
-            bail!("--chroot is not yet implemented");
-        }
-
+        // The input file must be opened before chroot (it may be outside
+        // the mount point). The stream reader consumes the input.
         let mut reader = StreamReader::new(input)?;
-        let mut ctx = ReceiveContext::new(mount)?;
+
+        let dest = if self.chroot {
+            // Confine the process to the mount point. After this, all paths
+            // in the stream are resolved relative to "/".
+            let mount_cstr = std::ffi::CString::new(
+                mount.to_str().ok_or_else(|| anyhow::anyhow!("mount path is not valid UTF-8"))?
+            ).context("mount path contains null byte")?;
+
+            if unsafe { nix::libc::chroot(mount_cstr.as_ptr()) } != 0 {
+                return Err(std::io::Error::last_os_error())
+                    .context(format!("failed to chroot to '{}'", mount.display()));
+            }
+            if unsafe { nix::libc::chdir(c"/".as_ptr()) } != 0 {
+                return Err(std::io::Error::last_os_error())
+                    .context("failed to chdir to / after chroot");
+            }
+            eprintln!("Chroot to {}", mount.display());
+            PathBuf::from("/")
+        } else {
+            mount.clone()
+        };
+
+        let mut ctx = ReceiveContext::new(&dest)?;
         let max_errors = self.max_errors.unwrap_or(0);
         let mut error_count = 0u64;
         let mut received_subvol = false;
