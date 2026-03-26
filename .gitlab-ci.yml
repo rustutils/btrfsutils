@@ -20,8 +20,6 @@ default:
       - .cargo/git
       - target/
 
-# -- Test stage ---------------------------------------------------------------
-
 lint:
   stage: test
   script:
@@ -29,7 +27,10 @@ lint:
     - cargo +nightly fmt --all --check
     - RUSTFLAGS="-D warnings" cargo check --all-targets
 
-# -- Build stage --------------------------------------------------------------
+test:
+  stage: test
+  script:
+    - cargo test
 
 build-x86:
   stage: build
@@ -51,19 +52,17 @@ build-x86-musl:
       - target/x86_64-unknown-linux-musl/release/btrfs
     expire_in: 1 week
 
-# -- Pages stage --------------------------------------------------------------
-
 pages:
   stage: pages
-  needs:
-    - job: build-x86
-      artifacts: true
-    - job: build-x86-musl
-      artifacts: true
+  image: alpine:latest
+  before_script: []
   script:
-    - mkdir -p public/binaries
-    - cp target/release/btrfs public/binaries/btrfs-x86_64
-    - cp target/x86_64-unknown-linux-musl/release/btrfs public/binaries/btrfs-x86_64-musl
+    - apk add --no-cache mdbook
+    - mdbook build
+    - mv target/book public
   artifacts:
     paths:
       - public
+  cache: {}
+  only:
+    - master
