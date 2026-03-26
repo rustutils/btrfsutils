@@ -34,8 +34,11 @@ test:
             "$binary" --ignored --test-threads=1 || failed=1
     done
 
-    # new snapshots will be owned by root, so we fix that here.
-    sudo chown -R "$(id -u):$(id -g)" cli/tests/snapshots/ cli/tests/commands/snapshots
+    # anything that we might write when running tests, change back to us.
+    sudo chown -R "$(id -u):$(id -g)" \
+        cli/tests/snapshots/ \
+        cli/tests/commands/snapshots \
+        target/test-fixtures
 
     if [[ $failed -ne 0 ]]; then
         echo ""
