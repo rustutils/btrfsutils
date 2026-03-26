@@ -13,6 +13,9 @@ use std::{
 /// Find the mount root for a given path by walking up the directory tree
 /// while the device ID (`st_dev`) remains the same. The mount root is the
 /// highest directory on the same device.
+///
+/// Note: this will not detect bind mounts of a subdirectory (where `st_dev`
+/// is the same all the way to `/`). This matches the C btrfs-progs behavior.
 fn find_mount_root(path: &Path) -> Result<PathBuf> {
     use std::os::unix::fs::MetadataExt;
 
