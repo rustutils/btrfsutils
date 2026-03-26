@@ -100,6 +100,25 @@ impl ReceiveContext {
                 ..
             } => self.process_utimes(path, atime, mtime),
             StreamCommand::UpdateExtent { .. } => Ok(()),
+            StreamCommand::EncodedWrite {
+                path, offset, unencoded_file_len, unencoded_len,
+                unencoded_offset, compression, encryption, data,
+            } => self.process_encoded_write(
+                path, *offset, *unencoded_file_len, *unencoded_len,
+                *unencoded_offset, *compression, *encryption, data,
+            ),
+            StreamCommand::Fallocate { path, mode, offset, len } => {
+                self.process_fallocate(path, *mode, *offset, *len)
+            }
+            StreamCommand::Fileattr { .. } => {
+                // Intentionally a no-op, matching C reference.  File
+                // attributes (chattr flags) are filesystem-internal and
+                // not reliably transferable across systems.
+                Ok(())
+            }
+            StreamCommand::EnableVerity { .. } => {
+                bail!("v3 ENABLE_VERITY is not yet implemented")
+            }
             StreamCommand::End => unreachable!("End is handled by the caller"),
         }
     }
@@ -254,8 +273,8 @@ impl ReceiveContext {
         let c_name = CString::new(path)
             .with_context(|| format!("snapshot name contains null byte: {path}"))?;
         btrfs_uapi::subvolume::snapshot_create(
-            parent_file.as_fd(),
             dest_dir_file.as_fd(),
+            parent_file.as_fd(),
             &c_name,
             false,
         )
@@ -590,6 +609,178 @@ impl ReceiveContext {
         }
         Ok(())
     }
+
+    fn process_fallocate(&mut self, path: &str, mode: u32, offset: u64, len: u64) -> Result<()> {
+        let full = self.full_path(path)?;
+        self.close_write_fd();
+        let file = OpenOptions::new()
+            .write(true)
+            .open(&full)
+            .with_context(|| format!("cannot open '{}' for fallocate", full.display()))?;
+        let ret = unsafe {
+            nix::libc::fallocate(
+                file.as_raw_fd(),
+                mode as i32,
+                offset as nix::libc::off_t,
+                len as nix::libc::off_t,
+            )
+        };
+        if ret < 0 {
+            return Err(std::io::Error::last_os_error())
+                .with_context(|| format!("fallocate failed on '{}'", full.display()));
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_encoded_write(
+        &mut self,
+        path: &str,
+        offset: u64,
+        unencoded_file_len: u64,
+        unencoded_len: u64,
+        unencoded_offset: u64,
+        compression: u32,
+        encryption: u32,
+        data: &[u8],
+    ) -> Result<()> {
+        if encryption != 0 {
+            bail!("encrypted encoded writes are not supported (encryption={encryption})");
+        }
+
+        let full = self.full_path(path)?;
+
+        // Reuse cached fd if writing to the same file.
+        if self.write_path != full {
+            self.close_write_fd();
+            let file = OpenOptions::new()
+                .write(true)
+                .open(&full)
+                .with_context(|| format!("cannot open '{}' for writing", full.display()))?;
+            self.write_fd = Some(file);
+            self.write_path = full.clone();
+        }
+
+        // Try the encoded write ioctl first — passes compressed data directly
+        // to the filesystem without decompression.
+        let fd = self.write_fd.as_ref().unwrap();
+        match btrfs_uapi::receive::encoded_write(
+            fd.as_fd(),
+            data,
+            offset,
+            unencoded_file_len,
+            unencoded_len,
+            unencoded_offset,
+            compression,
+            encryption,
+        ) {
+            Ok(()) => return Ok(()),
+            Err(nix::errno::Errno::ENOTTY)
+            | Err(nix::errno::Errno::EINVAL)
+            | Err(nix::errno::Errno::ENOSPC) => {
+                // Fall through to decompression.
+            }
+            Err(e) => {
+                return Err(e).with_context(|| {
+                    format!("encoded write failed on '{}'", full.display())
+                });
+            }
+        }
+
+        // Decompression fallback: decompress and pwrite.
+        let decompressed = decompress(data, unencoded_len as usize, compression)
+            .with_context(|| format!("decompression failed for '{}'", full.display()))?;
+
+        let write_data = &decompressed
+            [unencoded_offset as usize..unencoded_offset as usize + unencoded_file_len as usize];
+
+        use std::os::unix::fs::FileExt;
+        fd.write_all_at(write_data, offset)
+            .with_context(|| format!("pwrite failed on '{}'", full.display()))?;
+
+        Ok(())
+    }
+}
+
+/// Decompress `data` into a buffer of `output_len` bytes using the specified
+/// compression algorithm.
+fn decompress(data: &[u8], output_len: usize, compression: u32) -> Result<Vec<u8>> {
+    match compression {
+        0 => {
+            // No compression — data is already unencoded.
+            Ok(data.to_vec())
+        }
+        1 => {
+            // ZLIB
+            use std::io::Read;
+            let mut decoder = flate2::read::ZlibDecoder::new(data);
+            let mut out = vec![0u8; output_len];
+            decoder
+                .read_exact(&mut out)
+                .context("zlib decompression failed")?;
+            Ok(out)
+        }
+        2 => {
+            // ZSTD
+            let out = zstd::bulk::decompress(data, output_len)
+                .context("zstd decompression failed")?;
+            Ok(out)
+        }
+        3..=7 => {
+            // LZO with sector sizes 4K through 64K.
+            // Sector size = 1 << (compression - 3 + 12).
+            let sector_size = 1usize << (compression - 3 + 12);
+            decompress_lzo(data, output_len, sector_size)
+        }
+        _ => bail!("unsupported compression type {compression}"),
+    }
+}
+
+/// Decompress btrfs LZO format: data is compressed sector by sector. Each
+/// sector is independently LZO1X compressed. The format is:
+/// - 4 bytes LE: total compressed size (including this field)
+/// - For each sector:
+///   - 4 bytes LE: compressed segment length
+///   - N bytes: LZO1X compressed data
+fn decompress_lzo(data: &[u8], output_len: usize, sector_size: usize) -> Result<Vec<u8>> {
+    if data.len() < 4 {
+        bail!("LZO data too short for header");
+    }
+    let total_len = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+    if total_len > data.len() {
+        bail!("LZO total length {total_len} exceeds data length {}", data.len());
+    }
+
+    let mut out = Vec::with_capacity(output_len);
+    let mut pos = 4; // skip the 4-byte total length header
+
+    while pos < total_len && out.len() < output_len {
+        if pos + 4 > data.len() {
+            bail!("LZO segment header truncated at offset {pos}");
+        }
+        let seg_len = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+        pos += 4;
+
+        if pos + seg_len > data.len() {
+            bail!("LZO segment data truncated at offset {pos}, need {seg_len} bytes");
+        }
+
+        let remaining = (output_len - out.len()).min(sector_size);
+        let mut segment_out = vec![0u8; remaining];
+        lzo1x::decompress(&data[pos..pos + seg_len], &mut segment_out)
+            .map_err(|e| anyhow::anyhow!("LZO decompression failed at offset {pos}: {e:?}"))?;
+        out.extend_from_slice(&segment_out);
+
+        pos += seg_len;
+        // Segments are padded to 4-byte alignment.
+        pos = (pos + 3) & !3;
+    }
+
+    if out.len() < output_len {
+        out.resize(output_len, 0);
+    }
+
+    Ok(out)
 }
 
 fn path_to_cstring(path: &Path) -> Result<CString> {

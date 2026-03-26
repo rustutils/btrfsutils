@@ -279,6 +279,140 @@ fn send_receive_roundtrip() {
     verify_test_data(Path::new(&format!("{received}/dir")), "file3.bin", 32768);
 }
 
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_receive_incremental() {
+    let (_td1, mnt1) = single_mount();
+    let (_td2, mnt2) = single_mount();
+    let mp1 = mnt1.path().to_str().unwrap();
+    let mp2 = mnt2.path().to_str().unwrap();
+    let base_stream = format!("{}/base.bin", _td1.path().to_str().unwrap());
+    let incr_stream = format!("{}/incr.bin", _td1.path().to_str().unwrap());
+
+    // Create a subvolume with initial content.
+    let src = format!("{mp1}/data");
+    btrfs_ok(&["subvolume", "create", &src]);
+    write_test_data(Path::new(&src), "unchanged.bin", 8192);
+    write_test_data(Path::new(&src), "modified.bin", 4096);
+    write_test_data(Path::new(&src), "deleted.bin", 2048);
+    std::fs::create_dir(format!("{src}/subdir")).unwrap();
+    write_test_data(Path::new(&format!("{src}/subdir")), "nested.bin", 1024);
+
+    // Take a read-only snapshot as the base.
+    let base_snap = format!("{mp1}/snap_base");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &src, &base_snap]);
+
+    // Modify the subvolume: add, change, and delete files.
+    write_test_data(Path::new(&src), "added.bin", 16384);
+    // Overwrite modified.bin with different size.
+    write_test_data(Path::new(&src), "modified.bin", 32768);
+    std::fs::remove_file(format!("{src}/deleted.bin")).unwrap();
+    std::fs::create_dir(format!("{src}/newdir")).unwrap();
+    write_test_data(Path::new(&format!("{src}/newdir")), "fresh.bin", 4096);
+
+    // Take a second read-only snapshot.
+    let incr_snap = format!("{mp1}/snap_incr");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &src, &incr_snap]);
+
+    // Full send the base snapshot to the second mount.
+    btrfs_ok(&["send", "-f", &base_stream, &base_snap]);
+    btrfs_ok(&["receive", "-f", &base_stream, mp2]);
+
+    // Verify the base was received correctly.
+    let recv_base = format!("{mp2}/snap_base");
+    verify_test_data(Path::new(&recv_base), "unchanged.bin", 8192);
+    verify_test_data(Path::new(&recv_base), "modified.bin", 4096);
+    verify_test_data(Path::new(&recv_base), "deleted.bin", 2048);
+    verify_test_data(Path::new(&format!("{recv_base}/subdir")), "nested.bin", 1024);
+
+    // Incremental send: only the changes since base.
+    btrfs_ok(&["send", "-p", &base_snap, "-f", &incr_stream, &incr_snap]);
+
+    // The incremental stream should be non-empty.
+    let incr_size = std::fs::metadata(&incr_stream).unwrap().len();
+    assert!(incr_size > 0, "incremental stream is empty");
+
+    // Receive the incremental stream.
+    btrfs_ok(&["receive", "-f", &incr_stream, mp2]);
+
+    // Verify the incremental snapshot has the correct final state.
+    let recv_incr = format!("{mp2}/snap_incr");
+    assert!(Path::new(&recv_incr).is_dir(), "incremental snapshot not found");
+
+    // Unchanged file should be intact.
+    verify_test_data(Path::new(&recv_incr), "unchanged.bin", 8192);
+
+    // Modified file should have the new content and size.
+    verify_test_data(Path::new(&recv_incr), "modified.bin", 32768);
+
+    // Deleted file should be gone.
+    assert!(
+        !Path::new(&format!("{recv_incr}/deleted.bin")).exists(),
+        "deleted.bin should not exist in incremental snapshot"
+    );
+
+    // Added file should be present.
+    verify_test_data(Path::new(&recv_incr), "added.bin", 16384);
+
+    // Original nested file should still be there.
+    verify_test_data(Path::new(&format!("{recv_incr}/subdir")), "nested.bin", 1024);
+
+    // New directory and file should be present.
+    verify_test_data(Path::new(&format!("{recv_incr}/newdir")), "fresh.bin", 4096);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_receive_v2_compressed() {
+    // Source: mount with zstd compression so writes produce compressed extents.
+    let td1 = tempfile::tempdir().unwrap();
+    let file1 = BackingFile::new(td1.path(), "disk.img", 512_000_000);
+    file1.mkfs();
+    let lo1 = LoopbackDevice::new(file1);
+    let mnt1 = common::Mount::with_options(lo1, td1.path(), &["compress=zstd"]);
+    let mp1 = mnt1.path().to_str().unwrap();
+
+    // Destination: plain mount (no compression).
+    let (_td2, mnt2) = single_mount();
+    let mp2 = mnt2.path().to_str().unwrap();
+
+    let stream_file = format!("{}/v2.bin", td1.path().to_str().unwrap());
+
+    // Create a subvolume and write compressible data. The compress mount
+    // option ensures the kernel stores these extents compressed on disk.
+    let src = format!("{mp1}/v2test");
+    btrfs_ok(&["subvolume", "create", &src]);
+    common::write_compressible_data(Path::new(&src), "zeros.bin", 256 * 1024);
+    write_test_data(Path::new(&src), "pattern.bin", 64 * 1024);
+    btrfs_ok(&["filesystem", "sync", mp1]);
+
+    // Make read-only and send with --compressed-data (forces v2 protocol).
+    btrfs_ok(&["property", "set", "-t", "subvol", &src, "ro", "true"]);
+    btrfs_ok(&["send", "--compressed-data", "-f", &stream_file, &src]);
+
+    // Verify the stream contains encoded_write commands via --dump.
+    let dump = btrfs_ok(&["receive", "--dump", "-f", &stream_file]);
+    assert!(
+        dump.contains("encoded_write"),
+        "expected encoded_write in v2 stream dump:\n{dump}"
+    );
+
+    // Receive on the second mount.
+    btrfs_ok(&["receive", "-f", &stream_file, mp2]);
+
+    // Verify data integrity.
+    let received = format!("{mp2}/v2test");
+    assert!(Path::new(&received).is_dir(), "received subvol not found");
+
+    // zeros.bin: 256KB of all zeros.
+    let zeros = std::fs::read(format!("{received}/zeros.bin")).unwrap();
+    assert_eq!(zeros.len(), 256 * 1024);
+    assert!(zeros.iter().all(|&b| b == 0), "zeros.bin contains non-zero data");
+
+    // pattern.bin: deterministic test data.
+    verify_test_data(Path::new(&received), "pattern.bin", 64 * 1024);
+}
+
 // ── scrub ────────────────────────────────────────────────────────────
 
 #[test]
@@ -481,4 +615,185 @@ fn qgroup_create_destroy() {
 
     btrfs_ok(&["qgroup", "destroy", "1/100", mp]);
     btrfs_ok(&["quota", "disable", mp]);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn qgroup_assign_remove() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    btrfs_ok(&["quota", "enable", mp]);
+    btrfs_ok(&["subvolume", "create", &format!("{mp}/sub1")]);
+    btrfs_ok(&["qgroup", "create", "1/100", mp]);
+
+    // Assign the level-0 qgroup for sub1 to the level-1 group.
+    // sub1 is the first subvolume, so its qgroup is 0/256.
+    btrfs_ok(&["qgroup", "assign", "--no-rescan", "0/256", "1/100", mp]);
+
+    let out = btrfs_ok(&["qgroup", "show", "-pc", mp]);
+    assert!(out.contains("1/100"), "expected parent group in show:\n{out}");
+
+    // Remove the assignment.
+    btrfs_ok(&["qgroup", "remove", "--no-rescan", "0/256", "1/100", mp]);
+
+    btrfs_ok(&["qgroup", "destroy", "1/100", mp]);
+    btrfs_ok(&["quota", "disable", mp]);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn qgroup_limit() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    btrfs_ok(&["quota", "enable", mp]);
+
+    // Set a referenced limit on the top-level qgroup.
+    btrfs_ok(&["qgroup", "limit", "1G", "0/5", mp]);
+
+    let out = btrfs_ok(&["qgroup", "show", "-re", mp]);
+    assert!(out.contains("0/5"), "expected qgroup entry:\n{out}");
+
+    // Remove the limit.
+    btrfs_ok(&["qgroup", "limit", "none", "0/5", mp]);
+
+    btrfs_ok(&["quota", "disable", mp]);
+}
+
+// ── quota rescan ─────────────────────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn quota_rescan() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    btrfs_ok(&["quota", "enable", mp]);
+
+    // Start a rescan and wait for completion.
+    btrfs_ok(&["quota", "rescan", "-w", mp]);
+
+    // Query rescan status — should report no rescan in progress.
+    let out = btrfs_ok(&["quota", "rescan", "-s", mp]);
+    assert!(
+        out.contains("rescan") || out.contains("quota"),
+        "expected rescan status:\n{out}"
+    );
+
+    btrfs_ok(&["quota", "disable", mp]);
+}
+
+// ── scrub limit / resume ─────────────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn scrub_limit() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // Read the current limit (should show a table).
+    let out = btrfs_ok(&["scrub", "limit", mp]);
+    assert!(
+        out.contains("devid") || out.contains("limit"),
+        "expected limit table:\n{out}"
+    );
+
+    // Set a limit on all devices.
+    btrfs_ok(&["scrub", "limit", "-a", "-l", "100m", mp]);
+
+    // Read it back.
+    let out = btrfs_ok(&["scrub", "limit", mp]);
+    assert!(
+        out.contains("100") || out.contains("104857600"),
+        "expected limit value in output:\n{out}"
+    );
+
+    // Clear the limit (set to 0 = unlimited).
+    btrfs_ok(&["scrub", "limit", "-a", "-l", "0", mp]);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn scrub_resume_no_scrub() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // Resume when no scrub has been started — may succeed (starts a new
+    // scrub) or fail gracefully depending on kernel state. Either way it
+    // should not crash.
+    let (_, _, code) = btrfs(&["scrub", "resume", mp]);
+    assert!(code == 0 || code == 1, "unexpected exit code: {code}");
+}
+
+// ── balance resume ───────────────────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn balance_resume_not_running() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    let (_, stderr, code) = btrfs(&["balance", "resume", mp]);
+    assert_ne!(code, 0);
+    assert!(
+        stderr.contains("Not in progress") || stderr.contains("balance"),
+        "expected not-in-progress error:\n{stderr}"
+    );
+}
+
+// ── replace status (never started) ──────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn replace_status_never_started() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    let out = btrfs_ok(&["replace", "status", mp]);
+    assert!(
+        out.contains("no device replace") || out.contains("Never") || out.contains("started"),
+        "expected never-started status:\n{out}"
+    );
+}
+
+// ── device scan --forget ─────────────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn device_scan_forget_stale() {
+    let (_td, _mnt) = single_mount();
+
+    // Forget all stale (unmounted) devices. On a test system this may or
+    // may not find anything to forget, but the command should succeed.
+    let out = btrfs_ok(&["device", "scan", "--forget"]);
+    assert!(
+        out.contains("unregistered"),
+        "expected unregistered message:\n{out}"
+    );
+}
+
+// ── subvolume create/delete with multiple paths ──────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_create_multiple() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    btrfs_ok(&[
+        "subvolume", "create",
+        &format!("{mp}/multi1"),
+        &format!("{mp}/multi2"),
+        &format!("{mp}/multi3"),
+    ]);
+
+    assert!(Path::new(&format!("{mp}/multi1")).is_dir());
+    assert!(Path::new(&format!("{mp}/multi2")).is_dir());
+    assert!(Path::new(&format!("{mp}/multi3")).is_dir());
+
+    let out = btrfs_ok(&["subvolume", "list", mp]);
+    assert!(out.contains("multi1"), "expected multi1:\n{out}");
+    assert!(out.contains("multi2"), "expected multi2:\n{out}");
+    assert!(out.contains("multi3"), "expected multi3:\n{out}");
 }

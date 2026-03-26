@@ -126,6 +126,29 @@ pub fn dump_stream<R: Read>(input: R) -> Result<()> {
                     StreamCommand::UpdateExtent { path, offset, len } => {
                         println!("update_extent   ./{path}    offset={offset} len={len}");
                     }
+                    StreamCommand::EncodedWrite {
+                        path, offset, unencoded_file_len, unencoded_len,
+                        unencoded_offset, compression, encryption, data,
+                    } => {
+                        println!(
+                            "encoded_write   ./{path}    offset={offset} len={} unencoded_file_len={unencoded_file_len} unencoded_len={unencoded_len} unencoded_offset={unencoded_offset} compression={compression} encryption={encryption}",
+                            data.len()
+                        );
+                    }
+                    StreamCommand::Fallocate { path, mode, offset, len } => {
+                        println!("fallocate       ./{path}    mode={mode} offset={offset} len={len}");
+                    }
+                    StreamCommand::Fileattr { path, attr } => {
+                        println!("fileattr        ./{path}    fileattr=0x{attr:x}");
+                    }
+                    StreamCommand::EnableVerity {
+                        path, algorithm, block_size, salt, sig,
+                    } => {
+                        println!(
+                            "enable_verity   ./{path}    algorithm={algorithm} block_size={block_size} salt_len={} sig_len={}",
+                            salt.len(), sig.len()
+                        );
+                    }
                     StreamCommand::End => {
                         println!("end");
                     }

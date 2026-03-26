@@ -6,8 +6,8 @@
 //! subvolumes by their UUID or received UUID.
 
 use crate::raw::{
-    self, btrfs_ioc_clone_range, btrfs_ioc_set_received_subvol,
-    btrfs_ioctl_clone_range_args, btrfs_ioctl_received_subvol_args,
+    self, btrfs_ioc_clone_range, btrfs_ioc_encoded_write, btrfs_ioc_set_received_subvol,
+    btrfs_ioctl_clone_range_args, btrfs_ioctl_encoded_io_args, btrfs_ioctl_received_subvol_args,
 };
 use crate::tree_search::{SearchKey, tree_search};
 use nix::libc::c_int;
@@ -69,6 +69,49 @@ pub fn clone_range(
     // SAFETY: args is fully initialized, both fds are valid.
     unsafe {
         btrfs_ioc_clone_range(dest_fd.as_raw_fd() as c_int, &args)?;
+    }
+
+    Ok(())
+}
+
+/// Write pre-compressed data to a file using `BTRFS_IOC_ENCODED_WRITE`.
+///
+/// This passes compressed data directly to the filesystem without
+/// decompression, which is more efficient than decompressing and writing.
+/// The kernel may reject the call with `ENOTTY` (old kernel), `EINVAL`
+/// (unsupported parameters), or `ENOSPC`; callers should fall back to
+/// manual decompression + pwrite in those cases.
+#[allow(clippy::too_many_arguments)]
+pub fn encoded_write(
+    fd: BorrowedFd<'_>,
+    data: &[u8],
+    offset: u64,
+    unencoded_file_len: u64,
+    unencoded_len: u64,
+    unencoded_offset: u64,
+    compression: u32,
+    encryption: u32,
+) -> nix::Result<()> {
+    let iov = nix::libc::iovec {
+        iov_base: data.as_ptr() as *mut _,
+        iov_len: data.len(),
+    };
+
+    let mut args: btrfs_ioctl_encoded_io_args = unsafe { std::mem::zeroed() };
+    args.iov = &iov as *const _ as *mut _;
+    args.iovcnt = 1;
+    args.offset = offset as i64;
+    args.len = unencoded_file_len;
+    args.unencoded_len = unencoded_len;
+    args.unencoded_offset = unencoded_offset;
+    args.compression = compression;
+    args.encryption = encryption;
+
+    // SAFETY: args.iov points to a stack-allocated iovec whose iov_base
+    // references `data` which outlives this call. The ioctl reads from the
+    // iov buffers and writes encoded data to the file.
+    unsafe {
+        btrfs_ioc_encoded_write(fd.as_raw_fd() as c_int, &args)?;
     }
 
     Ok(())

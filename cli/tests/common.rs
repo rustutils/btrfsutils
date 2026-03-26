@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! RAII test helpers for btrfs integration tests.
 //!
 //! Each struct consumes and owns the previous layer. Drop cleans up from the
@@ -159,18 +160,25 @@ pub struct Mount {
 impl Mount {
     /// Creates `base_dir/mnt` and mounts the loop device there, consuming it.
     pub fn new(dev: LoopbackDevice, base_dir: &Path) -> Self {
+        Self::with_options(dev, base_dir, &[])
+    }
+
+    /// Creates `base_dir/mnt` and mounts with additional `-o` options.
+    pub fn with_options(dev: LoopbackDevice, base_dir: &Path, extra_opts: &[&str]) -> Self {
         let mountpoint = base_dir.join("mnt");
         fs::create_dir_all(&mountpoint)
             .unwrap_or_else(|e| panic!("failed to create {}: {e}", mountpoint.display()));
-        run(
-            "mount",
-            &[
-                "-t",
-                "btrfs",
-                dev.path().to_str().unwrap(),
-                mountpoint.to_str().unwrap(),
-            ],
-        );
+        let mut args = vec!["-t", "btrfs"];
+        if !extra_opts.is_empty() {
+            args.push("-o");
+            // Join multiple options with commas.
+            let opts = extra_opts.join(",");
+            // Leak the string so it lives long enough — this is test code.
+            args.push(Box::leak(opts.into_boxed_str()));
+        }
+        args.push(dev.path().to_str().unwrap());
+        args.push(mountpoint.to_str().unwrap());
+        run("mount", &args);
         let file = File::open(&mountpoint).expect("failed to open mount");
         Self {
             mountpoint,

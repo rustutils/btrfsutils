@@ -42,6 +42,12 @@ const BTRFS_SEND_C_CHOWN: u16 = 19;
 const BTRFS_SEND_C_UTIMES: u16 = 20;
 const BTRFS_SEND_C_END: u16 = 21;
 const BTRFS_SEND_C_UPDATE_EXTENT: u16 = 22;
+// v2 commands.
+const BTRFS_SEND_C_FALLOCATE: u16 = 23;
+const BTRFS_SEND_C_FILEATTR: u16 = 24;
+const BTRFS_SEND_C_ENCODED_WRITE: u16 = 25;
+// v3 commands.
+const BTRFS_SEND_C_ENABLE_VERITY: u16 = 26;
 
 // Attribute types.
 const BTRFS_SEND_A_UUID: u16 = 1;
@@ -70,6 +76,19 @@ const BTRFS_SEND_A_CLONE_CTRANSID: u16 = 21;
 const BTRFS_SEND_A_CLONE_PATH: u16 = 22;
 const BTRFS_SEND_A_CLONE_OFFSET: u16 = 23;
 const BTRFS_SEND_A_CLONE_LEN: u16 = 24;
+// v2 attribute types.
+const BTRFS_SEND_A_FALLOCATE_MODE: u16 = 25;
+const BTRFS_SEND_A_FILEATTR: u16 = 26;
+const BTRFS_SEND_A_UNENCODED_FILE_LEN: u16 = 27;
+const BTRFS_SEND_A_UNENCODED_LEN: u16 = 28;
+const BTRFS_SEND_A_UNENCODED_OFFSET: u16 = 29;
+const BTRFS_SEND_A_COMPRESSION: u16 = 30;
+const BTRFS_SEND_A_ENCRYPTION: u16 = 31;
+// v3 attribute types.
+const BTRFS_SEND_A_VERITY_ALGORITHM: u16 = 32;
+const BTRFS_SEND_A_VERITY_BLOCK_SIZE: u16 = 33;
+const BTRFS_SEND_A_VERITY_SALT_DATA: u16 = 34;
+const BTRFS_SEND_A_VERITY_SIG_DATA: u16 = 35;
 
 /// A timestamp from the send stream (sec + nsec).
 #[derive(Debug, Clone, Copy)]
@@ -175,6 +194,44 @@ pub enum StreamCommand {
         offset: u64,
         len: u64,
     },
+    /// v2: write pre-compressed data that can be passed through to the
+    /// filesystem without decompression via `BTRFS_IOC_ENCODED_WRITE`.
+    EncodedWrite {
+        path: String,
+        offset: u64,
+        /// Unencoded (decompressed) file length to write.
+        unencoded_file_len: u64,
+        /// Total unencoded length (may be larger due to sector alignment).
+        unencoded_len: u64,
+        /// Offset within the unencoded data where the file data starts.
+        unencoded_offset: u64,
+        /// Compression algorithm (0=none, 1=zlib, 2=zstd, 3-7=lzo with varying sector sizes).
+        compression: u32,
+        /// Encryption algorithm (currently always 0).
+        encryption: u32,
+        data: Vec<u8>,
+    },
+    /// v2: preallocate space or punch a hole.
+    Fallocate {
+        path: String,
+        /// `FALLOC_FL_*` flags (0=allocate, 1=KEEP_SIZE, 3=PUNCH_HOLE|KEEP_SIZE).
+        mode: u32,
+        offset: u64,
+        len: u64,
+    },
+    /// v2: set inode file attributes (chattr flags).
+    Fileattr {
+        path: String,
+        attr: u64,
+    },
+    /// v3: enable fs-verity on a file.
+    EnableVerity {
+        path: String,
+        algorithm: u8,
+        block_size: u32,
+        salt: Vec<u8>,
+        sig: Vec<u8>,
+    },
     End,
 }
 
@@ -204,8 +261,8 @@ impl<R: Read> StreamReader<R> {
                 .unwrap(),
         );
 
-        if version == 0 || version > 2 {
-            bail!("unsupported send stream version {version} (supported: 1-2)");
+        if version == 0 || version > 3 {
+            bail!("unsupported send stream version {version} (supported: 1-3)");
         }
 
         Ok(Self {
@@ -392,6 +449,40 @@ impl<R: Read> StreamReader<R> {
                 offset: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILE_OFFSET, "file_offset")?,
                 len: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_SIZE, "size")?,
             })),
+            BTRFS_SEND_C_FALLOCATE => Ok(Some(StreamCommand::Fallocate {
+                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                mode: attr_u32(&self.buf, &attrs, BTRFS_SEND_A_FALLOCATE_MODE, "fallocate_mode")?,
+                offset: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILE_OFFSET, "file_offset")?,
+                len: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_SIZE, "size")?,
+            })),
+            BTRFS_SEND_C_FILEATTR => Ok(Some(StreamCommand::Fileattr {
+                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                attr: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILEATTR, "fileattr")?,
+            })),
+            BTRFS_SEND_C_ENCODED_WRITE => Ok(Some(StreamCommand::EncodedWrite {
+                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                offset: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILE_OFFSET, "file_offset")?,
+                unencoded_file_len: attr_u64(
+                    &self.buf, &attrs, BTRFS_SEND_A_UNENCODED_FILE_LEN, "unencoded_file_len",
+                )?,
+                unencoded_len: attr_u64(
+                    &self.buf, &attrs, BTRFS_SEND_A_UNENCODED_LEN, "unencoded_len",
+                )?,
+                unencoded_offset: attr_u64(
+                    &self.buf, &attrs, BTRFS_SEND_A_UNENCODED_OFFSET, "unencoded_offset",
+                )?,
+                // Compression and encryption default to 0 if absent.
+                compression: attr_opt_u32(&self.buf, &attrs, BTRFS_SEND_A_COMPRESSION, 0),
+                encryption: attr_opt_u32(&self.buf, &attrs, BTRFS_SEND_A_ENCRYPTION, 0),
+                data: attr_data(&self.buf, &attrs, BTRFS_SEND_A_DATA, "data")?,
+            })),
+            BTRFS_SEND_C_ENABLE_VERITY => Ok(Some(StreamCommand::EnableVerity {
+                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                algorithm: attr_u8(&self.buf, &attrs, BTRFS_SEND_A_VERITY_ALGORITHM, "verity_algorithm")?,
+                block_size: attr_u32(&self.buf, &attrs, BTRFS_SEND_A_VERITY_BLOCK_SIZE, "verity_block_size")?,
+                salt: attr_data(&self.buf, &attrs, BTRFS_SEND_A_VERITY_SALT_DATA, "verity_salt")?,
+                sig: attr_data(&self.buf, &attrs, BTRFS_SEND_A_VERITY_SIG_DATA, "verity_sig")?,
+            })),
             BTRFS_SEND_C_END => Ok(Some(StreamCommand::End)),
             _ => bail!("unknown send stream command type {cmd}"),
         }
@@ -521,6 +612,36 @@ fn attr_timespec(
     })
 }
 
+fn attr_u32(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<u32> {
+    let data = get_attr(buf, attrs, attr_type, name)?;
+    if data.len() < 4 {
+        bail!("attribute {name} too short for u32: {} bytes", data.len());
+    }
+    Ok(u32::from_le_bytes(data[0..4].try_into().unwrap()))
+}
+
+fn attr_u8(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<u8> {
+    let data = get_attr(buf, attrs, attr_type, name)?;
+    if data.is_empty() {
+        bail!("attribute {name} is empty");
+    }
+    Ok(data[0])
+}
+
+/// Like `get_attr` but returns `None` instead of an error when the attribute
+/// is absent. Used for optional attributes in v2 commands.
+fn get_attr_opt<'a>(buf: &'a [u8], attrs: &AttrTable, attr_type: u16) -> Option<&'a [u8]> {
+    let (offset, len) = attrs[(attr_type - 1) as usize]?;
+    Some(&buf[offset..offset + len])
+}
+
+fn attr_opt_u32(buf: &[u8], attrs: &AttrTable, attr_type: u16, default: u32) -> u32 {
+    match get_attr_opt(buf, attrs, attr_type) {
+        Some(data) if data.len() >= 4 => u32::from_le_bytes(data[0..4].try_into().unwrap()),
+        _ => default,
+    }
+}
+
 fn attr_data(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<Vec<u8>> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     Ok(data.to_vec())
@@ -635,10 +756,20 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_version_three() {
+    fn valid_v3_header() {
         let mut buf = Vec::new();
         buf.extend_from_slice(SEND_STREAM_MAGIC);
         buf.extend_from_slice(&3u32.to_le_bytes());
+        buf.extend_from_slice(&build_command(BTRFS_SEND_C_END, &[]));
+        let reader = StreamReader::new(Cursor::new(buf)).unwrap();
+        assert_eq!(reader.version(), 3);
+    }
+
+    #[test]
+    fn unsupported_version_four() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(SEND_STREAM_MAGIC);
+        buf.extend_from_slice(&4u32.to_le_bytes());
         let err = StreamReader::new(Cursor::new(buf)).unwrap_err();
         assert!(format!("{err}").contains("unsupported"), "got: {err}");
     }
