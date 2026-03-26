@@ -46,7 +46,7 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SubvolumeFlags: u64 {
         /// Subvolume is read-only.
-        const RDONLY = 1 << 1;
+        const RDONLY = BTRFS_SUBVOL_RDONLY as u64;
     }
 }
 

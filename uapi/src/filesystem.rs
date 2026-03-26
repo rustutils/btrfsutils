@@ -9,7 +9,7 @@ use crate::raw::{
     BTRFS_FS_INFO_FLAG_GENERATION, btrfs_ioc_fs_info, btrfs_ioc_get_fslabel,
     btrfs_ioc_resize, btrfs_ioc_set_fslabel, btrfs_ioc_start_sync,
     btrfs_ioc_sync, btrfs_ioc_wait_sync, btrfs_ioctl_fs_info_args,
-    btrfs_ioctl_vol_args,
+    btrfs_ioctl_vol_args, BTRFS_LABEL_SIZE,
 };
 use nix::libc::c_char;
 use std::{
@@ -79,14 +79,11 @@ pub fn wait_sync(fd: BorrowedFd, transid: u64) -> nix::Result<()> {
     Ok(())
 }
 
-/// Maximum label length including the null terminator (BTRFS_LABEL_SIZE).
-const BTRFS_LABEL_SIZE: usize = crate::raw::BTRFS_LABEL_SIZE as usize;
-
 /// Read the label of the btrfs filesystem referred to by `fd`.
 ///
 /// Returns the label as a [`CString`]. An empty string means no label is set.
 pub fn label_get(fd: BorrowedFd) -> nix::Result<CString> {
-    let mut buf = [0i8; BTRFS_LABEL_SIZE];
+    let mut buf = [0i8; BTRFS_LABEL_SIZE as usize];
     unsafe { btrfs_ioc_get_fslabel(fd.as_raw_fd(), &mut buf) }?;
     let cstr = unsafe { CStr::from_ptr(buf.as_ptr()) };
     // CStr::to_owned() copies the bytes into a freshly allocated CString,
@@ -101,10 +98,10 @@ pub fn label_get(fd: BorrowedFd) -> nix::Result<CString> {
 /// kernel.
 pub fn label_set(fd: BorrowedFd, label: &CStr) -> nix::Result<()> {
     let bytes = label.to_bytes();
-    if bytes.len() >= BTRFS_LABEL_SIZE {
+    if bytes.len() >= BTRFS_LABEL_SIZE as usize {
         return Err(nix::errno::Errno::EINVAL);
     }
-    let mut buf = [0i8; BTRFS_LABEL_SIZE];
+    let mut buf = [0i8; BTRFS_LABEL_SIZE as usize];
     for (i, &b) in bytes.iter().enumerate() {
         buf[i] = b as c_char;
     }
