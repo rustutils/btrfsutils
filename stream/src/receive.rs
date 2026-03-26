@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use btrfs_disk::stream::{StreamCommand, Timespec};
+use crate::stream::{StreamCommand, Timespec};
 use std::{
     ffi::CString,
     fs::{self, File, OpenOptions},
@@ -10,6 +10,45 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Applies a parsed btrfs send stream to a mounted btrfs filesystem.
+///
+/// `ReceiveContext` is the receive-side counterpart to the kernel's
+/// `BTRFS_IOC_SEND`. It takes [`StreamCommand`] values produced by
+/// [`StreamReader`][crate::StreamReader] and executes the corresponding
+/// filesystem operations to recreate the sent subvolume on the destination.
+///
+/// The typical usage pattern is:
+///
+/// 1. Create a context with [`ReceiveContext::new`], pointing at the
+///    destination directory (must be on a mounted btrfs filesystem).
+/// 2. Feed each command from the stream into [`process_command`][Self::process_command].
+/// 3. When the stream yields [`StreamCommand::End`], call
+///    [`finish_subvol`][Self::finish_subvol] to finalize the received
+///    subvolume (sets the received UUID and marks it read-only).
+/// 4. For multi-stream input, repeat from step 2 with a new stream reader.
+///
+/// Supported operations:
+///
+/// v1 commands: subvolume and snapshot creation, file/directory/symlink/fifo/
+/// socket/device node creation, rename, link, unlink, rmdir, write (with fd
+/// caching for sequential writes to the same file), clone range (resolves
+/// source subvolume via UUID tree lookup), xattr set/remove, truncate, chmod,
+/// chown, utimes. UpdateExtent is a no-op (informational only).
+///
+/// v2 commands: encoded write (passes compressed data directly to the kernel
+/// via `BTRFS_IOC_ENCODED_WRITE`, with automatic decompression fallback for
+/// zlib, zstd, and lzo when the ioctl is unavailable or fails), fallocate
+/// (preallocate and punch hole). Fileattr is intentionally a no-op, matching
+/// the C reference.
+///
+/// v3 commands: enable verity (`FS_IOC_ENABLE_VERITY`).
+///
+/// Snapshot creation resolves the parent subvolume by searching the UUID tree
+/// for the received UUID first, then falling back to the regular UUID. The
+/// parent's ctransid is verified against both ctransid and stransid to handle
+/// parents that were themselves received.
+///
+/// Requires `CAP_SYS_ADMIN` and a mounted, writable btrfs filesystem.
 pub struct ReceiveContext {
     /// File descriptor to the mount root (for UUID tree searches and snapshots).
     mnt_fd: File,
@@ -30,6 +69,11 @@ pub struct ReceiveContext {
 }
 
 impl ReceiveContext {
+    /// Create a new receive context rooted at `dest_dir`.
+    ///
+    /// `dest_dir` must be a directory on a mounted btrfs filesystem. An fd to
+    /// this directory is kept open for the lifetime of the context and used for
+    /// UUID tree lookups when resolving snapshot parents and clone sources.
     pub fn new(dest_dir: &Path) -> Result<Self> {
         let mnt_fd = File::open(dest_dir)
             .with_context(|| format!("cannot open destination '{}'", dest_dir.display()))?;
@@ -46,6 +90,13 @@ impl ReceiveContext {
         })
     }
 
+    /// Dispatch and execute a single stream command.
+    ///
+    /// The caller is responsible for handling [`StreamCommand::End`] before
+    /// calling this method (it will panic on `End`). All other command types
+    /// are dispatched to the appropriate handler. Paths in the command are
+    /// resolved relative to the current subvolume within the destination
+    /// directory.
     pub fn process_command(&mut self, cmd: &StreamCommand) -> Result<()> {
         match cmd {
             StreamCommand::Subvol {
@@ -141,7 +192,13 @@ impl ReceiveContext {
         }
     }
 
-    /// Finalize the current subvolume: set received UUID and make read-only.
+    /// Finalize the current subvolume after all commands have been applied.
+    ///
+    /// This sets the received UUID and stransid on the subvolume via
+    /// `BTRFS_IOC_SET_RECEIVED_SUBVOL`, then marks it read-only. Call this
+    /// after processing a [`StreamCommand::End`] or at EOF if a subvolume
+    /// was in progress. Safe to call when no subvolume is active (returns
+    /// `Ok(())` immediately).
     pub fn finish_subvol(&mut self) -> Result<()> {
         self.close_write_fd();
 
@@ -182,6 +239,12 @@ impl ReceiveContext {
         Ok(())
     }
 
+    /// Close the cached write file descriptor, if any.
+    ///
+    /// Write operations cache an open fd to avoid repeated open/close when
+    /// the stream contains sequential writes to the same file. Call this
+    /// before operations that require no open writable fds (e.g. enabling
+    /// verity) or when switching subvolumes.
     pub fn close_write_fd(&mut self) {
         self.write_fd = None;
         self.write_path = PathBuf::new();

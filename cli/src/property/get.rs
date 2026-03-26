@@ -1,14 +1,11 @@
-use super::PropertyObjectType;
+use super::{PropertyObjectType, detect_object_types, property_names};
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, anyhow, bail};
 use btrfs_uapi::{filesystem::label_get, subvolume::subvolume_flags_get};
 use clap::Parser;
 use std::{
     fs::File,
-    os::unix::{
-        fs::{FileTypeExt, MetadataExt},
-        io::AsFd,
-    },
+    os::unix::io::AsFd,
     path::PathBuf,
 };
 
@@ -34,7 +31,7 @@ impl Runnable for PropertyGetCommand {
             .with_context(|| format!("failed to open '{}'", self.object.display()))?;
 
         // Detect object type if not specified
-        let detected_types = detect_object_types(&self.object)?;
+        let detected_types = detect_object_types(&self.object);
         let target_type = match self.object_type {
             Some(t) => t,
             None => {
@@ -56,65 +53,15 @@ impl Runnable for PropertyGetCommand {
         if let Some(name) = &self.name {
             get_property(&file, target_type, name, &self.object)?;
         } else {
-            // Otherwise, list all properties for this object type
-            list_properties(target_type, &self.object)?;
+            // Otherwise, list all properties with their values
+            for name in property_names(target_type) {
+                // Best-effort: print what we can, skip errors for individual properties
+                let _ = get_property(&file, target_type, name, &self.object);
+            }
         }
 
         Ok(())
     }
-}
-
-fn detect_object_types(path: &PathBuf) -> Result<Vec<PropertyObjectType>> {
-    let mut types = Vec::new();
-
-    // Try to stat the path
-    let metadata = std::fs::metadata(path).ok();
-
-    if let Some(metadata) = metadata {
-        // All files on btrfs are inodes
-        types.push(PropertyObjectType::Inode);
-
-        // Check if it's a block device (device property)
-        if metadata.file_type().is_block_device() {
-            types.push(PropertyObjectType::Device);
-        }
-
-        // Try to get subvolume info - if it works, it's a subvolume
-        if let Ok(file) = File::open(path) {
-            if btrfs_uapi::subvolume::subvolume_info(file.as_fd()).is_ok() {
-                // If the inode is BTRFS_FIRST_FREE_OBJECTID, it's a subvolume or filesystem root
-                if metadata.ino() == 256 {
-                    types.push(PropertyObjectType::Subvol);
-
-                    // Check if it's the filesystem root
-                    if is_filesystem_root(path).unwrap_or(false) {
-                        types.push(PropertyObjectType::Filesystem);
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(types)
-}
-
-fn is_filesystem_root(path: &PathBuf) -> Result<bool> {
-    let canonical = std::fs::canonicalize(path)?;
-    let parent = canonical.parent();
-
-    // The filesystem root is the mount point
-    // We can check if the parent has a different filesystem
-    if let Some(parent) = parent {
-        let canonical_metadata = std::fs::metadata(&canonical)?;
-        let parent_metadata = std::fs::metadata(parent)?;
-
-        // Different device numbers means we crossed a filesystem boundary
-        if canonical_metadata.dev() != parent_metadata.dev() {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
 }
 
 fn get_property(
@@ -137,7 +84,6 @@ fn get_property(
             println!("label={}", label.to_bytes().escape_ascii());
         }
         (PropertyObjectType::Inode, "compression") => {
-            // Try to get compression xattr
             get_compression_property(file, path)?;
         }
         _ => {
@@ -205,25 +151,6 @@ fn get_compression_property(file: &File, path: &PathBuf) -> Result<()> {
 
     let value = String::from_utf8_lossy(&buf);
     println!("compression={}", value);
-
-    Ok(())
-}
-
-fn list_properties(obj_type: PropertyObjectType, _path: &PathBuf) -> Result<()> {
-    match obj_type {
-        PropertyObjectType::Subvol => {
-            println!("{:<20}{}", "ro", "read-only status of a subvolume");
-        }
-        PropertyObjectType::Filesystem | PropertyObjectType::Device => {
-            println!("{:<20}{}", "label", "label of the filesystem");
-        }
-        PropertyObjectType::Inode => {
-            println!(
-                "{:<20}{}",
-                "compression", "compression algorithm for the file or directory"
-            );
-        }
-    }
 
     Ok(())
 }

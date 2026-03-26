@@ -129,27 +129,23 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "btrfs-disk",
+ "btrfs-stream",
  "btrfs-uapi",
  "clap",
  "env_logger",
- "flate2",
  "insta",
  "log",
- "lzo1x",
  "nix",
  "regex-lite",
  "tempfile",
  "uuid",
- "zstd",
 ]
 
 [[package]]
 name = "btrfs-disk"
 version = "0.2.0"
 dependencies = [
- "anyhow",
  "bindgen",
- "crc32c",
  "uuid",
 ]
 
@@ -160,6 +156,20 @@ dependencies = [
  "btrfs-cli",
  "clap",
  "clap_mangen",
+]
+
+[[package]]
+name = "btrfs-stream"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "btrfs-uapi",
+ "crc32c",
+ "flate2",
+ "lzo1x",
+ "nix",
+ "uuid",
+ "zstd",
 ]
 
 [[package]]

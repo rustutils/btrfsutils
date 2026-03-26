@@ -1,11 +1,9 @@
 mod dump;
-mod ops;
 
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
-use btrfs_disk::stream::{StreamCommand, StreamReader};
+use btrfs_stream::{ReceiveContext, StreamCommand, StreamReader};
 use clap::Parser;
-use ops::ReceiveContext;
 use std::{fs::File, io, path::PathBuf};
 
 /// Receive subvolumes from a stream.

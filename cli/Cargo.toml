@@ -21,11 +21,9 @@ env_logger = { workspace = true }
 log = { workspace = true }
 nix = { workspace = true }
 uuid = { workspace = true }
-btrfs-uapi = { path = "../uapi", version = "0.2.0" }
-btrfs-disk = { path = "../disk", version = "0.2.0" }
-flate2 = "1"
-zstd = "0.13"
-lzo1x = "0.2"
+btrfs-uapi = { workspace = true }
+btrfs-disk = { workspace = true }
+btrfs-stream = { workspace = true, features = ["receive"] }
 
 [dev-dependencies]
 insta = "1"

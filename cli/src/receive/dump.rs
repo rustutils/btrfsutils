@@ -1,5 +1,5 @@
 use anyhow::Result;
-use btrfs_disk::stream::{StreamCommand, StreamReader, Timespec};
+use btrfs_stream::{StreamCommand, StreamReader, Timespec};
 use std::io::Read;
 
 fn fmt_timespec(ts: &Timespec) -> String {

@@ -1,5 +1,5 @@
 [workspace]
-members = ["uapi", "disk", "cli", "mangen"]
+members = ["uapi", "disk", "stream", "cli", "mangen"]
 resolver = "2"
 
 [workspace.package]
@@ -19,6 +19,10 @@ env_logger = "0.11.9"
 log = "0.4.29"
 crc32c = "0.6"
 bindgen = "0.72.1"
+
+btrfs-uapi = { path = "uapi", version = "0.2.0" }
+btrfs-disk = { path = "disk", version = "0.2.0" }
+btrfs-stream = { path = "stream", version = "0.2.0" }
 
 [profile.release]
 lto = true

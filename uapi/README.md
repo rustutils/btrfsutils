@@ -23,7 +23,7 @@ exposes no kernel types, and uses idiomatic Rust types throughout:
 Every function that issues an ioctl takes a [`BorrowedFd`][`std::os::unix::io::BorrowedFd`]
 open on any file within the target btrfs filesystem. Functions in [`sysfs`]
 instead take a [`uuid::Uuid`], which can be obtained from
-[`filesystem::fs_info`].
+[`filesystem::filesystem_info`].
 
 Most ioctl-based operations require `CAP_SYS_ADMIN`.
 
