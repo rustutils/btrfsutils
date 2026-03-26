@@ -1,8 +1,7 @@
 //! Parse balance filter strings like `usage=50,profiles=raid1|single,limit=10`.
 
 use anyhow::{Result, bail};
-use btrfs_uapi::balance::BalanceArgs;
-use btrfs_uapi::space::BlockGroupFlags;
+use btrfs_uapi::{balance::BalanceArgs, space::BlockGroupFlags};
 
 /// Parse a comma-separated filter string into a `BalanceArgs`.
 ///
@@ -72,7 +71,9 @@ fn parse_one_filter(args: BalanceArgs, key: &str, value: &str) -> Result<Balance
             }
         }
         "devid" => {
-            let devid: u64 = value.parse().map_err(|_| anyhow::anyhow!("invalid devid: {value}"))?;
+            let devid: u64 = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("invalid devid: {value}"))?;
             if devid == 0 {
                 bail!("invalid devid: {value}");
             }
@@ -149,12 +150,15 @@ fn parse_range_u32(s: &str) -> Result<Option<(u32, u32)>> {
     let min: u32 = if left.is_empty() {
         0
     } else {
-        left.parse().map_err(|_| anyhow::anyhow!("invalid range min: {left}"))?
+        left.parse()
+            .map_err(|_| anyhow::anyhow!("invalid range min: {left}"))?
     };
     let max: u32 = if right.is_empty() {
         u32::MAX
     } else {
-        right.parse().map_err(|_| anyhow::anyhow!("invalid range max: {right}"))?
+        right
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid range max: {right}"))?
     };
     Ok(Some((min, max)))
 }
@@ -167,12 +171,15 @@ fn parse_range_u64(s: &str) -> Result<(u64, u64)> {
     let start: u64 = if left.is_empty() {
         0
     } else {
-        left.parse().map_err(|_| anyhow::anyhow!("invalid range start: {left}"))?
+        left.parse()
+            .map_err(|_| anyhow::anyhow!("invalid range start: {left}"))?
     };
     let end: u64 = if right.is_empty() {
         u64::MAX
     } else {
-        right.parse().map_err(|_| anyhow::anyhow!("invalid range end: {right}"))?
+        right
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid range end: {right}"))?
     };
     Ok((start, end))
 }
