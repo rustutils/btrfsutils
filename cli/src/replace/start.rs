@@ -1,6 +1,10 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
-use btrfs_uapi::replace::{ReplaceSource, ReplaceState, replace_start, replace_status};
+use btrfs_uapi::{
+    filesystem::fs_info,
+    replace::{ReplaceSource, ReplaceState, replace_start, replace_status},
+    sysfs::SysfsBtrfs,
+};
 use clap::Parser;
 use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf, thread, time::Duration};
 
@@ -46,6 +50,26 @@ impl Runnable for ReplaceStartCommand {
         let file = File::open(&self.mount_point)
             .with_context(|| format!("failed to open '{}'", self.mount_point.display()))?;
         let fd = file.as_fd();
+
+        // If --enqueue is set, wait for any running exclusive operation to finish.
+        if self.enqueue {
+            let info = fs_info(fd).with_context(|| {
+                format!(
+                    "failed to get filesystem info for '{}'",
+                    self.mount_point.display()
+                )
+            })?;
+            let sysfs = SysfsBtrfs::new(&info.uuid);
+            let op = sysfs.wait_for_exclusive_operation().with_context(|| {
+                format!(
+                    "failed to check exclusive operation on '{}'",
+                    self.mount_point.display()
+                )
+            })?;
+            if op != "none" {
+                eprintln!("waited for exclusive operation '{op}' to finish");
+            }
+        }
 
         // Check if a replace is already running.
         let current = replace_status(fd).with_context(|| {

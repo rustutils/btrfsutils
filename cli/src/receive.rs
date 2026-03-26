@@ -27,7 +27,7 @@ pub struct ReceiveCommand {
     #[clap(short = 'e')]
     terminate_on_end: bool,
 
-    /// Confine the process to <mount> using chroot
+    /// Confine the process to directory using chroot
     #[clap(short = 'C', long)]
     chroot: bool,
 

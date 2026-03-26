@@ -2,7 +2,7 @@ use crate::{Format, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::device::{device_forget, device_scan};
 use clap::Parser;
-use std::{ffi::CString, path::PathBuf};
+use std::{ffi::CString, fs, path::PathBuf};
 
 /// Scan or unregister devices for multi-device btrfs filesystems
 ///
@@ -45,13 +45,9 @@ impl Runnable for DeviceScanCommand {
                     anyhow::bail!("one or more devices could not be unregistered");
                 }
             }
+        } else if self.devices.is_empty() {
+            scan_all()?;
         } else {
-            if self.devices.is_empty() {
-                anyhow::bail!(
-                    "scanning all block devices is not yet implemented; \
-                     please specify one or more device paths explicitly"
-                );
-            }
             let mut had_error = false;
             for device in &self.devices {
                 match scan_one(device) {
@@ -69,6 +65,62 @@ impl Runnable for DeviceScanCommand {
 
         Ok(())
     }
+}
+
+/// Scan all block devices on the system for btrfs filesystems.
+///
+/// Enumerates devices from /proc/partitions and attempts to register each one.
+/// Non-btrfs devices silently fail (the kernel rejects them), so only devices
+/// that the kernel actually recognizes as btrfs are reported.
+fn scan_all() -> Result<()> {
+    let devices = block_devices_from_proc_partitions()
+        .context("failed to enumerate block devices from /proc/partitions")?;
+
+    if devices.is_empty() {
+        println!("no block devices found");
+        return Ok(());
+    }
+
+    let mut registered = 0u32;
+    for device in &devices {
+        let path_str = match device.to_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        let cpath = match CString::new(path_str) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if device_scan(&cpath).is_ok() {
+            println!("registered '{}'", device.display());
+            registered += 1;
+        }
+    }
+
+    if registered == 0 {
+        println!("no btrfs devices found");
+    }
+
+    Ok(())
+}
+
+/// Parse /proc/partitions and return /dev/ paths for all block devices.
+///
+/// /proc/partitions has a two-line header followed by lines of the form:
+///   major minor #blocks name
+fn block_devices_from_proc_partitions() -> Result<Vec<PathBuf>> {
+    let contents =
+        fs::read_to_string("/proc/partitions").context("failed to read /proc/partitions")?;
+
+    let mut devices = Vec::new();
+    for line in contents.lines().skip(2) {
+        let name = match line.split_whitespace().nth(3) {
+            Some(n) => n,
+            None => continue,
+        };
+        devices.push(PathBuf::from(format!("/dev/{name}")));
+    }
+    Ok(devices)
 }
 
 fn scan_one(device: &PathBuf) -> Result<()> {

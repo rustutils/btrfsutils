@@ -159,6 +159,25 @@ impl SysfsBtrfs {
         self.read_file("exclusive_operation")
     }
 
+    /// Wait until no exclusive operation is running on the filesystem.
+    ///
+    /// Polls the `exclusive_operation` sysfs file at one-second intervals.
+    /// Returns immediately if no exclusive operation is in progress, or after
+    /// the running operation completes. Returns the name of the operation
+    /// that was waited on, or `"none"` if nothing was running.
+    pub fn wait_for_exclusive_operation(&self) -> io::Result<String> {
+        let mut op = self.exclusive_operation()?;
+        if op == "none" {
+            return Ok(op);
+        }
+        let waited_for = op.clone();
+        while op != "none" {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            op = self.exclusive_operation()?;
+        }
+        Ok(waited_for)
+    }
+
     /// Names of the filesystem features that are enabled. Each feature
     /// corresponds to a file in the `features/` subdirectory.
     /// `/sys/fs/btrfs/<uuid>/features/`

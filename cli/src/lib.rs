@@ -44,7 +44,7 @@ pub enum Level {
     Error,
 }
 
-/// A Rust implementation of the btrfs command-line tool for managing Btrfs filesystems.
+/// User-space command-line tool for managing Btrfs filesystems.
 ///
 /// btrfs is a modern copy-on-write filesystem for Linux that provides advanced features
 /// including subvolumes, snapshots, RAID support, compression, quotas, and checksumming.

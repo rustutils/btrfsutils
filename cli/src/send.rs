@@ -34,7 +34,7 @@ pub struct SendCommand {
     #[clap(short = 'e')]
     omit_end_cmd: bool,
 
-    /// Send an incremental stream from <parent> to the subvolume
+    /// Send an incremental stream from parent to the subvolume
     #[clap(short = 'p', long)]
     parent: Option<PathBuf>,
 
