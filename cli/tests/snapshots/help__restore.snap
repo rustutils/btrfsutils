@@ -44,22 +44,22 @@ Options:
       --path-regex <PATH_REGEX>
           Restore only filenames matching regex
 
-  -c
+  -c, --ignore-case
           Ignore case (used with --path-regex)
 
-  -d
+  -d, --find-dir
           Find dir
 
   -l, --list-roots
           List tree roots
 
-  -f <FS_LOCATION>
+  -f, --fs-location <FS_LOCATION>
           Filesystem location (bytenr)
 
   -r, --root <ROOT>
           Root objectid
 
-  -t <TREE_LOCATION>
+  -t, --tree-location <TREE_LOCATION>
           Tree location (bytenr)
 
   -u, --super <SUPER_MIRROR>

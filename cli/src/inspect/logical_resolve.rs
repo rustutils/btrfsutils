@@ -13,15 +13,15 @@ pub struct LogicalResolveCommand {
     path: PathBuf,
 
     /// Skip the path resolving and print the inodes instead
-    #[clap(short = 'P')]
+    #[clap(short = 'P', long)]
     skip_paths: bool,
 
     /// Ignore offsets when matching references
-    #[clap(short = 'o')]
+    #[clap(short = 'o', long)]
     ignore_offset: bool,
 
     /// Set inode container's size
-    #[clap(short = 's')]
+    #[clap(short = 's', long)]
     bufsize: Option<u64>,
 }
 

@@ -20,53 +20,53 @@ Options:
           Print help (see a summary with '-h')
 
 Path filtering:
-  -o
+  -o, --only-below
           Print only subvolumes below the given path
 
-  -a
+  -a, --all
           Print all subvolumes in the filesystem, including deleted ones, and
           distinguish absolute and relative paths with respect to the given path
 
 Field selection:
-  -p
+  -p, --parent
           Print parent ID column (same as top level for non-snapshots)
 
-  -c
+  -c, --ogeneration
           Print ogeneration (generation at creation) column
 
-  -g
+  -g, --generation
           Print generation column (already shown by default; kept for
           compatibility with btrfs-progs CLI)
 
-  -u
+  -u, --uuid
           Print UUID column
 
-  -Q
+  -Q, --parent-uuid
           Print parent UUID column
 
-  -R
+  -R, --received-uuid
           Print received UUID column
 
 Type filtering:
-  -s
+  -s, --snapshots-only
           List only snapshots (subvolumes with a non-nil parent UUID)
 
-  -r
+  -r, --readonly
           List only read-only subvolumes
 
-  -d
+  -d, --deleted
           List deleted subvolumes that are not yet cleaned
 
 Other:
-  -t
+  -t, --table
           Print the result as a table
 
 Sorting:
-  -G <[+|-]VALUE>
+  -G, --gen-filter <[+|-]VALUE>
           Filter by generation: VALUE (exact), +VALUE (>= VALUE), -VALUE (<=
           VALUE)
 
-  -C <[+|-]VALUE>
+  -C, --ogen-filter <[+|-]VALUE>
           Filter by ogeneration: VALUE (exact), +VALUE (>= VALUE), -VALUE (<=
           VALUE)
 

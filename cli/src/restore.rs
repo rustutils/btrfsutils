@@ -51,11 +51,11 @@ pub struct RestoreCommand {
     path_regex: Option<String>,
 
     /// Ignore case (used with --path-regex)
-    #[clap(short = 'c')]
+    #[clap(short = 'c', long)]
     ignore_case: bool,
 
     /// Find dir
-    #[clap(short = 'd')]
+    #[clap(short = 'd', long)]
     find_dir: bool,
 
     /// List tree roots
@@ -63,7 +63,7 @@ pub struct RestoreCommand {
     list_roots: bool,
 
     /// Filesystem location (bytenr)
-    #[clap(short = 'f')]
+    #[clap(short = 'f', long)]
     fs_location: Option<u64>,
 
     /// Root objectid
@@ -71,7 +71,7 @@ pub struct RestoreCommand {
     root: Option<u64>,
 
     /// Tree location (bytenr)
-    #[clap(short = 't')]
+    #[clap(short = 't', long)]
     tree_location: Option<u64>,
 
     /// Super mirror index

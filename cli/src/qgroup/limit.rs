@@ -41,11 +41,11 @@ pub struct QgroupLimitCommand {
     pub path: Option<PathBuf>,
 
     /// Limit amount of data after compression
-    #[clap(short = 'c')]
+    #[clap(short = 'c', long)]
     pub compress: bool,
 
     /// Limit space exclusively assigned to this qgroup
-    #[clap(short = 'e')]
+    #[clap(short = 'e', long)]
     pub exclusive: bool,
 }
 

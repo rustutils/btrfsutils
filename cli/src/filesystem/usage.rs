@@ -22,11 +22,11 @@ pub struct FilesystemUsageCommand {
     pub units: UnitMode,
 
     /// Use base 1000 for human-readable sizes
-    #[clap(short = 'H')]
+    #[clap(short = 'H', long)]
     pub human_si: bool,
 
     /// Show data in tabular format
-    #[clap(short = 'T')]
+    #[clap(short = 'T', long)]
     pub tabular: bool,
 
     /// One or more mount points to show usage for

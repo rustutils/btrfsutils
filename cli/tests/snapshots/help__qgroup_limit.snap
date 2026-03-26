@@ -18,10 +18,10 @@ Arguments:
           Path to the filesystem (required when qgroupid is given)
 
 Options:
-  -c
+  -c, --compress
           Limit amount of data after compression
 
-  -e
+  -e, --exclusive
           Limit space exclusively assigned to this qgroup
 
   -h, --help

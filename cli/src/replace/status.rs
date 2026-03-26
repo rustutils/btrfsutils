@@ -15,7 +15,7 @@ use std::{
 #[derive(Parser, Debug)]
 pub struct ReplaceStatusCommand {
     /// Print once instead of continuously until the replace finishes
-    #[clap(short = '1')]
+    #[clap(short = '1', long)]
     pub once: bool,
 
     /// Path to a mounted btrfs filesystem

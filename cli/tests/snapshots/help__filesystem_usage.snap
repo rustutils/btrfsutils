@@ -35,10 +35,10 @@ Options:
       --tbytes
           Show sizes in TiB, or TB with --si
 
-  -H
+  -H, --human-si
           Use base 1000 for human-readable sizes
 
-  -T
+  -T, --tabular
           Show data in tabular format
 
   -h, --help

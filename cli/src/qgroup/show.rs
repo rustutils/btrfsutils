@@ -18,27 +18,27 @@ pub struct QgroupShowCommand {
     pub path: PathBuf,
 
     /// Print parent qgroup id
-    #[clap(short = 'p', help_heading = HEADING_COLUMN_SELECTION)]
+    #[clap(short = 'p', long, help_heading = HEADING_COLUMN_SELECTION)]
     pub print_parent: bool,
 
     /// Print child qgroup id
-    #[clap(short = 'c', help_heading = HEADING_COLUMN_SELECTION)]
+    #[clap(short = 'c', long, help_heading = HEADING_COLUMN_SELECTION)]
     pub print_child: bool,
 
     /// Print limit of referenced size
-    #[clap(short = 'r', help_heading = HEADING_COLUMN_SELECTION)]
+    #[clap(short = 'r', long, help_heading = HEADING_COLUMN_SELECTION)]
     pub print_rfer_limit: bool,
 
     /// Print limit of exclusive size
-    #[clap(short = 'e', help_heading = HEADING_COLUMN_SELECTION)]
+    #[clap(short = 'e', long, help_heading = HEADING_COLUMN_SELECTION)]
     pub print_excl_limit: bool,
 
     /// List all qgroups impacting path, including ancestral qgroups
-    #[clap(short = 'F', help_heading = HEADING_FILTERING)]
+    #[clap(short = 'F', long, help_heading = HEADING_FILTERING)]
     pub filter_all: bool,
 
     /// List all qgroups impacting path, excluding ancestral qgroups
-    #[clap(short = 'f', help_heading = HEADING_FILTERING)]
+    #[clap(short = 'f', long, help_heading = HEADING_FILTERING)]
     pub filter_direct: bool,
 
     /// Show raw numbers in bytes

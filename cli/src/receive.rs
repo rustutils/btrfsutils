@@ -18,11 +18,11 @@ pub struct ReceiveCommand {
     mount: Option<PathBuf>,
 
     /// Read the stream from FILE instead of stdin
-    #[clap(short = 'f')]
+    #[clap(short = 'f', long = "file")]
     file: Option<PathBuf>,
 
     /// Terminate after receiving an end-cmd marker
-    #[clap(short = 'e')]
+    #[clap(short = 'e', long)]
     terminate_on_end: bool,
 
     /// Confine the process to directory using chroot

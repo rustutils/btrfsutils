@@ -22,61 +22,61 @@ const HEADING_SORTING: &str = "Sorting";
 #[derive(Parser, Debug)]
 pub struct SubvolumeListCommand {
     /// Print only subvolumes below the given path
-    #[clap(short = 'o', help_heading = HEADING_PATH_FILTERING)]
+    #[clap(short = 'o', long, help_heading = HEADING_PATH_FILTERING)]
     only_below: bool,
 
     /// Print all subvolumes in the filesystem, including deleted ones, and
     /// distinguish absolute and relative paths with respect to the given path
-    #[clap(short = 'a', help_heading = HEADING_PATH_FILTERING)]
+    #[clap(short = 'a', long, help_heading = HEADING_PATH_FILTERING)]
     all: bool,
 
     /// Print parent ID column (same as top level for non-snapshots)
-    #[clap(short, help_heading = HEADING_FIELD_SELECTION)]
+    #[clap(short, long, help_heading = HEADING_FIELD_SELECTION)]
     parent: bool,
 
     /// Print ogeneration (generation at creation) column
-    #[clap(short = 'c', help_heading = HEADING_FIELD_SELECTION)]
+    #[clap(short = 'c', long, help_heading = HEADING_FIELD_SELECTION)]
     ogeneration: bool,
 
     /// Print generation column (already shown by default; kept for
     /// compatibility with btrfs-progs CLI)
-    #[clap(short, help_heading = HEADING_FIELD_SELECTION)]
+    #[clap(short, long, help_heading = HEADING_FIELD_SELECTION)]
     generation: bool,
 
     /// Print UUID column
-    #[clap(short, help_heading = HEADING_FIELD_SELECTION)]
+    #[clap(short, long, help_heading = HEADING_FIELD_SELECTION)]
     uuid: bool,
 
     /// Print parent UUID column
-    #[clap(short = 'Q', help_heading = HEADING_FIELD_SELECTION)]
+    #[clap(short = 'Q', long, help_heading = HEADING_FIELD_SELECTION)]
     parent_uuid: bool,
 
     /// Print received UUID column
-    #[clap(short = 'R', help_heading = HEADING_FIELD_SELECTION)]
+    #[clap(short = 'R', long, help_heading = HEADING_FIELD_SELECTION)]
     received_uuid: bool,
 
     /// List only snapshots (subvolumes with a non-nil parent UUID)
-    #[clap(short = 's', help_heading = HEADING_TYPE_FILTERING)]
+    #[clap(short = 's', long, help_heading = HEADING_TYPE_FILTERING)]
     snapshots_only: bool,
 
     /// List only read-only subvolumes
-    #[clap(short = 'r', help_heading = HEADING_TYPE_FILTERING)]
+    #[clap(short = 'r', long, help_heading = HEADING_TYPE_FILTERING)]
     readonly: bool,
 
     /// List deleted subvolumes that are not yet cleaned
-    #[clap(short = 'd', help_heading = HEADING_TYPE_FILTERING)]
+    #[clap(short = 'd', long, help_heading = HEADING_TYPE_FILTERING)]
     deleted: bool,
 
     /// Print the result as a table
-    #[clap(short = 't', help_heading = "Other")]
+    #[clap(short = 't', long, help_heading = "Other")]
     table: bool,
 
     /// Filter by generation: VALUE (exact), +VALUE (>= VALUE), -VALUE (<= VALUE)
-    #[clap(short = 'G', value_name = "[+|-]VALUE", allow_hyphen_values = true, help_heading = HEADING_SORTING)]
+    #[clap(short = 'G', long, value_name = "[+|-]VALUE", allow_hyphen_values = true, help_heading = HEADING_SORTING)]
     gen_filter: Option<GenFilter>,
 
     /// Filter by ogeneration: VALUE (exact), +VALUE (>= VALUE), -VALUE (<= VALUE)
-    #[clap(short = 'C', value_name = "[+|-]VALUE", allow_hyphen_values = true, help_heading = HEADING_SORTING)]
+    #[clap(short = 'C', long, value_name = "[+|-]VALUE", allow_hyphen_values = true, help_heading = HEADING_SORTING)]
     ogen_filter: Option<GenFilter>,
 
     /// Sort by comma-separated keys: gen, ogen, rootid, path

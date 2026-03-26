@@ -22,23 +22,23 @@ Options:
           Print help
 
 Column selection:
-  -p
+  -p, --print-parent
           Print parent qgroup id
 
-  -c
+  -c, --print-child
           Print child qgroup id
 
-  -r
+  -r, --print-rfer-limit
           Print limit of referenced size
 
-  -e
+  -e, --print-excl-limit
           Print limit of exclusive size
 
 Filtering:
-  -F
+  -F, --filter-all
           List all qgroups impacting path, including ancestral qgroups
 
-  -f
+  -f, --filter-direct
           List all qgroups impacting path, excluding ancestral qgroups
 
 Size units:

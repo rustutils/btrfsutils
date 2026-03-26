@@ -15,7 +15,7 @@ Arguments:
           after the source) or a full path for the new snapshot
 
 Options:
-  -r
+  -r, --readonly
           Make the snapshot read-only
 
   -i <QGROUPID>

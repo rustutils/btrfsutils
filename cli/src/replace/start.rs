@@ -32,15 +32,15 @@ pub struct ReplaceStartCommand {
     pub mount_point: PathBuf,
 
     /// Only read from srcdev if no other zero-defect mirror exists
-    #[clap(short = 'r')]
+    #[clap(short = 'r', long)]
     pub redundancy_only: bool,
 
     /// Force using and overwriting targetdev even if it contains a valid btrfs filesystem
-    #[clap(short = 'f')]
+    #[clap(short = 'f', long)]
     pub force: bool,
 
     /// Do not background the replace operation; wait for it to finish
-    #[clap(short = 'B')]
+    #[clap(short = 'B', long)]
     pub no_background: bool,
 
     /// Wait if there's another exclusive operation running, instead of returning an error

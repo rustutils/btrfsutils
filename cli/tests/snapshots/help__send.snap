@@ -17,7 +17,7 @@ Arguments:
           Subvolume(s) to send
 
 Options:
-  -e
+  -e, --omit-end-cmd
           Omit end-cmd marker between subvolumes
 
   -f, --outfile <OUTFILE>

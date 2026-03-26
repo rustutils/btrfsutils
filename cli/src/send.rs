@@ -34,7 +34,7 @@ pub struct SendCommand {
     subvolumes: Vec<PathBuf>,
 
     /// Omit end-cmd marker between subvolumes
-    #[clap(short = 'e')]
+    #[clap(short = 'e', long)]
     omit_end_cmd: bool,
 
     /// Send an incremental stream from parent to the subvolume

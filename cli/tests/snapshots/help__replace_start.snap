@@ -21,14 +21,14 @@ Arguments:
           Mount point of the filesystem
 
 Options:
-  -r
+  -r, --redundancy-only
           Only read from srcdev if no other zero-defect mirror exists
 
-  -f
+  -f, --force
           Force using and overwriting targetdev even if it contains a valid
           btrfs filesystem
 
-  -B
+  -B, --no-background
           Do not background the replace operation; wait for it to finish
 
       --enqueue

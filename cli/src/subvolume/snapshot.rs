@@ -8,7 +8,7 @@ use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
 #[derive(Parser, Debug)]
 pub struct SubvolumeSnapshotCommand {
     /// Make the snapshot read-only
-    #[clap(short)]
+    #[clap(short, long)]
     pub readonly: bool,
 
     /// Add the newly created snapshot to a qgroup (can be given multiple times)

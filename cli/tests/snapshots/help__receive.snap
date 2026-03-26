@@ -16,10 +16,10 @@ Arguments:
           Mount point of the destination filesystem (not required with --dump)
 
 Options:
-  -f <FILE>
+  -f, --file <FILE>
           Read the stream from FILE instead of stdin
 
-  -e
+  -e, --terminate-on-end
           Terminate after receiving an end-cmd marker
 
   -C, --chroot

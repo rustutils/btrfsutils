@@ -15,7 +15,7 @@ Arguments:
           Path to a mounted btrfs filesystem
 
 Options:
-  -1
+  -1, --once
           Print once instead of continuously until the replace finishes
 
   -h, --help

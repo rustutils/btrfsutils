@@ -14,13 +14,13 @@ Arguments:
           Path to a file or directory on the btrfs filesystem
 
 Options:
-  -P
+  -P, --skip-paths
           Skip the path resolving and print the inodes instead
 
-  -o
+  -o, --ignore-offset
           Ignore offsets when matching references
 
-  -s <BUFSIZE>
+  -s, --bufsize <BUFSIZE>
           Set inode container's size
 
   -h, --help
