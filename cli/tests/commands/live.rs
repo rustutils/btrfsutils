@@ -213,6 +213,56 @@ fn property_get_set_ro() {
     assert!(out.contains("false"), "expected ro=false:\n{out}");
 }
 
+// ── property force clear received_uuid ───────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn property_force_clear_received_uuid() {
+    let (_td1, mnt1) = single_mount();
+    let (_td2, mnt2) = single_mount();
+    let mp1 = mnt1.path().to_str().unwrap();
+    let mp2 = mnt2.path().to_str().unwrap();
+    let stream_file = format!("{}/force.bin", _td1.path().to_str().unwrap());
+
+    // Create a subvolume, send it, and receive it.
+    let src = format!("{mp1}/src");
+    btrfs_ok(&["subvolume", "create", &src]);
+    write_test_data(Path::new(&src), "file.bin", 4096);
+    btrfs_ok(&["property", "set", "-t", "subvol", &src, "ro", "true"]);
+    btrfs_ok(&["send", "-f", &stream_file, &src]);
+    btrfs_ok(&["receive", "-f", &stream_file, mp2]);
+
+    // The received subvolume should be read-only with a received_uuid.
+    let received = format!("{mp2}/src");
+    let out = btrfs_ok(&["subvolume", "show", &received]);
+    assert!(out.contains("Received UUID:"), "expected Received UUID field:\n{out}");
+    // The received UUID should not be "-" (nil).
+    assert!(
+        !out.lines().any(|l| l.contains("Received UUID:") && l.contains("-\n")),
+        "expected non-nil received UUID"
+    );
+
+    // Without -f, flipping ro→rw should fail.
+    let (_, stderr, code) = btrfs(&["property", "set", "-t", "subvol", &received, "ro", "false"]);
+    assert_ne!(code, 0, "expected failure without -f");
+    assert!(stderr.contains("received_uuid"), "expected received_uuid error:\n{stderr}");
+
+    // With -f, it should succeed and clear the received_uuid.
+    btrfs_ok(&["property", "set", "-t", "subvol", "-f", &received, "ro", "false"]);
+
+    // Verify: subvolume is now writable.
+    let out = btrfs_ok(&["property", "get", "-t", "subvol", &received, "ro"]);
+    assert!(out.contains("false"), "expected ro=false:\n{out}");
+
+    // Verify: received_uuid is now nil.
+    let out = btrfs_ok(&["subvolume", "show", &received]);
+    let recv_line = out.lines().find(|l| l.contains("Received UUID:")).unwrap();
+    assert!(
+        recv_line.contains("\t-") || recv_line.contains(" -"),
+        "expected nil received UUID after force, got: {recv_line}"
+    );
+}
+
 // ── send / receive ───────────────────────────────────────────────────
 
 #[test]

@@ -188,7 +188,6 @@ fn set_readonly_property(file: &File, value: &str, force: bool, path: &PathBuf) 
                      The value of received_uuid is used for incremental send, consider making a snapshot instead."
                 );
             }
-            // TODO: Clear received_uuid if force is set
         }
     }
 
@@ -201,6 +200,30 @@ fn set_readonly_property(file: &File, value: &str, force: bool, path: &PathBuf) 
 
     subvolume_flags_set(file.as_fd(), new_flags)
         .with_context(|| format!("failed to set flags for '{}'", path.display()))?;
+
+    // Clear received_uuid after flipping ro→rw with force.  This must
+    // happen after the flag change (the kernel rejects SET_RECEIVED_SUBVOL
+    // on a read-only subvolume). If it fails, warn but don't error —
+    // matching the C reference behaviour.
+    if is_readonly && !new_readonly && force {
+        let info = btrfs_uapi::subvolume::subvolume_info(file.as_fd()).ok();
+        if let Some(info) = info {
+            if !info.received_uuid.is_nil() {
+                eprintln!(
+                    "clearing received_uuid (was {})",
+                    info.received_uuid.as_hyphenated()
+                );
+                if let Err(e) =
+                    btrfs_uapi::receive::received_subvol_set(file.as_fd(), &uuid::Uuid::nil(), 0)
+                {
+                    eprintln!(
+                        "WARNING: failed to clear received_uuid on '{}': {e}",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
 
     Ok(())
 }
