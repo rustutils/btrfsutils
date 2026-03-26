@@ -72,26 +72,28 @@ pub struct Arguments {
     pub command: Command,
 }
 
+const GLOBAL_OPTIONS: &'static str = "Global options";
+
 #[derive(Parser, Debug)]
 pub struct GlobalOptions {
     /// Increase verbosity of the subcommand
-    #[clap(global = true, short, long)]
+    #[clap(global = true, short, long, help_heading = GLOBAL_OPTIONS)]
     pub verbose: bool,
 
     /// Print only errors
-    #[clap(global = true, short, long)]
+    #[clap(global = true, short, long, help_heading = GLOBAL_OPTIONS)]
     pub quiet: bool,
 
     /// If supported, do not do any active/changing actions
-    #[clap(global = true, long)]
+    #[clap(global = true, long, help_heading = GLOBAL_OPTIONS)]
     pub dry_run: bool,
 
     /// Set log level
-    #[clap(global = true, long)]
+    #[clap(global = true, long, help_heading = GLOBAL_OPTIONS)]
     pub log: Option<Level>,
 
     /// If supported, print subcommand output in that format
-    #[clap(global = true, long)]
+    #[clap(global = true, long, help_heading = GLOBAL_OPTIONS)]
     pub format: Option<Format>,
 }
 

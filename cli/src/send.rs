@@ -17,6 +17,9 @@ use std::{
     thread,
 };
 
+const HEADING_INCREMENTAL: &str = "Incremental";
+const HEADING_PROTOCOL: &str = "Protocol";
+
 /// Send the subvolume(s) to stdout.
 ///
 /// Generate a stream representation of one or more subvolumes that can be
@@ -35,11 +38,11 @@ pub struct SendCommand {
     omit_end_cmd: bool,
 
     /// Send an incremental stream from parent to the subvolume
-    #[clap(short = 'p', long)]
+    #[clap(short = 'p', long, help_heading = HEADING_INCREMENTAL)]
     parent: Option<PathBuf>,
 
     /// Use this snapshot as a clone source (may be given multiple times)
-    #[clap(short = 'c', long = "clone-src")]
+    #[clap(short = 'c', long = "clone-src", help_heading = HEADING_INCREMENTAL)]
     clone_src: Vec<PathBuf>,
 
     /// Write output to a file instead of stdout
@@ -47,15 +50,15 @@ pub struct SendCommand {
     outfile: Option<PathBuf>,
 
     /// Send in NO_FILE_DATA mode
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_PROTOCOL)]
     no_data: bool,
 
     /// Use send protocol version N (0 = highest supported by kernel)
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_PROTOCOL)]
     proto: Option<u32>,
 
     /// Send compressed data directly without decompressing
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_PROTOCOL)]
     compressed_data: bool,
 }
 

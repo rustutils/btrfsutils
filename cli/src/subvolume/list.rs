@@ -8,6 +8,11 @@ use std::{
     cmp::Ordering, fs::File, os::unix::io::AsFd, path::PathBuf, str::FromStr,
 };
 
+const HEADING_PATH_FILTERING: &str = "Path filtering";
+const HEADING_FIELD_SELECTION: &str = "Field selection";
+const HEADING_TYPE_FILTERING: &str = "Type filtering";
+const HEADING_SORTING: &str = "Sorting";
+
 /// List subvolumes and snapshots in the filesystem
 ///
 /// The default output format matches btrfs-progs:
@@ -16,62 +21,62 @@ use std::{
 /// Optional flags enable additional columns or filter the results.
 #[derive(Parser, Debug)]
 pub struct SubvolumeListCommand {
-    /// Print parent ID column (same as top level for non-snapshots)
-    #[clap(short)]
-    parent: bool,
-
-    /// Print generation column (already shown by default; kept for
-    /// compatibility with btrfs-progs CLI)
-    #[clap(short)]
-    generation: bool,
-
-    /// Print ogeneration (generation at creation) column
-    #[clap(short = 'c')]
-    ogeneration: bool,
-
-    /// Print UUID column
-    #[clap(short)]
-    uuid: bool,
-
-    /// Print parent UUID column
-    #[clap(short = 'Q')]
-    parent_uuid: bool,
-
-    /// Print received UUID column
-    #[clap(short = 'R')]
-    received_uuid: bool,
-
-    /// List only read-only subvolumes
-    #[clap(short = 'r')]
-    readonly: bool,
-
-    /// List only snapshots (subvolumes with a non-nil parent UUID)
-    #[clap(short = 's')]
-    snapshots_only: bool,
-
     /// Print only subvolumes below the given path
-    #[clap(short = 'o')]
+    #[clap(short = 'o', help_heading = HEADING_PATH_FILTERING)]
     only_below: bool,
 
     /// Print all subvolumes in the filesystem, including deleted ones, and
     /// distinguish absolute and relative paths with respect to the given path
-    #[clap(short = 'a')]
+    #[clap(short = 'a', help_heading = HEADING_PATH_FILTERING)]
     all: bool,
 
+    /// Print parent ID column (same as top level for non-snapshots)
+    #[clap(short, help_heading = HEADING_FIELD_SELECTION)]
+    parent: bool,
+
+    /// Print ogeneration (generation at creation) column
+    #[clap(short = 'c', help_heading = HEADING_FIELD_SELECTION)]
+    ogeneration: bool,
+
+    /// Print generation column (already shown by default; kept for
+    /// compatibility with btrfs-progs CLI)
+    #[clap(short, help_heading = HEADING_FIELD_SELECTION)]
+    generation: bool,
+
+    /// Print UUID column
+    #[clap(short, help_heading = HEADING_FIELD_SELECTION)]
+    uuid: bool,
+
+    /// Print parent UUID column
+    #[clap(short = 'Q', help_heading = HEADING_FIELD_SELECTION)]
+    parent_uuid: bool,
+
+    /// Print received UUID column
+    #[clap(short = 'R', help_heading = HEADING_FIELD_SELECTION)]
+    received_uuid: bool,
+
+    /// List only snapshots (subvolumes with a non-nil parent UUID)
+    #[clap(short = 's', help_heading = HEADING_TYPE_FILTERING)]
+    snapshots_only: bool,
+
+    /// List only read-only subvolumes
+    #[clap(short = 'r', help_heading = HEADING_TYPE_FILTERING)]
+    readonly: bool,
+
     /// List deleted subvolumes that are not yet cleaned
-    #[clap(short = 'd')]
+    #[clap(short = 'd', help_heading = HEADING_TYPE_FILTERING)]
     deleted: bool,
 
     /// Print the result as a table
-    #[clap(short = 't')]
+    #[clap(short = 't', help_heading = "Other")]
     table: bool,
 
     /// Filter by generation: VALUE (exact), +VALUE (>= VALUE), -VALUE (<= VALUE)
-    #[clap(short = 'G', value_name = "[+|-]VALUE", allow_hyphen_values = true)]
+    #[clap(short = 'G', value_name = "[+|-]VALUE", allow_hyphen_values = true, help_heading = HEADING_SORTING)]
     gen_filter: Option<GenFilter>,
 
     /// Filter by ogeneration: VALUE (exact), +VALUE (>= VALUE), -VALUE (<= VALUE)
-    #[clap(short = 'C', value_name = "[+|-]VALUE", allow_hyphen_values = true)]
+    #[clap(short = 'C', value_name = "[+|-]VALUE", allow_hyphen_values = true, help_heading = HEADING_SORTING)]
     ogen_filter: Option<GenFilter>,
 
     /// Sort by comma-separated keys: gen, ogen, rootid, path
@@ -82,7 +87,8 @@ pub struct SubvolumeListCommand {
         long,
         value_name = "KEYS",
         value_delimiter = ',',
-        allow_hyphen_values = true
+        allow_hyphen_values = true,
+        help_heading = HEADING_SORTING,
     )]
     sort: Vec<SortKey>,
 

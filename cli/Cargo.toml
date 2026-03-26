@@ -9,6 +9,7 @@ homepage.workspace = true
 readme = "README.md"
 categories = ["command-line-utilities", "filesystem"]
 keywords = ["btrfs", "filesystem", "cli", "linux", "storage"]
+default-run = "btrfs"
 
 [[bin]]
 name = "btrfs"

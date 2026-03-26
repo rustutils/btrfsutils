@@ -6,6 +6,9 @@ use btrfs_uapi::defrag::{
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
+const HEADING_COMPRESSION: &str = "Compression";
+const HEADING_RANGE: &str = "Range";
+
 /// Defragment files or directories on a btrfs filesystem
 #[derive(Parser, Debug)]
 pub struct FilesystemDefragCommand {
@@ -22,32 +25,32 @@ pub struct FilesystemDefragCommand {
     pub flush: bool,
 
     /// Compress the file while defragmenting (optionally specify type: zlib, lzo, zstd)
-    #[clap(long, short, conflicts_with = "nocomp")]
+    #[clap(long, short, conflicts_with = "nocomp", help_heading = HEADING_COMPRESSION)]
     pub compress: Option<Option<CompressType>>,
 
     /// Compression level (used together with --compress)
-    #[clap(long = "level", short = 'L', requires = "compress")]
+    #[clap(long = "level", short = 'L', requires = "compress", help_heading = HEADING_COMPRESSION)]
     pub compress_level: Option<i8>,
 
     /// Disable compression during defragmentation
-    #[clap(long, conflicts_with = "compress")]
+    #[clap(long, conflicts_with = "compress", help_heading = HEADING_COMPRESSION)]
     pub nocomp: bool,
 
     /// Defragment only bytes starting at this offset
-    #[clap(long, short)]
+    #[clap(long, short, help_heading = HEADING_RANGE)]
     pub start: Option<u64>,
 
     /// Defragment only this many bytes
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_RANGE)]
     pub len: Option<u64>,
 
     /// Target extent size threshold in bytes; extents larger than this are
     /// considered already defragmented
-    #[clap(long, short)]
+    #[clap(long, short, help_heading = HEADING_RANGE)]
     pub target: Option<u64>,
 
     /// Process the file in steps of this size rather than all at once
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_RANGE)]
     pub step: Option<u64>,
 
     /// One or more files or directories to defragment

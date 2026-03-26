@@ -7,6 +7,10 @@ use btrfs_uapi::quota::{
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
+const HEADING_COLUMN_SELECTION: &str = "Column selection";
+const HEADING_FILTERING: &str = "Filtering";
+const HEADING_SIZE_UNITS: &str = "Size units";
+
 /// List subvolume quota groups
 #[derive(Parser, Debug)]
 pub struct QgroupShowCommand {
@@ -14,59 +18,59 @@ pub struct QgroupShowCommand {
     pub path: PathBuf,
 
     /// Print parent qgroup id
-    #[clap(short = 'p')]
+    #[clap(short = 'p', help_heading = HEADING_COLUMN_SELECTION)]
     pub print_parent: bool,
 
     /// Print child qgroup id
-    #[clap(short = 'c')]
+    #[clap(short = 'c', help_heading = HEADING_COLUMN_SELECTION)]
     pub print_child: bool,
 
     /// Print limit of referenced size
-    #[clap(short = 'r')]
+    #[clap(short = 'r', help_heading = HEADING_COLUMN_SELECTION)]
     pub print_rfer_limit: bool,
 
     /// Print limit of exclusive size
-    #[clap(short = 'e')]
+    #[clap(short = 'e', help_heading = HEADING_COLUMN_SELECTION)]
     pub print_excl_limit: bool,
 
     /// List all qgroups impacting path, including ancestral qgroups
-    #[clap(short = 'F')]
+    #[clap(short = 'F', help_heading = HEADING_FILTERING)]
     pub filter_all: bool,
 
     /// List all qgroups impacting path, excluding ancestral qgroups
-    #[clap(short = 'f')]
+    #[clap(short = 'f', help_heading = HEADING_FILTERING)]
     pub filter_direct: bool,
 
     /// Show raw numbers in bytes
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_SIZE_UNITS)]
     pub raw: bool,
 
     /// Show human friendly numbers, base 1024 (default)
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_SIZE_UNITS)]
     pub human_readable: bool,
 
     /// Use 1024 as a base (IEC units)
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_SIZE_UNITS)]
     pub iec: bool,
 
     /// Use 1000 as a base (SI units)
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_SIZE_UNITS)]
     pub si: bool,
 
     /// Show sizes in KiB
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_SIZE_UNITS)]
     pub kbytes: bool,
 
     /// Show sizes in MiB
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_SIZE_UNITS)]
     pub mbytes: bool,
 
     /// Show sizes in GiB
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_SIZE_UNITS)]
     pub gbytes: bool,
 
     /// Show sizes in TiB
-    #[clap(long)]
+    #[clap(long, help_heading = HEADING_SIZE_UNITS)]
     pub tbytes: bool,
 
     /// Sort by a comma-separated list of fields (qgroupid, rfer, excl, max_rfer, max_excl)

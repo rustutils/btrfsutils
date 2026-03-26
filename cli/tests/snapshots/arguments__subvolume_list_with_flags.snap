@@ -14,16 +14,16 @@ Arguments {
         SubvolumeCommand {
             subcommand: List(
                 SubvolumeListCommand {
+                    only_below: false,
+                    all: false,
                     parent: true,
-                    generation: false,
                     ogeneration: false,
+                    generation: false,
                     uuid: true,
                     parent_uuid: false,
                     received_uuid: true,
-                    readonly: true,
                     snapshots_only: false,
-                    only_below: false,
-                    all: false,
+                    readonly: true,
                     deleted: false,
                     table: false,
                     gen_filter: None,
