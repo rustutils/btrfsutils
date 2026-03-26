@@ -384,8 +384,8 @@ pub fn qgroup_list(fd: BorrowedFd) -> nix::Result<QgroupList> {
         tree_id: BTRFS_QUOTA_TREE_OBJECTID as u64,
         min_objectid: 0,
         max_objectid: u64::MAX,
-        min_type: BTRFS_QGROUP_STATUS_KEY as u32,
-        max_type: BTRFS_QGROUP_RELATION_KEY as u32,
+        min_type: BTRFS_QGROUP_STATUS_KEY,
+        max_type: BTRFS_QGROUP_RELATION_KEY,
         min_offset: 0,
         max_offset: u64::MAX,
         min_transid: 0,
@@ -393,23 +393,23 @@ pub fn qgroup_list(fd: BorrowedFd) -> nix::Result<QgroupList> {
     };
 
     let scan_result = tree_search(fd, quota_key, |hdr, data| {
-        match hdr.item_type as u32 {
-            t if t == BTRFS_QGROUP_STATUS_KEY as u32 => {
+        match hdr.item_type {
+            t if t == BTRFS_QGROUP_STATUS_KEY => {
                 if let Some(raw) = parse_status_flags(data) {
                     status_flags = QgroupStatusFlags::from_bits_truncate(raw);
                 }
             }
-            t if t == BTRFS_QGROUP_INFO_KEY as u32 => {
+            t if t == BTRFS_QGROUP_INFO_KEY => {
                 // offset = qgroupid
                 let entry = builders.entry(hdr.offset).or_default();
                 parse_info(entry, data);
             }
-            t if t == BTRFS_QGROUP_LIMIT_KEY as u32 => {
+            t if t == BTRFS_QGROUP_LIMIT_KEY => {
                 // offset = qgroupid
                 let entry = builders.entry(hdr.offset).or_default();
                 parse_limit(entry, data);
             }
-            t if t == BTRFS_QGROUP_RELATION_KEY as u32 => {
+            t if t == BTRFS_QGROUP_RELATION_KEY => {
                 // The kernel stores two entries per relation:
                 //   (child, RELATION_KEY, parent)
                 //   (parent, RELATION_KEY, child)
@@ -472,7 +472,7 @@ fn collect_subvol_ids(fd: BorrowedFd) -> nix::Result<HashSet<u64>> {
     // 0xFFFFFFFF_FFFFFF00 as expected.
     let key = SearchKey::for_objectid_range(
         BTRFS_ROOT_TREE_OBJECTID as u64,
-        BTRFS_ROOT_ITEM_KEY as u32,
+        BTRFS_ROOT_ITEM_KEY,
         BTRFS_FIRST_FREE_OBJECTID as u64,
         BTRFS_LAST_FREE_OBJECTID as u64,
     );

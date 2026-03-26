@@ -191,7 +191,7 @@ pub fn subvolume_search_by_uuid(
     fd: BorrowedFd<'_>,
     uuid: &Uuid,
 ) -> nix::Result<u64> {
-    search_uuid_tree(fd, uuid, raw::BTRFS_UUID_KEY_SUBVOL as u32)
+    search_uuid_tree(fd, uuid, raw::BTRFS_UUID_KEY_SUBVOL)
 }
 
 /// Search the UUID tree for a subvolume by its received UUID.
@@ -202,7 +202,7 @@ pub fn subvolume_search_by_received_uuid(
     fd: BorrowedFd<'_>,
     uuid: &Uuid,
 ) -> nix::Result<u64> {
-    search_uuid_tree(fd, uuid, raw::BTRFS_UUID_KEY_RECEIVED_SUBVOL as u32)
+    search_uuid_tree(fd, uuid, raw::BTRFS_UUID_KEY_RECEIVED_SUBVOL)
 }
 
 /// Internal: search the UUID tree for a given key type.

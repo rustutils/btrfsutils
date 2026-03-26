@@ -18,7 +18,7 @@ impl Runnable for BalanceCancelCommand {
 
         match balance_ctl(file.as_fd(), BalanceCtl::Cancel) {
             Ok(()) => Ok(()),
-            Err(e) if e == Errno::ENOTCONN => {
+            Err(Errno::ENOTCONN) => {
                 anyhow::bail!(
                     "balance cancel on '{}' failed: Not in progress",
                     self.path.display()

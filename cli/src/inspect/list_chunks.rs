@@ -102,10 +102,9 @@ impl Runnable for ListChunksCommand {
             let mut lcnt: Vec<(u64, u64)> = Vec::new();
             for e in &logical_order {
                 let key = (e.devid, e.logical_start);
-                if !lnumber_map.contains_key(&key) {
-                    let cnt = get_or_insert_count(&mut lcnt, e.devid);
-                    lnumber_map.insert(key, cnt);
-                }
+                lnumber_map
+                    .entry(key)
+                    .or_insert_with(|| get_or_insert_count(&mut lcnt, e.devid));
             }
         }
 

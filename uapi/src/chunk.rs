@@ -99,7 +99,7 @@ pub fn device_chunk_allocations(
         fd,
         SearchKey::for_type(
             BTRFS_CHUNK_TREE_OBJECTID as u64,
-            BTRFS_CHUNK_ITEM_KEY as u32,
+            BTRFS_CHUNK_ITEM_KEY,
         ),
         |_hdr, data| {
             if let Some((stripe_len, flags, stripes)) = parse_chunk(data) {
@@ -130,7 +130,7 @@ pub fn chunk_list(fd: BorrowedFd) -> nix::Result<Vec<ChunkEntry>> {
         fd,
         SearchKey::for_objectid_range(
             BTRFS_CHUNK_TREE_OBJECTID as u64,
-            BTRFS_CHUNK_ITEM_KEY as u32,
+            BTRFS_CHUNK_ITEM_KEY,
             BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
             BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
         ),

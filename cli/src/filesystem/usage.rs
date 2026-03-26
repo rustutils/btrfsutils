@@ -195,7 +195,7 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
     };
 
     let free_statfs = nix::sys::statfs::statfs(path)
-        .map(|st| st.blocks_available() as u64 * st.block_size() as u64)
+        .map(|st| st.blocks_available() * st.block_size() as u64)
         .unwrap_or(0);
 
     let multiple = has_multiple_profiles(&spaces);

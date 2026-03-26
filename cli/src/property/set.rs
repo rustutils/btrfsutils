@@ -6,7 +6,12 @@ use btrfs_uapi::{
     subvolume::{SubvolumeFlags, subvolume_flags_get, subvolume_flags_set},
 };
 use clap::Parser;
-use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{
+    ffi::CString,
+    fs::File,
+    os::unix::io::AsFd,
+    path::{Path, PathBuf},
+};
 
 /// Set a property on a btrfs object
 #[derive(Parser, Debug)]
@@ -73,7 +78,7 @@ fn set_property(
     name: &str,
     value: &str,
     force: bool,
-    path: &PathBuf,
+    path: &Path,
 ) -> Result<()> {
     match (obj_type, name) {
         (PropertyObjectType::Subvol, "ro") => {
@@ -106,7 +111,7 @@ fn set_readonly_property(
     file: &File,
     value: &str,
     force: bool,
-    path: &PathBuf,
+    path: &Path,
 ) -> Result<()> {
     let new_readonly = match value {
         "true" => true,
@@ -132,13 +137,11 @@ fn set_readonly_property(
                 format!("failed to get subvolume info for '{}'", path.display())
             })?;
 
-        if !info.received_uuid.is_nil() {
-            if !force {
-                bail!(
-                    "cannot flip ro->rw with received_uuid set, use force option -f if you really want to unset the read-only status. \
+        if !info.received_uuid.is_nil() && !force {
+            bail!(
+                "cannot flip ro->rw with received_uuid set, use force option -f if you really want to unset the read-only status. \
                      The value of received_uuid is used for incremental send, consider making a snapshot instead."
-                );
-            }
+            );
         }
     }
 
@@ -159,22 +162,22 @@ fn set_readonly_property(
     // matching the C reference behaviour.
     if is_readonly && !new_readonly && force {
         let info = btrfs_uapi::subvolume::subvolume_info(file.as_fd()).ok();
-        if let Some(info) = info {
-            if !info.received_uuid.is_nil() {
+        if let Some(info) = info
+            && !info.received_uuid.is_nil()
+        {
+            eprintln!(
+                "clearing received_uuid (was {})",
+                info.received_uuid.as_hyphenated()
+            );
+            if let Err(e) = btrfs_uapi::send_receive::received_subvol_set(
+                file.as_fd(),
+                &uuid::Uuid::nil(),
+                0,
+            ) {
                 eprintln!(
-                    "clearing received_uuid (was {})",
-                    info.received_uuid.as_hyphenated()
+                    "WARNING: failed to clear received_uuid on '{}': {e}",
+                    path.display()
                 );
-                if let Err(e) = btrfs_uapi::send_receive::received_subvol_set(
-                    file.as_fd(),
-                    &uuid::Uuid::nil(),
-                    0,
-                ) {
-                    eprintln!(
-                        "WARNING: failed to clear received_uuid on '{}': {e}",
-                        path.display()
-                    );
-                }
             }
         }
     }
@@ -185,7 +188,7 @@ fn set_readonly_property(
 fn set_compression_property(
     file: &File,
     value: &str,
-    path: &PathBuf,
+    path: &Path,
 ) -> Result<()> {
     use nix::libc::fsetxattr;
     use std::os::unix::io::AsRawFd;

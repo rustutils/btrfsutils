@@ -67,10 +67,15 @@ coverage:
 man:
     cargo run --package btrfs-mangen
 
+# run code formatter
 format:
     cargo +nightly fmt --all
 
+# run static linters
 check:
     cargo +nightly fmt --all --check
     RUSTDOCFLAGS="-Dwarnings" cargo doc --no-deps
-    #cargo clippy
+    cargo clippy -- -Dwarnings
+
+alias fmt := format
+alias lint := check

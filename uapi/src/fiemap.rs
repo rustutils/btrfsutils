@@ -71,7 +71,7 @@ pub fn file_extents(fd: BorrowedFd) -> nix::Result<FileExtentInfo> {
     // We use a Vec<u64> to guarantee 8-byte alignment for the fiemap buffer.
     let slots = EXTENTS_PER_BATCH as usize;
     let buf_bytes = 32 + slots * FE_SIZE;
-    let words = (buf_bytes + 7) / 8;
+    let words = buf_bytes.div_ceil(8);
     let mut buf: Vec<u64> = vec![0u64; words];
 
     let raw_fd = fd.as_raw_fd();

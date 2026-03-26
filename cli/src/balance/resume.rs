@@ -26,17 +26,17 @@ impl Runnable for BalanceResumeCommand {
                 );
                 Ok(())
             }
-            Err(e) if e == Errno::ECANCELED => {
+            Err(Errno::ECANCELED) => {
                 eprintln!("Balance was paused or cancelled by user.");
                 Ok(())
             }
-            Err(e) if e == Errno::ENOTCONN => {
+            Err(Errno::ENOTCONN) => {
                 anyhow::bail!(
                     "balance resume on '{}' failed: Not in progress",
                     self.path.display()
                 )
             }
-            Err(e) if e == Errno::EINPROGRESS => {
+            Err(Errno::EINPROGRESS) => {
                 anyhow::bail!(
                     "balance resume on '{}' failed: Already running",
                     self.path.display()

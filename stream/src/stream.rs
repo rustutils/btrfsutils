@@ -289,9 +289,8 @@ impl<R: Read> StreamReader<R> {
     pub fn next_command(&mut self) -> Result<Option<StreamCommand>> {
         // Read command header.
         let mut cmd_hdr = [0u8; CMD_HEADER_LEN];
-        match read_exact_or_eof(&mut self.reader, &mut cmd_hdr)? {
-            false => return Ok(None), // clean EOF
-            true => {}
+        if !read_exact_or_eof(&mut self.reader, &mut cmd_hdr)? {
+            return Ok(None); // clean EOF
         }
 
         let payload_len =

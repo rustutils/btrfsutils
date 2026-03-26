@@ -134,10 +134,10 @@ pub fn is_device_mounted(device: &Path) -> Result<bool> {
         File::open("/proc/mounts").context("failed to open /proc/mounts")?;
     for line in std::io::BufReader::new(file).lines() {
         let line = line?;
-        if let Some(mount_dev) = line.split_whitespace().next() {
-            if mount_dev == canonical_str.as_ref() {
-                return Ok(true);
-            }
+        if let Some(mount_dev) = line.split_whitespace().next()
+            && mount_dev == canonical_str.as_ref()
+        {
+            return Ok(true);
         }
     }
     Ok(false)

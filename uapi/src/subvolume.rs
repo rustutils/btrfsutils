@@ -156,8 +156,8 @@ fn set_v2_name(
 /// type.
 fn build_qgroup_inherit(qgroups: &[u64]) -> Vec<u64> {
     let base_size = mem::size_of::<btrfs_qgroup_inherit>();
-    let total_size = base_size + qgroups.len() * mem::size_of::<u64>();
-    let num_u64 = (total_size + 7) / 8;
+    let total_size = base_size + std::mem::size_of_val(qgroups);
+    let num_u64 = total_size.div_ceil(8);
     let mut buf = vec![0u64; num_u64];
 
     // SAFETY: buf is large enough and zeroed; we write through a properly
@@ -354,7 +354,7 @@ pub fn subvolume_default_get(fd: BorrowedFd) -> nix::Result<u64> {
         fd,
         SearchKey::for_objectid_range(
             BTRFS_ROOT_TREE_OBJECTID as u64,
-            BTRFS_DIR_ITEM_KEY as u32,
+            BTRFS_DIR_ITEM_KEY,
             BTRFS_ROOT_TREE_DIR_OBJECTID as u64,
             BTRFS_ROOT_TREE_DIR_OBJECTID as u64,
         ),
@@ -416,7 +416,7 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
         fd,
         SearchKey::for_objectid_range(
             BTRFS_ROOT_TREE_OBJECTID as u64,
-            BTRFS_ROOT_ITEM_KEY as u32,
+            BTRFS_ROOT_ITEM_KEY,
             BTRFS_FIRST_FREE_OBJECTID as u64,
             BTRFS_LAST_FREE_OBJECTID as u64,
         ),
@@ -432,7 +432,7 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
         fd,
         SearchKey::for_objectid_range(
             BTRFS_ROOT_TREE_OBJECTID as u64,
-            BTRFS_ROOT_BACKREF_KEY as u32,
+            BTRFS_ROOT_BACKREF_KEY,
             BTRFS_FIRST_FREE_OBJECTID as u64,
             BTRFS_LAST_FREE_OBJECTID as u64,
         ),
@@ -512,7 +512,7 @@ fn ino_lookup_dir_path(
 /// `/` gives the final full path.
 fn resolve_full_paths(
     fd: BorrowedFd,
-    items: &mut Vec<SubvolumeListItem>,
+    items: &mut [SubvolumeListItem],
     top_id: u64,
 ) -> nix::Result<()> {
     // Map root_id → index for O(1) parent lookups.

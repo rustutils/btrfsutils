@@ -13,7 +13,7 @@ use std::{
         fd::{AsFd, AsRawFd, OwnedFd},
         unix::io::FromRawFd,
     },
-    path::PathBuf,
+    path::{Path, PathBuf},
     thread,
 };
 
@@ -67,12 +67,12 @@ const SEND_BUF_SIZE_V1: usize = 64 * 1024;
 /// Buffer size for protocol v2+ (16 KiB + 128 KiB compressed = 144 KiB).
 const SEND_BUF_SIZE_V2: usize = 16 * 1024 + 128 * 1024;
 
-fn open_subvol_ro(path: &PathBuf) -> Result<File> {
+fn open_subvol_ro(path: &Path) -> Result<File> {
     File::open(path)
         .with_context(|| format!("cannot open '{}'", path.display()))
 }
 
-fn check_subvol_readonly(file: &File, path: &PathBuf) -> Result<()> {
+fn check_subvol_readonly(file: &File, path: &Path) -> Result<()> {
     let flags = subvolume_flags_get(file.as_fd()).with_context(|| {
         format!("failed to get flags for '{}'", path.display())
     })?;
@@ -82,7 +82,7 @@ fn check_subvol_readonly(file: &File, path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn get_root_id(file: &File, path: &PathBuf) -> Result<u64> {
+fn get_root_id(file: &File, path: &Path) -> Result<u64> {
     let info = subvolume_info(file.as_fd()).with_context(|| {
         format!("failed to get subvolume info for '{}'", path.display())
     })?;
@@ -170,11 +170,8 @@ fn spawn_reader_thread(
 fn open_output(outfile: &Option<PathBuf>) -> Result<Box<dyn Write + Send>> {
     match outfile {
         Some(path) => {
-            let file = File::options()
-                .write(true)
-                .append(true)
-                .open(path)
-                .with_context(|| {
+            let file =
+                File::options().append(true).open(path).with_context(|| {
                     format!("cannot open '{}' for writing", path.display())
                 })?;
             Ok(Box::new(file))

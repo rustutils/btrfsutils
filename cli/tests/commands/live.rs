@@ -269,7 +269,10 @@ fn property_set_compression() {
     // Clear compression
     btrfs_ok(&["property", "set", &file, "compression", ""]);
     let out = btrfs_ok(&["property", "get", &file, "compression"]);
-    assert!(!out.contains("compression="), "expected no compression:\n{out}");
+    assert!(
+        !out.contains("compression="),
+        "expected no compression:\n{out}"
+    );
 }
 
 #[test]
@@ -278,9 +281,16 @@ fn property_set_label() {
     let (_td, mnt) = single_mount();
     let mp = mnt.path().to_str().unwrap();
 
-    btrfs_ok(&["property", "set", "-t", "filesystem", mp, "label", "newlabel"]);
-    let out =
-        btrfs_ok(&["property", "get", "-t", "filesystem", mp, "label"]);
+    btrfs_ok(&[
+        "property",
+        "set",
+        "-t",
+        "filesystem",
+        mp,
+        "label",
+        "newlabel",
+    ]);
+    let out = btrfs_ok(&["property", "get", "-t", "filesystem", mp, "label"]);
     assert!(out.contains("newlabel"), "expected label=newlabel:\n{out}");
 }
 
@@ -311,8 +321,7 @@ fn property_wrong_property_for_type() {
     std::fs::write(&file, "test").unwrap();
 
     // "ro" is not valid on an inode
-    let (_stdout, stderr, code) =
-        btrfs(&["property", "get", &file, "ro"]);
+    let (_stdout, stderr, code) = btrfs(&["property", "get", &file, "ro"]);
     assert_ne!(code, 0, "expected failure for wrong property type");
     assert!(
         stderr.contains("not applicable"),

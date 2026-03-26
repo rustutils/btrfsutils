@@ -18,7 +18,7 @@ impl Runnable for BalancePauseCommand {
 
         match balance_ctl(file.as_fd(), BalanceCtl::Pause) {
             Ok(()) => Ok(()),
-            Err(e) if e == Errno::ENOTCONN => {
+            Err(Errno::ENOTCONN) => {
                 anyhow::bail!(
                     "balance pause on '{}' failed: Not running",
                     self.path.display()

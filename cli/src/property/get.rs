@@ -3,7 +3,11 @@ use crate::{Format, Runnable};
 use anyhow::{Context, Result, anyhow, bail};
 use btrfs_uapi::{filesystem::label_get, subvolume::subvolume_flags_get};
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{
+    fs::File,
+    os::unix::io::AsFd,
+    path::{Path, PathBuf},
+};
 
 /// Get a property value of a btrfs object
 ///
@@ -65,7 +69,7 @@ fn get_property(
     file: &File,
     obj_type: PropertyObjectType,
     name: &str,
-    path: &PathBuf,
+    path: &Path,
 ) -> Result<()> {
     match (obj_type, name) {
         (PropertyObjectType::Subvol, "ro") => {
@@ -102,7 +106,7 @@ fn get_property(
     Ok(())
 }
 
-fn get_compression_property(file: &File, path: &PathBuf) -> Result<()> {
+fn get_compression_property(file: &File, path: &Path) -> Result<()> {
     use nix::libc::{ENODATA, fgetxattr};
     use std::os::unix::io::AsRawFd;
 

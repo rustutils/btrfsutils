@@ -141,10 +141,11 @@ impl Runnable for SubvolumeListCommand {
         // a <FS_TREE> prefix, matching btrfs-progs behaviour.
         if self.all {
             for item in &mut items {
-                if item.parent_id != 0 && item.parent_id != top_id {
-                    if !item.name.is_empty() {
-                        item.name = format!("<FS_TREE>/{}", item.name);
-                    }
+                if item.parent_id != 0
+                    && item.parent_id != top_id
+                    && !item.name.is_empty()
+                {
+                    item.name = format!("<FS_TREE>/{}", item.name);
                 }
             }
         }

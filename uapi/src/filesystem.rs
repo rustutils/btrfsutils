@@ -6,10 +6,10 @@
 //! human-readable label, and resizing a device within the filesystem.
 
 use crate::raw::{
-    BTRFS_FS_INFO_FLAG_GENERATION, btrfs_ioc_fs_info, btrfs_ioc_get_fslabel,
-    btrfs_ioc_resize, btrfs_ioc_set_fslabel, btrfs_ioc_start_sync,
-    btrfs_ioc_sync, btrfs_ioc_wait_sync, btrfs_ioctl_fs_info_args,
-    btrfs_ioctl_vol_args, BTRFS_LABEL_SIZE,
+    BTRFS_FS_INFO_FLAG_GENERATION, BTRFS_LABEL_SIZE, btrfs_ioc_fs_info,
+    btrfs_ioc_get_fslabel, btrfs_ioc_resize, btrfs_ioc_set_fslabel,
+    btrfs_ioc_start_sync, btrfs_ioc_sync, btrfs_ioc_wait_sync,
+    btrfs_ioctl_fs_info_args, btrfs_ioctl_vol_args,
 };
 use nix::libc::c_char;
 use std::{
@@ -124,14 +124,14 @@ pub enum ResizeAmount {
     Sub(u64),
 }
 
-impl ResizeAmount {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for ResizeAmount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Cancel => "cancel".to_owned(),
-            Self::Max => "max".to_owned(),
-            Self::Set(n) => n.to_string(),
-            Self::Add(n) => format!("+{n}"),
-            Self::Sub(n) => format!("-{n}"),
+            Self::Cancel => f.write_str("cancel"),
+            Self::Max => f.write_str("max"),
+            Self::Set(n) => write!(f, "{n}"),
+            Self::Add(n) => write!(f, "+{n}"),
+            Self::Sub(n) => write!(f, "-{n}"),
         }
     }
 }
@@ -191,7 +191,7 @@ pub fn resize(fd: BorrowedFd, args: ResizeArgs) -> nix::Result<()> {
         raw.name[i] = b as c_char;
     }
 
-    unsafe { btrfs_ioc_resize(fd.as_raw_fd(), &mut raw) }?;
+    unsafe { btrfs_ioc_resize(fd.as_raw_fd(), &raw) }?;
     Ok(())
 }
 

@@ -269,6 +269,6 @@ pub fn defrag_range(fd: BorrowedFd, args: &DefragRangeArgs) -> nix::Result<()> {
         }
     }
 
-    unsafe { btrfs_ioc_defrag_range(fd.as_raw_fd(), &mut raw) }?;
+    unsafe { btrfs_ioc_defrag_range(fd.as_raw_fd(), &raw) }?;
     Ok(())
 }

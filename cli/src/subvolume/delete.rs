@@ -79,11 +79,11 @@ impl Runnable for SubvolumeDeleteCommand {
         }
 
         // --commit-after: sync once at the end.
-        if let Some(ref file) = commit_after_fd {
-            if let Err(e) = wait_for_commit(file.as_fd()) {
-                eprintln!("error: failed to commit: {e:#}");
-                had_error = true;
-            }
+        if let Some(ref file) = commit_after_fd
+            && let Err(e) = wait_for_commit(file.as_fd())
+        {
+            eprintln!("error: failed to commit: {e:#}");
+            had_error = true;
         }
 
         if had_error {

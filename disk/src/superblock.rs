@@ -358,24 +358,18 @@ fn format_super_flags(flags: u64) -> String {
     let known: &[(u64, &str)] = &[
         (raw::BTRFS_HEADER_FLAG_WRITTEN as u64, "WRITTEN"),
         (raw::BTRFS_HEADER_FLAG_RELOC as u64, "RELOC"),
-        (raw::BTRFS_SUPER_FLAG_CHANGING_FSID as u64, "CHANGING_FSID"),
+        (raw::BTRFS_SUPER_FLAG_CHANGING_FSID, "CHANGING_FSID"),
+        (raw::BTRFS_SUPER_FLAG_CHANGING_FSID_V2, "CHANGING_FSID_V2"),
+        (raw::BTRFS_SUPER_FLAG_SEEDING, "SEEDING"),
+        (raw::BTRFS_SUPER_FLAG_METADUMP, "METADUMP"),
+        (raw::BTRFS_SUPER_FLAG_METADUMP_V2, "METADUMP_V2"),
+        (raw::BTRFS_SUPER_FLAG_CHANGING_BG_TREE, "CHANGING_BG_TREE"),
         (
-            raw::BTRFS_SUPER_FLAG_CHANGING_FSID_V2 as u64,
-            "CHANGING_FSID_V2",
-        ),
-        (raw::BTRFS_SUPER_FLAG_SEEDING as u64, "SEEDING"),
-        (raw::BTRFS_SUPER_FLAG_METADUMP as u64, "METADUMP"),
-        (raw::BTRFS_SUPER_FLAG_METADUMP_V2 as u64, "METADUMP_V2"),
-        (
-            raw::BTRFS_SUPER_FLAG_CHANGING_BG_TREE as u64,
-            "CHANGING_BG_TREE",
-        ),
-        (
-            raw::BTRFS_SUPER_FLAG_CHANGING_DATA_CSUM as u64,
+            raw::BTRFS_SUPER_FLAG_CHANGING_DATA_CSUM,
             "CHANGING_DATA_CSUM",
         ),
         (
-            raw::BTRFS_SUPER_FLAG_CHANGING_META_CSUM as u64,
+            raw::BTRFS_SUPER_FLAG_CHANGING_META_CSUM,
             "CHANGING_META_CSUM",
         ),
     ];

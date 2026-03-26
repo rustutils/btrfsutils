@@ -193,11 +193,11 @@ impl FilesystemDefragCommand {
                     if meta.dev() == dir_dev {
                         stack.push(path);
                     }
-                } else if meta.is_file() {
-                    if let Err(e) = self.defrag_one(&path, args) {
-                        eprintln!("error: {e:#}");
-                        errors += 1;
-                    }
+                } else if meta.is_file()
+                    && let Err(e) = self.defrag_one(&path, args)
+                {
+                    eprintln!("error: {e:#}");
+                    errors += 1;
                 }
                 // Skip symlinks, sockets, fifos, etc.
             }

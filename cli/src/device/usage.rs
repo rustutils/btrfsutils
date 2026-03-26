@@ -1,9 +1,8 @@
 use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
-    chunk::device_chunk_allocations,
-    device::device_info_all,
-    filesystem::filesystem_info,
+    chunk::device_chunk_allocations, device::device_info_all,
+    filesystem::filesystem_info, space::BlockGroupFlags,
 };
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
@@ -142,29 +141,19 @@ impl Runnable for DeviceUsageCommand {
     }
 }
 
-fn print_device_usage(
-    path: &std::path::Path,
-    mode: &UnitMode,
-) -> Result<()> {
-    let file = File::open(path).with_context(|| {
-        format!("failed to open '{}'", path.display())
-    })?;
+fn print_device_usage(path: &std::path::Path, mode: &UnitMode) -> Result<()> {
+    let file = File::open(path)
+        .with_context(|| format!("failed to open '{}'", path.display()))?;
     let fd = file.as_fd();
 
     let fs = filesystem_info(fd).with_context(|| {
-        format!(
-            "failed to get filesystem info for '{}'",
-            path.display()
-        )
+        format!("failed to get filesystem info for '{}'", path.display())
     })?;
     let devices = device_info_all(fd, &fs).with_context(|| {
         format!("failed to get device info for '{}'", path.display())
     })?;
     let allocs = device_chunk_allocations(fd).with_context(|| {
-        format!(
-            "failed to get chunk allocations for '{}'",
-            path.display()
-        )
+        format!("failed to get chunk allocations for '{}'", path.display())
     })?;
 
     for (di, dev) in devices.iter().enumerate() {
@@ -185,18 +174,12 @@ fn print_device_usage(
         print_line("Device slack", &fmt_size(slack, mode));
 
         let mut allocated: u64 = 0;
-        let mut dev_allocs: Vec<_> = allocs
-            .iter()
-            .filter(|a| a.devid == dev.devid)
-            .collect();
+        let mut dev_allocs: Vec<_> =
+            allocs.iter().filter(|a| a.devid == dev.devid).collect();
         dev_allocs.sort_by_key(|a| {
-            let type_order = if a.flags.contains(
-                btrfs_uapi::space::BlockGroupFlags::DATA,
-            ) {
+            let type_order = if a.flags.contains(BlockGroupFlags::DATA) {
                 0
-            } else if a.flags.contains(
-                btrfs_uapi::space::BlockGroupFlags::METADATA,
-            ) {
+            } else if a.flags.contains(BlockGroupFlags::METADATA) {
                 1
             } else {
                 2

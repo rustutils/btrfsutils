@@ -45,11 +45,11 @@ fn parse_resize_amount(s: &str) -> Result<ResizeAmount> {
 }
 
 fn parse_resize_args(s: &str) -> Result<ResizeArgs> {
-    if let Some(colon) = s.find(':') {
-        if let Ok(devid) = s[..colon].parse::<u64>() {
-            let amount = parse_resize_amount(&s[colon + 1..])?;
-            return Ok(ResizeArgs::new(amount).with_devid(devid));
-        }
+    if let Some(colon) = s.find(':')
+        && let Ok(devid) = s[..colon].parse::<u64>()
+    {
+        let amount = parse_resize_amount(&s[colon + 1..])?;
+        return Ok(ResizeArgs::new(amount).with_devid(devid));
     }
     Ok(ResizeArgs::new(parse_resize_amount(s)?))
 }

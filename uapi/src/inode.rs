@@ -264,7 +264,7 @@ fn subvolid_resolve_sub(
         fd,
         SearchKey::for_objectid_range(
             crate::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
-            crate::raw::BTRFS_ROOT_BACKREF_KEY as u32,
+            crate::raw::BTRFS_ROOT_BACKREF_KEY,
             subvol_id,
             subvol_id,
         ),

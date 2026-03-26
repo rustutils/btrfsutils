@@ -406,13 +406,13 @@ pub fn device_min_size(fd: BorrowedFd, devid: u64) -> nix::Result<u64> {
                 end: phys_start + len - 1,
             });
 
-            if let Some(prev_end) = last_pos {
-                if prev_end != phys_start {
-                    holes.push(Extent {
-                        start: prev_end,
-                        end: phys_start - 1,
-                    });
-                }
+            if let Some(prev_end) = last_pos
+                && prev_end != phys_start
+            {
+                holes.push(Extent {
+                    start: prev_end,
+                    end: phys_start - 1,
+                });
             }
 
             last_pos = Some(phys_start + len);

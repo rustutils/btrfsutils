@@ -50,7 +50,7 @@ impl Runnable for BalanceStatusCommand {
 
                 Ok(())
             }
-            Err(e) if e == Errno::ENOTCONN => {
+            Err(Errno::ENOTCONN) => {
                 println!("No balance found on '{}'", self.path.display());
                 Ok(())
             }

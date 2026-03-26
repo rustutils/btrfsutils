@@ -144,17 +144,14 @@ fn fmt_size(
     bytes: u64,
     raw: bool,
     fixed_divisor: Option<u64>,
-    use_si: bool,
+    _use_si: bool,
 ) -> String {
     if raw {
         return bytes.to_string();
     }
     if let Some(div) = fixed_divisor {
-        if use_si {
-            return format!("{}", bytes / div);
-        } else {
-            return format!("{}", bytes / div);
-        }
+        // TODO: use_si should format with base-1000 units
+        return format!("{}", bytes / div);
     }
     human_bytes(bytes)
 }

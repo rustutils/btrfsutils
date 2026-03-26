@@ -72,7 +72,7 @@ pub struct Arguments {
     pub command: Command,
 }
 
-const GLOBAL_OPTIONS: &'static str = "Global options";
+const GLOBAL_OPTIONS: &str = "Global options";
 
 #[derive(Parser, Debug)]
 pub struct GlobalOptions {

@@ -133,7 +133,7 @@ impl Runnable for BalanceStartCommand {
                 );
                 Ok(())
             }
-            Err(e) if e == Errno::ECANCELED => {
+            Err(Errno::ECANCELED) => {
                 // The kernel sets ECANCELED when the balance was paused or
                 // cancelled mid-run; this is not an error from the user's
                 // perspective.

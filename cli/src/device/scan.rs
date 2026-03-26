@@ -2,7 +2,11 @@ use crate::{Format, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::device::{device_forget, device_scan};
 use clap::Parser;
-use std::{ffi::CString, fs, path::PathBuf};
+use std::{
+    ffi::CString,
+    fs,
+    path::{Path, PathBuf},
+};
 
 /// Scan or unregister devices for multi-device btrfs filesystems
 ///
@@ -135,7 +139,7 @@ fn block_devices_from_proc_partitions() -> Result<Vec<PathBuf>> {
     Ok(devices)
 }
 
-fn scan_one(device: &PathBuf) -> Result<()> {
+fn scan_one(device: &Path) -> Result<()> {
     let path_str = device.to_str().ok_or_else(|| {
         anyhow::anyhow!("path is not valid UTF-8: '{}'", device.display())
     })?;
@@ -148,7 +152,7 @@ fn scan_one(device: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn forget_one(device: &PathBuf) -> Result<()> {
+fn forget_one(device: &Path) -> Result<()> {
     let path_str = device.to_str().ok_or_else(|| {
         anyhow::anyhow!("path is not valid UTF-8: '{}'", device.display())
     })?;

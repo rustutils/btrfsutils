@@ -77,19 +77,18 @@ impl Runnable for SubvolumeCreateCommand {
                 }
             };
 
-            if self.parents {
-                if let Err(e) =
+            if self.parents
+                && let Err(e) =
                     std::fs::create_dir_all(parent).with_context(|| {
                         format!(
                             "failed to create parent directories for '{}'",
                             parent.display()
                         )
                     })
-                {
-                    eprintln!("error creating '{}': {e}", path.display());
-                    had_error = true;
-                    continue;
-                }
+            {
+                eprintln!("error creating '{}': {e}", path.display());
+                had_error = true;
+                continue;
             }
 
             let file = match File::open(parent).with_context(|| {

@@ -19,16 +19,18 @@ use std::{
 fn find_mount_root(path: &Path) -> Result<PathBuf> {
     use std::os::unix::fs::MetadataExt;
 
-    let path = path.canonicalize().with_context(|| {
-        format!("cannot canonicalize '{}'", path.display())
-    })?;
-    let dev = path.metadata()
+    let path = path
+        .canonicalize()
+        .with_context(|| format!("cannot canonicalize '{}'", path.display()))?;
+    let dev = path
+        .metadata()
         .with_context(|| format!("cannot stat '{}'", path.display()))?
         .dev();
 
     let mut root = path.clone();
     while let Some(parent) = root.parent() {
-        let parent_dev = parent.metadata()
+        let parent_dev = parent
+            .metadata()
             .with_context(|| format!("cannot stat '{}'", parent.display()))?
             .dev();
         if parent_dev != dev {
@@ -644,6 +646,7 @@ impl ReceiveContext {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_clone(
         &mut self,
         path: &str,

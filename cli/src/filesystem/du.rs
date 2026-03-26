@@ -48,8 +48,8 @@ pub struct FilesystemDuCommand {
 impl Runnable for FilesystemDuCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         println!(
-            "{:>10}  {:>10}  {:>10}  {}",
-            "Total", "Exclusive", "Set shared", "Filename"
+            "{:>10}  {:>10}  {:>10}  Filename",
+            "Total", "Exclusive", "Set shared"
         );
 
         for path in &self.paths {
@@ -218,7 +218,7 @@ fn walk_dir(
 ///
 /// This gives the "set shared" value: physical bytes referenced by at least
 /// one `FIEMAP_EXTENT_SHARED` extent anywhere in the subtree.
-fn compute_set_shared(ranges: &mut Vec<(u64, u64)>) -> u64 {
+fn compute_set_shared(ranges: &mut [(u64, u64)]) -> u64 {
     if ranges.is_empty() {
         return 0;
     }

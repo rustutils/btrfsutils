@@ -54,7 +54,7 @@ impl Runnable for SubvolumeFindNewCommand {
         // Search tree 0 (the subvolume's own tree, relative to the fd) for
         // EXTENT_DATA_KEY items.  The min_transid filter restricts results to
         // items whose metadata block was written at or after last_gen.
-        let mut key = SearchKey::for_type(0, BTRFS_EXTENT_DATA_KEY as u32);
+        let mut key = SearchKey::for_type(0, BTRFS_EXTENT_DATA_KEY);
         key.min_transid = self.last_gen;
 
         let mut cache_ino: u64 = 0;
