@@ -1,11 +1,11 @@
 [package]
 name = "btrfs-cli"
-version = "0.2.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "A Rust implementation of the btrfs command-line tool"
-license = "GPL-2.0-only"
-repository = "https://github.com/rustutils/btrfs-progrs"
-homepage = "https://github.com/rustutils/btrfs-progrs"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 readme = "README.md"
 categories = ["command-line-utilities", "filesystem"]
 keywords = ["btrfs", "filesystem", "cli", "linux", "storage"]

@@ -2,6 +2,13 @@
 members = ["uapi", "disk", "cli"]
 resolver = "2"
 
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+license = "GPL-2.0-only"
+repository = "https://github.com/rustutils/btrfs-progrs"
+homepage = "https://github.com/rustutils/btrfs-progrs"
+
 [workspace.dependencies]
 nix = { version = "0.31.2", features = ["ioctl", "fs"] }
 bitflags = "2"

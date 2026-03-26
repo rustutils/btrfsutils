@@ -1,11 +1,11 @@
 [package]
 name = "btrfs-disk"
-version = "0.2.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 description = "Platform-independent parsing of btrfs on-disk structures"
-license = "GPL-2.0-only"
-repository = "https://github.com/rustutils/btrfs-progrs"
-homepage = "https://github.com/rustutils/btrfs-progrs"
 readme = "README.md"
 categories = ["filesystem", "parser-implementations"]
 keywords = ["btrfs", "filesystem", "parser", "userspace"]
