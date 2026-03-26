@@ -60,5 +60,9 @@ coverage:
     sudo chown -R "$(id -u):$(id -g)" target/coverage/
     cargo llvm-cov report --html
 
+# Generate man pages to target/man/
+man:
+    cargo run --package btrfs-cli --features mangen --bin btrfs-mangen
+
 format:
     cargo +nightly fmt --all

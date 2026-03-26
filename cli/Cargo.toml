@@ -26,6 +26,15 @@ btrfs-disk = { path = "../disk", version = "0.2.0" }
 flate2 = "1"
 zstd = "0.13"
 lzo1x = "0.2"
+clap_mangen = { version = "0.2", optional = true }
+
+[features]
+mangen = ["dep:clap_mangen"]
+
+[[bin]]
+name = "btrfs-mangen"
+path = "src/bin/btrfs-mangen.rs"
+required-features = ["mangen"]
 
 [dev-dependencies]
 insta = "1"

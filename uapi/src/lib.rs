@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod balance;
+pub mod blkdev;
 pub mod chunk;
 pub mod defrag;
 pub mod dev_extent;

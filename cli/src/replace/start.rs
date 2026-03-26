@@ -6,7 +6,15 @@ use btrfs_uapi::{
     sysfs::SysfsBtrfs,
 };
 use clap::Parser;
-use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf, thread, time::Duration};
+use std::{
+    ffi::CString,
+    fs::{self, File},
+    io::BufRead,
+    os::unix::{fs::FileTypeExt, io::AsFd},
+    path::{Path, PathBuf},
+    thread,
+    time::Duration,
+};
 
 /// Replace a device in the filesystem.
 ///
@@ -47,6 +55,9 @@ pub struct ReplaceStartCommand {
 
 impl Runnable for ReplaceStartCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+        // Validate the target device before opening the filesystem.
+        check_target_device(&self.target, self.force)?;
+
         let file = File::open(&self.mount_point)
             .with_context(|| format!("failed to open '{}'", self.mount_point.display()))?;
         let fd = file.as_fd();
@@ -98,6 +109,29 @@ impl Runnable for ReplaceStartCommand {
 
         let tgtdev = CString::new(self.target.as_os_str().as_encoded_bytes())
             .with_context(|| format!("invalid target device path '{}'", self.target.display()))?;
+
+        // Discard (TRIM) the target device unless --nodiscard is set.
+        if !self.nodiscard {
+            let tgtfile = fs::OpenOptions::new()
+                .write(true)
+                .open(&self.target)
+                .with_context(|| {
+                    format!(
+                        "failed to open target device '{}' for discard",
+                        self.target.display()
+                    )
+                })?;
+            match btrfs_uapi::blkdev::discard_whole_device(tgtfile.as_fd()) {
+                Ok(0) => {}
+                Ok(_) => eprintln!("discarded target device '{}'", self.target.display()),
+                Err(e) => {
+                    eprintln!(
+                        "warning: discard failed on '{}': {e}; continuing anyway",
+                        self.target.display()
+                    );
+                }
+            }
+        }
 
         match replace_start(fd, source, &tgtdev, self.redundancy_only).with_context(|| {
             format!(
@@ -151,5 +185,64 @@ impl Runnable for ReplaceStartCommand {
         }
 
         Ok(())
+    }
+}
+
+/// Validate the target device before starting the replace operation.
+///
+/// Checks that the target is a block device, is not currently mounted, and
+/// does not already contain a btrfs filesystem (unless --force is set).
+fn check_target_device(target: &Path, force: bool) -> Result<()> {
+    let meta = fs::metadata(target)
+        .with_context(|| format!("cannot access target device '{}'", target.display()))?;
+
+    if !meta.file_type().is_block_device() {
+        bail!("'{}' is not a block device", target.display());
+    }
+
+    if is_device_mounted(target)? {
+        bail!(
+            "'{}' is mounted; refusing to use a mounted device as replace target",
+            target.display()
+        );
+    }
+
+    if !force && has_btrfs_superblock(target) {
+        bail!(
+            "'{}' already contains a btrfs filesystem; use -f to force",
+            target.display()
+        );
+    }
+
+    Ok(())
+}
+
+/// Check if a device path appears in /proc/mounts.
+fn is_device_mounted(device: &Path) -> Result<bool> {
+    let canonical = fs::canonicalize(device)
+        .with_context(|| format!("cannot resolve path '{}'", device.display()))?;
+    let canonical_str = canonical.to_string_lossy();
+
+    let file = fs::File::open("/proc/mounts").context("failed to open /proc/mounts")?;
+    for line in std::io::BufReader::new(file).lines() {
+        let line = line?;
+        if let Some(mount_dev) = line.split_whitespace().next() {
+            if mount_dev == canonical_str.as_ref() {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Try to read a btrfs superblock from the device. Returns true if a valid
+/// btrfs magic signature is found.
+fn has_btrfs_superblock(device: &Path) -> bool {
+    let Ok(mut file) = File::open(device) else {
+        return false;
+    };
+    match btrfs_disk::superblock::read_superblock(&mut file, 0) {
+        Ok(sb) => sb.magic_is_valid(),
+        Err(_) => false,
     }
 }
