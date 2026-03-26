@@ -2,4 +2,5 @@
 source: cli/tests/arguments.rs
 expression: "parse_err(&[\"btrfs\", \"device\", \"add\", \"/dev/sdb\"])"
 ---
-error: 2 values required by '<ARGS> <ARGS>...'; only 1 was provided
+error: the following required arguments were not provided:
+  <DEVICES>...

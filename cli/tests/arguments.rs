@@ -201,6 +201,30 @@ fn device_add() {
 }
 
 #[test]
+fn device_add_force() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "device", "add", "-f", "/dev/sdb", "/mnt"]));
+}
+
+#[test]
+fn device_add_nodiscard() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "device", "add", "-K", "/dev/sdb", "/mnt"]));
+}
+
+#[test]
+fn device_add_enqueue() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "device", "add", "--enqueue", "/dev/sdb", "/mnt"
+    ]));
+}
+
+#[test]
+fn device_add_all_flags() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "device", "add", "-f", "-K", "--enqueue", "/dev/sdb", "/dev/sdc", "/mnt"
+    ]));
+}
+
+#[test]
 fn device_add_missing_mount() {
     insta::assert_snapshot!(parse_err(&["btrfs", "device", "add", "/dev/sdb"]));
 }

@@ -1,5 +1,11 @@
-use anyhow::{Context, Result};
-use std::str::FromStr;
+use anyhow::{Context, Result, bail};
+use std::{
+    fs::{self, File},
+    io::BufRead,
+    os::unix::fs::FileTypeExt,
+    path::Path,
+    str::FromStr,
+};
 use uuid::Uuid;
 
 /// Format a byte count as a human-readable string using binary prefixes.
@@ -84,6 +90,65 @@ impl FromStr for ParsedUuid {
                 .map(Self)
                 .map_err(|e| format!("invalid UUID: {e}")),
         }
+    }
+}
+
+/// Check that a device is suitable for use as a btrfs target (add or replace).
+///
+/// Verifies that the path is a block device, is not currently mounted, and
+/// does not already contain a btrfs filesystem (unless `force` is true).
+pub fn check_device_for_overwrite(device: &Path, force: bool) -> Result<()> {
+    let meta = fs::metadata(device)
+        .with_context(|| format!("cannot access device '{}'", device.display()))?;
+
+    if !meta.file_type().is_block_device() {
+        bail!("'{}' is not a block device", device.display());
+    }
+
+    if is_device_mounted(device)? {
+        bail!(
+            "'{}' is mounted; refusing to use a mounted device",
+            device.display()
+        );
+    }
+
+    if !force && has_btrfs_superblock(device) {
+        bail!(
+            "'{}' already contains a btrfs filesystem; use -f to force",
+            device.display()
+        );
+    }
+
+    Ok(())
+}
+
+/// Check if a device path appears in /proc/mounts.
+pub fn is_device_mounted(device: &Path) -> Result<bool> {
+    let canonical = fs::canonicalize(device)
+        .with_context(|| format!("cannot resolve path '{}'", device.display()))?;
+    let canonical_str = canonical.to_string_lossy();
+
+    let file = File::open("/proc/mounts").context("failed to open /proc/mounts")?;
+    for line in std::io::BufReader::new(file).lines() {
+        let line = line?;
+        if let Some(mount_dev) = line.split_whitespace().next() {
+            if mount_dev == canonical_str.as_ref() {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Try to read a btrfs superblock from the device. Returns true if a valid
+/// btrfs magic signature is found.
+pub fn has_btrfs_superblock(device: &Path) -> bool {
+    let Ok(mut file) = File::open(device) else {
+        return false;
+    };
+    match btrfs_disk::superblock::read_superblock(&mut file, 0) {
+        Ok(sb) => sb.magic_is_valid(),
+        Err(_) => false,
     }
 }
 

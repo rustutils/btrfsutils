@@ -588,6 +588,80 @@ fn device_add_remove() {
     assert!(!out.contains(dev2_path), "device should be removed:\n{out}");
 }
 
+#[test]
+#[ignore = "requires elevated privileges"]
+fn device_add_force() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // Create a second device and format it as btrfs so it has a superblock.
+    let dev2_file = BackingFile::new(_td.path(), "disk2.img", 512_000_000);
+    let dev2 = LoopbackDevice::new(dev2_file);
+    let dev2_path = dev2.path().to_str().unwrap();
+
+    std::process::Command::new("mkfs.btrfs")
+        .args(["-f", dev2_path])
+        .output()
+        .expect("mkfs.btrfs failed");
+
+    // Without --force, adding a device with an existing btrfs superblock should fail.
+    let (_stdout, stderr, code) = btrfs(&["device", "add", dev2_path, mp]);
+    assert_ne!(code, 0, "expected failure without --force:\n{stderr}");
+    assert!(
+        stderr.contains("already contains a btrfs filesystem"),
+        "expected btrfs superblock error:\n{stderr}"
+    );
+
+    // With --force, it should succeed.
+    btrfs_ok(&["device", "add", "-f", dev2_path, mp]);
+
+    let out = btrfs_ok(&["filesystem", "show", mp]);
+    assert!(
+        out.contains(dev2_path),
+        "expected new device in show output:\n{out}"
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn device_add_nodiscard() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    let dev2_file = BackingFile::new(_td.path(), "disk2.img", 512_000_000);
+    let dev2 = LoopbackDevice::new(dev2_file);
+    let dev2_path = dev2.path().to_str().unwrap();
+
+    // -K should skip TRIM and still add the device successfully.
+    btrfs_ok(&["device", "add", "-K", dev2_path, mp]);
+
+    let out = btrfs_ok(&["filesystem", "show", mp]);
+    assert!(
+        out.contains(dev2_path),
+        "expected new device in show output:\n{out}"
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn device_add_enqueue() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    let dev2_file = BackingFile::new(_td.path(), "disk2.img", 512_000_000);
+    let dev2 = LoopbackDevice::new(dev2_file);
+    let dev2_path = dev2.path().to_str().unwrap();
+
+    // --enqueue should work even when no exclusive operation is running.
+    btrfs_ok(&["device", "add", "--enqueue", dev2_path, mp]);
+
+    let out = btrfs_ok(&["filesystem", "show", mp]);
+    assert!(
+        out.contains(dev2_path),
+        "expected new device in show output:\n{out}"
+    );
+}
+
 // ── device scan / ready ──────────────────────────────────────────────
 
 #[test]

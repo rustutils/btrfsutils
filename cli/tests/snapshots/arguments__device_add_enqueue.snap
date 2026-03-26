@@ -1,6 +1,6 @@
 ---
 source: cli/tests/arguments.rs
-expression: "parse(&[\"btrfs\", \"device\", \"add\", \"/dev/sdb\", \"/mnt\"])"
+expression: "parse(&[\"btrfs\", \"device\", \"add\", \"--enqueue\", \"/dev/sdb\", \"/mnt\"])"
 ---
 Arguments {
     global: GlobalOptions {
@@ -16,7 +16,7 @@ Arguments {
                 DeviceAddCommand {
                     force: false,
                     nodiscard: false,
-                    enqueue: false,
+                    enqueue: true,
                     devices: [
                         "/dev/sdb",
                     ],

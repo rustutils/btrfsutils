@@ -1,8 +1,8 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::check_device_for_overwrite};
 use anyhow::{Context, Result};
-use btrfs_uapi::device::device_add;
+use btrfs_uapi::{device::device_add, filesystem::fs_info, sysfs::SysfsBtrfs};
 use clap::Parser;
-use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{ffi::CString, fs, os::unix::io::AsFd, path::PathBuf};
 
 /// Add one or more devices to a mounted filesystem
 ///
@@ -10,29 +10,87 @@ use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
 /// other data. The operation requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 pub struct DeviceAddCommand {
-    /// One or more block devices to add, followed by the filesystem mount point
-    ///
-    /// Example: btrfs device add /dev/sdb /dev/sdc /mnt/data
-    #[clap(required = true, num_args = 2..)]
-    pub args: Vec<PathBuf>,
+    /// Force overwrite of an existing filesystem on the device
+    #[clap(short = 'f', long)]
+    pub force: bool,
+
+    /// Do not perform whole device TRIM (discard) before adding
+    #[clap(short = 'K', long)]
+    pub nodiscard: bool,
+
+    /// Wait if there's another exclusive operation running, instead of returning an error
+    #[clap(long)]
+    pub enqueue: bool,
+
+    /// One or more block devices to add
+    #[clap(required = true, num_args = 1..)]
+    pub devices: Vec<PathBuf>,
+
+    /// Mount point of the target filesystem
+    pub target: PathBuf,
 }
 
 impl Runnable for DeviceAddCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        // The last argument is the mount point; everything before it is a device.
-        // split_last() returns (&last, &[..rest]), so mount is first.
-        let (mount, devices) = self
-            .args
-            .split_last()
-            .expect("clap ensures at least 2 args");
-
-        let file =
-            File::open(mount).with_context(|| format!("failed to open '{}'", mount.display()))?;
+        let file = fs::File::open(&self.target)
+            .with_context(|| format!("failed to open '{}'", self.target.display()))?;
         let fd = file.as_fd();
+
+        // If --enqueue is set, wait for any running exclusive operation to finish.
+        if self.enqueue {
+            let info = fs_info(fd).with_context(|| {
+                format!(
+                    "failed to get filesystem info for '{}'",
+                    self.target.display()
+                )
+            })?;
+            let sysfs = SysfsBtrfs::new(&info.uuid);
+            let op = sysfs.wait_for_exclusive_operation().with_context(|| {
+                format!(
+                    "failed to check exclusive operation on '{}'",
+                    self.target.display()
+                )
+            })?;
+            if op != "none" {
+                eprintln!("waited for exclusive operation '{op}' to finish");
+            }
+        }
 
         let mut had_error = false;
 
-        for device in devices {
+        for device in &self.devices {
+            // Validate the device: must be a block device, not mounted, no
+            // existing btrfs filesystem (unless --force).
+            if let Err(e) = check_device_for_overwrite(device, self.force) {
+                eprintln!("error: {e:#}");
+                had_error = true;
+                continue;
+            }
+
+            // Discard (TRIM) the device unless --nodiscard is set.
+            if !self.nodiscard {
+                match fs::OpenOptions::new().write(true).open(device) {
+                    Ok(tgtfile) => {
+                        match btrfs_uapi::blkdev::discard_whole_device(tgtfile.as_fd()) {
+                            Ok(0) => {}
+                            Ok(_) => eprintln!("discarded device '{}'", device.display()),
+                            Err(e) => {
+                                eprintln!(
+                                    "warning: discard failed on '{}': {e}; continuing anyway",
+                                    device.display()
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "warning: could not open '{}' for discard: {e}; continuing anyway",
+                            device.display()
+                        );
+                    }
+                }
+            }
+
             let path_str = device.to_str().ok_or_else(|| {
                 anyhow::anyhow!("device path is not valid UTF-8: '{}'", device.display())
             })?;
