@@ -7,7 +7,7 @@ use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 /// Create a subvolume quota group
 #[derive(Parser, Debug)]
 pub struct QgroupCreateCommand {
-    /// Qgroup id in the form <level>/<id>
+    /// Qgroup id in the form LEVEL/ID
     pub qgroupid: String,
 
     /// Path to a mounted btrfs filesystem

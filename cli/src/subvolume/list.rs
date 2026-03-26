@@ -11,7 +11,7 @@ use std::{
 /// List subvolumes and snapshots in the filesystem
 ///
 /// The default output format matches btrfs-progs:
-///   ID <id> gen <gen> top level <parent_id> path <name>
+///   ID NNN gen NNN top level NNN path NAME
 ///
 /// Optional flags enable additional columns or filter the results.
 #[derive(Parser, Debug)]

@@ -16,7 +16,7 @@ pub struct FilesystemResizeCommand {
     pub offline: bool,
 
     /// New size for the filesystem, e.g. "1G", "+512M", "-1G", "max", "cancel",
-    /// or "devid:<id>:<size>" to target a specific device
+    /// or "devid:ID:SIZE" to target a specific device
     pub size: String,
 
     pub path: PathBuf,
