@@ -18,7 +18,7 @@ pub struct ScrubLimitCommand {
     pub all: bool,
 
     /// Select a single device by devid
-    #[clap(long, short, value_name = "DEVID", requires = "limit")]
+    #[clap(long, short, requires = "limit")]
     pub devid: Option<u64>,
 
     /// Set the throughput limit (e.g. 100m, 1g); 0 removes the limit

@@ -2,4 +2,4 @@
 source: cli/tests/arguments.rs
 expression: "parse_err(&[\"btrfs\", \"subvolume\", \"show\", \"-r\", \"256\", \"-u\",\n\"550e8400-e29b-41d4-a716-446655440000\", \"/mnt\"])"
 ---
-error: the argument '--rootid <ID>' cannot be used with '--uuid <UUID>'
+error: the argument '--rootid <ROOTID>' cannot be used with '--uuid <UUID>'

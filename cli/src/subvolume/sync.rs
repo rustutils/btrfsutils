@@ -21,7 +21,7 @@ pub struct SubvolumeSyncCommand {
     subvolids: Vec<u64>,
 
     /// Sleep N seconds between checks (default: 1)
-    #[clap(short = 's', long, value_name = "N")]
+    #[clap(short = 's', long, value_name = "SECONDS")]
     sleep: Option<u64>,
 }
 

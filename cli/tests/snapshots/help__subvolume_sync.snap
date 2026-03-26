@@ -20,7 +20,7 @@ Arguments:
           omitted)
 
 Options:
-  -s, --sleep <N>
+  -s, --sleep <SECONDS>
           Sleep N seconds between checks (default: 1)
 
   -h, --help

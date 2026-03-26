@@ -17,7 +17,7 @@ Arguments:
           Path to a subvolume or any file within it
 
 Options:
-  -r, --rootid <ID>
+  -r, --rootid <ROOTID>
           Look up subvolume by its root ID instead of path
 
   -u, --uuid <UUID>

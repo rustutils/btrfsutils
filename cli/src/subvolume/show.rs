@@ -23,16 +23,11 @@ use std::{
 #[derive(Parser, Debug)]
 pub struct SubvolumeShowCommand {
     /// Look up subvolume by its root ID instead of path
-    #[clap(short = 'r', long = "rootid", value_name = "ID")]
+    #[clap(short = 'r', long = "rootid")]
     pub rootid: Option<u64>,
 
     /// Look up subvolume by its UUID instead of path
-    #[clap(
-        short = 'u',
-        long = "uuid",
-        value_name = "UUID",
-        conflicts_with = "rootid"
-    )]
+    #[clap(short = 'u', long = "uuid", conflicts_with = "rootid")]
     pub uuid: Option<ParsedUuid>,
 
     /// Path to a subvolume or any file within it
