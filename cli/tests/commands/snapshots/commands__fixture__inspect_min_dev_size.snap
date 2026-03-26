@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs inspect-internal min-dev-size <MOUNT>
+expression: "btrfs_ok(&[\"inspect-internal\", \"min-dev-size\", mp])"
+---
+105906176 bytes (101.00MiB)

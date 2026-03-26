@@ -27,11 +27,15 @@ test:
 
     # --preserve-env=LLVM_PROFILE_FILE is a no-op when the var is unset,
     # but allows `just coverage` to forward it through sudo.
+    export INSTA_WORKSPACE_ROOT="$PWD"
     failed=0
     for binary in "${binaries[@]}"; do
-        sudo --preserve-env=LLVM_PROFILE_FILE \
+        sudo --preserve-env=LLVM_PROFILE_FILE,INSTA_WORKSPACE_ROOT \
             "$binary" --ignored --test-threads=1 || failed=1
     done
+
+    # new snapshots will be owned by root, so we fix that here.
+    sudo chown -R "$(id -u):$(id -g)" cli/tests/snapshots/ cli/tests/commands/snapshots
 
     if [[ $failed -ne 0 ]]; then
         echo ""

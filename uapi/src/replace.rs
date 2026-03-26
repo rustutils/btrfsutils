@@ -211,3 +211,66 @@ pub fn replace_cancel(fd: BorrowedFd) -> nix::Result<bool> {
         _ => Err(Errno::EINVAL),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- epoch_to_systemtime ---
+
+    #[test]
+    fn epoch_zero_is_none() {
+        assert!(epoch_to_systemtime(0).is_none());
+    }
+
+    #[test]
+    fn epoch_nonzero_is_some() {
+        let t = epoch_to_systemtime(1700000000).unwrap();
+        assert_eq!(t, UNIX_EPOCH + Duration::from_secs(1700000000));
+    }
+
+    // --- ReplaceState::from_raw ---
+
+    #[test]
+    fn replace_state_from_raw_all_variants() {
+        assert!(matches!(
+            ReplaceState::from_raw(BTRFS_IOCTL_DEV_REPLACE_STATE_NEVER_STARTED as u64),
+            Some(ReplaceState::NeverStarted)
+        ));
+        assert!(matches!(
+            ReplaceState::from_raw(BTRFS_IOCTL_DEV_REPLACE_STATE_STARTED as u64),
+            Some(ReplaceState::Started)
+        ));
+        assert!(matches!(
+            ReplaceState::from_raw(BTRFS_IOCTL_DEV_REPLACE_STATE_FINISHED as u64),
+            Some(ReplaceState::Finished)
+        ));
+        assert!(matches!(
+            ReplaceState::from_raw(BTRFS_IOCTL_DEV_REPLACE_STATE_CANCELED as u64),
+            Some(ReplaceState::Canceled)
+        ));
+        assert!(matches!(
+            ReplaceState::from_raw(BTRFS_IOCTL_DEV_REPLACE_STATE_SUSPENDED as u64),
+            Some(ReplaceState::Suspended)
+        ));
+    }
+
+    #[test]
+    fn replace_state_from_raw_unknown() {
+        assert!(ReplaceState::from_raw(9999).is_none());
+    }
+
+    // --- ReplaceStartError Display ---
+
+    #[test]
+    fn replace_start_error_display() {
+        assert_eq!(
+            format!("{}", ReplaceStartError::AlreadyStarted),
+            "a device replace operation is already in progress"
+        );
+        assert_eq!(
+            format!("{}", ReplaceStartError::ScrubInProgress),
+            "a scrub is in progress; cancel it first"
+        );
+    }
+}

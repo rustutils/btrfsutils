@@ -53,6 +53,19 @@ impl BackingFile {
     pub fn mkfs(&self) {
         run("mkfs.btrfs", &["-f", self.path.to_str().unwrap()]);
     }
+
+    /// Run `mkfs.btrfs -f` with a fixed UUID and label for deterministic output.
+    pub fn mkfs_with_options(&self, uuid: &str, label: &str) {
+        run(
+            "mkfs.btrfs",
+            &[
+                "-f",
+                "--uuid", uuid,
+                "--label", label,
+                self.path.to_str().unwrap(),
+            ],
+        );
+    }
 }
 
 impl Drop for BackingFile {
@@ -61,19 +74,38 @@ impl Drop for BackingFile {
     }
 }
 
-/// A loop device attached to a file. Owns the [`BackingFile`]. Drop detaches
-/// with `losetup -d`, then the inner `BackingFile` removes the image file.
+/// A loop device attached to a file. Optionally owns a [`BackingFile`].
+/// Drop detaches with `losetup -d`, then the inner `BackingFile` (if any)
+/// removes the image file.
 pub struct LoopbackDevice {
     dev_path: PathBuf,
-    inner: BackingFile,
+    _inner: Option<BackingFile>,
 }
 
 impl LoopbackDevice {
     /// Attach a loop device to a backing file, consuming it. Call
     /// [`BackingFile::mkfs`] before this if the file should be formatted.
     pub fn new(file: BackingFile) -> Self {
+        let dev_path = Self::losetup(file.path());
+        Self {
+            dev_path,
+            _inner: Some(file),
+        }
+    }
+
+    /// Attach a loop device to an existing file without taking ownership.
+    /// The file will not be deleted on drop — only the loop device is detached.
+    pub fn attach_existing(path: &Path) -> Self {
+        let dev_path = Self::losetup(path);
+        Self {
+            dev_path,
+            _inner: None,
+        }
+    }
+
+    fn losetup(path: &Path) -> PathBuf {
         let output = Command::new("losetup")
-            .args(["--find", "--show", file.path().to_str().unwrap()])
+            .args(["--find", "--show", path.to_str().unwrap()])
             .output()
             .expect("failed to run losetup");
         assert!(
@@ -81,22 +113,19 @@ impl LoopbackDevice {
             "losetup failed: {}",
             String::from_utf8_lossy(&output.stderr),
         );
-        let dev = String::from_utf8(output.stdout)
-            .expect("losetup output is not UTF-8")
-            .trim()
-            .to_string();
-        Self {
-            dev_path: PathBuf::from(dev),
-            inner: file,
-        }
+        PathBuf::from(
+            String::from_utf8(output.stdout)
+                .expect("losetup output is not UTF-8")
+                .trim(),
+        )
     }
 
     pub fn path(&self) -> &Path {
         &self.dev_path
     }
 
-    pub fn backing_file(&self) -> &BackingFile {
-        &self.inner
+    pub fn backing_file(&self) -> Option<&BackingFile> {
+        self._inner.as_ref()
     }
 
     /// Tell the kernel to re-read the size of the backing file. Call this
@@ -255,6 +284,82 @@ pub fn single_mount() -> (tempfile::TempDir, Mount) {
     file.mkfs();
     let lo = LoopbackDevice::new(file);
     let mnt = Mount::new(lo, td.path());
+    (td, mnt)
+}
+
+/// Fixed UUID used by [`deterministic_mount`] for reproducible test output.
+pub const TEST_UUID: &str = "deadbeef-dead-beef-dead-beefdeadbeef";
+/// Fixed label used by [`deterministic_mount`] for reproducible test output.
+pub const TEST_LABEL: &str = "test-fs";
+
+/// Like [`single_mount`], but with a fixed UUID and label so that command
+/// output is deterministic and suitable for snapshot testing.
+pub fn deterministic_mount() -> (tempfile::TempDir, Mount) {
+    let td = tempfile::tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
+    file.mkfs_with_options(TEST_UUID, TEST_LABEL);
+    let lo = LoopbackDevice::new(file);
+    let mnt = Mount::new(lo, td.path());
+    (td, mnt)
+}
+
+/// Return the path to the cached decompressed fixture image, extracting it
+/// on first use. The cache lives at `target/test-fixtures/test-fs.img` so it
+/// survives across test runs but is cleaned by `cargo clean`.
+fn cached_fixture_image() -> PathBuf {
+    let cache_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../target/test-fixtures");
+    let cached = cache_dir.join("test-fs.img");
+
+    if !cached.exists() {
+        fs::create_dir_all(&cache_dir).unwrap_or_else(|e| {
+            panic!("failed to create {}: {e}", cache_dir.display())
+        });
+        let gz_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/commands/fixture.img.gz");
+        let status = Command::new("gunzip")
+            .args(["-k", "-c"])
+            .arg(&gz_path)
+            .stdout(
+                File::create(&cached)
+                    .unwrap_or_else(|e| panic!("failed to create {}: {e}", cached.display())),
+            )
+            .status()
+            .expect("failed to run gunzip");
+        assert!(status.success(), "gunzip failed");
+    }
+
+    cached
+}
+
+/// Mount the pre-built fixture image read-only. The decompressed image is
+/// cached in `target/test-fixtures/` so only the first test pays the gunzip
+/// cost. Each test attaches its own loopback device directly to the shared
+/// cached file — no copy needed since we mount read-only.
+pub fn fixture_mount() -> (tempfile::TempDir, Mount) {
+    let td = tempfile::tempdir().unwrap();
+    let cached = cached_fixture_image();
+
+    let lo = LoopbackDevice::attach_existing(&cached);
+
+    // Mount read-only to preserve the fixture.
+    let mountpoint = td.path().join("mnt");
+    fs::create_dir_all(&mountpoint).unwrap();
+    run(
+        "mount",
+        &[
+            "-t", "btrfs",
+            "-o", "ro",
+            lo.path().to_str().unwrap(),
+            mountpoint.to_str().unwrap(),
+        ],
+    );
+    let file = File::open(&mountpoint).expect("failed to open mount");
+    let mnt = Mount {
+        mountpoint,
+        file: ManuallyDrop::new(file),
+        dev: lo,
+    };
     (td, mnt)
 }
 

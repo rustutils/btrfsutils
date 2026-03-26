@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs inspect-internal subvolid-resolve 256 <MOUNT>
+expression: "redact_paths(&out, &mnt)"
+---
+subvol1

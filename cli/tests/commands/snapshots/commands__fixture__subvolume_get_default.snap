@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs subvolume get-default <MOUNT>
+expression: "btrfs_ok(&[\"subvolume\", \"get-default\", mp])"
+---
+ID 5 (FS_TREE)

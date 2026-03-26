@@ -1,0 +1,8 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs filesystem show <MOUNT>
+expression: "redact_paths(&btrfs_ok(&[\"filesystem\", \"show\", mp]), &mnt)"
+---
+Label: 'test-fixture'  uuid: deadbeef-dead-beef-dead-beefdeadbeef
+	Total devices 1 FS bytes used 1.49MiB
+	devid    1 size 109.00MiB used 88.00MiB path <DEV>

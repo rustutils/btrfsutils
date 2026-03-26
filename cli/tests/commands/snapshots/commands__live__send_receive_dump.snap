@@ -1,0 +1,16 @@
+---
+source: cli/tests/commands/live.rs
+description: btrfs receive --dump -f <STREAM>
+expression: redacted
+---
+subvol          ./dumptest    uuid=<UUID> transid: <TRANSID>
+chown           ./    uid=<N> gid=<N>
+chmod           ./    mode=<N>
+mkfile          ./o257-9-0
+rename          ./o257-9-0    dest=./file.bin
+write           ./file.bin    offset=<N> len=<N>
+chown           ./file.bin    uid=<N> gid=<N>
+chmod           ./file.bin    mode=<N>
+utimes          ./file.bin    atime=<EPOCH> mtime=<EPOCH> ctime=<EPOCH>
+utimes          ./    atime=<EPOCH> mtime=<EPOCH> ctime=<EPOCH>
+end

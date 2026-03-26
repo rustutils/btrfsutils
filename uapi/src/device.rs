@@ -90,6 +90,42 @@ impl DevStats {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dev_stats_default_is_clean() {
+        let stats = DevStats::default();
+        assert!(stats.is_clean());
+        assert_eq!(stats.total_errs(), 0);
+    }
+
+    #[test]
+    fn dev_stats_total_errs() {
+        let stats = DevStats {
+            devid: 1,
+            write_errs: 1,
+            read_errs: 2,
+            flush_errs: 3,
+            corruption_errs: 4,
+            generation_errs: 5,
+        };
+        assert_eq!(stats.total_errs(), 15);
+        assert!(!stats.is_clean());
+    }
+
+    #[test]
+    fn dev_stats_single_error_not_clean() {
+        let stats = DevStats {
+            corruption_errs: 1,
+            ..DevStats::default()
+        };
+        assert!(!stats.is_clean());
+        assert_eq!(stats.total_errs(), 1);
+    }
+}
+
 /// Copy the bytes of `path` (without the nul terminator) into `name`,
 /// returning `ENAMETOOLONG` if the path (including the terminator that the
 /// kernel expects to already be present via zeroing) does not fit.

@@ -1,0 +1,13 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs inspect-internal list-chunks <MOUNT>
+expression: "redact_paths(&btrfs_ok(&[\"inspect-internal\", \"list-chunks\", mp]), &mnt)"
+---
+UUID: deadbeef-dead-beef-dead-beefdeadbeef
+Devid  PNumber  Type/profile    PStart    Length       PEnd  LNumber    LStart  Usage%
+-----  -------  ------------  --------  --------  ---------  -------  --------  ------
+    1        1  data/single   13.00MiB   8.00MiB   21.00MiB        1  13.00MiB    0.00
+    1        2  system/dup    21.00MiB   8.00MiB   29.00MiB        2  21.00MiB    0.00
+    1        3  system/dup    29.00MiB   8.00MiB   37.00MiB        2  21.00MiB    0.00
+    1        4  metadata/dup  37.00MiB  32.00MiB   69.00MiB        3  29.00MiB    0.00
+    1        5  metadata/dup  69.00MiB  32.00MiB  101.00MiB        3  29.00MiB    0.00

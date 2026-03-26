@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs property list -t subvol <MOUNT>/subvol1
+expression: "btrfs_ok(&[\"property\", \"list\", \"-t\", \"subvol\", &subvol])"
+---
+ro                  read-only status of a subvolume

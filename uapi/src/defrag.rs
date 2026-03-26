@@ -143,6 +143,97 @@ impl Default for DefragRangeArgs {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- CompressType Display ---
+
+    #[test]
+    fn compress_type_display() {
+        assert_eq!(format!("{}", CompressType::Zlib), "zlib");
+        assert_eq!(format!("{}", CompressType::Lzo), "lzo");
+        assert_eq!(format!("{}", CompressType::Zstd), "zstd");
+    }
+
+    // --- CompressType FromStr ---
+
+    #[test]
+    fn compress_type_from_str() {
+        assert_eq!("zlib".parse::<CompressType>().unwrap(), CompressType::Zlib);
+        assert_eq!("lzo".parse::<CompressType>().unwrap(), CompressType::Lzo);
+        assert_eq!("zstd".parse::<CompressType>().unwrap(), CompressType::Zstd);
+    }
+
+    #[test]
+    fn compress_type_from_str_case_insensitive() {
+        assert_eq!("ZLIB".parse::<CompressType>().unwrap(), CompressType::Zlib);
+        assert_eq!("Zstd".parse::<CompressType>().unwrap(), CompressType::Zstd);
+    }
+
+    #[test]
+    fn compress_type_from_str_invalid() {
+        assert!("lz4".parse::<CompressType>().is_err());
+        assert!("".parse::<CompressType>().is_err());
+    }
+
+    // --- DefragRangeArgs builder ---
+
+    #[test]
+    fn defrag_args_defaults() {
+        let args = DefragRangeArgs::new();
+        assert_eq!(args.start, 0);
+        assert_eq!(args.len, u64::MAX);
+        assert!(!args.flush);
+        assert_eq!(args.extent_thresh, 0);
+        assert!(args.compress.is_none());
+        assert!(!args.nocomp);
+    }
+
+    #[test]
+    fn defrag_args_builder_chain() {
+        let args = DefragRangeArgs::new()
+            .start(4096)
+            .len(1024 * 1024)
+            .flush()
+            .extent_thresh(256 * 1024);
+        assert_eq!(args.start, 4096);
+        assert_eq!(args.len, 1024 * 1024);
+        assert!(args.flush);
+        assert_eq!(args.extent_thresh, 256 * 1024);
+    }
+
+    #[test]
+    fn defrag_args_compress_clears_nocomp() {
+        let args = DefragRangeArgs::new().nocomp().compress(CompressSpec {
+            compress_type: CompressType::Zstd,
+            level: None,
+        });
+        assert!(args.compress.is_some());
+        assert!(!args.nocomp);
+    }
+
+    #[test]
+    fn defrag_args_nocomp_clears_compress() {
+        let args = DefragRangeArgs::new()
+            .compress(CompressSpec {
+                compress_type: CompressType::Zlib,
+                level: Some(3),
+            })
+            .nocomp();
+        assert!(args.compress.is_none());
+        assert!(args.nocomp);
+    }
+
+    #[test]
+    fn defrag_args_default_trait() {
+        let a = DefragRangeArgs::default();
+        let b = DefragRangeArgs::new();
+        assert_eq!(a.start, b.start);
+        assert_eq!(a.len, b.len);
+    }
+}
+
 /// Defragment a byte range of the file referred to by `fd`.
 ///
 /// `fd` must be an open file descriptor to a regular file on a btrfs

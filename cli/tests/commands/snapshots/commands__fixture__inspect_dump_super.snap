@@ -1,0 +1,55 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs inspect-internal dump-super <DEV>
+expression: "redact_paths(&btrfs_ok(&[\"inspect-internal\", \"dump-super\", dev]), &mnt)"
+---
+superblock: bytenr=65536, device=<DEV>
+---------------------------------------------------------
+csum_type		0 (crc32c)
+csum_size		4
+csum			0x968af68b
+bytenr			65536
+flags			0x1
+			( WRITTEN )
+magic			_BHRfS_M [match]
+fsid			deadbeef-dead-beef-dead-beefdeadbeef
+metadata_uuid		00000000-0000-0000-0000-000000000000
+label			test-fixture
+generation		10
+root			31064064
+sys_array_size		129
+chunk_root_generation	8
+root_level		0
+chunk_root		22036480
+chunk_root_level	0
+log_root		0
+log_root_transid (deprecated)	0
+log_root_level		0
+total_bytes		114294784
+bytes_used		1564672
+sectorsize		4096
+nodesize		16384
+leafsize (deprecated)	16384
+stripesize		4096
+root_dir		6
+num_devices		1
+compat_flags		0x0
+compat_ro_flags		0xb
+			( FREE_SPACE_TREE|FREE_SPACE_TREE_VALID|BLOCK_GROUP_TREE )
+incompat_flags		0x361
+			( MIXED_BACKREF|BIG_METADATA|EXTENDED_IREF|SKINNY_METADATA|NO_HOLES )
+cache_generation	0
+uuid_tree_generation	10
+dev_item.uuid		b46f8ec6-0abe-41db-9009-505827210247
+dev_item.fsid		deadbeef-dead-beef-dead-beefdeadbeef [match]
+dev_item.type		0
+dev_item.total_bytes	114294784
+dev_item.bytes_used	92274688
+dev_item.io_align	4096
+dev_item.io_width	4096
+dev_item.sector_size	4096
+dev_item.devid		1
+dev_item.dev_group	0
+dev_item.seek_speed	0
+dev_item.bandwidth	0
+dev_item.generation	0

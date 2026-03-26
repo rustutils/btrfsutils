@@ -69,6 +69,61 @@ impl ScrubProgress {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scrub_progress_default_is_clean() {
+        let p = ScrubProgress::default();
+        assert!(p.is_clean());
+        assert_eq!(p.error_count(), 0);
+        assert_eq!(p.bytes_scrubbed(), 0);
+    }
+
+    #[test]
+    fn scrub_progress_error_count() {
+        let p = ScrubProgress {
+            read_errors: 1,
+            super_errors: 2,
+            verify_errors: 3,
+            csum_errors: 4,
+            ..ScrubProgress::default()
+        };
+        assert_eq!(p.error_count(), 10);
+        assert!(!p.is_clean());
+    }
+
+    #[test]
+    fn scrub_progress_bytes_scrubbed() {
+        let p = ScrubProgress {
+            data_bytes_scrubbed: 1000,
+            tree_bytes_scrubbed: 500,
+            ..ScrubProgress::default()
+        };
+        assert_eq!(p.bytes_scrubbed(), 1500);
+    }
+
+    #[test]
+    fn scrub_progress_corrected_errors_not_clean() {
+        let p = ScrubProgress {
+            corrected_errors: 1,
+            ..ScrubProgress::default()
+        };
+        assert!(!p.is_clean());
+        assert_eq!(p.error_count(), 0); // error_count doesn't include corrected
+    }
+
+    #[test]
+    fn scrub_progress_uncorrectable_errors_not_clean() {
+        let p = ScrubProgress {
+            uncorrectable_errors: 1,
+            ..ScrubProgress::default()
+        };
+        assert!(!p.is_clean());
+    }
+}
+
 fn from_raw(raw: &btrfs_ioctl_scrub_args) -> ScrubProgress {
     let p = &raw.progress;
     ScrubProgress {

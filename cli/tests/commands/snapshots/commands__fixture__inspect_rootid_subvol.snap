@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs inspect-internal rootid <MOUNT>/subvol1
+expression: "btrfs_ok(&[\"inspect-internal\", \"rootid\", &subvol])"
+---
+256

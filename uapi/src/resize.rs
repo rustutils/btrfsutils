@@ -72,6 +72,60 @@ impl ResizeArgs {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- ResizeAmount::to_string ---
+
+    #[test]
+    fn resize_amount_cancel() {
+        assert_eq!(ResizeAmount::Cancel.to_string(), "cancel");
+    }
+
+    #[test]
+    fn resize_amount_max() {
+        assert_eq!(ResizeAmount::Max.to_string(), "max");
+    }
+
+    #[test]
+    fn resize_amount_set() {
+        assert_eq!(ResizeAmount::Set(1073741824).to_string(), "1073741824");
+    }
+
+    #[test]
+    fn resize_amount_add() {
+        assert_eq!(ResizeAmount::Add(512000000).to_string(), "+512000000");
+    }
+
+    #[test]
+    fn resize_amount_sub() {
+        assert_eq!(ResizeAmount::Sub(256000000).to_string(), "-256000000");
+    }
+
+    // --- ResizeArgs builder + format_name ---
+
+    #[test]
+    fn resize_args_no_devid() {
+        let args = ResizeArgs::new(ResizeAmount::Max);
+        assert!(args.devid.is_none());
+        assert_eq!(args.format_name(), "max");
+    }
+
+    #[test]
+    fn resize_args_with_devid() {
+        let args = ResizeArgs::new(ResizeAmount::Add(1024)).with_devid(2);
+        assert_eq!(args.devid, Some(2));
+        assert_eq!(args.format_name(), "2:+1024");
+    }
+
+    #[test]
+    fn resize_args_set_with_devid() {
+        let args = ResizeArgs::new(ResizeAmount::Set(999)).with_devid(1);
+        assert_eq!(args.format_name(), "1:999");
+    }
+}
+
 /// Resize a device within the btrfs filesystem referred to by `fd`.
 ///
 /// `fd` must be an open file descriptor to a directory on the mounted

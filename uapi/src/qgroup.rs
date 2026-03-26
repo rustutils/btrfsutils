@@ -451,3 +451,39 @@ pub fn qgroup_clear_stale(fd: BorrowedFd) -> nix::Result<usize> {
 
     Ok(count)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn qgroupid_level_zero() {
+        assert_eq!(qgroupid_level(5), 0);
+        assert_eq!(qgroupid_level(256), 0);
+    }
+
+    #[test]
+    fn qgroupid_level_nonzero() {
+        let id = (1u64 << 48) | 100;
+        assert_eq!(qgroupid_level(id), 1);
+
+        let id = (3u64 << 48) | 42;
+        assert_eq!(qgroupid_level(id), 3);
+    }
+
+    #[test]
+    fn qgroupid_subvolid_extracts_lower_48_bits() {
+        assert_eq!(qgroupid_subvolid(256), 256);
+        assert_eq!(qgroupid_subvolid((1u64 << 48) | 100), 100);
+        assert_eq!(qgroupid_subvolid((2u64 << 48) | 0), 0);
+    }
+
+    #[test]
+    fn qgroupid_roundtrip() {
+        let level: u64 = 2;
+        let subvolid: u64 = 999;
+        let packed = (level << 48) | subvolid;
+        assert_eq!(qgroupid_level(packed), level as u16);
+        assert_eq!(qgroupid_subvolid(packed), subvolid);
+    }
+}

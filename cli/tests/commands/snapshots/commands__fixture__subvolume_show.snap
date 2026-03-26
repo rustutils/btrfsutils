@@ -1,0 +1,21 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs subvolume show <MOUNT>/subvol1
+expression: "redact_paths(&btrfs_ok(&[\"subvolume\", \"show\", &subvol]), &mnt)"
+---
+<MOUNT>/subvol1
+	Name: 			subvol1
+	UUID: 			63b095b9-2b65-ca41-87aa-a939e17e7679
+	Parent UUID: 		-
+	Received UUID: 		-
+	Creation time: 		2026-03-26 00:37:47 +0100
+	Subvolume ID: 		256
+	Generation: 		9
+	Gen at creation: 	9
+	Parent ID: 		5
+	Top level ID: 		5
+	Flags: 			-
+	Send transid: 		0
+	Send time: 		-
+	Receive transid: 	0
+	Receive time: 		-

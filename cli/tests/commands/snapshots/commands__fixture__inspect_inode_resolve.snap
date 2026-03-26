@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs inspect-internal inode-resolve 257 <MOUNT>
+expression: "redact_paths(&out, &mnt)"
+---
+btrfs-progrs

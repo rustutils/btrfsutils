@@ -1,0 +1,21 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs subvolume show <MOUNT>/snap1
+expression: "redact_paths(&btrfs_ok(&[\"subvolume\", \"show\", &snap1]), &mnt)"
+---
+<MOUNT>/snap1
+	Name: 			snap1
+	UUID: 			b0de66fd-e22d-5740-a224-dcaf9fc946a5
+	Parent UUID: 		63b095b9-2b65-ca41-87aa-a939e17e7679
+	Received UUID: 		-
+	Creation time: 		2026-03-26 00:37:47 +0100
+	Subvolume ID: 		257
+	Generation: 		9
+	Gen at creation: 	9
+	Parent ID: 		5
+	Top level ID: 		5
+	Flags: 			-
+	Send transid: 		0
+	Send time: 		-
+	Receive transid: 	0
+	Receive time: 		-

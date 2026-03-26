@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs subvolume get-flags <MOUNT>/subvol1
+expression: "btrfs_ok(&[\"subvolume\", \"get-flags\", &subvol])"
+---
+-

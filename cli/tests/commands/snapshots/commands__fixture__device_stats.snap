@@ -1,0 +1,10 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs device stats <MOUNT>
+expression: "redact_paths(&btrfs_ok(&[\"device\", \"stats\", mp]), &mnt)"
+---
+[<DEV>].write_io_errs            0
+[<DEV>].read_io_errs             0
+[<DEV>].flush_io_errs            0
+[<DEV>].corruption_errs          0
+[<DEV>].generation_errs          0

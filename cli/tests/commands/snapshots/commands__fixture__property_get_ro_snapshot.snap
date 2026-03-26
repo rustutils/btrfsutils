@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs property get -t subvol <MOUNT>/snap1 ro
+expression: "btrfs_ok(&[\"property\", \"get\", \"-t\", \"subvol\", &snap1, \"ro\"])"
+---
+ro=true
