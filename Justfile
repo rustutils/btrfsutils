@@ -66,3 +66,8 @@ man:
 
 format:
     cargo +nightly fmt --all
+
+check:
+    cargo +nightly fmt --all --check
+    RUSTDOCFLAGS="-Dwarnings" cargo doc --no-deps
+    #cargo clippy
