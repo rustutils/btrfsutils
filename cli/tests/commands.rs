@@ -47,8 +47,10 @@ fn redact(output: &str, mnt: &common::Mount) -> String {
         .replace_all(&s, "transid: <TRANSID>")
         .into_owned();
 
-    let re_timestamp =
-        regex_lite::Regex::new(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}").unwrap();
+    let re_timestamp = regex_lite::Regex::new(
+        r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}",
+    )
+    .unwrap();
     s = re_timestamp.replace_all(&s, "<TIMESTAMP>").into_owned();
 
     let re_epoch = regex_lite::Regex::new(r"\d{10,}\.\d+").unwrap();

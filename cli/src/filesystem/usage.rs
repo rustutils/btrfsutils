@@ -46,7 +46,9 @@ fn profile_ncopies(flags: BlockGroupFlags) -> u64 {
         || flags.contains(BlockGroupFlags::RAID10)
     {
         2
-    } else if flags.contains(BlockGroupFlags::RAID5) || flags.contains(BlockGroupFlags::RAID6) {
+    } else if flags.contains(BlockGroupFlags::RAID5)
+        || flags.contains(BlockGroupFlags::RAID6)
+    {
         0
     } else {
         1
@@ -68,7 +70,8 @@ fn has_multiple_profiles(spaces: &[SpaceInfo]) -> bool {
         spaces
             .iter()
             .filter(|s| {
-                s.flags.contains(type_flag) && !s.flags.contains(BlockGroupFlags::GLOBAL_RSV)
+                s.flags.contains(type_flag)
+                    && !s.flags.contains(BlockGroupFlags::GLOBAL_RSV)
             })
             .map(|s| s.flags & profile_mask)
             .collect::<HashSet<_>>()
@@ -92,15 +95,19 @@ impl Runnable for FilesystemUsageCommand {
 }
 
 fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
-    let file = File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
+    let file = File::open(path)
+        .with_context(|| format!("failed to open '{}'", path.display()))?;
     let fd = file.as_fd();
 
-    let fs = filesystem_info(fd)
-        .with_context(|| format!("failed to get filesystem info for '{}'", path.display()))?;
-    let devices = device_info_all(fd, &fs)
-        .with_context(|| format!("failed to get device info for '{}'", path.display()))?;
-    let spaces = space_info(fd)
-        .with_context(|| format!("failed to get space info for '{}'", path.display()))?;
+    let fs = filesystem_info(fd).with_context(|| {
+        format!("failed to get filesystem info for '{}'", path.display())
+    })?;
+    let devices = device_info_all(fd, &fs).with_context(|| {
+        format!("failed to get device info for '{}'", path.display())
+    })?;
+    let spaces = space_info(fd).with_context(|| {
+        format!("failed to get space info for '{}'", path.display())
+    })?;
 
     // Per-device chunk allocations from the chunk tree.  This requires
     // CAP_SYS_ADMIN; if it fails we degrade gracefully and note it below.
@@ -177,7 +184,8 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
     } else {
         0
     };
-    let (free_estimated, free_min) = if r_total_unused >= MIN_UNALLOCATED_THRESH {
+    let (free_estimated, free_min) = if r_total_unused >= MIN_UNALLOCATED_THRESH
+    {
         (
             free_base + (r_total_unused as f64 / data_ratio) as u64,
             free_base + (r_total_unused as f64 / max_data_ratio) as u64,
@@ -254,7 +262,8 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
         // Per-device lines: one row per device that holds stripes for this
         // exact profile.  Sorted by devid for stable output.
         if let Some(allocs) = &chunk_allocs {
-            let mut profile_allocs: Vec<_> = allocs.iter().filter(|a| a.flags == s.flags).collect();
+            let mut profile_allocs: Vec<_> =
+                allocs.iter().filter(|a| a.flags == s.flags).collect();
             profile_allocs.sort_by_key(|a| a.devid);
 
             for alloc in profile_allocs {

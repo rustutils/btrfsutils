@@ -65,12 +65,14 @@ const SEND_BUF_SIZE_V1: usize = 64 * 1024;
 const SEND_BUF_SIZE_V2: usize = 16 * 1024 + 128 * 1024;
 
 fn open_subvol_ro(path: &PathBuf) -> Result<File> {
-    File::open(path).with_context(|| format!("cannot open '{}'", path.display()))
+    File::open(path)
+        .with_context(|| format!("cannot open '{}'", path.display()))
 }
 
 fn check_subvol_readonly(file: &File, path: &PathBuf) -> Result<()> {
-    let flags = subvolume_flags_get(file.as_fd())
-        .with_context(|| format!("failed to get flags for '{}'", path.display()))?;
+    let flags = subvolume_flags_get(file.as_fd()).with_context(|| {
+        format!("failed to get flags for '{}'", path.display())
+    })?;
     if !flags.contains(SubvolumeFlags::RDONLY) {
         bail!("subvolume '{}' is not read-only", path.display());
     }
@@ -78,8 +80,9 @@ fn check_subvol_readonly(file: &File, path: &PathBuf) -> Result<()> {
 }
 
 fn get_root_id(file: &File, path: &PathBuf) -> Result<u64> {
-    let info = subvolume_info(file.as_fd())
-        .with_context(|| format!("failed to get subvolume info for '{}'", path.display()))?;
+    let info = subvolume_info(file.as_fd()).with_context(|| {
+        format!("failed to get subvolume info for '{}'", path.display())
+    })?;
     Ok(info.id)
 }
 
@@ -108,7 +111,8 @@ fn find_good_parent(
         })?;
 
         // Check if this clone source shares the same parent or IS the parent.
-        if cs_info.parent_uuid != subvol_info.parent_uuid && cs_info.uuid != subvol_info.parent_uuid
+        if cs_info.parent_uuid != subvol_info.parent_uuid
+            && cs_info.uuid != subvol_info.parent_uuid
         {
             continue;
         }
@@ -128,7 +132,8 @@ fn make_pipe() -> Result<(OwnedFd, OwnedFd)> {
     let mut fds = [0i32; 2];
     let ret = unsafe { nix::libc::pipe(fds.as_mut_ptr()) };
     if ret < 0 {
-        return Err(io::Error::last_os_error()).context("failed to create pipe");
+        return Err(io::Error::last_os_error())
+            .context("failed to create pipe");
     }
     // SAFETY: pipe() just returned two valid fds.
     let read_end = unsafe { OwnedFd::from_raw_fd(fds[0]) };
@@ -166,7 +171,9 @@ fn open_output(outfile: &Option<PathBuf>) -> Result<Box<dyn Write + Send>> {
                 .write(true)
                 .append(true)
                 .open(path)
-                .with_context(|| format!("cannot open '{}' for writing", path.display()))?;
+                .with_context(|| {
+                    format!("cannot open '{}' for writing", path.display())
+                })?;
             Ok(Box::new(file))
         }
         None => Ok(Box::new(io::stdout())),
@@ -190,11 +197,15 @@ impl Runnable for SendCommand {
                         .create(true)
                         .open(path)
                 })
-                .with_context(|| format!("cannot create '{}'", path.display()))?;
+                .with_context(|| {
+                    format!("cannot create '{}'", path.display())
+                })?;
         } else {
             let stdout = io::stdout();
             if unsafe { nix::libc::isatty(stdout.as_fd().as_raw_fd()) } == 1 {
-                bail!("not dumping send stream into a terminal, redirect it into a file");
+                bail!(
+                    "not dumping send stream into a terminal, redirect it into a file"
+                );
             }
         }
 
@@ -257,7 +268,9 @@ impl Runnable for SendCommand {
                 proto = 2;
             }
             if proto < 2 {
-                bail!("--compressed-data requires protocol version >= 2 (requested {proto})");
+                bail!(
+                    "--compressed-data requires protocol version >= 2 (requested {proto})"
+                );
             }
             if proto_supported < 2 {
                 bail!("kernel does not support --compressed-data");
@@ -288,9 +301,13 @@ impl Runnable for SendCommand {
             // parent among clone sources.
             let mut this_parent = parent_root_id;
             if !full_send && self.parent.is_none() {
-                let info = subvolume_info(subvol_file.as_fd()).with_context(|| {
-                    format!("failed to get info for '{}'", subvol_path.display())
-                })?;
+                let info =
+                    subvolume_info(subvol_file.as_fd()).with_context(|| {
+                        format!(
+                            "failed to get info for '{}'",
+                            subvol_path.display()
+                        )
+                    })?;
                 match find_good_parent(&info, &self.clone_src)? {
                     Some(id) => this_parent = id,
                     None => bail!(
@@ -336,13 +353,16 @@ impl Runnable for SendCommand {
                          Try upgrading your kernel or don't use -e."
                     );
                 }
-                return Err(e)
-                    .with_context(|| format!("send failed for '{}'", subvol_path.display()));
+                return Err(e).with_context(|| {
+                    format!("send failed for '{}'", subvol_path.display())
+                });
             }
 
             match reader.join() {
                 Ok(Ok(())) => {}
-                Ok(Err(e)) => return Err(e).context("send stream reader failed"),
+                Ok(Err(e)) => {
+                    return Err(e).context("send stream reader failed");
+                }
                 Err(_) => bail!("send stream reader thread panicked"),
             }
 

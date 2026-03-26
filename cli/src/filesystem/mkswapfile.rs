@@ -43,7 +43,12 @@ fn system_page_size() -> Result<u64> {
     Ok(size as u64)
 }
 
-fn write_swap_header(file: &File, page_count: u32, uuid: &Uuid, page_size: u64) -> Result<()> {
+fn write_swap_header(
+    file: &File,
+    page_count: u32,
+    uuid: &Uuid,
+    page_size: u64,
+) -> Result<()> {
     let mut header = vec![0u8; page_size as usize];
     header[0x400] = 0x01;
     header[0x404..0x408].copy_from_slice(&page_count.to_le_bytes());
@@ -73,7 +78,10 @@ impl Runnable for FilesystemMkswapfileCommand {
         let size = size - (size % page_size);
         let total_pages = size / page_size;
 
-        anyhow::ensure!(total_pages > 10, "swapfile too small after page alignment");
+        anyhow::ensure!(
+            total_pages > 10,
+            "swapfile too small after page alignment"
+        );
 
         let page_count = total_pages - 1;
         anyhow::ensure!(
@@ -87,10 +95,15 @@ impl Runnable for FilesystemMkswapfileCommand {
             .create_new(true)
             .mode(0o600)
             .open(&self.path)
-            .with_context(|| format!("failed to create '{}'", self.path.display()))?;
+            .with_context(|| {
+                format!("failed to create '{}'", self.path.display())
+            })?;
 
-        let ret = unsafe { libc::ioctl(file.as_raw_fd(), libc::FS_IOC_SETFLAGS, &FS_NOCOW_FL) };
-        nix::errno::Errno::result(ret).context("failed to set NOCOW attribute")?;
+        let ret = unsafe {
+            libc::ioctl(file.as_raw_fd(), libc::FS_IOC_SETFLAGS, &FS_NOCOW_FL)
+        };
+        nix::errno::Errno::result(ret)
+            .context("failed to set NOCOW attribute")?;
 
         fallocate(&file, FallocateFlags::empty(), 0, size as libc::off_t)
             .context("failed to allocate space for swapfile")?;

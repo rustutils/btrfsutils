@@ -23,7 +23,11 @@ pub fn device_size(fd: BorrowedFd) -> nix::Result<u64> {
 /// Tells the device that the specified range is no longer in use and its
 /// contents can be discarded. This is typically done before repurposing a
 /// device (e.g. as a replace target).
-pub fn discard_range(fd: BorrowedFd, offset: u64, length: u64) -> nix::Result<()> {
+pub fn discard_range(
+    fd: BorrowedFd,
+    offset: u64,
+    length: u64,
+) -> nix::Result<()> {
     let range: [u64; 2] = [offset, length];
     unsafe { blk_discard(fd.as_raw_fd(), &range) }?;
     Ok(())

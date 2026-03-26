@@ -47,7 +47,9 @@ pub fn dump_stream<R: Read>(input: R) -> Result<()> {
                     println!("mkdir           ./{path}");
                 }
                 StreamCommand::Mknod { path, mode, rdev } => {
-                    println!("mknod           ./{path}    mode={mode} rdev={rdev:#x}");
+                    println!(
+                        "mknod           ./{path}    mode={mode} rdev={rdev:#x}"
+                    );
                 }
                 StreamCommand::Mkfifo { path } => {
                     println!("mkfifo          ./{path}");
@@ -92,7 +94,10 @@ pub fn dump_stream<R: Read>(input: R) -> Result<()> {
                     );
                 }
                 StreamCommand::SetXattr { path, name, data } => {
-                    println!("set_xattr       ./{path}    name={name} len={}", data.len());
+                    println!(
+                        "set_xattr       ./{path}    name={name} len={}",
+                        data.len()
+                    );
                 }
                 StreamCommand::RemoveXattr { path, name } => {
                     println!("remove_xattr    ./{path}    name={name}");
@@ -120,7 +125,9 @@ pub fn dump_stream<R: Read>(input: R) -> Result<()> {
                     );
                 }
                 StreamCommand::UpdateExtent { path, offset, len } => {
-                    println!("update_extent   ./{path}    offset={offset} len={len}");
+                    println!(
+                        "update_extent   ./{path}    offset={offset} len={len}"
+                    );
                 }
                 StreamCommand::EncodedWrite {
                     path,
@@ -143,7 +150,9 @@ pub fn dump_stream<R: Read>(input: R) -> Result<()> {
                     offset,
                     len,
                 } => {
-                    println!("fallocate       ./{path}    mode={mode} offset={offset} len={len}");
+                    println!(
+                        "fallocate       ./{path}    mode={mode} offset={offset} len={len}"
+                    );
                 }
                 StreamCommand::Fileattr { path, attr } => {
                     println!("fileattr        ./{path}    fileattr=0x{attr:x}");
@@ -199,7 +208,8 @@ mod tests {
 
     #[test]
     fn fmt_uuid_specific() {
-        let uuid = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let uuid =
+            Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         assert_eq!(fmt_uuid(&uuid), "550e8400-e29b-41d4-a716-446655440000");
     }
 }

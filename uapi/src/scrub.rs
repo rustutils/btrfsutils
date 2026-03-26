@@ -8,8 +8,8 @@
 //! Requires `CAP_SYS_ADMIN`.
 
 use crate::raw::{
-    BTRFS_SCRUB_READONLY, btrfs_ioc_scrub, btrfs_ioc_scrub_cancel, btrfs_ioc_scrub_progress,
-    btrfs_ioctl_scrub_args,
+    BTRFS_SCRUB_READONLY, btrfs_ioc_scrub, btrfs_ioc_scrub_cancel,
+    btrfs_ioc_scrub_progress, btrfs_ioctl_scrub_args,
 };
 use std::{
     mem,
@@ -55,7 +55,10 @@ pub struct ScrubProgress {
 impl ScrubProgress {
     /// Total number of hard errors (read, super, verify, checksum).
     pub fn error_count(&self) -> u64 {
-        self.read_errors + self.super_errors + self.verify_errors + self.csum_errors
+        self.read_errors
+            + self.super_errors
+            + self.verify_errors
+            + self.csum_errors
     }
 
     /// Total bytes scrubbed (data + tree).
@@ -65,7 +68,9 @@ impl ScrubProgress {
 
     /// Returns `true` if no errors of any kind were found.
     pub fn is_clean(&self) -> bool {
-        self.error_count() == 0 && self.corrected_errors == 0 && self.uncorrectable_errors == 0
+        self.error_count() == 0
+            && self.corrected_errors == 0
+            && self.uncorrectable_errors == 0
     }
 }
 
@@ -152,7 +157,11 @@ fn from_raw(raw: &btrfs_ioctl_scrub_args) -> ScrubProgress {
 /// completion the final [`ScrubProgress`] counters are returned.
 ///
 /// Set `readonly` to `true` to check for errors without attempting repairs.
-pub fn scrub_start(fd: BorrowedFd, devid: u64, readonly: bool) -> nix::Result<ScrubProgress> {
+pub fn scrub_start(
+    fd: BorrowedFd,
+    devid: u64,
+    readonly: bool,
+) -> nix::Result<ScrubProgress> {
     let mut args: btrfs_ioctl_scrub_args = unsafe { mem::zeroed() };
     args.devid = devid;
     args.start = 0;
@@ -174,7 +183,10 @@ pub fn scrub_cancel(fd: BorrowedFd) -> nix::Result<()> {
 /// by `devid` within the filesystem referred to by `fd`.
 ///
 /// Returns `None` if no scrub is running on that device (`ENOTCONN`).
-pub fn scrub_progress(fd: BorrowedFd, devid: u64) -> nix::Result<Option<ScrubProgress>> {
+pub fn scrub_progress(
+    fd: BorrowedFd,
+    devid: u64,
+) -> nix::Result<Option<ScrubProgress>> {
     let mut args: btrfs_ioctl_scrub_args = unsafe { mem::zeroed() };
     args.devid = devid;
     args.start = 0;

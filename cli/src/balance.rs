@@ -4,17 +4,13 @@ use clap::Parser;
 use std::{fs::File, path::PathBuf};
 
 mod cancel;
-pub mod filters;
+mod filters;
 mod pause;
 mod resume;
 mod start;
 mod status;
 
-use cancel::BalanceCancelCommand;
-use pause::BalancePauseCommand;
-use resume::BalanceResumeCommand;
-use start::BalanceStartCommand;
-use status::BalanceStatusCommand;
+pub use self::{cancel::*, pause::*, resume::*, start::*, status::*};
 
 /// Balance data across devices, or change block groups using filters.
 ///
@@ -52,5 +48,6 @@ pub enum BalanceSubcommand {
 /// Open a path as a read-only file descriptor, suitable for passing to ioctls.
 fn open_path(path: &PathBuf) -> Result<File> {
     use anyhow::Context;
-    File::open(path).with_context(|| format!("failed to open '{}'", path.display()))
+    File::open(path)
+        .with_context(|| format!("failed to open '{}'", path.display()))
 }

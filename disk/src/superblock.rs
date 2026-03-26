@@ -179,7 +179,8 @@ impl Superblock {
 
     /// Whether the METADATA_UUID incompat flag is set.
     pub fn has_metadata_uuid(&self) -> bool {
-        self.incompat_flags & raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID as u64 != 0
+        self.incompat_flags & raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID as u64
+            != 0
     }
 }
 
@@ -196,7 +197,8 @@ fn read_raw_superblock(
     // SAFETY: btrfs_super_block is #[repr(C, packed)], exactly 4096 bytes,
     // and all-zeroes is a valid bit pattern. We just read into a byte buffer
     // so alignment is not an issue for the copy.
-    let sb: raw::btrfs_super_block = unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const _) };
+    let sb: raw::btrfs_super_block =
+        unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const _) };
     Ok(sb)
 }
 
@@ -342,7 +344,10 @@ fn parse_superblock(sb: &raw::btrfs_super_block) -> Superblock {
 
 /// Read and parse a btrfs superblock from a reader at the given mirror index
 /// (0, 1, or 2).
-pub fn read_superblock(reader: &mut (impl Read + Seek), mirror: u32) -> io::Result<Superblock> {
+pub fn read_superblock(
+    reader: &mut (impl Read + Seek),
+    mirror: u32,
+) -> io::Result<Superblock> {
     let offset = super_mirror_offset(mirror);
     let raw = read_raw_superblock(reader, offset)?;
     Ok(parse_superblock(&raw))
@@ -610,17 +615,28 @@ fn print_sys_chunk_array(sb: &Superblock) {
         let chunk_buf = &array[offset..];
         let length = u64::from_le_bytes(chunk_buf[0..8].try_into().unwrap());
         let owner = u64::from_le_bytes(chunk_buf[8..16].try_into().unwrap());
-        let stripe_len = u64::from_le_bytes(chunk_buf[16..24].try_into().unwrap());
-        let chunk_type = u64::from_le_bytes(chunk_buf[24..32].try_into().unwrap());
-        let io_align = u32::from_le_bytes(chunk_buf[32..36].try_into().unwrap());
-        let io_width = u32::from_le_bytes(chunk_buf[36..40].try_into().unwrap());
-        let sector_size = u32::from_le_bytes(chunk_buf[40..44].try_into().unwrap());
-        let num_stripes = u16::from_le_bytes(chunk_buf[44..46].try_into().unwrap());
-        let sub_stripes = u16::from_le_bytes(chunk_buf[46..48].try_into().unwrap());
+        let stripe_len =
+            u64::from_le_bytes(chunk_buf[16..24].try_into().unwrap());
+        let chunk_type =
+            u64::from_le_bytes(chunk_buf[24..32].try_into().unwrap());
+        let io_align =
+            u32::from_le_bytes(chunk_buf[32..36].try_into().unwrap());
+        let io_width =
+            u32::from_le_bytes(chunk_buf[36..40].try_into().unwrap());
+        let sector_size =
+            u32::from_le_bytes(chunk_buf[40..44].try_into().unwrap());
+        let num_stripes =
+            u16::from_le_bytes(chunk_buf[44..46].try_into().unwrap());
+        let sub_stripes =
+            u16::from_le_bytes(chunk_buf[46..48].try_into().unwrap());
 
         println!("\titem {item} key ({objectid} {key_type} {key_offset})");
-        println!("\t\tlength {length} owner {owner} stripe_len {stripe_len} type {chunk_type:#x}");
-        println!("\t\tio_align {io_align} io_width {io_width} sector_size {sector_size}");
+        println!(
+            "\t\tlength {length} owner {owner} stripe_len {stripe_len} type {chunk_type:#x}"
+        );
+        println!(
+            "\t\tio_align {io_align} io_width {io_width} sector_size {sector_size}"
+        );
         println!("\t\tnum_stripes {num_stripes} sub_stripes {sub_stripes}");
 
         let stripes_start = offset + chunk_base_size;
@@ -712,19 +728,27 @@ mod tests {
     #[test]
     fn csum_type_from_raw_known() {
         assert_eq!(
-            CsumType::from_raw(raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 as u16),
+            CsumType::from_raw(
+                raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 as u16
+            ),
             CsumType::Crc32
         );
         assert_eq!(
-            CsumType::from_raw(raw::btrfs_csum_type_BTRFS_CSUM_TYPE_XXHASH as u16),
+            CsumType::from_raw(
+                raw::btrfs_csum_type_BTRFS_CSUM_TYPE_XXHASH as u16
+            ),
             CsumType::Xxhash
         );
         assert_eq!(
-            CsumType::from_raw(raw::btrfs_csum_type_BTRFS_CSUM_TYPE_SHA256 as u16),
+            CsumType::from_raw(
+                raw::btrfs_csum_type_BTRFS_CSUM_TYPE_SHA256 as u16
+            ),
             CsumType::Sha256
         );
         assert_eq!(
-            CsumType::from_raw(raw::btrfs_csum_type_BTRFS_CSUM_TYPE_BLAKE2 as u16),
+            CsumType::from_raw(
+                raw::btrfs_csum_type_BTRFS_CSUM_TYPE_BLAKE2 as u16
+            ),
             CsumType::Blake2
         );
     }
@@ -827,27 +851,35 @@ mod tests {
         let sb_start = SUPER_INFO_OFFSET as usize;
 
         // Set magic.
-        let magic_off = sb_start + mem::offset_of!(raw::btrfs_super_block, magic);
-        buf[magic_off..magic_off + 8].copy_from_slice(&raw::BTRFS_MAGIC.to_le_bytes());
+        let magic_off =
+            sb_start + mem::offset_of!(raw::btrfs_super_block, magic);
+        buf[magic_off..magic_off + 8]
+            .copy_from_slice(&raw::BTRFS_MAGIC.to_le_bytes());
 
         // Set bytenr = SUPER_INFO_OFFSET.
-        let bytenr_off = sb_start + mem::offset_of!(raw::btrfs_super_block, bytenr);
-        buf[bytenr_off..bytenr_off + 8].copy_from_slice(&SUPER_INFO_OFFSET.to_le_bytes());
+        let bytenr_off =
+            sb_start + mem::offset_of!(raw::btrfs_super_block, bytenr);
+        buf[bytenr_off..bytenr_off + 8]
+            .copy_from_slice(&SUPER_INFO_OFFSET.to_le_bytes());
 
         // Set generation.
-        let gen_off = sb_start + mem::offset_of!(raw::btrfs_super_block, generation);
+        let gen_off =
+            sb_start + mem::offset_of!(raw::btrfs_super_block, generation);
         buf[gen_off..gen_off + 8].copy_from_slice(&42u64.to_le_bytes());
 
         // Set nodesize.
-        let ns_off = sb_start + mem::offset_of!(raw::btrfs_super_block, nodesize);
+        let ns_off =
+            sb_start + mem::offset_of!(raw::btrfs_super_block, nodesize);
         buf[ns_off..ns_off + 4].copy_from_slice(&16384u32.to_le_bytes());
 
         // Set sectorsize.
-        let ss_off = sb_start + mem::offset_of!(raw::btrfs_super_block, sectorsize);
+        let ss_off =
+            sb_start + mem::offset_of!(raw::btrfs_super_block, sectorsize);
         buf[ss_off..ss_off + 4].copy_from_slice(&4096u32.to_le_bytes());
 
         // Set a label.
-        let label_off = sb_start + mem::offset_of!(raw::btrfs_super_block, label);
+        let label_off =
+            sb_start + mem::offset_of!(raw::btrfs_super_block, label);
         buf[label_off..label_off + 4].copy_from_slice(b"test");
 
         let mut cursor = Cursor::new(buf);

@@ -36,7 +36,6 @@ mod receive;
 #[cfg(feature = "receive")]
 mod verity;
 
-pub use stream::{StreamCommand, StreamReader, Timespec};
-
 #[cfg(feature = "receive")]
 pub use receive::ReceiveContext;
+pub use stream::{StreamCommand, StreamReader, Timespec};

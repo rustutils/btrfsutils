@@ -6,12 +6,7 @@ use btrfs_uapi::{
     subvolume::{SubvolumeFlags, subvolume_flags_get, subvolume_flags_set},
 };
 use clap::Parser;
-use std::{
-    ffi::CString,
-    fs::File,
-    os::unix::io::AsFd,
-    path::PathBuf,
-};
+use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
 
 /// Set a property on a btrfs object
 #[derive(Parser, Debug)]
@@ -36,8 +31,9 @@ pub struct PropertySetCommand {
 
 impl Runnable for PropertySetCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.object)
-            .with_context(|| format!("failed to open '{}'", self.object.display()))?;
+        let file = File::open(&self.object).with_context(|| {
+            format!("failed to open '{}'", self.object.display())
+        })?;
 
         // Detect object type if not specified
         let detected_types = detect_object_types(&self.object);
@@ -83,11 +79,13 @@ fn set_property(
         (PropertyObjectType::Subvol, "ro") => {
             set_readonly_property(file, value, force, path)?;
         }
-        (PropertyObjectType::Filesystem, "label") | (PropertyObjectType::Device, "label") => {
-            let cstring =
-                CString::new(value.as_bytes()).context("label must not contain null bytes")?;
-            label_set(file.as_fd(), &cstring)
-                .with_context(|| format!("failed to set label for '{}'", path.display()))?;
+        (PropertyObjectType::Filesystem, "label")
+        | (PropertyObjectType::Device, "label") => {
+            let cstring = CString::new(value.as_bytes())
+                .context("label must not contain null bytes")?;
+            label_set(file.as_fd(), &cstring).with_context(|| {
+                format!("failed to set label for '{}'", path.display())
+            })?;
         }
         (PropertyObjectType::Inode, "compression") => {
             set_compression_property(file, value, path)?;
@@ -104,15 +102,22 @@ fn set_property(
     Ok(())
 }
 
-fn set_readonly_property(file: &File, value: &str, force: bool, path: &PathBuf) -> Result<()> {
+fn set_readonly_property(
+    file: &File,
+    value: &str,
+    force: bool,
+    path: &PathBuf,
+) -> Result<()> {
     let new_readonly = match value {
         "true" => true,
         "false" => false,
         _ => bail!("invalid value for property: {}", value),
     };
 
-    let current_flags = subvolume_flags_get(file.as_fd())
-        .with_context(|| format!("failed to get flags for '{}'", path.display()))?;
+    let current_flags =
+        subvolume_flags_get(file.as_fd()).with_context(|| {
+            format!("failed to get flags for '{}'", path.display())
+        })?;
     let is_readonly = current_flags.contains(SubvolumeFlags::RDONLY);
 
     // No change if already in desired state
@@ -123,7 +128,9 @@ fn set_readonly_property(file: &File, value: &str, force: bool, path: &PathBuf) 
     // If going from ro to rw, check for received_uuid
     if is_readonly && !new_readonly {
         let info = btrfs_uapi::subvolume::subvolume_info(file.as_fd())
-            .with_context(|| format!("failed to get subvolume info for '{}'", path.display()))?;
+            .with_context(|| {
+                format!("failed to get subvolume info for '{}'", path.display())
+            })?;
 
         if !info.received_uuid.is_nil() {
             if !force {
@@ -142,8 +149,9 @@ fn set_readonly_property(file: &File, value: &str, force: bool, path: &PathBuf) 
         new_flags &= !SubvolumeFlags::RDONLY;
     }
 
-    subvolume_flags_set(file.as_fd(), new_flags)
-        .with_context(|| format!("failed to set flags for '{}'", path.display()))?;
+    subvolume_flags_set(file.as_fd(), new_flags).with_context(|| {
+        format!("failed to set flags for '{}'", path.display())
+    })?;
 
     // Clear received_uuid after flipping ro→rw with force.  This must
     // happen after the flag change (the kernel rejects SET_RECEIVED_SUBVOL
@@ -157,9 +165,11 @@ fn set_readonly_property(file: &File, value: &str, force: bool, path: &PathBuf) 
                     "clearing received_uuid (was {})",
                     info.received_uuid.as_hyphenated()
                 );
-                if let Err(e) =
-                    btrfs_uapi::send_receive::received_subvol_set(file.as_fd(), &uuid::Uuid::nil(), 0)
-                {
+                if let Err(e) = btrfs_uapi::send_receive::received_subvol_set(
+                    file.as_fd(),
+                    &uuid::Uuid::nil(),
+                    0,
+                ) {
                     eprintln!(
                         "WARNING: failed to clear received_uuid on '{}': {e}",
                         path.display()
@@ -172,7 +182,11 @@ fn set_readonly_property(file: &File, value: &str, force: bool, path: &PathBuf) 
     Ok(())
 }
 
-fn set_compression_property(file: &File, value: &str, path: &PathBuf) -> Result<()> {
+fn set_compression_property(
+    file: &File,
+    value: &str,
+    path: &PathBuf,
+) -> Result<()> {
     use nix::libc::fsetxattr;
     use std::os::unix::io::AsRawFd;
 

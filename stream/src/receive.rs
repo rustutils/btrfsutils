@@ -1,5 +1,5 @@
-use anyhow::{Context, Result, bail};
 use crate::stream::{StreamCommand, Timespec};
+use anyhow::{Context, Result, bail};
 use std::{
     ffi::CString,
     fs::{self, File, OpenOptions},
@@ -75,8 +75,9 @@ impl ReceiveContext {
     /// this directory is kept open for the lifetime of the context and used for
     /// UUID tree lookups when resolving snapshot parents and clone sources.
     pub fn new(dest_dir: &Path) -> Result<Self> {
-        let mnt_fd = File::open(dest_dir)
-            .with_context(|| format!("cannot open destination '{}'", dest_dir.display()))?;
+        let mnt_fd = File::open(dest_dir).with_context(|| {
+            format!("cannot open destination '{}'", dest_dir.display())
+        })?;
 
         Ok(Self {
             mnt_fd,
@@ -110,18 +111,32 @@ impl ReceiveContext {
                 ctransid,
                 clone_uuid,
                 clone_ctransid,
-            } => self.process_snapshot(path, uuid, *ctransid, clone_uuid, *clone_ctransid),
+            } => self.process_snapshot(
+                path,
+                uuid,
+                *ctransid,
+                clone_uuid,
+                *clone_ctransid,
+            ),
             StreamCommand::Mkfile { path } => self.process_mkfile(path),
             StreamCommand::Mkdir { path } => self.process_mkdir(path),
-            StreamCommand::Mknod { path, mode, rdev } => self.process_mknod(path, *mode, *rdev),
+            StreamCommand::Mknod { path, mode, rdev } => {
+                self.process_mknod(path, *mode, *rdev)
+            }
             StreamCommand::Mkfifo { path } => self.process_mkfifo(path),
             StreamCommand::Mksock { path } => self.process_mksock(path),
-            StreamCommand::Symlink { path, target } => self.process_symlink(path, target),
+            StreamCommand::Symlink { path, target } => {
+                self.process_symlink(path, target)
+            }
             StreamCommand::Rename { from, to } => self.process_rename(from, to),
-            StreamCommand::Link { path, target } => self.process_link(path, target),
+            StreamCommand::Link { path, target } => {
+                self.process_link(path, target)
+            }
             StreamCommand::Unlink { path } => self.process_unlink(path),
             StreamCommand::Rmdir { path } => self.process_rmdir(path),
-            StreamCommand::Write { path, offset, data } => self.process_write(path, *offset, data),
+            StreamCommand::Write { path, offset, data } => {
+                self.process_write(path, *offset, data)
+            }
             StreamCommand::Clone {
                 path,
                 offset,
@@ -142,10 +157,18 @@ impl ReceiveContext {
             StreamCommand::SetXattr { path, name, data } => {
                 self.process_set_xattr(path, name, data)
             }
-            StreamCommand::RemoveXattr { path, name } => self.process_remove_xattr(path, name),
-            StreamCommand::Truncate { path, size } => self.process_truncate(path, *size),
-            StreamCommand::Chmod { path, mode } => self.process_chmod(path, *mode),
-            StreamCommand::Chown { path, uid, gid } => self.process_chown(path, *uid, *gid),
+            StreamCommand::RemoveXattr { path, name } => {
+                self.process_remove_xattr(path, name)
+            }
+            StreamCommand::Truncate { path, size } => {
+                self.process_truncate(path, *size)
+            }
+            StreamCommand::Chmod { path, mode } => {
+                self.process_chmod(path, *mode)
+            }
+            StreamCommand::Chown { path, uid, gid } => {
+                self.process_chown(path, *uid, *gid)
+            }
             StreamCommand::Utimes {
                 path, atime, mtime, ..
             } => self.process_utimes(path, atime, mtime),
@@ -187,7 +210,13 @@ impl ReceiveContext {
                 block_size,
                 salt,
                 sig,
-            } => self.process_enable_verity(path, *algorithm, *block_size, salt, sig),
+            } => self.process_enable_verity(
+                path,
+                *algorithm,
+                *block_size,
+                salt,
+                sig,
+            ),
             StreamCommand::End => unreachable!("End is handled by the caller"),
         }
     }
@@ -211,25 +240,31 @@ impl ReceiveContext {
             None => return Ok(()),
         };
 
-        let subvol_file = File::open(&subvol_path)
-            .with_context(|| format!("cannot open subvolume '{}'", subvol_path.display()))?;
+        let subvol_file = File::open(&subvol_path).with_context(|| {
+            format!("cannot open subvolume '{}'", subvol_path.display())
+        })?;
         let fd = subvol_file.as_fd();
 
-        btrfs_uapi::send_receive::received_subvol_set(fd, &uuid, self.stransid).with_context(|| {
-            format!(
-                "failed to set received subvol on '{}'",
-                subvol_path.display()
-            )
-        })?;
+        btrfs_uapi::send_receive::received_subvol_set(fd, &uuid, self.stransid)
+            .with_context(|| {
+                format!(
+                    "failed to set received subvol on '{}'",
+                    subvol_path.display()
+                )
+            })?;
 
         // Make the subvolume read-only.
         let flags = btrfs_uapi::subvolume::subvolume_flags_get(fd)
-            .with_context(|| format!("failed to get flags for '{}'", subvol_path.display()))?;
+            .with_context(|| {
+                format!("failed to get flags for '{}'", subvol_path.display())
+            })?;
         btrfs_uapi::subvolume::subvolume_flags_set(
             fd,
             flags | btrfs_uapi::subvolume::SubvolumeFlags::RDONLY,
         )
-        .with_context(|| format!("failed to set read-only on '{}'", subvol_path.display()))?;
+        .with_context(|| {
+            format!("failed to set read-only on '{}'", subvol_path.display())
+        })?;
 
         self.cur_subvol = None;
         self.cur_subvol_path = None;
@@ -258,18 +293,31 @@ impl ReceiveContext {
         Ok(subvol_path.join(relative))
     }
 
-    fn process_subvol(&mut self, path: &str, uuid: &uuid::Uuid, ctransid: u64) -> Result<()> {
+    fn process_subvol(
+        &mut self,
+        path: &str,
+        uuid: &uuid::Uuid,
+        ctransid: u64,
+    ) -> Result<()> {
         self.finish_subvol()?;
 
         let subvol_path = self.dest_dir.join(path);
 
         // Create subvolume using the parent directory fd.
-        let parent_dir = File::open(&self.dest_dir)
-            .with_context(|| format!("cannot open '{}'", self.dest_dir.display()))?;
-        let c_name = CString::new(path)
-            .with_context(|| format!("subvolume name contains null byte: {path}"))?;
-        btrfs_uapi::subvolume::subvolume_create(parent_dir.as_fd(), &c_name, &[])
-            .with_context(|| format!("failed to create subvolume '{}'", subvol_path.display()))?;
+        let parent_dir = File::open(&self.dest_dir).with_context(|| {
+            format!("cannot open '{}'", self.dest_dir.display())
+        })?;
+        let c_name = CString::new(path).with_context(|| {
+            format!("subvolume name contains null byte: {path}")
+        })?;
+        btrfs_uapi::subvolume::subvolume_create(
+            parent_dir.as_fd(),
+            &c_name,
+            &[],
+        )
+        .with_context(|| {
+            format!("failed to create subvolume '{}'", subvol_path.display())
+        })?;
 
         self.cur_subvol = Some(path.to_string());
         self.cur_subvol_path = Some(subvol_path);
@@ -292,38 +340,50 @@ impl ReceiveContext {
         let subvol_path = self.dest_dir.join(path);
 
         // Find the parent subvolume by its received UUID, then fall back to UUID.
-        let parent_root_id =
-            btrfs_uapi::send_receive::subvolume_search_by_received_uuid(self.mnt_fd.as_fd(), clone_uuid)
-                .or_else(|_| {
-                    btrfs_uapi::send_receive::subvolume_search_by_uuid(self.mnt_fd.as_fd(), clone_uuid)
-                })
-                .with_context(|| {
-                    format!(
-                        "cannot find parent subvolume with UUID {} for snapshot '{}'",
-                        clone_uuid.as_hyphenated(),
-                        path
-                    )
-                })?;
+        let parent_root_id = btrfs_uapi::send_receive::subvolume_search_by_received_uuid(
+            self.mnt_fd.as_fd(),
+            clone_uuid,
+        )
+        .or_else(|_| {
+            btrfs_uapi::send_receive::subvolume_search_by_uuid(self.mnt_fd.as_fd(), clone_uuid)
+        })
+        .with_context(|| {
+            format!(
+                "cannot find parent subvolume with UUID {} for snapshot '{}'",
+                clone_uuid.as_hyphenated(),
+                path
+            )
+        })?;
 
         // Verify the parent's ctransid matches.
-        let parent_path = btrfs_uapi::inode::subvolid_resolve(self.mnt_fd.as_fd(), parent_root_id)
-            .with_context(|| {
-                format!("cannot resolve path for parent subvolume {parent_root_id}")
-            })?;
+        let parent_path = btrfs_uapi::inode::subvolid_resolve(
+            self.mnt_fd.as_fd(),
+            parent_root_id,
+        )
+        .with_context(|| {
+            format!("cannot resolve path for parent subvolume {parent_root_id}")
+        })?;
 
         // Open the parent subvolume to verify ctransid and create the snapshot.
         let parent_full = self.dest_dir.join(&parent_path);
-        let parent_file = File::open(&parent_full)
-            .with_context(|| format!("cannot open parent subvolume '{}'", parent_full.display()))?;
+        let parent_file = File::open(&parent_full).with_context(|| {
+            format!("cannot open parent subvolume '{}'", parent_full.display())
+        })?;
 
         let parent_info =
-            btrfs_uapi::subvolume::subvolume_info(parent_file.as_fd()).with_context(|| {
-                format!("failed to get info for parent '{}'", parent_full.display())
-            })?;
+            btrfs_uapi::subvolume::subvolume_info(parent_file.as_fd())
+                .with_context(|| {
+                    format!(
+                        "failed to get info for parent '{}'",
+                        parent_full.display()
+                    )
+                })?;
 
         // The parent's ctransid must match: check both ctransid and stransid
         // (stransid is set when the parent was itself received).
-        if parent_info.ctransid != clone_ctransid && parent_info.stransid != clone_ctransid {
+        if parent_info.ctransid != clone_ctransid
+            && parent_info.stransid != clone_ctransid
+        {
             bail!(
                 "parent subvolume '{}' ctransid mismatch: stream expects {}, found ctransid={} stransid={}",
                 parent_path,
@@ -334,10 +394,12 @@ impl ReceiveContext {
         }
 
         // Create the snapshot.
-        let dest_dir_file = File::open(&self.dest_dir)
-            .with_context(|| format!("cannot open '{}'", self.dest_dir.display()))?;
-        let c_name = CString::new(path)
-            .with_context(|| format!("snapshot name contains null byte: {path}"))?;
+        let dest_dir_file = File::open(&self.dest_dir).with_context(|| {
+            format!("cannot open '{}'", self.dest_dir.display())
+        })?;
+        let c_name = CString::new(path).with_context(|| {
+            format!("snapshot name contains null byte: {path}")
+        })?;
         btrfs_uapi::subvolume::snapshot_create(
             dest_dir_file.as_fd(),
             parent_file.as_fd(),
@@ -345,13 +407,22 @@ impl ReceiveContext {
             false,
             &[],
         )
-        .with_context(|| format!("failed to create snapshot '{}'", subvol_path.display()))?;
+        .with_context(|| {
+            format!("failed to create snapshot '{}'", subvol_path.display())
+        })?;
 
         // Make the snapshot writable so we can apply the stream delta.
-        let snap_file = File::open(&subvol_path)
-            .with_context(|| format!("cannot open snapshot '{}'", subvol_path.display()))?;
-        let snap_flags = btrfs_uapi::subvolume::subvolume_flags_get(snap_file.as_fd())
-            .with_context(|| format!("failed to get flags for '{}'", subvol_path.display()))?;
+        let snap_file = File::open(&subvol_path).with_context(|| {
+            format!("cannot open snapshot '{}'", subvol_path.display())
+        })?;
+        let snap_flags =
+            btrfs_uapi::subvolume::subvolume_flags_get(snap_file.as_fd())
+                .with_context(|| {
+                    format!(
+                        "failed to get flags for '{}'",
+                        subvol_path.display()
+                    )
+                })?;
         if snap_flags.contains(btrfs_uapi::subvolume::SubvolumeFlags::RDONLY) {
             btrfs_uapi::subvolume::subvolume_flags_set(
                 snap_file.as_fd(),
@@ -375,19 +446,26 @@ impl ReceiveContext {
 
     fn process_mkfile(&mut self, path: &str) -> Result<()> {
         let full = self.full_path(path)?;
-        File::create(&full)
-            .with_context(|| format!("failed to create file '{}'", full.display()))?;
+        File::create(&full).with_context(|| {
+            format!("failed to create file '{}'", full.display())
+        })?;
         Ok(())
     }
 
     fn process_mkdir(&mut self, path: &str) -> Result<()> {
         let full = self.full_path(path)?;
-        fs::create_dir(&full)
-            .with_context(|| format!("failed to create directory '{}'", full.display()))?;
+        fs::create_dir(&full).with_context(|| {
+            format!("failed to create directory '{}'", full.display())
+        })?;
         Ok(())
     }
 
-    fn process_mknod(&mut self, path: &str, mode: u64, rdev: u64) -> Result<()> {
+    fn process_mknod(
+        &mut self,
+        path: &str,
+        mode: u64,
+        rdev: u64,
+    ) -> Result<()> {
         let full = self.full_path(path)?;
         let c_path = path_to_cstring(&full)?;
         let ret = unsafe {
@@ -398,8 +476,9 @@ impl ReceiveContext {
             )
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("mknod failed for '{}'", full.display()));
+            return Err(std::io::Error::last_os_error()).with_context(|| {
+                format!("mknod failed for '{}'", full.display())
+            });
         }
         Ok(())
     }
@@ -409,8 +488,9 @@ impl ReceiveContext {
         let c_path = path_to_cstring(&full)?;
         let ret = unsafe { nix::libc::mkfifo(c_path.as_ptr(), 0o600) };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("mkfifo failed for '{}'", full.display()));
+            return Err(std::io::Error::last_os_error()).with_context(|| {
+                format!("mkfifo failed for '{}'", full.display())
+            });
         }
         Ok(())
     }
@@ -418,18 +498,22 @@ impl ReceiveContext {
     fn process_mksock(&mut self, path: &str) -> Result<()> {
         let full = self.full_path(path)?;
         let c_path = path_to_cstring(&full)?;
-        let ret = unsafe { nix::libc::mknod(c_path.as_ptr(), nix::libc::S_IFSOCK | 0o600, 0) };
+        let ret = unsafe {
+            nix::libc::mknod(c_path.as_ptr(), nix::libc::S_IFSOCK | 0o600, 0)
+        };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("mksock failed for '{}'", full.display()));
+            return Err(std::io::Error::last_os_error()).with_context(|| {
+                format!("mksock failed for '{}'", full.display())
+            });
         }
         Ok(())
     }
 
     fn process_symlink(&mut self, path: &str, target: &str) -> Result<()> {
         let full = self.full_path(path)?;
-        std::os::unix::fs::symlink(target, &full)
-            .with_context(|| format!("failed to create symlink '{}'", full.display()))?;
+        std::os::unix::fs::symlink(target, &full).with_context(|| {
+            format!("failed to create symlink '{}'", full.display())
+        })?;
         Ok(())
     }
 
@@ -465,26 +549,34 @@ impl ReceiveContext {
         if self.write_path == full {
             self.close_write_fd();
         }
-        fs::remove_file(&full).with_context(|| format!("failed to unlink '{}'", full.display()))?;
+        fs::remove_file(&full).with_context(|| {
+            format!("failed to unlink '{}'", full.display())
+        })?;
         Ok(())
     }
 
     fn process_rmdir(&mut self, path: &str) -> Result<()> {
         let full = self.full_path(path)?;
-        fs::remove_dir(&full).with_context(|| format!("failed to rmdir '{}'", full.display()))?;
+        fs::remove_dir(&full)
+            .with_context(|| format!("failed to rmdir '{}'", full.display()))?;
         Ok(())
     }
 
-    fn process_write(&mut self, path: &str, offset: u64, data: &[u8]) -> Result<()> {
+    fn process_write(
+        &mut self,
+        path: &str,
+        offset: u64,
+        data: &[u8],
+    ) -> Result<()> {
         let full = self.full_path(path)?;
 
         // Reuse cached fd if writing to the same file.
         if self.write_path != full {
             self.close_write_fd();
-            let file = OpenOptions::new()
-                .write(true)
-                .open(&full)
-                .with_context(|| format!("cannot open '{}' for writing", full.display()))?;
+            let file =
+                OpenOptions::new().write(true).open(&full).with_context(
+                    || format!("cannot open '{}' for writing", full.display()),
+                )?;
             self.write_fd = Some(file);
             self.write_path = full.clone();
         }
@@ -499,8 +591,9 @@ impl ReceiveContext {
             )
         };
         if written < 0 {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("pwrite failed on '{}'", full.display()));
+            return Err(std::io::Error::last_os_error()).with_context(|| {
+                format!("pwrite failed on '{}'", full.display())
+            });
         }
         if (written as usize) != data.len() {
             bail!(
@@ -528,16 +621,22 @@ impl ReceiveContext {
 
         // Find the clone source subvolume.
         let clone_subvol_root =
-            btrfs_uapi::send_receive::subvolume_search_by_received_uuid(self.mnt_fd.as_fd(), clone_uuid)
-                .or_else(|_| {
-                    btrfs_uapi::send_receive::subvolume_search_by_uuid(self.mnt_fd.as_fd(), clone_uuid)
-                })
-                .with_context(|| {
-                    format!(
-                        "cannot find clone source subvolume with UUID {}",
-                        clone_uuid.as_hyphenated()
-                    )
-                })?;
+            btrfs_uapi::send_receive::subvolume_search_by_received_uuid(
+                self.mnt_fd.as_fd(),
+                clone_uuid,
+            )
+            .or_else(|_| {
+                btrfs_uapi::send_receive::subvolume_search_by_uuid(
+                    self.mnt_fd.as_fd(),
+                    clone_uuid,
+                )
+            })
+            .with_context(|| {
+                format!(
+                    "cannot find clone source subvolume with UUID {}",
+                    clone_uuid.as_hyphenated()
+                )
+            })?;
 
         let subvol_path =
             btrfs_uapi::inode::subvolid_resolve(self.mnt_fd.as_fd(), clone_subvol_root)
@@ -546,8 +645,9 @@ impl ReceiveContext {
                 })?;
 
         let clone_full = self.dest_dir.join(&subvol_path).join(clone_path);
-        let clone_file = File::open(&clone_full)
-            .with_context(|| format!("cannot open clone source '{}'", clone_full.display()))?;
+        let clone_file = File::open(&clone_full).with_context(|| {
+            format!("cannot open clone source '{}'", clone_full.display())
+        })?;
 
         // Close cached write fd if it's for this file — we need a fresh fd.
         if self.write_path == full {
@@ -557,7 +657,9 @@ impl ReceiveContext {
         let dest_file = OpenOptions::new()
             .write(true)
             .open(&full)
-            .with_context(|| format!("cannot open '{}' for clone", full.display()))?;
+            .with_context(|| {
+                format!("cannot open '{}' for clone", full.display())
+            })?;
 
         btrfs_uapi::send_receive::clone_range(
             dest_file.as_fd(),
@@ -566,15 +668,23 @@ impl ReceiveContext {
             len,
             offset,
         )
-        .with_context(|| format!("clone_range failed on '{}'", full.display()))?;
+        .with_context(|| {
+            format!("clone_range failed on '{}'", full.display())
+        })?;
 
         Ok(())
     }
 
-    fn process_set_xattr(&mut self, path: &str, name: &str, data: &[u8]) -> Result<()> {
+    fn process_set_xattr(
+        &mut self,
+        path: &str,
+        name: &str,
+        data: &[u8],
+    ) -> Result<()> {
         let full = self.full_path(path)?;
         let c_path = path_to_cstring(&full)?;
-        let c_name = CString::new(name).with_context(|| format!("invalid xattr name: {name}"))?;
+        let c_name = CString::new(name)
+            .with_context(|| format!("invalid xattr name: {name}"))?;
         let ret = unsafe {
             nix::libc::lsetxattr(
                 c_path.as_ptr(),
@@ -585,8 +695,9 @@ impl ReceiveContext {
             )
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("lsetxattr failed on '{}'", full.display()));
+            return Err(std::io::Error::last_os_error()).with_context(|| {
+                format!("lsetxattr failed on '{}'", full.display())
+            });
         }
         Ok(())
     }
@@ -594,11 +705,15 @@ impl ReceiveContext {
     fn process_remove_xattr(&mut self, path: &str, name: &str) -> Result<()> {
         let full = self.full_path(path)?;
         let c_path = path_to_cstring(&full)?;
-        let c_name = CString::new(name).with_context(|| format!("invalid xattr name: {name}"))?;
-        let ret = unsafe { nix::libc::lremovexattr(c_path.as_ptr(), c_name.as_ptr()) };
+        let c_name = CString::new(name)
+            .with_context(|| format!("invalid xattr name: {name}"))?;
+        let ret = unsafe {
+            nix::libc::lremovexattr(c_path.as_ptr(), c_name.as_ptr())
+        };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("lremovexattr failed on '{}'", full.display()));
+            return Err(std::io::Error::last_os_error()).with_context(|| {
+                format!("lremovexattr failed on '{}'", full.display())
+            });
         }
         Ok(())
     }
@@ -606,10 +721,13 @@ impl ReceiveContext {
     fn process_truncate(&mut self, path: &str, size: u64) -> Result<()> {
         let full = self.full_path(path)?;
         let c_path = path_to_cstring(&full)?;
-        let ret = unsafe { nix::libc::truncate(c_path.as_ptr(), size as nix::libc::off_t) };
+        let ret = unsafe {
+            nix::libc::truncate(c_path.as_ptr(), size as nix::libc::off_t)
+        };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("truncate failed on '{}'", full.display()));
+            return Err(std::io::Error::last_os_error()).with_context(|| {
+                format!("truncate failed on '{}'", full.display())
+            });
         }
         Ok(())
     }
@@ -632,13 +750,19 @@ impl ReceiveContext {
             )
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("lchown failed on '{}'", full.display()));
+            return Err(std::io::Error::last_os_error()).with_context(|| {
+                format!("lchown failed on '{}'", full.display())
+            });
         }
         Ok(())
     }
 
-    fn process_utimes(&mut self, path: &str, atime: &Timespec, mtime: &Timespec) -> Result<()> {
+    fn process_utimes(
+        &mut self,
+        path: &str,
+        atime: &Timespec,
+        mtime: &Timespec,
+    ) -> Result<()> {
         let full = self.full_path(path)?;
         let c_path = path_to_cstring(&full)?;
         let times = [
@@ -660,19 +784,29 @@ impl ReceiveContext {
             )
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("utimensat failed on '{}'", full.display()));
+            return Err(std::io::Error::last_os_error()).with_context(|| {
+                format!("utimensat failed on '{}'", full.display())
+            });
         }
         Ok(())
     }
 
-    fn process_fallocate(&mut self, path: &str, mode: u32, offset: u64, len: u64) -> Result<()> {
+    fn process_fallocate(
+        &mut self,
+        path: &str,
+        mode: u32,
+        offset: u64,
+        len: u64,
+    ) -> Result<()> {
         let full = self.full_path(path)?;
         self.close_write_fd();
-        let file = OpenOptions::new()
-            .write(true)
-            .open(&full)
-            .with_context(|| format!("cannot open '{}' for fallocate", full.display()))?;
+        let file =
+            OpenOptions::new()
+                .write(true)
+                .open(&full)
+                .with_context(|| {
+                    format!("cannot open '{}' for fallocate", full.display())
+                })?;
         let ret = unsafe {
             nix::libc::fallocate(
                 file.as_raw_fd(),
@@ -682,8 +816,9 @@ impl ReceiveContext {
             )
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error())
-                .with_context(|| format!("fallocate failed on '{}'", full.display()));
+            return Err(std::io::Error::last_os_error()).with_context(|| {
+                format!("fallocate failed on '{}'", full.display())
+            });
         }
         Ok(())
     }
@@ -703,11 +838,20 @@ impl ReceiveContext {
         self.close_write_fd();
 
         // fs-verity requires the file to be opened read-only.
-        let file = File::open(&full)
-            .with_context(|| format!("cannot open '{}' for verity", full.display()))?;
+        let file = File::open(&full).with_context(|| {
+            format!("cannot open '{}' for verity", full.display())
+        })?;
 
-        crate::verity::enable_verity(file.as_fd(), algorithm, block_size, salt, sig)
-            .with_context(|| format!("FS_IOC_ENABLE_VERITY failed on '{}'", full.display()))?;
+        crate::verity::enable_verity(
+            file.as_fd(),
+            algorithm,
+            block_size,
+            salt,
+            sig,
+        )
+        .with_context(|| {
+            format!("FS_IOC_ENABLE_VERITY failed on '{}'", full.display())
+        })?;
 
         Ok(())
     }
@@ -725,7 +869,9 @@ impl ReceiveContext {
         data: &[u8],
     ) -> Result<()> {
         if encryption != 0 {
-            bail!("encrypted encoded writes are not supported (encryption={encryption})");
+            bail!(
+                "encrypted encoded writes are not supported (encryption={encryption})"
+            );
         }
 
         let full = self.full_path(path)?;
@@ -733,10 +879,10 @@ impl ReceiveContext {
         // Reuse cached fd if writing to the same file.
         if self.write_path != full {
             self.close_write_fd();
-            let file = OpenOptions::new()
-                .write(true)
-                .open(&full)
-                .with_context(|| format!("cannot open '{}' for writing", full.display()))?;
+            let file =
+                OpenOptions::new().write(true).open(&full).with_context(
+                    || format!("cannot open '{}' for writing", full.display()),
+                )?;
             self.write_fd = Some(file);
             self.write_path = full.clone();
         }
@@ -761,21 +907,26 @@ impl ReceiveContext {
                 // Fall through to decompression.
             }
             Err(e) => {
-                return Err(e)
-                    .with_context(|| format!("encoded write failed on '{}'", full.display()));
+                return Err(e).with_context(|| {
+                    format!("encoded write failed on '{}'", full.display())
+                });
             }
         }
 
         // Decompression fallback: decompress and pwrite.
-        let decompressed = decompress(data, unencoded_len as usize, compression)
-            .with_context(|| format!("decompression failed for '{}'", full.display()))?;
+        let decompressed =
+            decompress(data, unencoded_len as usize, compression)
+                .with_context(|| {
+                    format!("decompression failed for '{}'", full.display())
+                })?;
 
-        let write_data = &decompressed
-            [unencoded_offset as usize..unencoded_offset as usize + unencoded_file_len as usize];
+        let write_data = &decompressed[unencoded_offset as usize
+            ..unencoded_offset as usize + unencoded_file_len as usize];
 
         use std::os::unix::fs::FileExt;
-        fd.write_all_at(write_data, offset)
-            .with_context(|| format!("pwrite failed on '{}'", full.display()))?;
+        fd.write_all_at(write_data, offset).with_context(|| {
+            format!("pwrite failed on '{}'", full.display())
+        })?;
 
         Ok(())
     }
@@ -783,7 +934,11 @@ impl ReceiveContext {
 
 /// Decompress `data` into a buffer of `output_len` bytes using the specified
 /// compression algorithm.
-fn decompress(data: &[u8], output_len: usize, compression: u32) -> Result<Vec<u8>> {
+fn decompress(
+    data: &[u8],
+    output_len: usize,
+    compression: u32,
+) -> Result<Vec<u8>> {
     match compression {
         0 => {
             // No compression — data is already unencoded.
@@ -801,8 +956,8 @@ fn decompress(data: &[u8], output_len: usize, compression: u32) -> Result<Vec<u8
         }
         2 => {
             // ZSTD
-            let out =
-                zstd::bulk::decompress(data, output_len).context("zstd decompression failed")?;
+            let out = zstd::bulk::decompress(data, output_len)
+                .context("zstd decompression failed")?;
             Ok(out)
         }
         3..=7 => {
@@ -821,7 +976,11 @@ fn decompress(data: &[u8], output_len: usize, compression: u32) -> Result<Vec<u8
 /// - For each sector:
 ///   - 4 bytes LE: compressed segment length
 ///   - N bytes: LZO1X compressed data
-fn decompress_lzo(data: &[u8], output_len: usize, sector_size: usize) -> Result<Vec<u8>> {
+fn decompress_lzo(
+    data: &[u8],
+    output_len: usize,
+    sector_size: usize,
+) -> Result<Vec<u8>> {
     if data.len() < 4 {
         bail!("LZO data too short for header");
     }
@@ -840,17 +999,24 @@ fn decompress_lzo(data: &[u8], output_len: usize, sector_size: usize) -> Result<
         if pos + 4 > data.len() {
             bail!("LZO segment header truncated at offset {pos}");
         }
-        let seg_len = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+        let seg_len =
+            u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
         pos += 4;
 
         if pos + seg_len > data.len() {
-            bail!("LZO segment data truncated at offset {pos}, need {seg_len} bytes");
+            bail!(
+                "LZO segment data truncated at offset {pos}, need {seg_len} bytes"
+            );
         }
 
         let remaining = (output_len - out.len()).min(sector_size);
         let mut segment_out = vec![0u8; remaining];
         lzo1x::decompress(&data[pos..pos + seg_len], &mut segment_out)
-            .map_err(|e| anyhow::anyhow!("LZO decompression failed at offset {pos}: {e:?}"))?;
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "LZO decompression failed at offset {pos}: {e:?}"
+                )
+            })?;
         out.extend_from_slice(&segment_out);
 
         pos += seg_len;
@@ -867,6 +1033,7 @@ fn decompress_lzo(data: &[u8], output_len: usize, sector_size: usize) -> Result<
 
 fn path_to_cstring(path: &Path) -> Result<CString> {
     use std::os::unix::ffi::OsStrExt;
-    CString::new(path.as_os_str().as_bytes())
-        .with_context(|| format!("path contains null byte: '{}'", path.display()))
+    CString::new(path.as_os_str().as_bytes()).with_context(|| {
+        format!("path contains null byte: '{}'", path.display())
+    })
 }

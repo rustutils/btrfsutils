@@ -59,8 +59,9 @@ struct Row {
 
 impl Runnable for ListChunksCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         let fd = file.as_fd();
 
         let fs = filesystem_info(fd).with_context(|| {
@@ -72,8 +73,9 @@ impl Runnable for ListChunksCommand {
 
         println!("UUID: {}", fs.uuid.as_hyphenated());
 
-        let mut entries = chunk_list(fd)
-            .with_context(|| format!("failed to read chunk tree for '{}'", self.path.display()))?;
+        let mut entries = chunk_list(fd).with_context(|| {
+            format!("failed to read chunk tree for '{}'", self.path.display())
+        })?;
 
         if entries.is_empty() {
             println!("no chunks found");
@@ -109,7 +111,8 @@ impl Runnable for ListChunksCommand {
 
         for e in &entries {
             let pnumber = get_or_insert_count(&mut pcount, e.devid);
-            let lnumber = *lnumber_map.get(&(e.devid, e.logical_start)).unwrap_or(&1);
+            let lnumber =
+                *lnumber_map.get(&(e.devid, e.logical_start)).unwrap_or(&1);
             let usage_pct = if e.length > 0 {
                 e.used as f64 / e.length as f64 * 100.0
             } else {
@@ -130,12 +133,14 @@ impl Runnable for ListChunksCommand {
         // Compute column widths.
         let devid_w = col_w("Devid", rows.iter().map(|r| digits(r.devid)));
         let pnum_w = col_w("PNumber", rows.iter().map(|r| digits(r.pnumber)));
-        let type_w = col_w("Type/profile", rows.iter().map(|r| r.flags_str.len()));
+        let type_w =
+            col_w("Type/profile", rows.iter().map(|r| r.flags_str.len()));
         let pstart_w = col_w(
             "PStart",
             rows.iter().map(|r| human_bytes(r.physical_start).len()),
         );
-        let length_w = col_w("Length", rows.iter().map(|r| human_bytes(r.length).len()));
+        let length_w =
+            col_w("Length", rows.iter().map(|r| human_bytes(r.length).len()));
         let pend_w = col_w(
             "PEnd",
             rows.iter().map(|r| human_bytes(r.physical_end).len()),

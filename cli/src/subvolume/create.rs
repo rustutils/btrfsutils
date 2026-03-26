@@ -33,10 +33,9 @@ impl Runnable for SubvolumeCreateCommand {
         let mut had_error = false;
 
         for path in &self.paths {
-            let parent = match path
-                .parent()
-                .ok_or_else(|| anyhow::anyhow!("'{}' has no parent directory", path.display()))
-            {
+            let parent = match path.parent().ok_or_else(|| {
+                anyhow::anyhow!("'{}' has no parent directory", path.display())
+            }) {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("error creating '{}': {e}", path.display());
@@ -45,10 +44,9 @@ impl Runnable for SubvolumeCreateCommand {
                 }
             };
 
-            let name_os = match path
-                .file_name()
-                .ok_or_else(|| anyhow::anyhow!("'{}' has no file name", path.display()))
-            {
+            let name_os = match path.file_name().ok_or_else(|| {
+                anyhow::anyhow!("'{}' has no file name", path.display())
+            }) {
                 Ok(n) => n,
                 Err(e) => {
                     eprintln!("error creating '{}': {e}", path.display());
@@ -57,10 +55,9 @@ impl Runnable for SubvolumeCreateCommand {
                 }
             };
 
-            let name_str = match name_os
-                .to_str()
-                .ok_or_else(|| anyhow::anyhow!("'{}' is not valid UTF-8", path.display()))
-            {
+            let name_str = match name_os.to_str().ok_or_else(|| {
+                anyhow::anyhow!("'{}' is not valid UTF-8", path.display())
+            }) {
                 Ok(s) => s,
                 Err(e) => {
                     eprintln!("error creating '{}': {e}", path.display());
@@ -69,9 +66,9 @@ impl Runnable for SubvolumeCreateCommand {
                 }
             };
 
-            let cname = match CString::new(name_str)
-                .with_context(|| format!("subvolume name contains a null byte: '{}'", name_str))
-            {
+            let cname = match CString::new(name_str).with_context(|| {
+                format!("subvolume name contains a null byte: '{}'", name_str)
+            }) {
                 Ok(c) => c,
                 Err(e) => {
                     eprintln!("error creating '{}': {e}", path.display());
@@ -81,8 +78,13 @@ impl Runnable for SubvolumeCreateCommand {
             };
 
             if self.parents {
-                if let Err(e) = std::fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create parent directories for '{}'", parent.display()))
+                if let Err(e) =
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format!(
+                            "failed to create parent directories for '{}'",
+                            parent.display()
+                        )
+                    })
                 {
                     eprintln!("error creating '{}': {e}", path.display());
                     had_error = true;
@@ -90,9 +92,9 @@ impl Runnable for SubvolumeCreateCommand {
                 }
             }
 
-            let file = match File::open(parent)
-                .with_context(|| format!("failed to open '{}'", parent.display()))
-            {
+            let file = match File::open(parent).with_context(|| {
+                format!("failed to open '{}'", parent.display())
+            }) {
                 Ok(f) => f,
                 Err(e) => {
                     eprintln!("error creating '{}': {e}", path.display());

@@ -12,14 +12,15 @@ use crate::{
     raw::{
         BTRFS_DIR_ITEM_KEY, BTRFS_FIRST_FREE_OBJECTID, BTRFS_FS_TREE_OBJECTID,
         BTRFS_LAST_FREE_OBJECTID, BTRFS_ROOT_BACKREF_KEY, BTRFS_ROOT_ITEM_KEY,
-        BTRFS_ROOT_TREE_DIR_OBJECTID, BTRFS_ROOT_TREE_OBJECTID, BTRFS_SUBVOL_QGROUP_INHERIT,
-        BTRFS_SUBVOL_RDONLY, BTRFS_SUBVOL_SPEC_BY_ID, btrfs_ioc_default_subvol,
-        btrfs_ioc_get_subvol_info,
-        btrfs_ioc_ino_lookup, btrfs_ioc_snap_create_v2, btrfs_ioc_snap_destroy_v2,
-        btrfs_ioc_subvol_create_v2,
-        btrfs_ioc_subvol_getflags, btrfs_ioc_subvol_setflags, btrfs_ioctl_get_subvol_info_args,
-        btrfs_ioctl_ino_lookup_args, btrfs_ioctl_vol_args_v2, btrfs_qgroup_inherit,
-        btrfs_root_item, btrfs_timespec,
+        BTRFS_ROOT_TREE_DIR_OBJECTID, BTRFS_ROOT_TREE_OBJECTID,
+        BTRFS_SUBVOL_QGROUP_INHERIT, BTRFS_SUBVOL_RDONLY,
+        BTRFS_SUBVOL_SPEC_BY_ID, btrfs_ioc_default_subvol,
+        btrfs_ioc_get_subvol_info, btrfs_ioc_ino_lookup,
+        btrfs_ioc_snap_create_v2, btrfs_ioc_snap_destroy_v2,
+        btrfs_ioc_subvol_create_v2, btrfs_ioc_subvol_getflags,
+        btrfs_ioc_subvol_setflags, btrfs_ioctl_get_subvol_info_args,
+        btrfs_ioctl_ino_lookup_args, btrfs_ioctl_vol_args_v2,
+        btrfs_qgroup_inherit, btrfs_root_item, btrfs_timespec,
     },
     tree_search::{SearchKey, tree_search},
 };
@@ -131,7 +132,10 @@ pub struct SubvolumeListItem {
 
 /// Write `name` into the `name` union member of a zeroed
 /// `btrfs_ioctl_vol_args_v2`, returning `ENAMETOOLONG` if it does not fit.
-fn set_v2_name(args: &mut btrfs_ioctl_vol_args_v2, name: &CStr) -> nix::Result<()> {
+fn set_v2_name(
+    args: &mut btrfs_ioctl_vol_args_v2,
+    name: &CStr,
+) -> nix::Result<()> {
     let bytes = name.to_bytes(); // excludes nul terminator
     // SAFETY: name is the active union member; the struct is already zeroed so
     // the implicit nul terminator is already present.
@@ -158,7 +162,8 @@ fn build_qgroup_inherit(qgroups: &[u64]) -> Vec<u64> {
 
     // SAFETY: buf is large enough and zeroed; we write through a properly
     // aligned pointer (btrfs_qgroup_inherit has 8-byte alignment).
-    let inherit = unsafe { &mut *(buf.as_mut_ptr() as *mut btrfs_qgroup_inherit) };
+    let inherit =
+        unsafe { &mut *(buf.as_mut_ptr() as *mut btrfs_qgroup_inherit) };
     inherit.num_qgroups = qgroups.len() as u64;
 
     // Write the qgroup IDs into the flexible array member.
@@ -173,7 +178,11 @@ fn build_qgroup_inherit(qgroups: &[u64]) -> Vec<u64> {
 /// Set the `BTRFS_SUBVOL_QGROUP_INHERIT` fields on a `vol_args_v2` struct.
 ///
 /// `buf` must be the buffer returned by `build_qgroup_inherit`.
-fn set_qgroup_inherit(args: &mut btrfs_ioctl_vol_args_v2, buf: &[u64], num_qgroups: usize) {
+fn set_qgroup_inherit(
+    args: &mut btrfs_ioctl_vol_args_v2,
+    buf: &[u64],
+    num_qgroups: usize,
+) {
     args.flags |= BTRFS_SUBVOL_QGROUP_INHERIT as u64;
     let base_size = mem::size_of::<btrfs_qgroup_inherit>();
     let total_size = base_size + num_qgroups * mem::size_of::<u64>();
@@ -222,7 +231,10 @@ pub fn subvolume_delete(parent_fd: BorrowedFd, name: &CStr) -> nix::Result<()> {
 /// `fd` must be an open file descriptor on the filesystem (typically the mount
 /// point).  Unlike `subvolume_delete`, this does not require knowing the
 /// subvolume's path.  Requires `CAP_SYS_ADMIN`.
-pub fn subvolume_delete_by_id(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> {
+pub fn subvolume_delete_by_id(
+    fd: BorrowedFd,
+    subvolid: u64,
+) -> nix::Result<()> {
     let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
     args.flags = BTRFS_SUBVOL_SPEC_BY_ID as u64;
     args.__bindgen_anon_2.subvolid = subvolid;
@@ -274,7 +286,10 @@ pub fn subvolume_info(fd: BorrowedFd) -> nix::Result<SubvolumeInfo> {
 /// `fd` can be any open file descriptor on the filesystem.  If `rootid` is 0,
 /// the subvolume that `fd` belongs to is queried (equivalent to
 /// `subvolume_info`).  Does not require elevated privileges.
-pub fn subvolume_info_by_id(fd: BorrowedFd, rootid: u64) -> nix::Result<SubvolumeInfo> {
+pub fn subvolume_info_by_id(
+    fd: BorrowedFd,
+    rootid: u64,
+) -> nix::Result<SubvolumeInfo> {
     let mut raw: btrfs_ioctl_get_subvol_info_args = unsafe { mem::zeroed() };
     raw.treeid = rootid;
     unsafe { btrfs_ioc_get_subvol_info(fd.as_raw_fd(), &mut raw) }?;
@@ -315,7 +330,10 @@ pub fn subvolume_flags_get(fd: BorrowedFd) -> nix::Result<SubvolumeFlags> {
 ///
 /// Requires `CAP_SYS_ADMIN` to make a subvolume read-only; any user may
 /// clear the read-only flag from a subvolume they own.
-pub fn subvolume_flags_set(fd: BorrowedFd, flags: SubvolumeFlags) -> nix::Result<()> {
+pub fn subvolume_flags_set(
+    fd: BorrowedFd,
+    flags: SubvolumeFlags,
+) -> nix::Result<()> {
     let raw: u64 = flags.bits();
     unsafe { btrfs_ioc_subvol_setflags(fd.as_raw_fd(), &raw) }?;
     Ok(())
@@ -349,14 +367,18 @@ pub fn subvolume_default_get(fd: BorrowedFd) -> nix::Result<u64> {
                 return Ok(());
             }
             let name_off = offset_of!(btrfs_dir_item, name_len);
-            let name_len = u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
+            let name_len =
+                u16::from_le_bytes([data[name_off], data[name_off + 1]])
+                    as usize;
             if data.len() < header_size + name_len {
                 return Ok(());
             }
             let item_name = &data[header_size..header_size + name_len];
             if item_name == b"default" {
                 let loc_off = offset_of!(btrfs_dir_item, location);
-                let target_id = u64::from_le_bytes(data[loc_off..loc_off + 8].try_into().unwrap());
+                let target_id = u64::from_le_bytes(
+                    data[loc_off..loc_off + 8].try_into().unwrap(),
+                );
                 default_id = Some(target_id);
             }
             Ok(())
@@ -419,7 +441,8 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
             let root_id = hdr.objectid;
             let parent_id = hdr.offset;
 
-            if let Some(item) = items.iter_mut().find(|i| i.root_id == root_id) {
+            if let Some(item) = items.iter_mut().find(|i| i.root_id == root_id)
+            {
                 // Only take the first ROOT_BACKREF for each subvolume.  A
                 // subvolume can have multiple ROOT_BACKREF entries when it is
                 // referenced from more than one parent (e.g. the subvolume
@@ -441,7 +464,8 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
 
     // Determine which subvolume the fd is open on.  Paths are expressed
     // relative to this subvolume, matching btrfs-progs behaviour.
-    let top_id = crate::inode::lookup_path_rootid(fd).unwrap_or(FS_TREE_OBJECTID);
+    let top_id =
+        crate::inode::lookup_path_rootid(fd).unwrap_or(FS_TREE_OBJECTID);
 
     resolve_full_paths(fd, &mut items, top_id)?;
 
@@ -455,7 +479,11 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
 /// the tree root, and an empty string when `dir_id` is the tree root itself.
 /// This prefix can be concatenated directly with the subvolume's leaf name to
 /// form the full segment within the parent.
-fn ino_lookup_dir_path(fd: BorrowedFd, parent_tree: u64, dir_id: u64) -> nix::Result<String> {
+fn ino_lookup_dir_path(
+    fd: BorrowedFd,
+    parent_tree: u64,
+    dir_id: u64,
+) -> nix::Result<String> {
     let mut args = btrfs_ioctl_ino_lookup_args {
         treeid: parent_tree,
         objectid: dir_id,
@@ -633,16 +661,20 @@ fn parse_root_item(root_id: u64, data: &[u8]) -> Option<SubvolumeListItem> {
     let flags = SubvolumeFlags::from_bits_truncate(flags_raw);
 
     // Extended fields exist only in non-legacy items.
-    let otime_nsec = offset_of!(btrfs_root_item, otime) + offset_of!(btrfs_timespec, nsec);
+    let otime_nsec =
+        offset_of!(btrfs_root_item, otime) + offset_of!(btrfs_timespec, nsec);
     let (uuid, parent_uuid, received_uuid, otransid, otime) =
         if data.len() >= otime_nsec + field_size!(btrfs_timespec, nsec) {
             let off_uuid = offset_of!(btrfs_root_item, uuid);
             let off_parent = offset_of!(btrfs_root_item, parent_uuid);
             let off_received = offset_of!(btrfs_root_item, received_uuid);
             let uuid_size = field_size!(btrfs_root_item, uuid);
-            let uuid = Uuid::from_bytes(data[off_uuid..off_uuid + uuid_size].try_into().unwrap());
-            let parent_uuid =
-                Uuid::from_bytes(data[off_parent..off_parent + uuid_size].try_into().unwrap());
+            let uuid = Uuid::from_bytes(
+                data[off_uuid..off_uuid + uuid_size].try_into().unwrap(),
+            );
+            let parent_uuid = Uuid::from_bytes(
+                data[off_parent..off_parent + uuid_size].try_into().unwrap(),
+            );
             let received_uuid = Uuid::from_bytes(
                 data[off_received..off_received + uuid_size]
                     .try_into()
@@ -650,7 +682,10 @@ fn parse_root_item(root_id: u64, data: &[u8]) -> Option<SubvolumeListItem> {
             );
             let otransid = rle64(data, offset_of!(btrfs_root_item, otransid));
             let otime_sec = offset_of!(btrfs_root_item, otime);
-            let otime = timespec_to_system_time(rle64(data, otime_sec), rle32(data, otime_nsec));
+            let otime = timespec_to_system_time(
+                rle64(data, otime_sec),
+                rle32(data, otime_nsec),
+            );
             (uuid, parent_uuid, received_uuid, otransid, otime)
         } else {
             (Uuid::nil(), Uuid::nil(), Uuid::nil(), 0, UNIX_EPOCH)
@@ -683,11 +718,14 @@ fn parse_root_ref(data: &[u8]) -> Option<(u64, String)> {
     }
     let dir_id = rle64(data, offset_of!(btrfs_root_ref, dirid));
     let name_off = offset_of!(btrfs_root_ref, name_len);
-    let name_len = u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
+    let name_len =
+        u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
     if data.len() < header_size + name_len {
         return None;
     }
-    let name = String::from_utf8_lossy(&data[header_size..header_size + name_len]).into_owned();
+    let name =
+        String::from_utf8_lossy(&data[header_size..header_size + name_len])
+            .into_owned();
     Some((dir_id, name))
 }
 
@@ -873,7 +911,8 @@ mod tests {
             test_item(258, 257),
         ];
         let segments = vec!["A".to_string(), "B".to_string(), "C".to_string()];
-        let id_to_idx: HashMap<u64, usize> = [(256, 0), (257, 1), (258, 2)].into();
+        let id_to_idx: HashMap<u64, usize> =
+            [(256, 0), (257, 1), (258, 2)].into();
         let mut cache = HashMap::new();
 
         let path = build_full_path(
@@ -898,10 +937,13 @@ mod tests {
             test_item(258, 257),
         ];
         let segments = vec!["A".to_string(), "B".to_string(), "C".to_string()];
-        let id_to_idx: HashMap<u64, usize> = [(256, 0), (257, 1), (258, 2)].into();
+        let id_to_idx: HashMap<u64, usize> =
+            [(256, 0), (257, 1), (258, 2)].into();
         let mut cache = HashMap::new();
 
-        let path = build_full_path(258, 257, &id_to_idx, &segments, &items, &mut cache);
+        let path = build_full_path(
+            258, 257, &id_to_idx, &segments, &items, &mut cache,
+        );
         assert_eq!(path, "C");
 
         // B's path is also just "B" (its parent 256/A is below top_id in the
@@ -909,7 +951,9 @@ mod tests {
         // With top_id=257, building B: parent=256, 256 is in id_to_idx but
         // 256's parent is FS_TREE (5) which triggers the stop, so chain = [257, 256],
         // and A gets its segment, B gets "A/B".
-        let path_b = build_full_path(257, 257, &id_to_idx, &segments, &items, &mut cache);
+        let path_b = build_full_path(
+            257, 257, &id_to_idx, &segments, &items, &mut cache,
+        );
         // 257 itself: its parent is 256, 256 != top_id (257), so we walk up.
         // 256's parent is FS_TREE (5), which triggers stop. chain = [257, 256].
         // 256 resolves to "A" (parent is FS_TREE), 257 resolves to "A/B".
@@ -947,7 +991,8 @@ mod tests {
             test_item(258, 257),
         ];
         let segments = vec!["A".to_string(), "B".to_string(), "C".to_string()];
-        let id_to_idx: HashMap<u64, usize> = [(256, 0), (257, 1), (258, 2)].into();
+        let id_to_idx: HashMap<u64, usize> =
+            [(256, 0), (257, 1), (258, 2)].into();
         let mut cache = HashMap::new();
         cache.insert(257, "A/B".to_string());
 

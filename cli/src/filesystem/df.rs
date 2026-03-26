@@ -12,10 +12,12 @@ pub struct FilesystemDfCommand {
 
 impl Runnable for FilesystemDfCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
-        let entries = space_info(file.as_fd())
-            .with_context(|| format!("failed to get space info for '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
+        let entries = space_info(file.as_fd()).with_context(|| {
+            format!("failed to get space info for '{}'", self.path.display())
+        })?;
 
         for entry in &entries {
             println!(

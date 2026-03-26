@@ -1,6 +1,8 @@
 use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
-use btrfs_uapi::{device::device_info_all, filesystem::filesystem_info, scrub::scrub_progress};
+use btrfs_uapi::{
+    device::device_info_all, filesystem::filesystem_info, scrub::scrub_progress,
+};
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
@@ -17,8 +19,9 @@ pub struct ScrubStatusCommand {
 
 impl Runnable for ScrubStatusCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         let fd = file.as_fd();
 
         let fs = filesystem_info(fd).with_context(|| {
@@ -27,8 +30,9 @@ impl Runnable for ScrubStatusCommand {
                 self.path.display()
             )
         })?;
-        let devices = device_info_all(fd, &fs)
-            .with_context(|| format!("failed to get device info for '{}'", self.path.display()))?;
+        let devices = device_info_all(fd, &fs).with_context(|| {
+            format!("failed to get device info for '{}'", self.path.display())
+        })?;
 
         println!("UUID: {}", fs.uuid.as_hyphenated());
 
@@ -36,19 +40,24 @@ impl Runnable for ScrubStatusCommand {
         let mut fs_totals = btrfs_uapi::scrub::ScrubProgress::default();
 
         for dev in &devices {
-            match scrub_progress(fd, dev.devid)
-                .with_context(|| format!("failed to get scrub progress for device {}", dev.devid))?
-            {
+            match scrub_progress(fd, dev.devid).with_context(|| {
+                format!("failed to get scrub progress for device {}", dev.devid)
+            })? {
                 None => {
                     if self.device {
-                        println!("device {} ({}): no scrub in progress", dev.devid, dev.path);
+                        println!(
+                            "device {} ({}): no scrub in progress",
+                            dev.devid, dev.path
+                        );
                     }
                 }
                 Some(progress) => {
                     any_running = true;
                     super::accumulate(&mut fs_totals, &progress);
                     if self.device {
-                        super::print_progress_summary(&progress, dev.devid, &dev.path);
+                        super::print_progress_summary(
+                            &progress, dev.devid, &dev.path,
+                        );
                     }
                 }
             }

@@ -1,7 +1,7 @@
 use crate::common::single_mount;
 use btrfs_uapi::{
-    subvolume::{subvolume_create, subvolume_info},
     filesystem::sync,
+    subvolume::{subvolume_create, subvolume_info},
     tree_search::{SearchKey, tree_search},
 };
 use std::{
@@ -24,7 +24,8 @@ fn tree_search_enumerate_root_items() {
         CStr::from_bytes_with_nul(b"ts-c\0").unwrap(),
     ] {
         subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
-        let dir = File::open(mnt.path().join(name.to_str().unwrap())).expect("open failed");
+        let dir = File::open(mnt.path().join(name.to_str().unwrap()))
+            .expect("open failed");
         let info = subvolume_info(dir.as_fd()).expect("subvolume_info failed");
         subvol_ids.push(info.id);
     }
@@ -66,7 +67,8 @@ fn tree_search_objectid_range() {
         CStr::from_bytes_with_nul(b"range-c\0").unwrap(),
     ] {
         subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
-        let dir = File::open(mnt.path().join(name.to_str().unwrap())).expect("open failed");
+        let dir = File::open(mnt.path().join(name.to_str().unwrap()))
+            .expect("open failed");
         let info = subvolume_info(dir.as_fd()).expect("subvolume_info failed");
         subvol_ids.push(info.id);
     }
@@ -144,8 +146,10 @@ fn tree_search_large_result_no_duplicates() {
     let mut expected_ids = Vec::new();
     for i in 0..60 {
         let name = CString::new(format!("sub-{i:03}")).unwrap();
-        subvolume_create(mnt.fd(), &name, &[]).expect("subvolume_create failed");
-        let dir = File::open(mnt.path().join(name.to_str().unwrap())).expect("open failed");
+        subvolume_create(mnt.fd(), &name, &[])
+            .expect("subvolume_create failed");
+        let dir = File::open(mnt.path().join(name.to_str().unwrap()))
+            .expect("open failed");
         let info = subvolume_info(dir.as_fd()).expect("subvolume_info failed");
         expected_ids.push(info.id);
     }

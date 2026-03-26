@@ -31,8 +31,8 @@ impl Runnable for DeviceRemoveCommand {
             .expect("clap ensures at least 2 args");
 
         let mount = PathBuf::from(mount_str);
-        let file =
-            File::open(&mount).with_context(|| format!("failed to open '{}'", mount.display()))?;
+        let file = File::open(&mount)
+            .with_context(|| format!("failed to open '{}'", mount.display()))?;
         let fd = file.as_fd();
 
         let mut had_error = false;
@@ -65,8 +65,9 @@ fn remove_one(fd: std::os::unix::io::BorrowedFd, spec_str: &str) -> Result<()> {
         device_remove(fd, DeviceSpec::Id(devid))
             .with_context(|| format!("failed to remove devid {devid}"))?;
     } else {
-        let cpath = CString::new(spec_str)
-            .with_context(|| format!("device spec contains a null byte: '{spec_str}'"))?;
+        let cpath = CString::new(spec_str).with_context(|| {
+            format!("device spec contains a null byte: '{spec_str}'")
+        })?;
         device_remove(fd, DeviceSpec::Path(&cpath))
             .with_context(|| format!("failed to remove device '{spec_str}'"))?;
     }

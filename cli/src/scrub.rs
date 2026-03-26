@@ -9,11 +9,7 @@ mod resume;
 mod start;
 mod status;
 
-use cancel::ScrubCancelCommand;
-use limit::ScrubLimitCommand;
-use resume::ScrubResumeCommand;
-use start::ScrubStartCommand;
-use status::ScrubStatusCommand;
+pub use self::{cancel::*, limit::*, resume::*, start::*, status::*};
 
 /// Verify checksums of data and metadata.
 ///
@@ -92,7 +88,9 @@ fn print_progress_summary(p: &ScrubProgress, devid: u64, path: &str) {
 /// Print the error summary line.
 fn print_error_summary(p: &ScrubProgress) {
     if p.malloc_errors > 0 {
-        eprintln!("WARNING: memory allocation errors during scrub — results may be inaccurate");
+        eprintln!(
+            "WARNING: memory allocation errors during scrub — results may be inaccurate"
+        );
     }
     print!("  Error summary:  ");
     if p.is_clean() {

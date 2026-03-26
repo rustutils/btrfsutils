@@ -5,8 +5,9 @@
 //! transparent compression at the same time.
 
 use crate::raw::{
-    BTRFS_DEFRAG_RANGE_COMPRESS, BTRFS_DEFRAG_RANGE_COMPRESS_LEVEL, BTRFS_DEFRAG_RANGE_NOCOMPRESS,
-    BTRFS_DEFRAG_RANGE_START_IO, btrfs_ioc_defrag_range, btrfs_ioctl_defrag_range_args,
+    BTRFS_DEFRAG_RANGE_COMPRESS, BTRFS_DEFRAG_RANGE_COMPRESS_LEVEL,
+    BTRFS_DEFRAG_RANGE_NOCOMPRESS, BTRFS_DEFRAG_RANGE_START_IO,
+    btrfs_ioc_defrag_range, btrfs_ioctl_defrag_range_args,
 };
 use std::{
     mem,

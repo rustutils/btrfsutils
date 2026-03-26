@@ -1,8 +1,12 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result};
-use btrfs_uapi::subvolume::{SubvolumeFlags, SubvolumeListItem, subvolume_list};
+use btrfs_uapi::subvolume::{
+    SubvolumeFlags, SubvolumeListItem, subvolume_list,
+};
 use clap::Parser;
-use std::{cmp::Ordering, fs::File, os::unix::io::AsFd, path::PathBuf, str::FromStr};
+use std::{
+    cmp::Ordering, fs::File, os::unix::io::AsFd, path::PathBuf, str::FromStr,
+};
 
 /// List subvolumes and snapshots in the filesystem
 ///
@@ -74,7 +78,12 @@ pub struct SubvolumeListCommand {
     ///
     /// Prefix with + (ascending, default) or - (descending).
     /// Example: --sort=gen,-ogen,path
-    #[clap(long, value_name = "KEYS", value_delimiter = ',', allow_hyphen_values = true)]
+    #[clap(
+        long,
+        value_name = "KEYS",
+        value_delimiter = ',',
+        allow_hyphen_values = true
+    )]
     sort: Vec<SortKey>,
 
     /// Path to a mounted btrfs filesystem
@@ -83,11 +92,13 @@ pub struct SubvolumeListCommand {
 
 impl Runnable for SubvolumeListCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
 
-        let mut items = subvolume_list(file.as_fd())
-            .with_context(|| format!("failed to list subvolumes for '{}'", self.path.display()))?;
+        let mut items = subvolume_list(file.as_fd()).with_context(|| {
+            format!("failed to list subvolumes for '{}'", self.path.display())
+        })?;
 
         let top_id = btrfs_uapi::inode::lookup_path_rootid(file.as_fd())
             .with_context(|| "failed to get root id for path")?;
@@ -169,7 +180,8 @@ impl SubvolumeListCommand {
             // Build the output line incrementally in the same field order as
             // btrfs-progs: ID, gen, [cgen,] top level, [parent,] path, [uuid,]
             // [parent_uuid,] [received_uuid]
-            let mut line = format!("ID {} gen {}", item.root_id, item.generation);
+            let mut line =
+                format!("ID {} gen {}", item.root_id, item.generation);
 
             if self.ogeneration {
                 line.push_str(&format!(" cgen {}", item.otransid));
@@ -188,11 +200,17 @@ impl SubvolumeListCommand {
             }
 
             if self.parent_uuid {
-                line.push_str(&format!(" parent_uuid {}", fmt_uuid(&item.parent_uuid)));
+                line.push_str(&format!(
+                    " parent_uuid {}",
+                    fmt_uuid(&item.parent_uuid)
+                ));
             }
 
             if self.received_uuid {
-                line.push_str(&format!(" received_uuid {}", fmt_uuid(&item.received_uuid)));
+                line.push_str(&format!(
+                    " received_uuid {}",
+                    fmt_uuid(&item.received_uuid)
+                ));
             }
 
             println!("{line}");
@@ -224,7 +242,8 @@ impl SubvolumeListCommand {
         println!("{}", headers.join("\t"));
 
         // Print separator.
-        let sep: Vec<String> = headers.iter().map(|h| "-".repeat(h.len())).collect();
+        let sep: Vec<String> =
+            headers.iter().map(|h| "-".repeat(h.len())).collect();
         println!("{}", sep.join("\t"));
 
         // Print rows.
@@ -235,10 +254,8 @@ impl SubvolumeListCommand {
                 &item.name
             };
 
-            let mut cols: Vec<String> = vec![
-                item.root_id.to_string(),
-                item.generation.to_string(),
-            ];
+            let mut cols: Vec<String> =
+                vec![item.root_id.to_string(), item.generation.to_string()];
             if self.ogeneration {
                 cols.push(item.otransid.to_string());
             }
@@ -293,13 +310,18 @@ impl FromStr for GenFilter {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         if let Some(rest) = s.strip_prefix('+') {
-            let v: u64 = rest.parse().map_err(|_| format!("invalid number: '{rest}'"))?;
+            let v: u64 = rest
+                .parse()
+                .map_err(|_| format!("invalid number: '{rest}'"))?;
             Ok(GenFilter::AtLeast(v))
         } else if let Some(rest) = s.strip_prefix('-') {
-            let v: u64 = rest.parse().map_err(|_| format!("invalid number: '{rest}'"))?;
+            let v: u64 = rest
+                .parse()
+                .map_err(|_| format!("invalid number: '{rest}'"))?;
             Ok(GenFilter::AtMost(v))
         } else {
-            let v: u64 = s.parse().map_err(|_| format!("invalid number: '{s}'"))?;
+            let v: u64 =
+                s.parse().map_err(|_| format!("invalid number: '{s}'"))?;
             Ok(GenFilter::Exact(v))
         }
     }
@@ -321,18 +343,18 @@ enum SortField {
 }
 
 impl SortKey {
-    fn compare(&self, a: &SubvolumeListItem, b: &SubvolumeListItem) -> Ordering {
+    fn compare(
+        &self,
+        a: &SubvolumeListItem,
+        b: &SubvolumeListItem,
+    ) -> Ordering {
         let ord = match self.field {
             SortField::Gen => a.generation.cmp(&b.generation),
             SortField::Ogen => a.otransid.cmp(&b.otransid),
             SortField::Rootid => a.root_id.cmp(&b.root_id),
             SortField::Path => a.name.cmp(&b.name),
         };
-        if self.descending {
-            ord.reverse()
-        } else {
-            ord
-        }
+        if self.descending { ord.reverse() } else { ord }
     }
 }
 
@@ -353,7 +375,11 @@ impl FromStr for SortKey {
             "ogen" => SortField::Ogen,
             "rootid" => SortField::Rootid,
             "path" => SortField::Path,
-            _ => return Err(format!("unknown sort key: '{field_str}' (expected gen, ogen, rootid, or path)")),
+            _ => {
+                return Err(format!(
+                    "unknown sort key: '{field_str}' (expected gen, ogen, rootid, or path)"
+                ));
+            }
         };
 
         Ok(SortKey { field, descending })

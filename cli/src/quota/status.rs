@@ -25,20 +25,26 @@ fn describe_mode(mode: &str) -> &str {
 
 impl Runnable for QuotaStatusCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         let fd = file.as_fd();
 
-        let fs = btrfs_uapi::filesystem::filesystem_info(fd).with_context(|| {
-            format!(
-                "failed to get filesystem info for '{}'",
-                self.path.display()
-            )
-        })?;
+        let fs =
+            btrfs_uapi::filesystem::filesystem_info(fd).with_context(|| {
+                format!(
+                    "failed to get filesystem info for '{}'",
+                    self.path.display()
+                )
+            })?;
 
-        let status = SysfsBtrfs::new(&fs.uuid).quota_status().with_context(|| {
-            format!("failed to read quota status for '{}'", self.path.display())
-        })?;
+        let status =
+            SysfsBtrfs::new(&fs.uuid).quota_status().with_context(|| {
+                format!(
+                    "failed to read quota status for '{}'",
+                    self.path.display()
+                )
+            })?;
 
         if self.is_enabled {
             if !status.enabled {

@@ -12,15 +12,11 @@ mod fix_device_size;
 mod super_recover;
 mod zero_log;
 
-use chunk_recover::RescueChunkRecoverCommand;
-use clear_ino_cache::RescueClearInoCacheCommand;
-use clear_space_cache::RescueClearSpaceCacheCommand;
-use clear_uuid_tree::RescueClearUuidTreeCommand;
-use create_control_device::RescueCreateControlDeviceCommand;
-use fix_data_checksum::RescueFixDataChecksumCommand;
-use fix_device_size::RescueFixDeviceSizeCommand;
-use super_recover::RescueSuperRecoverCommand;
-use zero_log::RescueZeroLogCommand;
+pub use self::{
+    chunk_recover::*, clear_ino_cache::*, clear_space_cache::*,
+    clear_uuid_tree::*, create_control_device::*, fix_data_checksum::*,
+    fix_device_size::*, super_recover::*, zero_log::*,
+};
 
 /// Toolbox for specific rescue operations.
 ///
@@ -42,7 +38,9 @@ impl Runnable for RescueCommand {
             RescueSubcommand::ZeroLog(cmd) => cmd.run(format, dry_run),
             RescueSubcommand::FixDeviceSize(cmd) => cmd.run(format, dry_run),
             RescueSubcommand::FixDataChecksum(cmd) => cmd.run(format, dry_run),
-            RescueSubcommand::CreateControlDevice(cmd) => cmd.run(format, dry_run),
+            RescueSubcommand::CreateControlDevice(cmd) => {
+                cmd.run(format, dry_run)
+            }
             RescueSubcommand::ClearInoCache(cmd) => cmd.run(format, dry_run),
             RescueSubcommand::ClearSpaceCache(cmd) => cmd.run(format, dry_run),
             RescueSubcommand::ClearUuidTree(cmd) => cmd.run(format, dry_run),

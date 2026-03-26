@@ -2,8 +2,9 @@ use crate::common::single_mount;
 use btrfs_uapi::{
     filesystem::sync,
     quota::{
-        QgroupLimitFlags, qgroup_assign, qgroup_clear_stale, qgroup_create, qgroup_destroy,
-        qgroup_limit, qgroup_list, qgroup_remove, quota_disable, quota_enable, quota_rescan_wait,
+        QgroupLimitFlags, qgroup_assign, qgroup_clear_stale, qgroup_create,
+        qgroup_destroy, qgroup_limit, qgroup_list, qgroup_remove,
+        quota_disable, quota_enable, quota_rescan_wait,
     },
     subvolume::{subvolume_create, subvolume_delete, subvolume_info},
 };
@@ -59,12 +60,15 @@ fn qgroup_lifecycle() {
     let name = CStr::from_bytes_with_nul(b"test-subvol\0").unwrap();
     subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
-    let subvol_dir = File::open(mnt.path().join("test-subvol")).expect("open subvol failed");
-    let info = subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
+    let subvol_dir =
+        File::open(mnt.path().join("test-subvol")).expect("open subvol failed");
+    let info =
+        subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
     let subvol_qgroupid = info.id; // level-0 qgroup = subvolume ID
 
     // Assign the subvolume's qgroup to the level-1 parent.
-    qgroup_assign(mnt.fd(), subvol_qgroupid, level1_qgroupid).expect("qgroup_assign failed");
+    qgroup_assign(mnt.fd(), subvol_qgroupid, level1_qgroupid)
+        .expect("qgroup_assign failed");
 
     // Set an exclusive limit on the subvolume's qgroup.
     qgroup_limit(
@@ -101,11 +105,13 @@ fn qgroup_lifecycle() {
     assert!(level1_qg.is_some(), "level-1 qgroup should appear in list");
 
     // Tear down: remove assignment, destroy level-1 qgroup.
-    qgroup_remove(mnt.fd(), subvol_qgroupid, level1_qgroupid).expect("qgroup_remove failed");
+    qgroup_remove(mnt.fd(), subvol_qgroupid, level1_qgroupid)
+        .expect("qgroup_remove failed");
     qgroup_destroy(mnt.fd(), level1_qgroupid).expect("qgroup_destroy failed");
 
     // Level-1 qgroup should be gone now.
-    let list2 = qgroup_list(mnt.fd()).expect("qgroup_list after destroy failed");
+    let list2 =
+        qgroup_list(mnt.fd()).expect("qgroup_list after destroy failed");
     assert!(
         !list2.qgroups.iter().any(|q| q.qgroupid == level1_qgroupid),
         "level-1 qgroup should be gone after destroy",
@@ -126,13 +132,16 @@ fn qgroup_clear_stale_test() {
     // Create three subvolumes.
     for name in [b"sub-a\0", b"sub-b\0", b"sub-c\0"] {
         let cname = CStr::from_bytes_with_nul(name).unwrap();
-        subvolume_create(mnt.fd(), cname, &[]).expect("subvolume_create failed");
+        subvolume_create(mnt.fd(), cname, &[])
+            .expect("subvolume_create failed");
     }
     sync(mnt.fd()).unwrap();
 
     // Get sub-b's qgroupid before deletion.
-    let sub_b_dir = File::open(mnt.path().join("sub-b")).expect("open sub-b failed");
-    let sub_b_info = subvolume_info(sub_b_dir.as_fd()).expect("subvolume_info failed");
+    let sub_b_dir =
+        File::open(mnt.path().join("sub-b")).expect("open sub-b failed");
+    let sub_b_info =
+        subvolume_info(sub_b_dir.as_fd()).expect("subvolume_info failed");
     let sub_b_qgroupid = sub_b_info.id;
     drop(sub_b_dir);
 
@@ -151,7 +160,9 @@ fn qgroup_clear_stale_test() {
         std::thread::sleep(std::time::Duration::from_millis(200));
 
         let list = qgroup_list(mnt.fd()).expect("qgroup_list failed");
-        if let Some(qg) = list.qgroups.iter().find(|q| q.qgroupid == sub_b_qgroupid) {
+        if let Some(qg) =
+            list.qgroups.iter().find(|q| q.qgroupid == sub_b_qgroupid)
+        {
             if qg.stale {
                 stale_visible = true;
                 break;
@@ -164,12 +175,15 @@ fn qgroup_clear_stale_test() {
 
     if !stale_visible {
         // Kernel cleaner hasn't run yet — skip rather than flake.
-        eprintln!("qgroup_clear_stale_test: subvolume cleaner hasn't run, skipping");
+        eprintln!(
+            "qgroup_clear_stale_test: subvolume cleaner hasn't run, skipping"
+        );
         return;
     }
 
     // Clear stale qgroups.
-    let cleared = qgroup_clear_stale(mnt.fd()).expect("qgroup_clear_stale failed");
+    let cleared =
+        qgroup_clear_stale(mnt.fd()).expect("qgroup_clear_stale failed");
     assert!(
         cleared >= 1,
         "should have cleared at least 1 stale qgroup, got {cleared}"

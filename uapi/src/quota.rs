@@ -17,20 +17,23 @@
 use crate::{
     field_size,
     raw::{
-        BTRFS_FIRST_FREE_OBJECTID, BTRFS_LAST_FREE_OBJECTID, BTRFS_QGROUP_INFO_KEY,
-        BTRFS_QGROUP_LIMIT_EXCL_CMPR, BTRFS_QGROUP_LIMIT_KEY, BTRFS_QGROUP_LIMIT_MAX_EXCL,
-        BTRFS_QGROUP_LIMIT_MAX_RFER, BTRFS_QGROUP_LIMIT_RFER_CMPR, BTRFS_QGROUP_RELATION_KEY,
-        BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT, BTRFS_QGROUP_STATUS_FLAG_ON,
-        BTRFS_QGROUP_STATUS_FLAG_RESCAN, BTRFS_QGROUP_STATUS_FLAG_SIMPLE_MODE,
-        BTRFS_QGROUP_STATUS_KEY, BTRFS_QUOTA_CTL_DISABLE, BTRFS_QUOTA_CTL_ENABLE,
-        BTRFS_QUOTA_CTL_ENABLE_SIMPLE_QUOTA, BTRFS_QUOTA_TREE_OBJECTID, BTRFS_ROOT_ITEM_KEY,
-        BTRFS_ROOT_TREE_OBJECTID, btrfs_ioc_qgroup_assign, btrfs_ioc_qgroup_create,
-        btrfs_ioc_qgroup_limit, btrfs_ioc_quota_ctl, btrfs_ioc_quota_rescan,
-        btrfs_ioc_quota_rescan_status, btrfs_ioc_quota_rescan_wait,
-        btrfs_ioctl_qgroup_assign_args, btrfs_ioctl_qgroup_create_args,
-        btrfs_ioctl_qgroup_limit_args, btrfs_ioctl_quota_ctl_args,
-        btrfs_ioctl_quota_rescan_args, btrfs_qgroup_info_item, btrfs_qgroup_limit,
-        btrfs_qgroup_limit_item, btrfs_qgroup_status_item,
+        BTRFS_FIRST_FREE_OBJECTID, BTRFS_LAST_FREE_OBJECTID,
+        BTRFS_QGROUP_INFO_KEY, BTRFS_QGROUP_LIMIT_EXCL_CMPR,
+        BTRFS_QGROUP_LIMIT_KEY, BTRFS_QGROUP_LIMIT_MAX_EXCL,
+        BTRFS_QGROUP_LIMIT_MAX_RFER, BTRFS_QGROUP_LIMIT_RFER_CMPR,
+        BTRFS_QGROUP_RELATION_KEY, BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT,
+        BTRFS_QGROUP_STATUS_FLAG_ON, BTRFS_QGROUP_STATUS_FLAG_RESCAN,
+        BTRFS_QGROUP_STATUS_FLAG_SIMPLE_MODE, BTRFS_QGROUP_STATUS_KEY,
+        BTRFS_QUOTA_CTL_DISABLE, BTRFS_QUOTA_CTL_ENABLE,
+        BTRFS_QUOTA_CTL_ENABLE_SIMPLE_QUOTA, BTRFS_QUOTA_TREE_OBJECTID,
+        BTRFS_ROOT_ITEM_KEY, BTRFS_ROOT_TREE_OBJECTID, btrfs_ioc_qgroup_assign,
+        btrfs_ioc_qgroup_create, btrfs_ioc_qgroup_limit, btrfs_ioc_quota_ctl,
+        btrfs_ioc_quota_rescan, btrfs_ioc_quota_rescan_status,
+        btrfs_ioc_quota_rescan_wait, btrfs_ioctl_qgroup_assign_args,
+        btrfs_ioctl_qgroup_create_args, btrfs_ioctl_qgroup_limit_args,
+        btrfs_ioctl_quota_ctl_args, btrfs_ioctl_quota_rescan_args,
+        btrfs_qgroup_info_item, btrfs_qgroup_limit, btrfs_qgroup_limit_item,
+        btrfs_qgroup_status_item,
     },
     tree_search::{SearchKey, tree_search},
 };
@@ -217,12 +220,16 @@ impl QgroupEntryBuilder {
             excl: self.excl,
             excl_cmpr: self.excl_cmpr,
             limit_flags: QgroupLimitFlags::from_bits_truncate(self.limit_flags),
-            max_rfer: if self.limit_flags & BTRFS_QGROUP_LIMIT_MAX_RFER as u64 != 0 {
+            max_rfer: if self.limit_flags & BTRFS_QGROUP_LIMIT_MAX_RFER as u64
+                != 0
+            {
                 self.max_rfer
             } else {
                 u64::MAX
             },
-            max_excl: if self.limit_flags & BTRFS_QGROUP_LIMIT_MAX_EXCL as u64 != 0 {
+            max_excl: if self.limit_flags & BTRFS_QGROUP_LIMIT_MAX_EXCL as u64
+                != 0
+            {
                 self.max_excl
             } else {
                 u64::MAX
@@ -254,9 +261,11 @@ fn parse_info(builder: &mut QgroupEntryBuilder, data: &[u8]) {
 
     builder.has_info = true;
     builder.rfer = rle64(data, offset_of!(btrfs_qgroup_info_item, rfer));
-    builder.rfer_cmpr = rle64(data, offset_of!(btrfs_qgroup_info_item, rfer_cmpr));
+    builder.rfer_cmpr =
+        rle64(data, offset_of!(btrfs_qgroup_info_item, rfer_cmpr));
     builder.excl = rle64(data, offset_of!(btrfs_qgroup_info_item, excl));
-    builder.excl_cmpr = rle64(data, offset_of!(btrfs_qgroup_info_item, excl_cmpr));
+    builder.excl_cmpr =
+        rle64(data, offset_of!(btrfs_qgroup_info_item, excl_cmpr));
 }
 
 fn parse_limit(builder: &mut QgroupEntryBuilder, data: &[u8]) {
@@ -267,9 +276,12 @@ fn parse_limit(builder: &mut QgroupEntryBuilder, data: &[u8]) {
     }
 
     builder.has_limit = true;
-    builder.limit_flags = rle64(data, offset_of!(btrfs_qgroup_limit_item, flags));
-    builder.max_rfer = rle64(data, offset_of!(btrfs_qgroup_limit_item, max_rfer));
-    builder.max_excl = rle64(data, offset_of!(btrfs_qgroup_limit_item, max_excl));
+    builder.limit_flags =
+        rle64(data, offset_of!(btrfs_qgroup_limit_item, flags));
+    builder.max_rfer =
+        rle64(data, offset_of!(btrfs_qgroup_limit_item, max_rfer));
+    builder.max_excl =
+        rle64(data, offset_of!(btrfs_qgroup_limit_item, max_excl));
 }
 
 /// Create a new qgroup with the given `qgroupid` on the filesystem referred
@@ -483,7 +495,8 @@ fn collect_subvol_ids(fd: BorrowedFd) -> nix::Result<HashSet<u64>> {
 /// Returns the number of qgroups successfully destroyed.
 pub fn qgroup_clear_stale(fd: BorrowedFd) -> nix::Result<usize> {
     let list = qgroup_list(fd)?;
-    let simple_mode = list.status_flags.contains(QgroupStatusFlags::SIMPLE_MODE);
+    let simple_mode =
+        list.status_flags.contains(QgroupStatusFlags::SIMPLE_MODE);
 
     let mut count = 0usize;
 

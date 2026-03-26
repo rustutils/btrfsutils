@@ -13,16 +13,10 @@ mod show;
 mod snapshot;
 mod sync;
 
-use create::SubvolumeCreateCommand;
-use delete::SubvolumeDeleteCommand;
-use find_new::SubvolumeFindNewCommand;
-use flags::{SubvolumeGetFlagsCommand, SubvolumeSetFlagsCommand};
-use get_default::SubvolumeGetDefaultCommand;
-use list::SubvolumeListCommand;
-use set_default::SubvolumeSetDefaultCommand;
-use show::SubvolumeShowCommand;
-use snapshot::SubvolumeSnapshotCommand;
-use sync::SubvolumeSyncCommand;
+pub use self::{
+    create::*, delete::*, find_new::*, flags::*, get_default::*, list::*,
+    set_default::*, show::*, snapshot::*, sync::*,
+};
 
 /// Create, delete, list, and manage btrfs subvolumes and snapshots.
 ///

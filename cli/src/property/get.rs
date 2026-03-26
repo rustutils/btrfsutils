@@ -3,11 +3,7 @@ use crate::{Format, Runnable};
 use anyhow::{Context, Result, anyhow, bail};
 use btrfs_uapi::{filesystem::label_get, subvolume::subvolume_flags_get};
 use clap::Parser;
-use std::{
-    fs::File,
-    os::unix::io::AsFd,
-    path::PathBuf,
-};
+use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
 /// Get a property value of a btrfs object
 ///
@@ -27,8 +23,9 @@ pub struct PropertyGetCommand {
 
 impl Runnable for PropertyGetCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.object)
-            .with_context(|| format!("failed to open '{}'", self.object.display()))?;
+        let file = File::open(&self.object).with_context(|| {
+            format!("failed to open '{}'", self.object.display())
+        })?;
 
         // Detect object type if not specified
         let detected_types = detect_object_types(&self.object);
@@ -72,15 +69,22 @@ fn get_property(
 ) -> Result<()> {
     match (obj_type, name) {
         (PropertyObjectType::Subvol, "ro") => {
-            let flags = subvolume_flags_get(file.as_fd()).with_context(|| {
-                format!("failed to get read-only flag for '{}'", path.display())
-            })?;
-            let is_readonly = flags.contains(btrfs_uapi::subvolume::SubvolumeFlags::RDONLY);
+            let flags =
+                subvolume_flags_get(file.as_fd()).with_context(|| {
+                    format!(
+                        "failed to get read-only flag for '{}'",
+                        path.display()
+                    )
+                })?;
+            let is_readonly =
+                flags.contains(btrfs_uapi::subvolume::SubvolumeFlags::RDONLY);
             println!("ro={}", if is_readonly { "true" } else { "false" });
         }
-        (PropertyObjectType::Filesystem, "label") | (PropertyObjectType::Device, "label") => {
-            let label = label_get(file.as_fd())
-                .with_context(|| format!("failed to get label for '{}'", path.display()))?;
+        (PropertyObjectType::Filesystem, "label")
+        | (PropertyObjectType::Device, "label") => {
+            let label = label_get(file.as_fd()).with_context(|| {
+                format!("failed to get label for '{}'", path.display())
+            })?;
             println!("label={}", label.to_bytes().escape_ascii());
         }
         (PropertyObjectType::Inode, "compression") => {

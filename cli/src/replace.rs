@@ -6,9 +6,7 @@ mod cancel;
 mod start;
 mod status;
 
-use cancel::ReplaceCancelCommand;
-use start::ReplaceStartCommand;
-use status::ReplaceStatusCommand;
+pub use self::{cancel::*, start::*, status::*};
 
 /// Replace a device in the filesystem.
 ///

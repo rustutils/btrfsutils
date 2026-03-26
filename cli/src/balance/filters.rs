@@ -43,7 +43,11 @@ pub fn parse_filters(filter_str: &str) -> Result<BalanceArgs> {
     Ok(args)
 }
 
-fn parse_one_filter(args: BalanceArgs, key: &str, value: &str) -> Result<BalanceArgs> {
+fn parse_one_filter(
+    args: BalanceArgs,
+    key: &str,
+    value: &str,
+) -> Result<BalanceArgs> {
     if value.is_empty() {
         bail!("the {key} filter requires an argument");
     }
@@ -63,7 +67,9 @@ fn parse_one_filter(args: BalanceArgs, key: &str, value: &str) -> Result<Balance
                 // Only validate max when explicitly provided (open-ended
                 // ranges like "10.." use u32::MAX as sentinel).
                 if max != u32::MAX && max > 100 {
-                    bail!("invalid usage argument: {value} (max must be <= 100)");
+                    bail!(
+                        "invalid usage argument: {value} (max must be <= 100)"
+                    );
                 }
                 Ok(args.usage_range(min, max))
             } else {
@@ -165,9 +171,9 @@ fn parse_range_u32(s: &str) -> Result<Option<(u32, u32)>> {
 
 /// Parse a `start..end` range of u64 values. Both sides required.
 fn parse_range_u64(s: &str) -> Result<(u64, u64)> {
-    let (left, right) = s
-        .split_once("..")
-        .ok_or_else(|| anyhow::anyhow!("expected range 'start..end', got: {s}"))?;
+    let (left, right) = s.split_once("..").ok_or_else(|| {
+        anyhow::anyhow!("expected range 'start..end', got: {s}")
+    })?;
     let start: u64 = if left.is_empty() {
         0
     } else {

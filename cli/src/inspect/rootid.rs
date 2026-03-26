@@ -12,12 +12,14 @@ pub struct RootidCommand {
 
 impl Runnable for RootidCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         let fd = file.as_fd();
 
-        let rootid = btrfs_uapi::inode::lookup_path_rootid(fd)
-            .context("failed to look up root ID (is this a btrfs filesystem?)")?;
+        let rootid = btrfs_uapi::inode::lookup_path_rootid(fd).context(
+            "failed to look up root ID (is this a btrfs filesystem?)",
+        )?;
 
         println!("{}", rootid);
         Ok(())

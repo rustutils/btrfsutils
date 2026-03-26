@@ -7,10 +7,7 @@ mod enable;
 mod rescan;
 mod status;
 
-use disable::QuotaDisableCommand;
-use enable::QuotaEnableCommand;
-use rescan::QuotaRescanCommand;
-use status::QuotaStatusCommand;
+pub use self::{disable::*, enable::*, rescan::*, status::*};
 
 /// Manage filesystem quota settings.
 ///

@@ -1,7 +1,9 @@
 use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
-    device::device_info_all, filesystem::{filesystem_info, label_get}, space::space_info,
+    device::device_info_all,
+    filesystem::{filesystem_info, label_get},
+    space::space_info,
 };
 use clap::Parser;
 use std::{collections::HashSet, fs::File, os::unix::io::AsFd};
@@ -27,7 +29,8 @@ impl Runnable for FilesystemShowCommand {
             anyhow::bail!("--all-devices is not yet implemented");
         }
 
-        let mounts = parse_btrfs_mounts().context("failed to read /proc/self/mounts")?;
+        let mounts =
+            parse_btrfs_mounts().context("failed to read /proc/self/mounts")?;
 
         if mounts.is_empty() {
             println!("No btrfs filesystem found.");
@@ -52,7 +55,10 @@ impl Runnable for FilesystemShowCommand {
                 let uuid_str = info.uuid.as_hyphenated().to_string();
                 let label = label_get(fd).unwrap_or_default();
                 let label_str = label.to_string_lossy();
-                if mount != filter && uuid_str != *filter && label_str != filter.as_str() {
+                if mount != filter
+                    && uuid_str != *filter
+                    && label_str != filter.as_str()
+                {
                     continue;
                 }
             }
@@ -65,11 +71,14 @@ impl Runnable for FilesystemShowCommand {
                 .map(|l| l.to_string_lossy().into_owned())
                 .unwrap_or_default();
 
-            let devices = device_info_all(fd, &info)
-                .with_context(|| format!("failed to get device info for '{mount}'"))?;
+            let devices = device_info_all(fd, &info).with_context(|| {
+                format!("failed to get device info for '{mount}'")
+            })?;
 
             let used_bytes = space_info(fd)
-                .map(|entries| entries.iter().map(|e| e.used_bytes).sum::<u64>())
+                .map(|entries| {
+                    entries.iter().map(|e| e.used_bytes).sum::<u64>()
+                })
                 .unwrap_or(0);
 
             if !first {
@@ -105,8 +114,8 @@ impl Runnable for FilesystemShowCommand {
 }
 
 fn parse_btrfs_mounts() -> Result<Vec<String>> {
-    let contents =
-        std::fs::read_to_string("/proc/self/mounts").context("failed to read /proc/self/mounts")?;
+    let contents = std::fs::read_to_string("/proc/self/mounts")
+        .context("failed to read /proc/self/mounts")?;
     let mounts = contents
         .lines()
         .filter_map(|line| {

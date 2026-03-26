@@ -53,8 +53,9 @@ impl Runnable for FilesystemDuCommand {
         );
 
         for path in &self.paths {
-            process_top_level(path, self.summarize)
-                .with_context(|| format!("cannot check space of '{}'", path.display()))?;
+            process_top_level(path, self.summarize).with_context(|| {
+                format!("cannot check space of '{}'", path.display())
+            })?;
         }
         Ok(())
     }
@@ -65,15 +66,17 @@ fn process_top_level(path: &Path, summarize: bool) -> Result<()> {
     // Physical (start, end_exclusive) ranges of all shared extents in this subtree.
     let mut shared_ranges: Vec<(u64, u64)> = Vec::new();
 
-    let meta =
-        fs::symlink_metadata(path).with_context(|| format!("cannot stat '{}'", path.display()))?;
+    let meta = fs::symlink_metadata(path)
+        .with_context(|| format!("cannot stat '{}'", path.display()))?;
 
     let root_dev = meta.dev();
 
     let total = if meta.is_file() {
-        let file = File::open(path).with_context(|| format!("cannot open '{}'", path.display()))?;
-        let info = file_extents(file.as_fd())
-            .map_err(|e| anyhow::anyhow!("fiemap failed on '{}': {e}", path.display()))?;
+        let file = File::open(path)
+            .with_context(|| format!("cannot open '{}'", path.display()))?;
+        let info = file_extents(file.as_fd()).map_err(|e| {
+            anyhow::anyhow!("fiemap failed on '{}': {e}", path.display())
+        })?;
         shared_ranges.extend_from_slice(&info.shared_extents);
         info.total_bytes
     } else if meta.is_dir() {
@@ -112,17 +115,23 @@ fn walk_dir(
 ) -> Result<u64> {
     let mut dir_total: u64 = 0;
 
-    let entries =
-        fs::read_dir(dir).with_context(|| format!("cannot read directory '{}'", dir.display()))?;
+    let entries = fs::read_dir(dir).with_context(|| {
+        format!("cannot read directory '{}'", dir.display())
+    })?;
 
     for entry in entries {
-        let entry = entry.with_context(|| format!("error reading entry in '{}'", dir.display()))?;
+        let entry = entry.with_context(|| {
+            format!("error reading entry in '{}'", dir.display())
+        })?;
         let entry_path = entry.path();
 
         let meta = match fs::symlink_metadata(&entry_path) {
             Ok(m) => m,
             Err(e) => {
-                eprintln!("warning: cannot stat '{}': {e}", entry_path.display());
+                eprintln!(
+                    "warning: cannot stat '{}': {e}",
+                    entry_path.display()
+                );
                 continue;
             }
         };
@@ -145,7 +154,10 @@ fn walk_dir(
             let file = match File::open(&entry_path) {
                 Ok(f) => f,
                 Err(e) => {
-                    eprintln!("warning: cannot open '{}': {e}", entry_path.display());
+                    eprintln!(
+                        "warning: cannot open '{}': {e}",
+                        entry_path.display()
+                    );
                     continue;
                 }
             };
@@ -153,7 +165,10 @@ fn walk_dir(
             let info = match file_extents(file.as_fd()) {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("warning: fiemap failed on '{}': {e}", entry_path.display());
+                    eprintln!(
+                        "warning: fiemap failed on '{}': {e}",
+                        entry_path.display()
+                    );
                     continue;
                 }
             };
@@ -172,7 +187,13 @@ fn walk_dir(
             shared_ranges.extend_from_slice(&info.shared_extents);
             dir_total += info.total_bytes;
         } else {
-            let sub_total = walk_dir(&entry_path, root_dev, seen, shared_ranges, summarize)?;
+            let sub_total = walk_dir(
+                &entry_path,
+                root_dev,
+                seen,
+                shared_ranges,
+                summarize,
+            )?;
 
             if !summarize {
                 // For non-top-level directories, set shared is shown as "-".

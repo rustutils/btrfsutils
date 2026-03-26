@@ -2,7 +2,10 @@ use crate::{Format, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::replace::{ReplaceState, replace_status};
 use clap::Parser;
-use std::{fs::File, io::Write, os::unix::io::AsFd, path::PathBuf, thread, time::Duration};
+use std::{
+    fs::File, io::Write, os::unix::io::AsFd, path::PathBuf, thread,
+    time::Duration,
+};
 
 /// Print status of a running device replace operation.
 ///
@@ -47,8 +50,9 @@ fn format_time(t: &std::time::SystemTime) -> String {
 
 impl Runnable for ReplaceStatusCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.mount_point)
-            .with_context(|| format!("failed to open '{}'", self.mount_point.display()))?;
+        let file = File::open(&self.mount_point).with_context(|| {
+            format!("failed to open '{}'", self.mount_point.display())
+        })?;
         let fd = file.as_fd();
 
         loop {
@@ -65,7 +69,8 @@ impl Runnable for ReplaceStatusCommand {
                     let pct = status.progress_1000 as f64 / 10.0;
                     format!(
                         "{pct:.1}% done, {} write errs, {} uncorr. read errs",
-                        status.num_write_errors, status.num_uncorrectable_read_errors,
+                        status.num_write_errors,
+                        status.num_uncorrectable_read_errors,
                     )
                 }
                 ReplaceState::Finished => {
@@ -80,7 +85,8 @@ impl Runnable for ReplaceStatusCommand {
                     format!(
                         "Started on {started}, finished on {stopped}, \
                          {} write errs, {} uncorr. read errs",
-                        status.num_write_errors, status.num_uncorrectable_read_errors,
+                        status.num_write_errors,
+                        status.num_uncorrectable_read_errors,
                     )
                 }
                 ReplaceState::Canceled => {
@@ -96,7 +102,8 @@ impl Runnable for ReplaceStatusCommand {
                     format!(
                         "Started on {started}, canceled on {stopped} at {pct:.1}%, \
                          {} write errs, {} uncorr. read errs",
-                        status.num_write_errors, status.num_uncorrectable_read_errors,
+                        status.num_write_errors,
+                        status.num_uncorrectable_read_errors,
                     )
                 }
                 ReplaceState::Suspended => {
@@ -112,7 +119,8 @@ impl Runnable for ReplaceStatusCommand {
                     format!(
                         "Started on {started}, suspended on {stopped} at {pct:.1}%, \
                          {} write errs, {} uncorr. read errs",
-                        status.num_write_errors, status.num_uncorrectable_read_errors,
+                        status.num_write_errors,
+                        status.num_uncorrectable_read_errors,
                     )
                 }
             };

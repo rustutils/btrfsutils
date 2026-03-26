@@ -294,9 +294,11 @@ impl<R: Read> StreamReader<R> {
             true => {}
         }
 
-        let payload_len = u32::from_le_bytes(cmd_hdr[0..4].try_into().unwrap()) as usize;
+        let payload_len =
+            u32::from_le_bytes(cmd_hdr[0..4].try_into().unwrap()) as usize;
         let cmd = u16::from_le_bytes(cmd_hdr[4..6].try_into().unwrap());
-        let expected_crc = u32::from_le_bytes(cmd_hdr[6..10].try_into().unwrap());
+        let expected_crc =
+            u32::from_le_bytes(cmd_hdr[6..10].try_into().unwrap());
 
         // Read payload.
         self.buf.resize(payload_len, 0);
@@ -326,15 +328,40 @@ impl<R: Read> StreamReader<R> {
         // Dispatch by command type.
         match cmd {
             BTRFS_SEND_C_SUBVOL => Ok(Some(StreamCommand::Subvol {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
                 uuid: attr_uuid(&self.buf, &attrs, BTRFS_SEND_A_UUID, "uuid")?,
-                ctransid: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_CTRANSID, "ctransid")?,
+                ctransid: attr_u64(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_CTRANSID,
+                    "ctransid",
+                )?,
             })),
             BTRFS_SEND_C_SNAPSHOT => Ok(Some(StreamCommand::Snapshot {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
                 uuid: attr_uuid(&self.buf, &attrs, BTRFS_SEND_A_UUID, "uuid")?,
-                ctransid: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_CTRANSID, "ctransid")?,
-                clone_uuid: attr_uuid(&self.buf, &attrs, BTRFS_SEND_A_CLONE_UUID, "clone_uuid")?,
+                ctransid: attr_u64(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_CTRANSID,
+                    "ctransid",
+                )?,
+                clone_uuid: attr_uuid(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_CLONE_UUID,
+                    "clone_uuid",
+                )?,
                 clone_ctransid: attr_u64(
                     &self.buf,
                     &attrs,
@@ -343,66 +370,191 @@ impl<R: Read> StreamReader<R> {
                 )?,
             })),
             BTRFS_SEND_C_MKFILE => Ok(Some(StreamCommand::Mkfile {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
             })),
             BTRFS_SEND_C_MKDIR => Ok(Some(StreamCommand::Mkdir {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
             })),
             BTRFS_SEND_C_MKNOD => Ok(Some(StreamCommand::Mknod {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
                 mode: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_MODE, "mode")?,
                 rdev: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_RDEV, "rdev")?,
             })),
             BTRFS_SEND_C_MKFIFO => Ok(Some(StreamCommand::Mkfifo {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
             })),
             BTRFS_SEND_C_MKSOCK => Ok(Some(StreamCommand::Mksock {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
             })),
             BTRFS_SEND_C_SYMLINK => Ok(Some(StreamCommand::Symlink {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                target: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH_LINK, "link_target")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
+                target: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH_LINK,
+                    "link_target",
+                )?,
             })),
             BTRFS_SEND_C_RENAME => Ok(Some(StreamCommand::Rename {
-                from: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                to: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH_TO, "path_to")?,
+                from: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
+                to: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH_TO,
+                    "path_to",
+                )?,
             })),
             BTRFS_SEND_C_LINK => Ok(Some(StreamCommand::Link {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                target: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH_LINK, "link_target")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
+                target: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH_LINK,
+                    "link_target",
+                )?,
             })),
             BTRFS_SEND_C_UNLINK => Ok(Some(StreamCommand::Unlink {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
             })),
             BTRFS_SEND_C_RMDIR => Ok(Some(StreamCommand::Rmdir {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
             })),
             BTRFS_SEND_C_SET_XATTR => Ok(Some(StreamCommand::SetXattr {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                name: attr_string(&self.buf, &attrs, BTRFS_SEND_A_XATTR_NAME, "xattr_name")?,
-                data: attr_data(&self.buf, &attrs, BTRFS_SEND_A_XATTR_DATA, "xattr_data")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
+                name: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_XATTR_NAME,
+                    "xattr_name",
+                )?,
+                data: attr_data(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_XATTR_DATA,
+                    "xattr_data",
+                )?,
             })),
             BTRFS_SEND_C_REMOVE_XATTR => Ok(Some(StreamCommand::RemoveXattr {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                name: attr_string(&self.buf, &attrs, BTRFS_SEND_A_XATTR_NAME, "xattr_name")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
+                name: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_XATTR_NAME,
+                    "xattr_name",
+                )?,
             })),
             BTRFS_SEND_C_WRITE => Ok(Some(StreamCommand::Write {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                offset: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILE_OFFSET, "file_offset")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
+                offset: attr_u64(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_FILE_OFFSET,
+                    "file_offset",
+                )?,
                 data: attr_data(&self.buf, &attrs, BTRFS_SEND_A_DATA, "data")?,
             })),
             BTRFS_SEND_C_CLONE => Ok(Some(StreamCommand::Clone {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                offset: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILE_OFFSET, "file_offset")?,
-                len: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_CLONE_LEN, "clone_len")?,
-                clone_uuid: attr_uuid(&self.buf, &attrs, BTRFS_SEND_A_CLONE_UUID, "clone_uuid")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
+                offset: attr_u64(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_FILE_OFFSET,
+                    "file_offset",
+                )?,
+                len: attr_u64(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_CLONE_LEN,
+                    "clone_len",
+                )?,
+                clone_uuid: attr_uuid(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_CLONE_UUID,
+                    "clone_uuid",
+                )?,
                 clone_ctransid: attr_u64(
                     &self.buf,
                     &attrs,
                     BTRFS_SEND_A_CLONE_CTRANSID,
                     "clone_ctransid",
                 )?,
-                clone_path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_CLONE_PATH, "clone_path")?,
+                clone_path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_CLONE_PATH,
+                    "clone_path",
+                )?,
                 clone_offset: attr_u64(
                     &self.buf,
                     &attrs,
@@ -411,97 +563,203 @@ impl<R: Read> StreamReader<R> {
                 )?,
             })),
             BTRFS_SEND_C_TRUNCATE => Ok(Some(StreamCommand::Truncate {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
                 size: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_SIZE, "size")?,
             })),
             BTRFS_SEND_C_CHMOD => Ok(Some(StreamCommand::Chmod {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
                 mode: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_MODE, "mode")?,
             })),
             BTRFS_SEND_C_CHOWN => Ok(Some(StreamCommand::Chown {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
                 uid: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_UID, "uid")?,
                 gid: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_GID, "gid")?,
             })),
             BTRFS_SEND_C_UTIMES => Ok(Some(StreamCommand::Utimes {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                atime: attr_timespec(&self.buf, &attrs, BTRFS_SEND_A_ATIME, "atime")?,
-                mtime: attr_timespec(&self.buf, &attrs, BTRFS_SEND_A_MTIME, "mtime")?,
-                ctime: attr_timespec(&self.buf, &attrs, BTRFS_SEND_A_CTIME, "ctime")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
+                atime: attr_timespec(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_ATIME,
+                    "atime",
+                )?,
+                mtime: attr_timespec(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_MTIME,
+                    "mtime",
+                )?,
+                ctime: attr_timespec(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_CTIME,
+                    "ctime",
+                )?,
             })),
-            BTRFS_SEND_C_UPDATE_EXTENT => Ok(Some(StreamCommand::UpdateExtent {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                offset: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILE_OFFSET, "file_offset")?,
-                len: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_SIZE, "size")?,
-            })),
+            BTRFS_SEND_C_UPDATE_EXTENT => {
+                Ok(Some(StreamCommand::UpdateExtent {
+                    path: attr_string(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_PATH,
+                        "path",
+                    )?,
+                    offset: attr_u64(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_FILE_OFFSET,
+                        "file_offset",
+                    )?,
+                    len: attr_u64(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_SIZE,
+                        "size",
+                    )?,
+                }))
+            }
             BTRFS_SEND_C_FALLOCATE => Ok(Some(StreamCommand::Fallocate {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
+                path: attr_string(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_PATH,
+                    "path",
+                )?,
                 mode: attr_u32(
                     &self.buf,
                     &attrs,
                     BTRFS_SEND_A_FALLOCATE_MODE,
                     "fallocate_mode",
                 )?,
-                offset: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILE_OFFSET, "file_offset")?,
+                offset: attr_u64(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_FILE_OFFSET,
+                    "file_offset",
+                )?,
                 len: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_SIZE, "size")?,
             })),
             BTRFS_SEND_C_FILEATTR => Ok(Some(StreamCommand::Fileattr {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                attr: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILEATTR, "fileattr")?,
-            })),
-            BTRFS_SEND_C_ENCODED_WRITE => Ok(Some(StreamCommand::EncodedWrite {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                offset: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILE_OFFSET, "file_offset")?,
-                unencoded_file_len: attr_u64(
+                path: attr_string(
                     &self.buf,
                     &attrs,
-                    BTRFS_SEND_A_UNENCODED_FILE_LEN,
-                    "unencoded_file_len",
+                    BTRFS_SEND_A_PATH,
+                    "path",
                 )?,
-                unencoded_len: attr_u64(
+                attr: attr_u64(
                     &self.buf,
                     &attrs,
-                    BTRFS_SEND_A_UNENCODED_LEN,
-                    "unencoded_len",
-                )?,
-                unencoded_offset: attr_u64(
-                    &self.buf,
-                    &attrs,
-                    BTRFS_SEND_A_UNENCODED_OFFSET,
-                    "unencoded_offset",
-                )?,
-                // Compression and encryption default to 0 if absent.
-                compression: attr_opt_u32(&self.buf, &attrs, BTRFS_SEND_A_COMPRESSION, 0),
-                encryption: attr_opt_u32(&self.buf, &attrs, BTRFS_SEND_A_ENCRYPTION, 0),
-                data: attr_data(&self.buf, &attrs, BTRFS_SEND_A_DATA, "data")?,
-            })),
-            BTRFS_SEND_C_ENABLE_VERITY => Ok(Some(StreamCommand::EnableVerity {
-                path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                algorithm: attr_u8(
-                    &self.buf,
-                    &attrs,
-                    BTRFS_SEND_A_VERITY_ALGORITHM,
-                    "verity_algorithm",
-                )?,
-                block_size: attr_u32(
-                    &self.buf,
-                    &attrs,
-                    BTRFS_SEND_A_VERITY_BLOCK_SIZE,
-                    "verity_block_size",
-                )?,
-                salt: attr_data(
-                    &self.buf,
-                    &attrs,
-                    BTRFS_SEND_A_VERITY_SALT_DATA,
-                    "verity_salt",
-                )?,
-                sig: attr_data(
-                    &self.buf,
-                    &attrs,
-                    BTRFS_SEND_A_VERITY_SIG_DATA,
-                    "verity_sig",
+                    BTRFS_SEND_A_FILEATTR,
+                    "fileattr",
                 )?,
             })),
+            BTRFS_SEND_C_ENCODED_WRITE => {
+                Ok(Some(StreamCommand::EncodedWrite {
+                    path: attr_string(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_PATH,
+                        "path",
+                    )?,
+                    offset: attr_u64(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_FILE_OFFSET,
+                        "file_offset",
+                    )?,
+                    unencoded_file_len: attr_u64(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_UNENCODED_FILE_LEN,
+                        "unencoded_file_len",
+                    )?,
+                    unencoded_len: attr_u64(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_UNENCODED_LEN,
+                        "unencoded_len",
+                    )?,
+                    unencoded_offset: attr_u64(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_UNENCODED_OFFSET,
+                        "unencoded_offset",
+                    )?,
+                    // Compression and encryption default to 0 if absent.
+                    compression: attr_opt_u32(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_COMPRESSION,
+                        0,
+                    ),
+                    encryption: attr_opt_u32(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_ENCRYPTION,
+                        0,
+                    ),
+                    data: attr_data(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_DATA,
+                        "data",
+                    )?,
+                }))
+            }
+            BTRFS_SEND_C_ENABLE_VERITY => {
+                Ok(Some(StreamCommand::EnableVerity {
+                    path: attr_string(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_PATH,
+                        "path",
+                    )?,
+                    algorithm: attr_u8(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_VERITY_ALGORITHM,
+                        "verity_algorithm",
+                    )?,
+                    block_size: attr_u32(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_VERITY_BLOCK_SIZE,
+                        "verity_block_size",
+                    )?,
+                    salt: attr_data(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_VERITY_SALT_DATA,
+                        "verity_salt",
+                    )?,
+                    sig: attr_data(
+                        &self.buf,
+                        &attrs,
+                        BTRFS_SEND_A_VERITY_SIG_DATA,
+                        "verity_sig",
+                    )?,
+                }))
+            }
             BTRFS_SEND_C_END => Ok(Some(StreamCommand::End)),
             _ => bail!("unknown send stream command type {cmd}"),
         }
@@ -517,7 +775,9 @@ fn read_exact_or_eof(reader: &mut impl Read, buf: &mut [u8]) -> Result<bool> {
                 if pos == 0 {
                     return Ok(false);
                 }
-                bail!("truncated send stream: unexpected EOF after {pos} bytes");
+                bail!(
+                    "truncated send stream: unexpected EOF after {pos} bytes"
+                );
             }
             Ok(n) => pos += n,
             Err(e) => return Err(e).context("failed to read send stream"),
@@ -539,7 +799,8 @@ fn parse_tlv_attrs(payload: &[u8], version: u32) -> Result<AttrTable> {
         if pos + 2 > payload.len() {
             bail!("truncated TLV: not enough bytes for type field");
         }
-        let tlv_type = u16::from_le_bytes(payload[pos..pos + 2].try_into().unwrap());
+        let tlv_type =
+            u16::from_le_bytes(payload[pos..pos + 2].try_into().unwrap());
         pos += 2;
 
         if tlv_type == 0 || tlv_type as usize > MAX_ATTRS {
@@ -554,7 +815,9 @@ fn parse_tlv_attrs(payload: &[u8], version: u32) -> Result<AttrTable> {
             if pos + 2 > payload.len() {
                 bail!("truncated TLV: not enough bytes for length field");
             }
-            let len = u16::from_le_bytes(payload[pos..pos + 2].try_into().unwrap()) as usize;
+            let len =
+                u16::from_le_bytes(payload[pos..pos + 2].try_into().unwrap())
+                    as usize;
             pos += 2;
             len
         };
@@ -573,13 +836,23 @@ fn parse_tlv_attrs(payload: &[u8], version: u32) -> Result<AttrTable> {
     Ok(attrs)
 }
 
-fn get_attr<'a>(buf: &'a [u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<&'a [u8]> {
+fn get_attr<'a>(
+    buf: &'a [u8],
+    attrs: &AttrTable,
+    attr_type: u16,
+    name: &str,
+) -> Result<&'a [u8]> {
     let (offset, len) = attrs[(attr_type - 1) as usize]
         .ok_or_else(|| anyhow::anyhow!("missing required attribute: {name}"))?;
     Ok(&buf[offset..offset + len])
 }
 
-fn attr_u64(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<u64> {
+fn attr_u64(
+    buf: &[u8],
+    attrs: &AttrTable,
+    attr_type: u16,
+    name: &str,
+) -> Result<u64> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     if data.len() < 8 {
         bail!("attribute {name} too short for u64: {} bytes", data.len());
@@ -587,7 +860,12 @@ fn attr_u64(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result
     Ok(u64::from_le_bytes(data[0..8].try_into().unwrap()))
 }
 
-fn attr_string(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<String> {
+fn attr_string(
+    buf: &[u8],
+    attrs: &AttrTable,
+    attr_type: u16,
+    name: &str,
+) -> Result<String> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     // Strings in the stream are null-terminated; strip the trailing NUL.
     let s = if data.last() == Some(&0) {
@@ -595,10 +873,16 @@ fn attr_string(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Res
     } else {
         data
     };
-    String::from_utf8(s.to_vec()).with_context(|| format!("attribute {name} is not valid UTF-8"))
+    String::from_utf8(s.to_vec())
+        .with_context(|| format!("attribute {name} is not valid UTF-8"))
 }
 
-fn attr_uuid(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<Uuid> {
+fn attr_uuid(
+    buf: &[u8],
+    attrs: &AttrTable,
+    attr_type: u16,
+    name: &str,
+) -> Result<Uuid> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     if data.len() < 16 {
         bail!("attribute {name} too short for UUID: {} bytes", data.len());
@@ -606,7 +890,12 @@ fn attr_uuid(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Resul
     Ok(Uuid::from_bytes(data[0..16].try_into().unwrap()))
 }
 
-fn attr_timespec(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<Timespec> {
+fn attr_timespec(
+    buf: &[u8],
+    attrs: &AttrTable,
+    attr_type: u16,
+    name: &str,
+) -> Result<Timespec> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     if data.len() < 12 {
         bail!(
@@ -620,7 +909,12 @@ fn attr_timespec(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> R
     })
 }
 
-fn attr_u32(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<u32> {
+fn attr_u32(
+    buf: &[u8],
+    attrs: &AttrTable,
+    attr_type: u16,
+    name: &str,
+) -> Result<u32> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     if data.len() < 4 {
         bail!("attribute {name} too short for u32: {} bytes", data.len());
@@ -628,7 +922,12 @@ fn attr_u32(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result
     Ok(u32::from_le_bytes(data[0..4].try_into().unwrap()))
 }
 
-fn attr_u8(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<u8> {
+fn attr_u8(
+    buf: &[u8],
+    attrs: &AttrTable,
+    attr_type: u16,
+    name: &str,
+) -> Result<u8> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     if data.is_empty() {
         bail!("attribute {name} is empty");
@@ -638,19 +937,35 @@ fn attr_u8(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<
 
 /// Like `get_attr` but returns `None` instead of an error when the attribute
 /// is absent. Used for optional attributes in v2 commands.
-fn get_attr_opt<'a>(buf: &'a [u8], attrs: &AttrTable, attr_type: u16) -> Option<&'a [u8]> {
+fn get_attr_opt<'a>(
+    buf: &'a [u8],
+    attrs: &AttrTable,
+    attr_type: u16,
+) -> Option<&'a [u8]> {
     let (offset, len) = attrs[(attr_type - 1) as usize]?;
     Some(&buf[offset..offset + len])
 }
 
-fn attr_opt_u32(buf: &[u8], attrs: &AttrTable, attr_type: u16, default: u32) -> u32 {
+fn attr_opt_u32(
+    buf: &[u8],
+    attrs: &AttrTable,
+    attr_type: u16,
+    default: u32,
+) -> u32 {
     match get_attr_opt(buf, attrs, attr_type) {
-        Some(data) if data.len() >= 4 => u32::from_le_bytes(data[0..4].try_into().unwrap()),
+        Some(data) if data.len() >= 4 => {
+            u32::from_le_bytes(data[0..4].try_into().unwrap())
+        }
         _ => default,
     }
 }
 
-fn attr_data(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<Vec<u8>> {
+fn attr_data(
+    buf: &[u8],
+    attrs: &AttrTable,
+    attr_type: u16,
+    name: &str,
+) -> Result<Vec<u8>> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     Ok(data.to_vec())
 }
@@ -897,7 +1212,8 @@ mod tests {
     fn rename_command() {
         let mut payload = Vec::new();
         payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH, "old_name"));
-        payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH_TO, "new_name"));
+        payload
+            .extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH_TO, "new_name"));
         let mut stream = v1_header();
         stream.extend_from_slice(&build_command(BTRFS_SEND_C_RENAME, &payload));
         let mut reader = StreamReader::new(Cursor::new(stream)).unwrap();
@@ -914,9 +1230,11 @@ mod tests {
     fn symlink_command() {
         let mut payload = Vec::new();
         payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH, "link"));
-        payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH_LINK, "/target"));
+        payload
+            .extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH_LINK, "/target"));
         let mut stream = v1_header();
-        stream.extend_from_slice(&build_command(BTRFS_SEND_C_SYMLINK, &payload));
+        stream
+            .extend_from_slice(&build_command(BTRFS_SEND_C_SYMLINK, &payload));
         let mut reader = StreamReader::new(Cursor::new(stream)).unwrap();
         match reader.next_command().unwrap().unwrap() {
             StreamCommand::Symlink { path, target } => {
@@ -969,7 +1287,8 @@ mod tests {
         payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH, "shrink.bin"));
         payload.extend_from_slice(&tlv_u64(BTRFS_SEND_A_SIZE, 4096));
         let mut stream = v1_header();
-        stream.extend_from_slice(&build_command(BTRFS_SEND_C_TRUNCATE, &payload));
+        stream
+            .extend_from_slice(&build_command(BTRFS_SEND_C_TRUNCATE, &payload));
         let mut reader = StreamReader::new(Cursor::new(stream)).unwrap();
         match reader.next_command().unwrap().unwrap() {
             StreamCommand::Truncate { path, size } => {
@@ -1005,10 +1324,16 @@ mod tests {
         let xattr_value = b"\x01\x02\x03";
         let mut payload = Vec::new();
         payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH, "file"));
-        payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_XATTR_NAME, "user.test"));
+        payload.extend_from_slice(&tlv_string(
+            BTRFS_SEND_A_XATTR_NAME,
+            "user.test",
+        ));
         payload.extend_from_slice(&tlv(BTRFS_SEND_A_XATTR_DATA, xattr_value));
         let mut stream = v1_header();
-        stream.extend_from_slice(&build_command(BTRFS_SEND_C_SET_XATTR, &payload));
+        stream.extend_from_slice(&build_command(
+            BTRFS_SEND_C_SET_XATTR,
+            &payload,
+        ));
         let mut reader = StreamReader::new(Cursor::new(stream)).unwrap();
         match reader.next_command().unwrap().unwrap() {
             StreamCommand::SetXattr { path, name, data } => {
@@ -1053,7 +1378,8 @@ mod tests {
 
     #[test]
     fn subvol_command() {
-        let uuid = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let uuid =
+            Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
         let mut payload = Vec::new();
         payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH, "my_subvol"));
         payload.extend_from_slice(&tlv_uuid(BTRFS_SEND_A_UUID, uuid));
@@ -1077,16 +1403,20 @@ mod tests {
 
     #[test]
     fn snapshot_command() {
-        let uuid = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
-        let clone_uuid = Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap();
+        let uuid =
+            Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
+        let clone_uuid =
+            Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap();
         let mut payload = Vec::new();
         payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH, "my_snap"));
         payload.extend_from_slice(&tlv_uuid(BTRFS_SEND_A_UUID, uuid));
         payload.extend_from_slice(&tlv_u64(BTRFS_SEND_A_CTRANSID, 100));
-        payload.extend_from_slice(&tlv_uuid(BTRFS_SEND_A_CLONE_UUID, clone_uuid));
+        payload
+            .extend_from_slice(&tlv_uuid(BTRFS_SEND_A_CLONE_UUID, clone_uuid));
         payload.extend_from_slice(&tlv_u64(BTRFS_SEND_A_CLONE_CTRANSID, 99));
         let mut stream = v1_header();
-        stream.extend_from_slice(&build_command(BTRFS_SEND_C_SNAPSHOT, &payload));
+        stream
+            .extend_from_slice(&build_command(BTRFS_SEND_C_SNAPSHOT, &payload));
         let mut reader = StreamReader::new(Cursor::new(stream)).unwrap();
         match reader.next_command().unwrap().unwrap() {
             StreamCommand::Snapshot {
@@ -1110,14 +1440,17 @@ mod tests {
 
     #[test]
     fn clone_command() {
-        let clone_uuid = Uuid::parse_str("12345678-1234-1234-1234-123456789abc").unwrap();
+        let clone_uuid =
+            Uuid::parse_str("12345678-1234-1234-1234-123456789abc").unwrap();
         let mut payload = Vec::new();
         payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH, "dest"));
         payload.extend_from_slice(&tlv_u64(BTRFS_SEND_A_FILE_OFFSET, 0));
         payload.extend_from_slice(&tlv_u64(BTRFS_SEND_A_CLONE_LEN, 4096));
-        payload.extend_from_slice(&tlv_uuid(BTRFS_SEND_A_CLONE_UUID, clone_uuid));
+        payload
+            .extend_from_slice(&tlv_uuid(BTRFS_SEND_A_CLONE_UUID, clone_uuid));
         payload.extend_from_slice(&tlv_u64(BTRFS_SEND_A_CLONE_CTRANSID, 7));
-        payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_CLONE_PATH, "source"));
+        payload
+            .extend_from_slice(&tlv_string(BTRFS_SEND_A_CLONE_PATH, "source"));
         payload.extend_from_slice(&tlv_u64(BTRFS_SEND_A_CLONE_OFFSET, 8192));
         let mut stream = v1_header();
         stream.extend_from_slice(&build_command(BTRFS_SEND_C_CLONE, &payload));
@@ -1249,7 +1582,10 @@ mod tests {
         payload.extend_from_slice(&tlv_u64(BTRFS_SEND_A_FILE_OFFSET, 65536));
         payload.extend_from_slice(&tlv_u64(BTRFS_SEND_A_SIZE, 131072));
         let mut stream = v1_header();
-        stream.extend_from_slice(&build_command(BTRFS_SEND_C_UPDATE_EXTENT, &payload));
+        stream.extend_from_slice(&build_command(
+            BTRFS_SEND_C_UPDATE_EXTENT,
+            &payload,
+        ));
         let mut reader = StreamReader::new(Cursor::new(stream)).unwrap();
         match reader.next_command().unwrap().unwrap() {
             StreamCommand::UpdateExtent { path, offset, len } => {
@@ -1312,7 +1648,8 @@ mod tests {
     fn link_command() {
         let mut payload = Vec::new();
         payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH, "hardlink"));
-        payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH_LINK, "original"));
+        payload
+            .extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH_LINK, "original"));
         let mut stream = v1_header();
         stream.extend_from_slice(&build_command(BTRFS_SEND_C_LINK, &payload));
         let mut reader = StreamReader::new(Cursor::new(stream)).unwrap();
@@ -1329,9 +1666,15 @@ mod tests {
     fn remove_xattr_command() {
         let mut payload = Vec::new();
         payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_PATH, "file"));
-        payload.extend_from_slice(&tlv_string(BTRFS_SEND_A_XATTR_NAME, "user.old"));
+        payload.extend_from_slice(&tlv_string(
+            BTRFS_SEND_A_XATTR_NAME,
+            "user.old",
+        ));
         let mut stream = v1_header();
-        stream.extend_from_slice(&build_command(BTRFS_SEND_C_REMOVE_XATTR, &payload));
+        stream.extend_from_slice(&build_command(
+            BTRFS_SEND_C_REMOVE_XATTR,
+            &payload,
+        ));
         let mut reader = StreamReader::new(Cursor::new(stream)).unwrap();
         match reader.next_command().unwrap().unwrap() {
             StreamCommand::RemoveXattr { path, name } => {

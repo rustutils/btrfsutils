@@ -9,12 +9,7 @@ mod scan;
 mod stats;
 mod usage;
 
-use add::DeviceAddCommand;
-use ready::DeviceReadyCommand;
-use remove::DeviceRemoveCommand;
-use scan::DeviceScanCommand;
-use stats::DeviceStatsCommand;
-use usage::DeviceUsageCommand;
+pub use self::{add::*, ready::*, remove::*, scan::*, stats::*, usage::*};
 
 /// Manage devices in a btrfs filesystem.
 ///

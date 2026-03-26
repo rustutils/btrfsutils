@@ -27,13 +27,20 @@ pub struct LogicalResolveCommand {
 
 impl Runnable for LogicalResolveCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         let fd = file.as_fd();
 
-        let results =
-            btrfs_uapi::inode::logical_ino(fd, self.logical, self.ignore_offset, self.bufsize)
-                .context("failed to look up logical address (is this a btrfs filesystem?)")?;
+        let results = btrfs_uapi::inode::logical_ino(
+            fd,
+            self.logical,
+            self.ignore_offset,
+            self.bufsize,
+        )
+        .context(
+            "failed to look up logical address (is this a btrfs filesystem?)",
+        )?;
 
         if results.is_empty() {
             eprintln!("no results found for logical address {}", self.logical);

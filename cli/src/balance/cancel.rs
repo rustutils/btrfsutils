@@ -24,8 +24,9 @@ impl Runnable for BalanceCancelCommand {
                     self.path.display()
                 )
             }
-            Err(e) => Err(e)
-                .with_context(|| format!("balance cancel on '{}' failed", self.path.display())),
+            Err(e) => Err(e).with_context(|| {
+                format!("balance cancel on '{}' failed", self.path.display())
+            }),
         }
     }
 }

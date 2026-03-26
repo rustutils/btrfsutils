@@ -13,15 +13,17 @@ pub struct SubvolumeGetDefaultCommand {
 
 impl Runnable for SubvolumeGetDefaultCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
-
-        let default_id = subvolume_default_get(file.as_fd()).with_context(|| {
-            format!(
-                "failed to get default subvolume for '{}'",
-                self.path.display()
-            )
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
         })?;
+
+        let default_id =
+            subvolume_default_get(file.as_fd()).with_context(|| {
+                format!(
+                    "failed to get default subvolume for '{}'",
+                    self.path.display()
+                )
+            })?;
 
         if default_id == FS_TREE_OBJECTID {
             println!("ID 5 (FS_TREE)");

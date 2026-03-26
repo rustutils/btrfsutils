@@ -91,7 +91,9 @@ impl Runnable for BalanceStartCommand {
 
         if !has_filters {
             // No type filters specified — relocate everything.
-            flags |= BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
+            flags |= BalanceFlags::DATA
+                | BalanceFlags::METADATA
+                | BalanceFlags::SYSTEM;
         }
 
         if self.force {
@@ -102,11 +104,21 @@ impl Runnable for BalanceStartCommand {
         // chance to abort, unless --full-balance was passed.
         if !has_filters && !self.full_balance {
             eprintln!("WARNING:\n");
-            eprintln!("\tFull balance without filters requested. This operation is very");
-            eprintln!("\tintense and takes potentially very long. It is recommended to");
-            eprintln!("\tuse the balance filters to narrow down the scope of balance.");
-            eprintln!("\tUse 'btrfs balance start --full-balance' to skip this warning.");
-            eprintln!("\tThe operation will start in 10 seconds. Use Ctrl-C to stop it.");
+            eprintln!(
+                "\tFull balance without filters requested. This operation is very"
+            );
+            eprintln!(
+                "\tintense and takes potentially very long. It is recommended to"
+            );
+            eprintln!(
+                "\tuse the balance filters to narrow down the scope of balance."
+            );
+            eprintln!(
+                "\tUse 'btrfs balance start --full-balance' to skip this warning."
+            );
+            eprintln!(
+                "\tThe operation will start in 10 seconds. Use Ctrl-C to stop it."
+            );
             thread::sleep(Duration::from_secs(10));
             eprintln!("\nStarting balance without any filters.");
         }
@@ -128,9 +140,9 @@ impl Runnable for BalanceStartCommand {
                 eprintln!("Balance was paused or cancelled by user.");
                 Ok(())
             }
-            Err(e) => {
-                Err(e).with_context(|| format!("error during balancing '{}'", self.path.display()))
-            }
+            Err(e) => Err(e).with_context(|| {
+                format!("error during balancing '{}'", self.path.display())
+            }),
         }
     }
 }

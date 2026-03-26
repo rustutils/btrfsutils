@@ -15,12 +15,14 @@ pub struct InodeResolveCommand {
 
 impl Runnable for InodeResolveCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         let fd = file.as_fd();
 
-        let paths = btrfs_uapi::inode::ino_paths(fd, self.inode)
-            .context("failed to look up inode paths (is this a btrfs filesystem?)")?;
+        let paths = btrfs_uapi::inode::ino_paths(fd, self.inode).context(
+            "failed to look up inode paths (is this a btrfs filesystem?)",
+        )?;
 
         if paths.is_empty() {
             eprintln!("no paths found for inode {}", self.inode);

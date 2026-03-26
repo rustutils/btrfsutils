@@ -1,7 +1,12 @@
-use crate::common::{BackingFile, LoopbackDevice, Mount, single_mount, write_test_data};
+use crate::common::{
+    BackingFile, LoopbackDevice, Mount, single_mount, write_test_data,
+};
 use btrfs_uapi::{
     device::{device_add, device_info, device_min_size},
-    filesystem::{filesystem_info, label_get, label_set, sync, ResizeAmount, ResizeArgs, resize},
+    filesystem::{
+        ResizeAmount, ResizeArgs, filesystem_info, label_get, label_set,
+        resize, sync,
+    },
 };
 use std::ffi::{CStr, CString};
 
@@ -47,7 +52,8 @@ fn filesystem_info_after_add() {
     let dev2_cpath = CString::new(lo2.path().to_str().unwrap()).unwrap();
     device_add(mnt.fd(), &dev2_cpath).expect("device_add failed");
 
-    let info2 = filesystem_info(mnt.fd()).expect("filesystem_info after add failed");
+    let info2 =
+        filesystem_info(mnt.fd()).expect("filesystem_info after add failed");
     assert_eq!(info2.num_devices, 2);
     assert_eq!(info2.max_id, 2);
     assert_eq!(
@@ -98,7 +104,8 @@ fn label_max_length() {
     // 255 bytes is the max (BTRFS_LABEL_SIZE is 256 including nul).
     let max_label = "a".repeat(255);
     let max_cstr = CString::new(max_label.clone()).unwrap();
-    label_set(mnt.fd(), &max_cstr).expect("label_set with 255 bytes should succeed");
+    label_set(mnt.fd(), &max_cstr)
+        .expect("label_set with 255 bytes should succeed");
 
     let got = label_get(mnt.fd()).expect("label_get failed");
     assert_eq!(got.to_bytes().len(), 255);
@@ -150,7 +157,8 @@ fn resize_grow() {
     mnt.loopback().refresh_size();
 
     // Tell btrfs to use the new space.
-    resize(mnt.fd(), ResizeArgs::new(ResizeAmount::Max).with_devid(1)).expect("resize grow failed");
+    resize(mnt.fd(), ResizeArgs::new(ResizeAmount::Max).with_devid(1))
+        .expect("resize grow failed");
 
     let dev_after = device_info(mnt.fd(), 1).unwrap().unwrap();
 

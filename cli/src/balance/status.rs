@@ -32,14 +32,20 @@ impl Runnable for BalanceStatusCommand {
                 }
 
                 let pct_left = if progress.expected > 0 {
-                    100.0 * (1.0 - progress.completed as f64 / progress.expected as f64)
+                    100.0
+                        * (1.0
+                            - progress.completed as f64
+                                / progress.expected as f64)
                 } else {
                     0.0
                 };
 
                 println!(
                     "{} out of about {} chunks balanced ({} considered), {:3.0}% left",
-                    progress.completed, progress.expected, progress.considered, pct_left
+                    progress.completed,
+                    progress.expected,
+                    progress.considered,
+                    pct_left
                 );
 
                 Ok(())
@@ -48,8 +54,9 @@ impl Runnable for BalanceStatusCommand {
                 println!("No balance found on '{}'", self.path.display());
                 Ok(())
             }
-            Err(e) => Err(e)
-                .with_context(|| format!("balance status on '{}' failed", self.path.display())),
+            Err(e) => Err(e).with_context(|| {
+                format!("balance status on '{}' failed", self.path.display())
+            }),
         }
     }
 }

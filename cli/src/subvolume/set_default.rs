@@ -1,6 +1,8 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, anyhow};
-use btrfs_uapi::subvolume::{FS_TREE_OBJECTID, subvolume_default_set, subvolume_info};
+use btrfs_uapi::subvolume::{
+    FS_TREE_OBJECTID, subvolume_default_set, subvolume_info,
+};
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
@@ -26,26 +28,30 @@ impl Runnable for SubvolumeSetDefaultCommand {
                     anyhow!("a filesystem path is required when specifying a subvolume ID")
                 })?;
 
-                let file = File::open(mount)
-                    .with_context(|| format!("failed to open '{}'", mount.display()))?;
+                let file = File::open(mount).with_context(|| {
+                    format!("failed to open '{}'", mount.display())
+                })?;
 
                 let id_to_use = if id == 0 { FS_TREE_OBJECTID } else { id };
 
-                subvolume_default_set(file.as_fd(), id_to_use).with_context(|| {
-                    format!(
-                        "failed to set default subvolume to ID {} on '{}'",
-                        id_to_use,
-                        mount.display()
-                    )
-                })?;
+                subvolume_default_set(file.as_fd(), id_to_use).with_context(
+                    || {
+                        format!(
+                            "failed to set default subvolume to ID {} on '{}'",
+                            id_to_use,
+                            mount.display()
+                        )
+                    },
+                )?;
 
                 println!("Set default subvolume to ID {id_to_use}");
             }
             Err(_) => {
                 let subvol_path = PathBuf::from(&self.subvol_or_id);
 
-                let file = File::open(&subvol_path)
-                    .with_context(|| format!("failed to open '{}'", subvol_path.display()))?;
+                let file = File::open(&subvol_path).with_context(|| {
+                    format!("failed to open '{}'", subvol_path.display())
+                })?;
 
                 let info = subvolume_info(file.as_fd()).with_context(|| {
                     format!(
@@ -54,13 +60,15 @@ impl Runnable for SubvolumeSetDefaultCommand {
                     )
                 })?;
 
-                subvolume_default_set(file.as_fd(), info.id).with_context(|| {
-                    format!(
-                        "failed to set default subvolume to '{}' (ID {})",
-                        subvol_path.display(),
-                        info.id
-                    )
-                })?;
+                subvolume_default_set(file.as_fd(), info.id).with_context(
+                    || {
+                        format!(
+                            "failed to set default subvolume to '{}' (ID {})",
+                            subvol_path.display(),
+                            info.id
+                        )
+                    },
+                )?;
 
                 println!(
                     "Set default subvolume to '{}' (ID {})",

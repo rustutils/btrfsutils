@@ -1,9 +1,9 @@
 use crate::common::{single_mount, write_test_data};
 use btrfs_uapi::{
     fiemap::file_extents,
+    filesystem::sync,
     inode::{ino_paths, logical_ino, lookup_path_rootid, subvolid_resolve},
     subvolume::{subvolume_create, subvolume_info},
-    filesystem::sync,
 };
 use std::{ffi::CStr, fs::File, os::unix::io::AsFd};
 
@@ -14,7 +14,8 @@ use std::{ffi::CStr, fs::File, os::unix::io::AsFd};
 fn inode_lookup_path_rootid() {
     let (_td, mnt) = single_mount();
 
-    let root_id = lookup_path_rootid(mnt.fd()).expect("lookup_path_rootid on mount failed");
+    let root_id = lookup_path_rootid(mnt.fd())
+        .expect("lookup_path_rootid on mount failed");
     assert_eq!(
         root_id, 5,
         "mount root should have tree ID 5 (FS_TREE_OBJECTID)"
@@ -24,9 +25,10 @@ fn inode_lookup_path_rootid() {
     let name = CStr::from_bytes_with_nul(b"test-subvol\0").unwrap();
     subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
-    let subvol_dir = File::open(mnt.path().join("test-subvol")).expect("open subvol failed");
-    let subvol_root_id =
-        lookup_path_rootid(subvol_dir.as_fd()).expect("lookup_path_rootid on subvol failed");
+    let subvol_dir =
+        File::open(mnt.path().join("test-subvol")).expect("open subvol failed");
+    let subvol_root_id = lookup_path_rootid(subvol_dir.as_fd())
+        .expect("lookup_path_rootid on subvol failed");
 
     // The subvolume's root ID should be different from FS_TREE and > 255.
     assert_ne!(
@@ -39,7 +41,8 @@ fn inode_lookup_path_rootid() {
     );
 
     // It should match what subvolume_info reports.
-    let info = subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
+    let info =
+        subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
     assert_eq!(
         subvol_root_id, info.id,
         "root ID should match subvolume_info.id"
@@ -58,7 +61,8 @@ fn inode_ino_paths() {
     write_test_data(mnt.path(), "file.bin", 1_000_000);
     sync(mnt.fd()).unwrap();
 
-    let meta = std::fs::metadata(mnt.path().join("file.bin")).expect("metadata failed");
+    let meta = std::fs::metadata(mnt.path().join("file.bin"))
+        .expect("metadata failed");
     let inum = meta.ino();
 
     let paths = ino_paths(mnt.fd(), inum).expect("ino_paths failed");
@@ -68,11 +72,15 @@ fn inode_ino_paths() {
     );
 
     // Create a hardlink and check that both paths appear.
-    std::fs::hard_link(mnt.path().join("file.bin"), mnt.path().join("link.bin"))
-        .expect("hard_link failed");
+    std::fs::hard_link(
+        mnt.path().join("file.bin"),
+        mnt.path().join("link.bin"),
+    )
+    .expect("hard_link failed");
     sync(mnt.fd()).unwrap();
 
-    let paths2 = ino_paths(mnt.fd(), inum).expect("ino_paths after hardlink failed");
+    let paths2 =
+        ino_paths(mnt.fd(), inum).expect("ino_paths after hardlink failed");
     assert_eq!(
         paths2.len(),
         2,
@@ -121,7 +129,8 @@ fn inode_logical_ino() {
     // The physical start from fiemap is the btrfs logical address.
     let logical_addr = info.shared_extents[0].0;
 
-    let results = logical_ino(mnt.fd(), logical_addr, false, None).expect("logical_ino failed");
+    let results = logical_ino(mnt.fd(), logical_addr, false, None)
+        .expect("logical_ino failed");
     assert!(
         !results.is_empty(),
         "logical_ino should return at least one result"
@@ -145,10 +154,13 @@ fn inode_subvolid_resolve() {
     let name = CStr::from_bytes_with_nul(b"my-subvol\0").unwrap();
     subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
-    let subvol_dir = File::open(mnt.path().join("my-subvol")).expect("open subvol failed");
-    let info = subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
+    let subvol_dir =
+        File::open(mnt.path().join("my-subvol")).expect("open subvol failed");
+    let info =
+        subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
 
-    let resolved = subvolid_resolve(mnt.fd(), info.id).expect("subvolid_resolve failed");
+    let resolved =
+        subvolid_resolve(mnt.fd(), info.id).expect("subvolid_resolve failed");
     assert!(
         resolved.contains("my-subvol"),
         "resolved path should contain 'my-subvol', got '{resolved}'",

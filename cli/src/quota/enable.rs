@@ -16,14 +16,20 @@ pub struct QuotaEnableCommand {
 
 impl Runnable for QuotaEnableCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
 
         btrfs_uapi::quota::quota_enable(file.as_fd(), self.simple)
-            .with_context(|| format!("failed to enable quota on '{}'", self.path.display()))?;
+            .with_context(|| {
+                format!("failed to enable quota on '{}'", self.path.display())
+            })?;
 
         if self.simple {
-            println!("quota enabled (simple mode) on '{}'", self.path.display());
+            println!(
+                "quota enabled (simple mode) on '{}'",
+                self.path.display()
+            );
         } else {
             println!("quota enabled on '{}'", self.path.display());
         }

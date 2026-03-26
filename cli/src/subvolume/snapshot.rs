@@ -30,33 +30,33 @@ impl Runnable for SubvolumeSnapshotCommand {
             .map(|s| parse_qgroupid(s))
             .collect::<Result<_>>()?;
 
-        let (dest_parent, name_os) = if self.dest.is_dir() {
-            let name_os = self
-                .source
-                .file_name()
-                .ok_or_else(|| anyhow::anyhow!("source has no file name"))?;
-            (self.dest.as_path(), name_os)
-        } else {
-            let dest_parent = self
-                .dest
-                .parent()
-                .ok_or_else(|| anyhow::anyhow!("destination has no parent"))?;
-            let name_os = self
-                .dest
-                .file_name()
-                .ok_or_else(|| anyhow::anyhow!("destination has no name"))?;
-            (dest_parent, name_os)
-        };
+        let (dest_parent, name_os) =
+            if self.dest.is_dir() {
+                let name_os = self.source.file_name().ok_or_else(|| {
+                    anyhow::anyhow!("source has no file name")
+                })?;
+                (self.dest.as_path(), name_os)
+            } else {
+                let dest_parent = self.dest.parent().ok_or_else(|| {
+                    anyhow::anyhow!("destination has no parent")
+                })?;
+                let name_os = self.dest.file_name().ok_or_else(|| {
+                    anyhow::anyhow!("destination has no name")
+                })?;
+                (dest_parent, name_os)
+            };
 
-        let name_str = name_os
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("snapshot name is not valid UTF-8"))?;
+        let name_str = name_os.to_str().ok_or_else(|| {
+            anyhow::anyhow!("snapshot name is not valid UTF-8")
+        })?;
 
-        let cname = CString::new(name_str)
-            .with_context(|| format!("snapshot name contains a null byte: '{}'", name_str))?;
+        let cname = CString::new(name_str).with_context(|| {
+            format!("snapshot name contains a null byte: '{}'", name_str)
+        })?;
 
-        let source_file = File::open(&self.source)
-            .with_context(|| format!("failed to open source '{}'", self.source.display()))?;
+        let source_file = File::open(&self.source).with_context(|| {
+            format!("failed to open source '{}'", self.source.display())
+        })?;
 
         let parent_file = File::open(dest_parent).with_context(|| {
             format!(

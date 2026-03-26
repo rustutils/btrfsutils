@@ -1,13 +1,14 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
+    filesystem::sync,
     inode::ino_paths,
     raw::{
-        BTRFS_EXTENT_DATA_KEY, BTRFS_FILE_EXTENT_INLINE, BTRFS_FILE_EXTENT_PREALLOC,
-        BTRFS_FILE_EXTENT_REG, btrfs_file_extent_item,
+        BTRFS_EXTENT_DATA_KEY, BTRFS_FILE_EXTENT_INLINE,
+        BTRFS_FILE_EXTENT_PREALLOC, BTRFS_FILE_EXTENT_REG,
+        btrfs_file_extent_item,
     },
     subvolume::subvolume_info,
-    filesystem::sync,
     tree_search::{SearchKey, tree_search},
 };
 use clap::Parser;
@@ -32,16 +33,22 @@ fn rle64(buf: &[u8], off: usize) -> u64 {
 
 impl Runnable for SubvolumeFindNewCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
 
         // Sync first so we see the latest data.
-        sync(file.as_fd())
-            .with_context(|| format!("failed to sync '{}'", self.path.display()))?;
+        sync(file.as_fd()).with_context(|| {
+            format!("failed to sync '{}'", self.path.display())
+        })?;
 
         // Get the current generation for the "transid marker" output.
-        let info = subvolume_info(file.as_fd())
-            .with_context(|| format!("failed to get subvolume info for '{}'", self.path.display()))?;
+        let info = subvolume_info(file.as_fd()).with_context(|| {
+            format!(
+                "failed to get subvolume info for '{}'",
+                self.path.display()
+            )
+        })?;
         let max_gen = info.generation;
 
         // Search tree 0 (the subvolume's own tree, relative to the fd) for

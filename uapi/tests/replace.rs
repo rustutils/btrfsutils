@@ -1,11 +1,15 @@
-use crate::common::{BackingFile, LoopbackDevice, Mount, single_mount, write_test_data};
+use crate::common::{
+    BackingFile, LoopbackDevice, Mount, single_mount, write_test_data,
+};
 use btrfs_uapi::{
     balance::{BalanceArgs, BalanceFlags, balance},
     device::{device_add, device_info_all},
-    filesystem::filesystem_info,
-    replace::{ReplaceSource, ReplaceState, replace_cancel, replace_start, replace_status},
+    filesystem::{filesystem_info, sync},
+    replace::{
+        ReplaceSource, ReplaceState, replace_cancel, replace_start,
+        replace_status,
+    },
     space::BlockGroupFlags,
-    filesystem::sync,
 };
 use std::ffi::CString;
 
@@ -43,7 +47,8 @@ fn replace_device() {
     device_add(mnt.fd(), &dev2_cpath).expect("device_add failed");
 
     let convert = BalanceArgs::new().convert(BlockGroupFlags::RAID1.bits());
-    let flags = BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
+    let flags =
+        BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
     balance(
         mnt.fd(),
         flags,
@@ -82,7 +87,8 @@ fn replace_device() {
 
     // The replacement device should now be device 2.
     let info = filesystem_info(mnt.fd()).expect("filesystem_info failed");
-    let devs = device_info_all(mnt.fd(), &info).expect("device_info_all failed");
+    let devs =
+        device_info_all(mnt.fd(), &info).expect("device_info_all failed");
     assert_eq!(devs.len(), 2, "should still have 2 devices");
     let dev2 = devs
         .iter()
@@ -111,7 +117,8 @@ fn replace_cancel_test() {
     device_add(mnt.fd(), &dev2_cpath).expect("device_add failed");
 
     let convert = BalanceArgs::new().convert(BlockGroupFlags::RAID1.bits());
-    let flags = BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
+    let flags =
+        BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
     balance(
         mnt.fd(),
         flags,

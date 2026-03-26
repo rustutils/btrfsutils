@@ -1,12 +1,15 @@
-use crate::common::{BackingFile, LoopbackDevice, Mount, single_mount, write_test_data};
+use crate::common::{
+    BackingFile, LoopbackDevice, Mount, single_mount, write_test_data,
+};
 use btrfs_uapi::{
     balance::{
-        BalanceArgs, BalanceCtl, BalanceFlags, BalanceState, balance, balance_ctl, balance_progress,
+        BalanceArgs, BalanceCtl, BalanceFlags, BalanceState, balance,
+        balance_ctl, balance_progress,
     },
     chunk::device_chunk_allocations,
     device::device_add,
-    space::{BlockGroupFlags, space_info},
     filesystem::sync,
+    space::{BlockGroupFlags, space_info},
 };
 use nix::errno::Errno;
 use std::{ffi::CString, fs::File, os::unix::io::AsFd};
@@ -67,8 +70,10 @@ fn balance_cancel_not_running() {
 fn balance_full_completes() {
     let (_td, mnt) = single_mount();
 
-    let flags = BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
-    let progress = balance(mnt.fd(), flags, None, None, None).expect("balance failed");
+    let flags =
+        BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
+    let progress =
+        balance(mnt.fd(), flags, None, None, None).expect("balance failed");
 
     // On a fresh empty filesystem, completed should equal considered.
     assert_eq!(
@@ -87,8 +92,10 @@ fn balance_cancel_in_flight() {
     // Kick off a balance in a background thread.
     let mount_path = mnt.path().to_path_buf();
     let balance_thread = std::thread::spawn(move || {
-        let file = File::open(&mount_path).expect("failed to open mount in thread");
-        let flags = BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
+        let file =
+            File::open(&mount_path).expect("failed to open mount in thread");
+        let flags =
+            BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
         balance(file.as_fd(), flags, None, None, None)
     });
 
@@ -131,8 +138,10 @@ fn balance_convert_raid1() {
     device_add(mnt.fd(), &dev2_cpath).expect("device_add failed");
 
     // Convert data and metadata to RAID1.
-    let convert_args = BalanceArgs::new().convert(BlockGroupFlags::RAID1.bits());
-    let flags = BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
+    let convert_args =
+        BalanceArgs::new().convert(BlockGroupFlags::RAID1.bits());
+    let flags =
+        BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
     balance(
         mnt.fd(),
         flags,
@@ -154,7 +163,8 @@ fn balance_convert_raid1() {
     );
 
     // Both devices should have chunk allocations.
-    let allocs = device_chunk_allocations(mnt.fd()).expect("device_chunk_allocations failed");
+    let allocs = device_chunk_allocations(mnt.fd())
+        .expect("device_chunk_allocations failed");
     let dev1_bytes: u64 = allocs
         .iter()
         .filter(|a| a.devid == 1)
@@ -186,8 +196,10 @@ fn balance_pause_resume() {
     // Start balance in a background thread.
     let mount_path = mnt.path().to_path_buf();
     let balance_thread = std::thread::spawn(move || {
-        let file = File::open(&mount_path).expect("failed to open mount in thread");
-        let flags = BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
+        let file =
+            File::open(&mount_path).expect("failed to open mount in thread");
+        let flags =
+            BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
         balance(file.as_fd(), flags, None, None, None)
     });
 
@@ -213,7 +225,8 @@ fn balance_pause_resume() {
 
             // Resume — balance() with RESUME flag re-starts a paused balance.
             // May return ENOTCONN/ECANCELED if balance finished while paused.
-            let resume_fd = File::open(&mnt.path()).expect("failed to open mount");
+            let resume_fd =
+                File::open(&mnt.path()).expect("failed to open mount");
             let flags = BalanceFlags::DATA
                 | BalanceFlags::METADATA
                 | BalanceFlags::SYSTEM
@@ -251,8 +264,10 @@ fn balance_cancel_with_data() {
 
     let mount_path = mnt.path().to_path_buf();
     let balance_thread = std::thread::spawn(move || {
-        let file = File::open(&mount_path).expect("failed to open mount in thread");
-        let flags = BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
+        let file =
+            File::open(&mount_path).expect("failed to open mount in thread");
+        let flags =
+            BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
         balance(file.as_fd(), flags, None, None, None)
     });
 

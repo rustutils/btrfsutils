@@ -1,7 +1,8 @@
 use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
 use btrfs_uapi::quota::{
-    QgroupInfo, QgroupLimitFlags, QgroupStatusFlags, qgroupid_level, qgroupid_subvolid,
+    QgroupInfo, QgroupLimitFlags, QgroupStatusFlags, qgroupid_level,
+    qgroupid_subvolid,
 };
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
@@ -135,7 +136,12 @@ impl std::str::FromStr for SortKeys {
     }
 }
 
-fn fmt_size(bytes: u64, raw: bool, fixed_divisor: Option<u64>, use_si: bool) -> String {
+fn fmt_size(
+    bytes: u64,
+    raw: bool,
+    fixed_divisor: Option<u64>,
+    use_si: bool,
+) -> String {
     if raw {
         return bytes.to_string();
     }
@@ -178,24 +184,29 @@ impl Runnable for QgroupShowCommand {
         let _ = self.filter_all;
         let _ = self.filter_direct;
 
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         let fd = file.as_fd();
 
         if self.sync {
-            btrfs_uapi::filesystem::sync(fd)
-                .with_context(|| format!("failed to sync '{}'", self.path.display()))?;
+            btrfs_uapi::filesystem::sync(fd).with_context(|| {
+                format!("failed to sync '{}'", self.path.display())
+            })?;
         }
 
-        let list = btrfs_uapi::quota::qgroup_list(fd)
-            .with_context(|| format!("failed to list qgroups on '{}'", self.path.display()))?;
+        let list = btrfs_uapi::quota::qgroup_list(fd).with_context(|| {
+            format!("failed to list qgroups on '{}'", self.path.display())
+        })?;
 
         if list.qgroups.is_empty() {
             return Ok(());
         }
 
         if list.status_flags.contains(QgroupStatusFlags::INCONSISTENT) {
-            eprintln!("WARNING: qgroup data is inconsistent, use 'btrfs quota rescan' to fix");
+            eprintln!(
+                "WARNING: qgroup data is inconsistent, use 'btrfs quota rescan' to fix"
+            );
         }
 
         // Determine display mode
@@ -232,7 +243,8 @@ impl Runnable for QgroupShowCommand {
                             SortField::MaxRfer => a.max_rfer.cmp(&b.max_rfer),
                             SortField::MaxExcl => a.max_excl.cmp(&b.max_excl),
                         };
-                        let ord = if key.descending { ord.reverse() } else { ord };
+                        let ord =
+                            if key.descending { ord.reverse() } else { ord };
                         if ord != std::cmp::Ordering::Equal {
                             return ord;
                         }
@@ -246,7 +258,8 @@ impl Runnable for QgroupShowCommand {
         }
 
         // Build header
-        let mut header = format!("{:<16} {:>12} {:>12}", "qgroupid", "rfer", "excl");
+        let mut header =
+            format!("{:<16} {:>12} {:>12}", "qgroupid", "rfer", "excl");
         if self.print_rfer_limit {
             header.push_str(&format!(" {:>12}", "max_rfer"));
         }
@@ -266,7 +279,8 @@ impl Runnable for QgroupShowCommand {
             let rfer_str = fmt_size(q.rfer, raw, fixed_divisor, use_si);
             let excl_str = fmt_size(q.excl, raw, fixed_divisor, use_si);
 
-            let mut line = format!("{:<16} {:>12} {:>12}", id_str, rfer_str, excl_str);
+            let mut line =
+                format!("{:<16} {:>12} {:>12}", id_str, rfer_str, excl_str);
 
             if self.print_rfer_limit {
                 let s = fmt_limit(

@@ -17,8 +17,9 @@ pub struct ReplaceCancelCommand {
 
 impl Runnable for ReplaceCancelCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.mount_point)
-            .with_context(|| format!("failed to open '{}'", self.mount_point.display()))?;
+        let file = File::open(&self.mount_point).with_context(|| {
+            format!("failed to open '{}'", self.mount_point.display())
+        })?;
 
         let was_running = replace_cancel(file.as_fd()).with_context(|| {
             format!(

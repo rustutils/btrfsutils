@@ -12,29 +12,27 @@
 use anyhow::Result;
 use clap::{Parser, ValueEnum};
 
-pub mod balance;
-pub mod check;
-pub mod device;
-pub mod filesystem;
-pub mod inspect;
-pub mod property;
-pub mod qgroup;
-pub mod quota;
-pub mod receive;
-pub mod replace;
-pub mod rescue;
-pub mod restore;
-pub mod scrub;
-pub mod send;
-pub mod subvolume;
-pub mod util;
+mod balance;
+mod check;
+mod device;
+mod filesystem;
+mod inspect;
+mod property;
+mod qgroup;
+mod quota;
+mod receive;
+mod replace;
+mod rescue;
+mod restore;
+mod scrub;
+mod send;
+mod subvolume;
+mod util;
 
-use crate::{
-    balance::BalanceCommand, check::CheckCommand, device::DeviceCommand,
-    filesystem::FilesystemCommand, inspect::InspectCommand, property::PropertyCommand,
-    qgroup::QgroupCommand, quota::QuotaCommand, receive::ReceiveCommand, replace::ReplaceCommand,
-    rescue::RescueCommand, restore::RestoreCommand, scrub::ScrubCommand, send::SendCommand,
-    subvolume::SubvolumeCommand,
+pub use crate::{
+    balance::*, check::*, device::*, filesystem::*, inspect::*, property::*,
+    qgroup::*, quota::*, receive::*, replace::*, rescue::*, restore::*,
+    scrub::*, send::*, subvolume::*,
 };
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -44,7 +42,9 @@ pub enum Format {
     Json,
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(
+    Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum,
+)]
 pub enum Level {
     Debug,
     #[default]

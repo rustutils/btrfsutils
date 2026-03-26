@@ -1,9 +1,12 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
-use btrfs_uapi::subvolume::{
-    subvolume_delete, subvolume_delete_by_id, subvolume_info, subvolume_list,
+use btrfs_uapi::{
+    filesystem::{start_sync, wait_sync},
+    subvolume::{
+        subvolume_delete, subvolume_delete_by_id, subvolume_info,
+        subvolume_list,
+    },
 };
-use btrfs_uapi::filesystem::{start_sync, wait_sync};
 use clap::Parser;
 use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
 
@@ -50,7 +53,9 @@ pub struct SubvolumeDeleteCommand {
 impl Runnable for SubvolumeDeleteCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         if self.subvolid.is_some() && self.paths.len() != 1 {
-            bail!("--subvolid requires exactly one path argument (the filesystem mount point)");
+            bail!(
+                "--subvolid requires exactly one path argument (the filesystem mount point)"
+            );
         }
 
         let mut had_error = false;
@@ -93,23 +98,25 @@ impl SubvolumeDeleteCommand {
     /// Delete a subvolume by path. Returns (success, optional fd for commit-after).
     fn delete_by_path(&self, path: &PathBuf) -> (bool, Option<File>) {
         let result = (|| -> Result<File> {
-            let parent = path
-                .parent()
-                .ok_or_else(|| anyhow::anyhow!("'{}' has no parent directory", path.display()))?;
+            let parent = path.parent().ok_or_else(|| {
+                anyhow::anyhow!("'{}' has no parent directory", path.display())
+            })?;
 
-            let name_os = path
-                .file_name()
-                .ok_or_else(|| anyhow::anyhow!("'{}' has no file name", path.display()))?;
+            let name_os = path.file_name().ok_or_else(|| {
+                anyhow::anyhow!("'{}' has no file name", path.display())
+            })?;
 
-            let name_str = name_os
-                .to_str()
-                .ok_or_else(|| anyhow::anyhow!("'{}' is not valid UTF-8", path.display()))?;
+            let name_str = name_os.to_str().ok_or_else(|| {
+                anyhow::anyhow!("'{}' is not valid UTF-8", path.display())
+            })?;
 
-            let cname = CString::new(name_str)
-                .with_context(|| format!("subvolume name contains a null byte: '{name_str}'"))?;
+            let cname = CString::new(name_str).with_context(|| {
+                format!("subvolume name contains a null byte: '{name_str}'")
+            })?;
 
-            let parent_file = File::open(parent)
-                .with_context(|| format!("failed to open '{}'", parent.display()))?;
+            let parent_file = File::open(parent).with_context(|| {
+                format!("failed to open '{}'", parent.display())
+            })?;
             let fd = parent_file.as_fd();
 
             if self.recursive {
@@ -120,16 +127,18 @@ impl SubvolumeDeleteCommand {
                 println!("Delete subvolume '{}'", path.display());
             }
 
-            subvolume_delete(fd, &cname)
-                .with_context(|| format!("failed to delete '{}'", path.display()))?;
+            subvolume_delete(fd, &cname).with_context(|| {
+                format!("failed to delete '{}'", path.display())
+            })?;
 
             if !self.verbose {
                 println!("Delete subvolume '{}'", path.display());
             }
 
             if self.commit_each {
-                wait_for_commit(fd)
-                    .with_context(|| format!("failed to commit after '{}'", path.display()))?;
+                wait_for_commit(fd).with_context(|| {
+                    format!("failed to commit after '{}'", path.display())
+                })?;
             }
 
             Ok(parent_file)
@@ -145,10 +154,15 @@ impl SubvolumeDeleteCommand {
     }
 
     /// Delete a subvolume by numeric ID. Returns (success, optional fd for commit-after).
-    fn delete_by_id(&self, subvolid: u64, fs_path: &PathBuf) -> (bool, Option<File>) {
+    fn delete_by_id(
+        &self,
+        subvolid: u64,
+        fs_path: &PathBuf,
+    ) -> (bool, Option<File>) {
         let result = (|| -> Result<File> {
-            let file = File::open(fs_path)
-                .with_context(|| format!("failed to open '{}'", fs_path.display()))?;
+            let file = File::open(fs_path).with_context(|| {
+                format!("failed to open '{}'", fs_path.display())
+            })?;
             let fd = file.as_fd();
 
             if self.verbose {
@@ -191,13 +205,15 @@ impl SubvolumeDeleteCommand {
         let fd = file.as_fd();
 
         // Get the root ID of this subvolume.
-        let info = subvolume_info(fd)
-            .with_context(|| format!("failed to get subvolume info for '{}'", path.display()))?;
+        let info = subvolume_info(fd).with_context(|| {
+            format!("failed to get subvolume info for '{}'", path.display())
+        })?;
         let target_id = info.id;
 
         // List all subvolumes on this filesystem and find those nested under target_id.
-        let all = subvolume_list(fd)
-            .with_context(|| format!("failed to list subvolumes on '{}'", path.display()))?;
+        let all = subvolume_list(fd).with_context(|| {
+            format!("failed to list subvolumes on '{}'", path.display())
+        })?;
 
         // Build the set of subvolume IDs that are descendants of target_id.
         // We need post-order traversal (delete children before parents).
@@ -221,7 +237,11 @@ impl SubvolumeDeleteCommand {
                 // Try to find the name for verbose output.
                 if let Some(item) = all.iter().find(|i| i.root_id == child_id) {
                     if !item.name.is_empty() {
-                        println!("Delete subvolume '{}/{}'", path.display(), item.name);
+                        println!(
+                            "Delete subvolume '{}/{}'",
+                            path.display(),
+                            item.name
+                        );
                     } else {
                         println!("Delete subvolume (subvolid={child_id})");
                     }

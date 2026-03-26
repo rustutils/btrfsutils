@@ -24,9 +24,9 @@ impl Runnable for BalancePauseCommand {
                     self.path.display()
                 )
             }
-            Err(e) => {
-                Err(e).with_context(|| format!("balance pause on '{}' failed", self.path.display()))
-            }
+            Err(e) => Err(e).with_context(|| {
+                format!("balance pause on '{}' failed", self.path.display())
+            }),
         }
     }
 }

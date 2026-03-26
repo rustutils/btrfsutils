@@ -28,10 +28,12 @@ pub struct BackingFile {
 impl BackingFile {
     pub fn new(dir: &Path, name: &str, size: u64) -> Self {
         let path = dir.join(name);
-        let file = File::create(&path)
-            .unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
-        file.set_len(size)
-            .unwrap_or_else(|e| panic!("failed to set length of {}: {e}", path.display()));
+        let file = File::create(&path).unwrap_or_else(|e| {
+            panic!("failed to create {}: {e}", path.display())
+        });
+        file.set_len(size).unwrap_or_else(|e| {
+            panic!("failed to set length of {}: {e}", path.display())
+        });
         Self { path }
     }
 
@@ -42,12 +44,16 @@ impl BackingFile {
     /// Grow or shrink the backing file. Call [`LoopbackDevice::refresh_size`]
     /// afterwards if a loop device is attached.
     pub fn resize(&self, new_size: u64) {
-        let file = File::options()
-            .write(true)
-            .open(&self.path)
-            .unwrap_or_else(|e| panic!("failed to open {}: {e}", self.path.display()));
-        file.set_len(new_size)
-            .unwrap_or_else(|e| panic!("failed to resize {}: {e}", self.path.display()));
+        let file =
+            File::options()
+                .write(true)
+                .open(&self.path)
+                .unwrap_or_else(|e| {
+                    panic!("failed to open {}: {e}", self.path.display())
+                });
+        file.set_len(new_size).unwrap_or_else(|e| {
+            panic!("failed to resize {}: {e}", self.path.display())
+        });
     }
 
     /// Run `mkfs.btrfs -f` on this file.
@@ -166,10 +172,15 @@ impl Mount {
     }
 
     /// Creates `base_dir/mnt` and mounts with additional `-o` options.
-    pub fn with_options(dev: LoopbackDevice, base_dir: &Path, extra_opts: &[&str]) -> Self {
+    pub fn with_options(
+        dev: LoopbackDevice,
+        base_dir: &Path,
+        extra_opts: &[&str],
+    ) -> Self {
         let mountpoint = base_dir.join("mnt");
-        fs::create_dir_all(&mountpoint)
-            .unwrap_or_else(|e| panic!("failed to create {}: {e}", mountpoint.display()));
+        fs::create_dir_all(&mountpoint).unwrap_or_else(|e| {
+            panic!("failed to create {}: {e}", mountpoint.display())
+        });
         let mut args = vec!["-t", "btrfs"];
         if !extra_opts.is_empty() {
             args.push("-o");
@@ -238,8 +249,8 @@ fn run(cmd: &str, args: &[&str]) {
 /// `byte = position % 251` (prime modulus avoids alignment artifacts).
 pub fn write_test_data(dir: &Path, name: &str, size: usize) {
     let path = dir.join(name);
-    let mut file =
-        File::create(&path).unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
+    let mut file = File::create(&path)
+        .unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
     let chunk_size = 64 * 1024;
     let mut buf = vec![0u8; chunk_size];
     let mut written = 0;
@@ -258,7 +269,8 @@ pub fn write_test_data(dir: &Path, name: &str, size: usize) {
 /// by [`write_test_data`].
 pub fn verify_test_data(dir: &Path, name: &str, size: usize) {
     let path = dir.join(name);
-    let data = fs::read(&path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    let data = fs::read(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
     assert_eq!(
         data.len(),
         size,
@@ -273,8 +285,8 @@ pub fn verify_test_data(dir: &Path, name: &str, size: usize) {
 /// Write highly compressible data (all zeros).
 pub fn write_compressible_data(dir: &Path, name: &str, size: usize) {
     let path = dir.join(name);
-    let mut file =
-        File::create(&path).unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
+    let mut file = File::create(&path)
+        .unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
     let chunk_size = 64 * 1024;
     let buf = vec![0u8; chunk_size];
     let mut written = 0;
@@ -317,20 +329,22 @@ pub fn deterministic_mount() -> (tempfile::TempDir, Mount) {
 /// on first use. The cache lives at `target/test-fixtures/test-fs.img` so it
 /// survives across test runs but is cleaned by `cargo clean`.
 fn cached_fixture_image() -> PathBuf {
-    let cache_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-fixtures");
+    let cache_dir =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-fixtures");
     let cached = cache_dir.join("test-fs.img");
 
     if !cached.exists() {
-        fs::create_dir_all(&cache_dir)
-            .unwrap_or_else(|e| panic!("failed to create {}: {e}", cache_dir.display()));
-        let gz_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/commands/fixture.img.gz");
+        fs::create_dir_all(&cache_dir).unwrap_or_else(|e| {
+            panic!("failed to create {}: {e}", cache_dir.display())
+        });
+        let gz_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/commands/fixture.img.gz");
         let status = Command::new("gunzip")
             .args(["-k", "-c"])
             .arg(&gz_path)
-            .stdout(
-                File::create(&cached)
-                    .unwrap_or_else(|e| panic!("failed to create {}: {e}", cached.display())),
-            )
+            .stdout(File::create(&cached).unwrap_or_else(|e| {
+                panic!("failed to create {}: {e}", cached.display())
+            }))
             .status()
             .expect("failed to run gunzip");
         assert!(status.success(), "gunzip failed");

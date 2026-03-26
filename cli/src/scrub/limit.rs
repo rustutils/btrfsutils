@@ -1,6 +1,8 @@
 use crate::{Format, Runnable, util::parse_size_with_suffix};
 use anyhow::{Context, Result};
-use btrfs_uapi::{device::device_info_all, filesystem::filesystem_info, sysfs::SysfsBtrfs};
+use btrfs_uapi::{
+    device::device_info_all, filesystem::filesystem_info, sysfs::SysfsBtrfs,
+};
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
@@ -29,8 +31,9 @@ pub struct ScrubLimitCommand {
 
 impl Runnable for ScrubLimitCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         let fd = file.as_fd();
 
         let fs = filesystem_info(fd).with_context(|| {
@@ -39,8 +42,9 @@ impl Runnable for ScrubLimitCommand {
                 self.path.display()
             )
         })?;
-        let devices = device_info_all(fd, &fs)
-            .with_context(|| format!("failed to get device info for '{}'", self.path.display()))?;
+        let devices = device_info_all(fd, &fs).with_context(|| {
+            format!("failed to get device info for '{}'", self.path.display())
+        })?;
 
         let sysfs = SysfsBtrfs::new(&fs.uuid);
 
@@ -51,11 +55,17 @@ impl Runnable for ScrubLimitCommand {
             let dev = devices
                 .iter()
                 .find(|d| d.devid == target_devid)
-                .with_context(|| format!("device with devid {target_devid} not found"))?;
+                .with_context(|| {
+                    format!("device with devid {target_devid} not found")
+                })?;
             let new_limit = self.limit.unwrap();
-            let old_limit = sysfs
-                .scrub_speed_max_get(dev.devid)
-                .with_context(|| format!("failed to read scrub limit for devid {}", dev.devid))?;
+            let old_limit =
+                sysfs.scrub_speed_max_get(dev.devid).with_context(|| {
+                    format!(
+                        "failed to read scrub limit for devid {}",
+                        dev.devid
+                    )
+                })?;
             println!(
                 "Set scrub limit of devid {} from {} to {}",
                 dev.devid,
@@ -64,7 +74,9 @@ impl Runnable for ScrubLimitCommand {
             );
             sysfs
                 .scrub_speed_max_set(dev.devid, new_limit)
-                .with_context(|| format!("failed to set scrub limit for devid {}", dev.devid))?;
+                .with_context(|| {
+                    format!("failed to set scrub limit for devid {}", dev.devid)
+                })?;
             return Ok(());
         }
 
@@ -72,9 +84,14 @@ impl Runnable for ScrubLimitCommand {
             // Set limit for all devices.
             let new_limit = self.limit.unwrap();
             for dev in &devices {
-                let old_limit = sysfs.scrub_speed_max_get(dev.devid).with_context(|| {
-                    format!("failed to read scrub limit for devid {}", dev.devid)
-                })?;
+                let old_limit = sysfs
+                    .scrub_speed_max_get(dev.devid)
+                    .with_context(|| {
+                        format!(
+                            "failed to read scrub limit for devid {}",
+                            dev.devid
+                        )
+                    })?;
                 println!(
                     "Set scrub limit of devid {} from {} to {}",
                     dev.devid,
@@ -84,7 +101,10 @@ impl Runnable for ScrubLimitCommand {
                 sysfs
                     .scrub_speed_max_set(dev.devid, new_limit)
                     .with_context(|| {
-                        format!("failed to set scrub limit for devid {}", dev.devid)
+                        format!(
+                            "failed to set scrub limit for devid {}",
+                            dev.devid
+                        )
                     })?;
             }
             return Ok(());

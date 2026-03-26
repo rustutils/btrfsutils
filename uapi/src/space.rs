@@ -5,12 +5,13 @@
 //! underlying the `btrfs filesystem df` command.
 
 use crate::raw::{
-    BTRFS_AVAIL_ALLOC_BIT_SINGLE, BTRFS_BLOCK_GROUP_DATA, BTRFS_BLOCK_GROUP_DUP,
-    BTRFS_BLOCK_GROUP_METADATA, BTRFS_BLOCK_GROUP_RAID0, BTRFS_BLOCK_GROUP_RAID1,
-    BTRFS_BLOCK_GROUP_RAID1C3, BTRFS_BLOCK_GROUP_RAID1C4, BTRFS_BLOCK_GROUP_RAID5,
-    BTRFS_BLOCK_GROUP_RAID6, BTRFS_BLOCK_GROUP_RAID10, BTRFS_BLOCK_GROUP_SYSTEM,
-    BTRFS_SPACE_INFO_GLOBAL_RSV, btrfs_ioc_space_info, btrfs_ioctl_space_args,
-    btrfs_ioctl_space_info,
+    BTRFS_AVAIL_ALLOC_BIT_SINGLE, BTRFS_BLOCK_GROUP_DATA,
+    BTRFS_BLOCK_GROUP_DUP, BTRFS_BLOCK_GROUP_METADATA, BTRFS_BLOCK_GROUP_RAID0,
+    BTRFS_BLOCK_GROUP_RAID1, BTRFS_BLOCK_GROUP_RAID1C3,
+    BTRFS_BLOCK_GROUP_RAID1C4, BTRFS_BLOCK_GROUP_RAID5,
+    BTRFS_BLOCK_GROUP_RAID6, BTRFS_BLOCK_GROUP_RAID10,
+    BTRFS_BLOCK_GROUP_SYSTEM, BTRFS_SPACE_INFO_GLOBAL_RSV,
+    btrfs_ioc_space_info, btrfs_ioctl_space_args, btrfs_ioctl_space_info,
 };
 use bitflags::bitflags;
 use std::{
@@ -258,7 +259,8 @@ mod tests {
 
     #[test]
     fn from_bits_preserves_known_flags() {
-        let raw = BTRFS_BLOCK_GROUP_DATA as u64 | BTRFS_BLOCK_GROUP_RAID1 as u64;
+        let raw =
+            BTRFS_BLOCK_GROUP_DATA as u64 | BTRFS_BLOCK_GROUP_RAID1 as u64;
         let flags = BlockGroupFlags::from_bits_truncate(raw);
         assert!(flags.contains(BlockGroupFlags::DATA));
         assert!(flags.contains(BlockGroupFlags::RAID1));

@@ -83,7 +83,8 @@ pub fn ino_paths(fd: BorrowedFd<'_>, inum: u64) -> nix::Result<Vec<String>> {
 
     // Parse the results from the data container
     // The buffer is laid out as: btrfs_data_container header, followed by val[] array
-    let container = unsafe { &*(buf.as_ptr() as *const crate::raw::btrfs_data_container) };
+    let container =
+        unsafe { &*(buf.as_ptr() as *const crate::raw::btrfs_data_container) };
 
     let mut paths = Vec::new();
 
@@ -168,7 +169,8 @@ pub fn logical_ino(
     }
 
     // Parse the results from the data container
-    let container = unsafe { &*(buf.as_ptr() as *const crate::raw::btrfs_data_container) };
+    let container =
+        unsafe { &*(buf.as_ptr() as *const crate::raw::btrfs_data_container) };
 
     let mut results = Vec::new();
 
@@ -230,13 +232,20 @@ pub fn logical_ino(
 /// let path = subvolid_resolve(fd, 5)?;
 /// println!("Subvolume 5 is at: {}", path);
 /// ```
-pub fn subvolid_resolve(fd: BorrowedFd<'_>, subvol_id: u64) -> nix::Result<String> {
+pub fn subvolid_resolve(
+    fd: BorrowedFd<'_>,
+    subvol_id: u64,
+) -> nix::Result<String> {
     let mut path = String::new();
     subvolid_resolve_sub(fd, &mut path, subvol_id)?;
     Ok(path)
 }
 
-fn subvolid_resolve_sub(fd: BorrowedFd<'_>, path: &mut String, subvol_id: u64) -> nix::Result<()> {
+fn subvolid_resolve_sub(
+    fd: BorrowedFd<'_>,
+    path: &mut String,
+    subvol_id: u64,
+) -> nix::Result<()> {
     use crate::raw::BTRFS_FS_TREE_OBJECTID;
 
     // If this is the filesystem root, we're done (empty path means root)
@@ -283,7 +292,9 @@ fn subvolid_resolve_sub(fd: BorrowedFd<'_>, path: &mut String, subvol_id: u64) -
             );
 
             let name_off = offset_of!(btrfs_root_ref, name_len);
-            let name_len = u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
+            let name_len =
+                u16::from_le_bytes([data[name_off], data[name_off + 1]])
+                    as usize;
 
             if data.len() < header_size + name_len {
                 return Err(nix::errno::Errno::EOVERFLOW);
@@ -294,20 +305,26 @@ fn subvolid_resolve_sub(fd: BorrowedFd<'_>, path: &mut String, subvol_id: u64) -
             // If dirid is not the first free objectid, we need to resolve the directory path too
             if dirid != BTRFS_FIRST_FREE_OBJECTID as u64 {
                 // Look up the directory in the parent subvolume
-                let mut ino_lookup_args = crate::raw::btrfs_ioctl_ino_lookup_args {
-                    treeid: parent_subvol_id,
-                    objectid: dirid,
-                    ..unsafe { std::mem::zeroed() }
-                };
+                let mut ino_lookup_args =
+                    crate::raw::btrfs_ioctl_ino_lookup_args {
+                        treeid: parent_subvol_id,
+                        objectid: dirid,
+                        ..unsafe { std::mem::zeroed() }
+                    };
 
                 unsafe {
-                    btrfs_ioc_ino_lookup(fd.as_raw_fd() as c_int, &mut ino_lookup_args)?;
+                    btrfs_ioc_ino_lookup(
+                        fd.as_raw_fd() as c_int,
+                        &mut ino_lookup_args,
+                    )?;
                 }
 
                 // Get the directory name (it's a null-terminated C string)
-                let dir_name = unsafe { std::ffi::CStr::from_ptr(ino_lookup_args.name.as_ptr()) }
-                    .to_str()
-                    .map_err(|_| nix::errno::Errno::EINVAL)?;
+                let dir_name = unsafe {
+                    std::ffi::CStr::from_ptr(ino_lookup_args.name.as_ptr())
+                }
+                .to_str()
+                .map_err(|_| nix::errno::Errno::EINVAL)?;
 
                 if !dir_name.is_empty() {
                     if !path.is_empty() {
@@ -323,8 +340,8 @@ fn subvolid_resolve_sub(fd: BorrowedFd<'_>, path: &mut String, subvol_id: u64) -
             }
 
             // Convert name bytes to string
-            let name_str =
-                std::str::from_utf8(name_bytes).map_err(|_| nix::errno::Errno::EINVAL)?;
+            let name_str = std::str::from_utf8(name_bytes)
+                .map_err(|_| nix::errno::Errno::EINVAL)?;
             path.push_str(name_str);
 
             Ok(())

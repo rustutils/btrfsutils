@@ -6,9 +6,10 @@
 //! human-readable label, and resizing a device within the filesystem.
 
 use crate::raw::{
-    BTRFS_FS_INFO_FLAG_GENERATION, btrfs_ioc_fs_info, btrfs_ioc_get_fslabel, btrfs_ioc_resize,
-    btrfs_ioc_set_fslabel, btrfs_ioc_start_sync, btrfs_ioc_sync, btrfs_ioc_wait_sync,
-    btrfs_ioctl_fs_info_args, btrfs_ioctl_vol_args,
+    BTRFS_FS_INFO_FLAG_GENERATION, btrfs_ioc_fs_info, btrfs_ioc_get_fslabel,
+    btrfs_ioc_resize, btrfs_ioc_set_fslabel, btrfs_ioc_start_sync,
+    btrfs_ioc_sync, btrfs_ioc_wait_sync, btrfs_ioctl_fs_info_args,
+    btrfs_ioctl_vol_args,
 };
 use nix::libc::c_char;
 use std::{

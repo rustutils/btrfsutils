@@ -34,8 +34,9 @@ pub struct DumpSuperCommand {
 
 impl Runnable for DumpSuperCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let mut file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let mut file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
 
         let mirrors: Vec<u32> = if self.all {
             (0..SUPER_MIRROR_MAX).collect()
@@ -59,7 +60,9 @@ impl Runnable for DumpSuperCommand {
             let sb = match superblock::read_superblock(&mut file, mirror) {
                 Ok(sb) => sb,
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                    println!("superblock mirror {mirror} beyond end of device, skipping");
+                    println!(
+                        "superblock mirror {mirror} beyond end of device, skipping"
+                    );
                     continue;
                 }
                 Err(e) => {
@@ -85,7 +88,9 @@ impl Runnable for DumpSuperCommand {
                 );
             }
 
-            println!("---------------------------------------------------------");
+            println!(
+                "---------------------------------------------------------"
+            );
             superblock::print_superblock(&sb, self.full);
         }
 

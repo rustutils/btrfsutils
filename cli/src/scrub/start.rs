@@ -1,6 +1,8 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result};
-use btrfs_uapi::{device::device_info_all, filesystem::filesystem_info, scrub::scrub_start};
+use btrfs_uapi::{
+    device::device_info_all, filesystem::filesystem_info, scrub::scrub_start,
+};
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
@@ -20,8 +22,9 @@ pub struct ScrubStartCommand {
 
 impl Runnable for ScrubStartCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         let fd = file.as_fd();
 
         let fs = filesystem_info(fd).with_context(|| {
@@ -30,8 +33,9 @@ impl Runnable for ScrubStartCommand {
                 self.path.display()
             )
         })?;
-        let devices = device_info_all(fd, &fs)
-            .with_context(|| format!("failed to get device info for '{}'", self.path.display()))?;
+        let devices = device_info_all(fd, &fs).with_context(|| {
+            format!("failed to get device info for '{}'", self.path.display())
+        })?;
 
         println!("UUID: {}", fs.uuid.as_hyphenated());
 
@@ -43,7 +47,9 @@ impl Runnable for ScrubStartCommand {
             match scrub_start(fd, dev.devid, self.readonly) {
                 Ok(progress) => {
                     super::accumulate(&mut fs_totals, &progress);
-                    super::print_progress_summary(&progress, dev.devid, &dev.path);
+                    super::print_progress_summary(
+                        &progress, dev.devid, &dev.path,
+                    );
                 }
                 Err(e) => {
                     eprintln!("error scrubbing device {}: {e}", dev.devid);

@@ -1,7 +1,9 @@
-use crate::common::{BackingFile, LoopbackDevice, Mount, single_mount, write_test_data};
+use crate::common::{
+    BackingFile, LoopbackDevice, Mount, single_mount, write_test_data,
+};
 use btrfs_uapi::{
-    scrub::{scrub_cancel, scrub_start},
     filesystem::sync,
+    scrub::{scrub_cancel, scrub_start},
 };
 use nix::errno::Errno;
 use std::{fs::File, os::unix::io::AsFd};
@@ -37,7 +39,8 @@ fn scrub_readonly() {
     write_test_data(mnt.path(), "data.bin", 10_000_000);
     sync(mnt.fd()).unwrap();
 
-    let progress = scrub_start(mnt.fd(), 1, true).expect("scrub_start readonly failed");
+    let progress =
+        scrub_start(mnt.fd(), 1, true).expect("scrub_start readonly failed");
 
     assert!(
         progress.data_bytes_scrubbed > 0,
@@ -69,7 +72,8 @@ fn scrub_cancel_test() {
     // Start scrub in a background thread (scrub_start blocks).
     let mount_path = mnt.path().to_path_buf();
     let scrub_thread = std::thread::spawn(move || {
-        let file = File::open(&mount_path).expect("open mount in thread failed");
+        let file =
+            File::open(&mount_path).expect("open mount in thread failed");
         scrub_start(file.as_fd(), 1, false)
     });
 

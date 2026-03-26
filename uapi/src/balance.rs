@@ -295,7 +295,9 @@ pub fn balance_ctl(fd: BorrowedFd, cmd: BalanceCtl) -> nix::Result<()> {
 /// Returns a [`BalanceState`] bitflags value indicating whether a balance is
 /// running, paused, or being cancelled, along with a [`BalanceProgress`] with
 /// the current counters.
-pub fn balance_progress(fd: BorrowedFd) -> nix::Result<(BalanceState, BalanceProgress)> {
+pub fn balance_progress(
+    fd: BorrowedFd,
+) -> nix::Result<(BalanceState, BalanceProgress)> {
     let mut args: btrfs_ioctl_balance_args = unsafe { std::mem::zeroed() };
 
     unsafe {

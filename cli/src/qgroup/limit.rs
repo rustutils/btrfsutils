@@ -85,16 +85,24 @@ impl Runnable for QgroupLimitCommand {
             max_rfer = size;
         }
 
-        let file = File::open(&fs_path)
-            .with_context(|| format!("failed to open '{}'", fs_path.display()))?;
+        let file = File::open(&fs_path).with_context(|| {
+            format!("failed to open '{}'", fs_path.display())
+        })?;
 
-        match btrfs_uapi::quota::qgroup_limit(file.as_fd(), qgroupid, flags, max_rfer, max_excl) {
+        match btrfs_uapi::quota::qgroup_limit(
+            file.as_fd(),
+            qgroupid,
+            flags,
+            max_rfer,
+            max_excl,
+        ) {
             Ok(()) => Ok(()),
             Err(Errno::ENOTCONN) => {
                 anyhow::bail!("quota not enabled on '{}'", fs_path.display())
             }
-            Err(e) => Err(e)
-                .with_context(|| format!("failed to set qgroup limit on '{}'", fs_path.display())),
+            Err(e) => Err(e).with_context(|| {
+                format!("failed to set qgroup limit on '{}'", fs_path.display())
+            }),
         }
     }
 }

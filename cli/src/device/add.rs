@@ -1,6 +1,8 @@
 use crate::{Format, Runnable, util::check_device_for_overwrite};
 use anyhow::{Context, Result};
-use btrfs_uapi::{device::device_add, filesystem::filesystem_info, sysfs::SysfsBtrfs};
+use btrfs_uapi::{
+    device::device_add, filesystem::filesystem_info, sysfs::SysfsBtrfs,
+};
 use clap::Parser;
 use std::{ffi::CString, fs, os::unix::io::AsFd, path::PathBuf};
 
@@ -32,8 +34,9 @@ pub struct DeviceAddCommand {
 
 impl Runnable for DeviceAddCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = fs::File::open(&self.target)
-            .with_context(|| format!("failed to open '{}'", self.target.display()))?;
+        let file = fs::File::open(&self.target).with_context(|| {
+            format!("failed to open '{}'", self.target.display())
+        })?;
         let fd = file.as_fd();
 
         // If --enqueue is set, wait for any running exclusive operation to finish.
@@ -45,12 +48,13 @@ impl Runnable for DeviceAddCommand {
                 )
             })?;
             let sysfs = SysfsBtrfs::new(&info.uuid);
-            let op = sysfs.wait_for_exclusive_operation().with_context(|| {
-                format!(
-                    "failed to check exclusive operation on '{}'",
-                    self.target.display()
-                )
-            })?;
+            let op =
+                sysfs.wait_for_exclusive_operation().with_context(|| {
+                    format!(
+                        "failed to check exclusive operation on '{}'",
+                        self.target.display()
+                    )
+                })?;
             if op != "none" {
                 eprintln!("waited for exclusive operation '{op}' to finish");
             }
@@ -71,9 +75,14 @@ impl Runnable for DeviceAddCommand {
             if !self.nodiscard {
                 match fs::OpenOptions::new().write(true).open(device) {
                     Ok(tgtfile) => {
-                        match btrfs_uapi::blkdev::discard_whole_device(tgtfile.as_fd()) {
+                        match btrfs_uapi::blkdev::discard_whole_device(
+                            tgtfile.as_fd(),
+                        ) {
                             Ok(0) => {}
-                            Ok(_) => eprintln!("discarded device '{}'", device.display()),
+                            Ok(_) => eprintln!(
+                                "discarded device '{}'",
+                                device.display()
+                            ),
                             Err(e) => {
                                 eprintln!(
                                     "warning: discard failed on '{}': {e}; continuing anyway",
@@ -92,17 +101,26 @@ impl Runnable for DeviceAddCommand {
             }
 
             let path_str = device.to_str().ok_or_else(|| {
-                anyhow::anyhow!("device path is not valid UTF-8: '{}'", device.display())
+                anyhow::anyhow!(
+                    "device path is not valid UTF-8: '{}'",
+                    device.display()
+                )
             })?;
 
             let cpath = CString::new(path_str).with_context(|| {
-                format!("device path contains a null byte: '{}'", device.display())
+                format!(
+                    "device path contains a null byte: '{}'",
+                    device.display()
+                )
             })?;
 
             match device_add(fd, &cpath) {
                 Ok(()) => println!("added device '{}'", device.display()),
                 Err(e) => {
-                    eprintln!("error adding device '{}': {e}", device.display());
+                    eprintln!(
+                        "error adding device '{}': {e}",
+                        device.display()
+                    );
                     had_error = true;
                 }
             }

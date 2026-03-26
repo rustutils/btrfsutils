@@ -66,15 +66,15 @@ impl std::ops::Deref for ParsedUuid {
 /// The packed form is `(level as u64) << 48 | subvolid`.
 /// Example: `"0/5"` → `5`, `"1/256"` → `0x0001_0000_0000_0100`.
 pub fn parse_qgroupid(s: &str) -> anyhow::Result<u64> {
-    let (level_str, id_str) = s
-        .split_once('/')
-        .ok_or_else(|| anyhow::anyhow!("invalid qgroup ID '{}': expected <level>/<id>", s))?;
-    let level: u64 = level_str
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid qgroup level '{}' in '{}'", level_str, s))?;
-    let subvolid: u64 = id_str
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid qgroup subvolid '{}' in '{}'", id_str, s))?;
+    let (level_str, id_str) = s.split_once('/').ok_or_else(|| {
+        anyhow::anyhow!("invalid qgroup ID '{}': expected <level>/<id>", s)
+    })?;
+    let level: u64 = level_str.parse().map_err(|_| {
+        anyhow::anyhow!("invalid qgroup level '{}' in '{}'", level_str, s)
+    })?;
+    let subvolid: u64 = id_str.parse().map_err(|_| {
+        anyhow::anyhow!("invalid qgroup subvolid '{}' in '{}'", id_str, s)
+    })?;
     Ok((level << 48) | subvolid)
 }
 
@@ -98,8 +98,9 @@ impl FromStr for ParsedUuid {
 /// Verifies that the path is a block device, is not currently mounted, and
 /// does not already contain a btrfs filesystem (unless `force` is true).
 pub fn check_device_for_overwrite(device: &Path, force: bool) -> Result<()> {
-    let meta = fs::metadata(device)
-        .with_context(|| format!("cannot access device '{}'", device.display()))?;
+    let meta = fs::metadata(device).with_context(|| {
+        format!("cannot access device '{}'", device.display())
+    })?;
 
     if !meta.file_type().is_block_device() {
         bail!("'{}' is not a block device", device.display());
@@ -124,11 +125,13 @@ pub fn check_device_for_overwrite(device: &Path, force: bool) -> Result<()> {
 
 /// Check if a device path appears in /proc/mounts.
 pub fn is_device_mounted(device: &Path) -> Result<bool> {
-    let canonical = fs::canonicalize(device)
-        .with_context(|| format!("cannot resolve path '{}'", device.display()))?;
+    let canonical = fs::canonicalize(device).with_context(|| {
+        format!("cannot resolve path '{}'", device.display())
+    })?;
     let canonical_str = canonical.to_string_lossy();
 
-    let file = File::open("/proc/mounts").context("failed to open /proc/mounts")?;
+    let file =
+        File::open("/proc/mounts").context("failed to open /proc/mounts")?;
     for line in std::io::BufReader::new(file).lines() {
         let line = line?;
         if let Some(mount_dev) = line.split_whitespace().next() {
@@ -288,7 +291,8 @@ mod tests {
 
     #[test]
     fn parsed_uuid_explicit() {
-        let u: ParsedUuid = "550e8400-e29b-41d4-a716-446655440000".parse().unwrap();
+        let u: ParsedUuid =
+            "550e8400-e29b-41d4-a716-446655440000".parse().unwrap();
         assert_eq!(u.to_string(), "550e8400-e29b-41d4-a716-446655440000");
     }
 

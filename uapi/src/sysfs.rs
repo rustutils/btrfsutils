@@ -113,12 +113,10 @@ impl SysfsBtrfs {
         for line in contents.lines() {
             let mut parts = line.splitn(2, ' ');
             let key = parts.next().unwrap_or("").trim();
-            let val: u64 = parts
-                .next()
-                .unwrap_or("")
-                .trim()
-                .parse()
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let val: u64 =
+                parts.next().unwrap_or("").trim().parse().map_err(|e| {
+                    io::Error::new(io::ErrorKind::InvalidData, e)
+                })?;
             match key {
                 "commits" => commits = Some(val),
                 "cur_commit_ms" => cur_commit_ms = Some(val),
@@ -138,10 +136,14 @@ impl SysfsBtrfs {
 
         Ok(CommitStats {
             commits: commits.ok_or_else(|| missing("commits"))?,
-            cur_commit_ms: cur_commit_ms.ok_or_else(|| missing("cur_commit_ms"))?,
-            last_commit_ms: last_commit_ms.ok_or_else(|| missing("last_commit_ms"))?,
-            max_commit_ms: max_commit_ms.ok_or_else(|| missing("max_commit_ms"))?,
-            total_commit_ms: total_commit_ms.ok_or_else(|| missing("total_commit_ms"))?,
+            cur_commit_ms: cur_commit_ms
+                .ok_or_else(|| missing("cur_commit_ms"))?,
+            last_commit_ms: last_commit_ms
+                .ok_or_else(|| missing("last_commit_ms"))?,
+            max_commit_ms: max_commit_ms
+                .ok_or_else(|| missing("max_commit_ms"))?,
+            total_commit_ms: total_commit_ms
+                .ok_or_else(|| missing("total_commit_ms"))?,
         })
     }
 
@@ -210,7 +212,8 @@ impl SysfsBtrfs {
     /// `/sys/fs/btrfs/<uuid>/metadata_uuid`
     pub fn metadata_uuid(&self) -> io::Result<Uuid> {
         let s = self.read_file("metadata_uuid")?;
-        Uuid::parse_str(&s).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        Uuid::parse_str(&s)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
     /// B-tree node size in bytes.
@@ -259,7 +262,11 @@ impl SysfsBtrfs {
     /// bytes per second. Pass `0` to remove the limit (unlimited).
     /// Requires root.
     /// `/sys/fs/btrfs/<uuid>/devinfo/<devid>/scrub_speed_max`
-    pub fn scrub_speed_max_set(&self, devid: u64, limit: u64) -> io::Result<()> {
+    pub fn scrub_speed_max_set(
+        &self,
+        devid: u64,
+        limit: u64,
+    ) -> io::Result<()> {
         let path = self.base.join(format!("devinfo/{devid}/scrub_speed_max"));
         fs::write(path, format!("{limit}\n"))
     }
@@ -271,7 +278,8 @@ impl SysfsBtrfs {
     /// `/sys/fs/btrfs/features/send_stream_version`
     pub fn send_stream_version(&self) -> u32 {
         // This is a global feature file, not per-filesystem.
-        let path = std::path::Path::new("/sys/fs/btrfs/features/send_stream_version");
+        let path =
+            std::path::Path::new("/sys/fs/btrfs/features/send_stream_version");
         match fs::read_to_string(path) {
             Ok(s) => s.trim().parse::<u32>().unwrap_or(1),
             Err(_) => 1,
@@ -310,10 +318,11 @@ impl SysfsBtrfs {
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
             != 0;
         let override_limits = self.read_bool("quota_override")?;
-        let drop_subtree_threshold = fs::read_to_string(qgroups.join("drop_subtree_threshold"))?
-            .trim()
-            .parse::<u64>()
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let drop_subtree_threshold =
+            fs::read_to_string(qgroups.join("drop_subtree_threshold"))?
+                .trim()
+                .parse::<u64>()
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         let mut total_count: u64 = 0;
         let mut level0_count: u64 = 0;
@@ -321,7 +330,9 @@ impl SysfsBtrfs {
             let entry = entry?;
             let raw_name = entry.file_name();
             let name = raw_name.to_string_lossy();
-            if let Some((level, _id)) = parse_qgroup_entry_name(OsStr::new(name.as_ref())) {
+            if let Some((level, _id)) =
+                parse_qgroup_entry_name(OsStr::new(name.as_ref()))
+            {
                 total_count += 1;
                 if level == 0 {
                     level0_count += 1;

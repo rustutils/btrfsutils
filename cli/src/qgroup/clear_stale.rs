@@ -12,12 +12,17 @@ pub struct QgroupClearStaleCommand {
 
 impl Runnable for QgroupClearStaleCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
-
-        let n = btrfs_uapi::quota::qgroup_clear_stale(file.as_fd()).with_context(|| {
-            format!("failed to clear stale qgroups on '{}'", self.path.display())
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
         })?;
+
+        let n = btrfs_uapi::quota::qgroup_clear_stale(file.as_fd())
+            .with_context(|| {
+                format!(
+                    "failed to clear stale qgroups on '{}'",
+                    self.path.display()
+                )
+            })?;
 
         if n == 0 {
             println!("no stale qgroups found");

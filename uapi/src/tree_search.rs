@@ -179,8 +179,10 @@ pub fn tree_search(
             if off + SEARCH_HEADER_SIZE > buf_cap {
                 return Err(nix::errno::Errno::EOVERFLOW);
             }
-            let raw_hdr: btrfs_ioctl_search_header =
-                unsafe { (buf_base.add(off) as *const btrfs_ioctl_search_header).read_unaligned() };
+            let raw_hdr: btrfs_ioctl_search_header = unsafe {
+                (buf_base.add(off) as *const btrfs_ioctl_search_header)
+                    .read_unaligned()
+            };
             let hdr = SearchHeader {
                 transid: raw_hdr.transid,
                 objectid: raw_hdr.objectid,
@@ -194,7 +196,9 @@ pub fn tree_search(
             if off + data_len > buf_cap {
                 return Err(nix::errno::Errno::EOVERFLOW);
             }
-            let data: &[u8] = unsafe { std::slice::from_raw_parts(buf_base.add(off), data_len) };
+            let data: &[u8] = unsafe {
+                std::slice::from_raw_parts(buf_base.add(off), data_len)
+            };
             off += data_len;
 
             f(&hdr, data)?;
@@ -233,7 +237,10 @@ fn fill_search_key(sk: &mut btrfs_ioctl_search_key, key: &SearchKey) {
 ///
 /// Returns `false` when the objectid also overflows, meaning the full key
 /// space has been exhausted.
-fn advance_cursor(sk: &mut btrfs_ioctl_search_key, last: &SearchHeader) -> bool {
+fn advance_cursor(
+    sk: &mut btrfs_ioctl_search_key,
+    last: &SearchHeader,
+) -> bool {
     let (new_offset, offset_overflow) = last.offset.overflowing_add(1);
     if !offset_overflow {
         sk.min_objectid = last.objectid;

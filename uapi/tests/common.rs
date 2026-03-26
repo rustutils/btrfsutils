@@ -27,10 +27,12 @@ pub struct BackingFile {
 impl BackingFile {
     pub fn new(dir: &Path, name: &str, size: u64) -> Self {
         let path = dir.join(name);
-        let file = File::create(&path)
-            .unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
-        file.set_len(size)
-            .unwrap_or_else(|e| panic!("failed to set length of {}: {e}", path.display()));
+        let file = File::create(&path).unwrap_or_else(|e| {
+            panic!("failed to create {}: {e}", path.display())
+        });
+        file.set_len(size).unwrap_or_else(|e| {
+            panic!("failed to set length of {}: {e}", path.display())
+        });
         Self { path }
     }
 
@@ -41,12 +43,16 @@ impl BackingFile {
     /// Grow or shrink the backing file. Call [`LoopbackDevice::refresh_size`]
     /// afterwards if a loop device is attached.
     pub fn resize(&self, new_size: u64) {
-        let file = File::options()
-            .write(true)
-            .open(&self.path)
-            .unwrap_or_else(|e| panic!("failed to open {}: {e}", self.path.display()));
-        file.set_len(new_size)
-            .unwrap_or_else(|e| panic!("failed to resize {}: {e}", self.path.display()));
+        let file =
+            File::options()
+                .write(true)
+                .open(&self.path)
+                .unwrap_or_else(|e| {
+                    panic!("failed to open {}: {e}", self.path.display())
+                });
+        file.set_len(new_size).unwrap_or_else(|e| {
+            panic!("failed to resize {}: {e}", self.path.display())
+        });
     }
 
     /// Run `mkfs.btrfs -f` on this file.
@@ -131,8 +137,9 @@ impl Mount {
     /// Creates `base_dir/mnt` and mounts the loop device there, consuming it.
     pub fn new(dev: LoopbackDevice, base_dir: &Path) -> Self {
         let mountpoint = base_dir.join("mnt");
-        fs::create_dir_all(&mountpoint)
-            .unwrap_or_else(|e| panic!("failed to create {}: {e}", mountpoint.display()));
+        fs::create_dir_all(&mountpoint).unwrap_or_else(|e| {
+            panic!("failed to create {}: {e}", mountpoint.display())
+        });
         run(
             "mount",
             &[
@@ -199,8 +206,8 @@ fn run(cmd: &str, args: &[&str]) {
 /// `byte = position % 251` (prime modulus avoids alignment artifacts).
 pub fn write_test_data(dir: &Path, name: &str, size: usize) {
     let path = dir.join(name);
-    let mut file =
-        File::create(&path).unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
+    let mut file = File::create(&path)
+        .unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
     let chunk_size = 64 * 1024;
     let mut buf = vec![0u8; chunk_size];
     let mut written = 0;
@@ -219,7 +226,8 @@ pub fn write_test_data(dir: &Path, name: &str, size: usize) {
 /// by [`write_test_data`].
 pub fn verify_test_data(dir: &Path, name: &str, size: usize) {
     let path = dir.join(name);
-    let data = fs::read(&path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    let data = fs::read(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
     assert_eq!(
         data.len(),
         size,
@@ -234,8 +242,8 @@ pub fn verify_test_data(dir: &Path, name: &str, size: usize) {
 /// Write highly compressible data (all zeros).
 pub fn write_compressible_data(dir: &Path, name: &str, size: usize) {
     let path = dir.join(name);
-    let mut file =
-        File::create(&path).unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
+    let mut file = File::create(&path)
+        .unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
     let chunk_size = 64 * 1024;
     let buf = vec![0u8; chunk_size];
     let mut written = 0;

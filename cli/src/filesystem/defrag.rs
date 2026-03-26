@@ -1,6 +1,8 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result};
-use btrfs_uapi::defrag::{CompressSpec, CompressType, DefragRangeArgs, defrag_range};
+use btrfs_uapi::defrag::{
+    CompressSpec, CompressType, DefragRangeArgs, defrag_range,
+};
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
@@ -82,8 +84,9 @@ impl Runnable for FilesystemDefragCommand {
         let mut errors = 0u64;
 
         for path in &self.paths {
-            let meta = std::fs::symlink_metadata(path)
-                .with_context(|| format!("cannot access '{}'", path.display()))?;
+            let meta = std::fs::symlink_metadata(path).with_context(|| {
+                format!("cannot access '{}'", path.display())
+            })?;
 
             if self.recursive && meta.is_dir() {
                 errors += self.defrag_recursive(path, &args)?;
@@ -105,18 +108,23 @@ impl Runnable for FilesystemDefragCommand {
 
 impl FilesystemDefragCommand {
     /// Defragment a single file.
-    fn defrag_one(&self, path: &std::path::Path, args: &DefragRangeArgs) -> Result<()> {
+    fn defrag_one(
+        &self,
+        path: &std::path::Path,
+        args: &DefragRangeArgs,
+    ) -> Result<()> {
         if self.verbose {
             println!("{}", path.display());
         }
-        let file =
-            File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
+        let file = File::open(path)
+            .with_context(|| format!("failed to open '{}'", path.display()))?;
 
         if let Some(step) = self.step {
             self.defrag_in_steps(&file, path, args, step)?;
         } else {
-            defrag_range(file.as_fd(), args)
-                .with_context(|| format!("defrag failed on '{}'", path.display()))?;
+            defrag_range(file.as_fd(), args).with_context(|| {
+                format!("defrag failed on '{}'", path.display())
+            })?;
         }
         Ok(())
     }
@@ -125,7 +133,11 @@ impl FilesystemDefragCommand {
     ///
     /// Does not follow symlinks and does not cross filesystem boundaries,
     /// matching the C reference's `nftw(path, cb, 10, FTW_MOUNT | FTW_PHYS)`.
-    fn defrag_recursive(&self, dir: &std::path::Path, args: &DefragRangeArgs) -> Result<u64> {
+    fn defrag_recursive(
+        &self,
+        dir: &std::path::Path,
+        args: &DefragRangeArgs,
+    ) -> Result<u64> {
         use std::os::unix::fs::MetadataExt;
 
         let dir_dev = std::fs::metadata(dir)
@@ -139,7 +151,10 @@ impl FilesystemDefragCommand {
             let entries = match std::fs::read_dir(&current) {
                 Ok(e) => e,
                 Err(e) => {
-                    eprintln!("error: cannot read '{}': {e}", current.display());
+                    eprintln!(
+                        "error: cannot read '{}': {e}",
+                        current.display()
+                    );
                     errors += 1;
                     continue;
                 }
@@ -161,7 +176,10 @@ impl FilesystemDefragCommand {
                 let meta = match std::fs::symlink_metadata(&path) {
                     Ok(m) => m,
                     Err(e) => {
-                        eprintln!("error: cannot stat '{}': {e}", path.display());
+                        eprintln!(
+                            "error: cannot stat '{}': {e}",
+                            path.display()
+                        );
                         errors += 1;
                         continue;
                     }
@@ -219,8 +237,12 @@ impl FilesystemDefragCommand {
             // Always flush between steps.
             step_args.flush = true;
 
-            defrag_range(file.as_fd(), &step_args)
-                .with_context(|| format!("defrag failed on '{}' at offset {offset}", path.display()))?;
+            defrag_range(file.as_fd(), &step_args).with_context(|| {
+                format!(
+                    "defrag failed on '{}' at offset {offset}",
+                    path.display()
+                )
+            })?;
 
             offset = match offset.checked_add(step) {
                 Some(next) => next,

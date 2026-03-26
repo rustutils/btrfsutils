@@ -21,8 +21,9 @@ pub struct FilesystemLabelCommand {
 
 impl Runnable for FilesystemLabelCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         match &self.new_label {
             None => {
                 let label = label_get(file.as_fd()).with_context(|| {

@@ -1,3 +1,4 @@
 imports_granularity = "Crate"
 group_imports = "One"
 edition = "2021"
+max_width = 80

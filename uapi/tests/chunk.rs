@@ -1,10 +1,12 @@
-use crate::common::{BackingFile, LoopbackDevice, Mount, single_mount, write_test_data};
+use crate::common::{
+    BackingFile, LoopbackDevice, Mount, single_mount, write_test_data,
+};
 use btrfs_uapi::{
     balance::{BalanceArgs, BalanceFlags, balance},
     chunk::{chunk_list, device_chunk_allocations},
     device::device_add,
-    space::BlockGroupFlags,
     filesystem::sync,
+    space::BlockGroupFlags,
 };
 use std::ffi::CString;
 
@@ -69,8 +71,10 @@ fn chunk_allocations_two_devices() {
     sync(mnt.fd()).unwrap();
 
     // Convert to RAID1 so both devices get data.
-    let convert_args = BalanceArgs::new().convert(BlockGroupFlags::RAID1.bits());
-    let flags = BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
+    let convert_args =
+        BalanceArgs::new().convert(BlockGroupFlags::RAID1.bits());
+    let flags =
+        BalanceFlags::DATA | BalanceFlags::METADATA | BalanceFlags::SYSTEM;
     balance(
         mnt.fd(),
         flags,
@@ -80,7 +84,8 @@ fn chunk_allocations_two_devices() {
     )
     .expect("balance failed");
 
-    let allocs = device_chunk_allocations(mnt.fd()).expect("device_chunk_allocations failed");
+    let allocs = device_chunk_allocations(mnt.fd())
+        .expect("device_chunk_allocations failed");
     let dev1_bytes: u64 = allocs
         .iter()
         .filter(|a| a.devid == 1)

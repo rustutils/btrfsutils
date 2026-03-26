@@ -92,7 +92,8 @@ fn defrag_no_compression() {
         .open(&path)
         .expect("open failed");
 
-    defrag_range(file.as_fd(), &DefragRangeArgs::new()).expect("defrag_range failed");
+    defrag_range(file.as_fd(), &DefragRangeArgs::new())
+        .expect("defrag_range failed");
     drop(file);
     sync(mnt.fd()).unwrap();
 

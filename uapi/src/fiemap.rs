@@ -37,7 +37,8 @@ const FIEMAP_EXTENT_SHARED: u32 = 0x0000_2000;
 
 /// Flags for extents whose bytes we do not count (unknown location,
 /// not-yet-written, or stored inline in metadata).
-const SKIP_FLAGS: u32 = FIEMAP_EXTENT_UNKNOWN | FIEMAP_EXTENT_DELALLOC | FIEMAP_EXTENT_DATA_INLINE;
+const SKIP_FLAGS: u32 =
+    FIEMAP_EXTENT_UNKNOWN | FIEMAP_EXTENT_DELALLOC | FIEMAP_EXTENT_DATA_INLINE;
 
 /// Number of extent slots to request per ioctl call.
 const EXTENTS_PER_BATCH: u32 = 256;
@@ -92,8 +93,13 @@ pub fn file_extents(fd: BorrowedFd) -> nix::Result<FileExtentInfo> {
         // EXTENTS_PER_BATCH extent slots.  The ioctl only writes within that
         // region.  raw_fd is a valid open file descriptor for the duration of
         // this call.
-        let ret =
-            unsafe { libc::ioctl(raw_fd, FS_IOC_FIEMAP, buf.as_mut_ptr() as *mut libc::c_void) };
+        let ret = unsafe {
+            libc::ioctl(
+                raw_fd,
+                FS_IOC_FIEMAP,
+                buf.as_mut_ptr() as *mut libc::c_void,
+            )
+        };
         if ret < 0 {
             return Err(nix::errno::Errno::last());
         }
@@ -150,7 +156,9 @@ fn as_bytes(v: &[u64]) -> &[u8] {
 
 fn as_bytes_mut(v: &mut [u64]) -> &mut [u8] {
     // SAFETY: same as above, with exclusive access.
-    unsafe { std::slice::from_raw_parts_mut(v.as_mut_ptr().cast(), v.len() * 8) }
+    unsafe {
+        std::slice::from_raw_parts_mut(v.as_mut_ptr().cast(), v.len() * 8)
+    }
 }
 
 fn read_u64(buf: &[u8], off: usize) -> u64 {

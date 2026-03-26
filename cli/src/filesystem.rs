@@ -13,16 +13,10 @@ mod show;
 mod sync;
 mod usage;
 
-use commit_stats::FilesystemCommitStatsCommand;
-use defrag::FilesystemDefragCommand;
-use df::FilesystemDfCommand;
-use du::FilesystemDuCommand;
-use label::FilesystemLabelCommand;
-use mkswapfile::FilesystemMkswapfileCommand;
-use resize::FilesystemResizeCommand;
-use show::FilesystemShowCommand;
-use sync::FilesystemSyncCommand;
-use usage::FilesystemUsageCommand;
+pub use self::{
+    commit_stats::*, defrag::*, df::*, du::*, label::*, mkswapfile::*,
+    resize::*, show::*, sync::*, usage::*,
+};
 
 /// Overall filesystem tasks and information.
 ///

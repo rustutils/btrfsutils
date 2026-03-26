@@ -1,11 +1,12 @@
 use crate::common::{single_mount, write_test_data};
 use btrfs_uapi::{
-    subvolume::{
-        SubvolumeFlags, snapshot_create, subvolume_create, subvolume_default_get,
-        subvolume_default_set, subvolume_delete, subvolume_flags_get, subvolume_flags_set,
-        subvolume_info, subvolume_list,
-    },
     filesystem::sync,
+    subvolume::{
+        SubvolumeFlags, snapshot_create, subvolume_create,
+        subvolume_default_get, subvolume_default_set, subvolume_delete,
+        subvolume_flags_get, subvolume_flags_set, subvolume_info,
+        subvolume_list,
+    },
 };
 use std::{ffi::CStr, fs::File, os::unix::io::AsFd};
 
@@ -19,8 +20,10 @@ fn subvolume_create_info_delete() {
     subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
     // subvolume_info should return valid metadata.
-    let subvol_dir = File::open(mnt.path().join("test-subvol")).expect("open subvol failed");
-    let info = subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
+    let subvol_dir =
+        File::open(mnt.path().join("test-subvol")).expect("open subvol failed");
+    let info =
+        subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
     assert!(
         info.id > 255,
         "subvolume ID should be > 255, got {}",
@@ -47,27 +50,37 @@ fn subvolume_snapshot() {
     let (_td, mnt) = single_mount();
 
     let origin_name = CStr::from_bytes_with_nul(b"origin\0").unwrap();
-    subvolume_create(mnt.fd(), origin_name, &[]).expect("subvolume_create failed");
+    subvolume_create(mnt.fd(), origin_name, &[])
+        .expect("subvolume_create failed");
 
     write_test_data(&mnt.path().join("origin"), "data.bin", 1_000_000);
     sync(mnt.fd()).unwrap();
 
     // Create a snapshot.
     let snap_name = CStr::from_bytes_with_nul(b"snap1\0").unwrap();
-    let origin_dir = File::open(mnt.path().join("origin")).expect("open origin failed");
+    let origin_dir =
+        File::open(mnt.path().join("origin")).expect("open origin failed");
     snapshot_create(mnt.fd(), origin_dir.as_fd(), snap_name, false, &[])
         .expect("snapshot_create failed");
     drop(origin_dir);
 
     // Snapshot should have the same data.
-    crate::common::verify_test_data(&mnt.path().join("snap1"), "data.bin", 1_000_000);
+    crate::common::verify_test_data(
+        &mnt.path().join("snap1"),
+        "data.bin",
+        1_000_000,
+    );
 
     // Modify the original — snapshot should retain the old content.
     std::fs::write(mnt.path().join("origin").join("data.bin"), b"overwritten")
         .expect("overwrite failed");
 
     // Snapshot should still have the original data.
-    crate::common::verify_test_data(&mnt.path().join("snap1"), "data.bin", 1_000_000);
+    crate::common::verify_test_data(
+        &mnt.path().join("snap1"),
+        "data.bin",
+        1_000_000,
+    );
 }
 
 /// A readonly snapshot should have the RDONLY flag and refuse writes.
@@ -77,25 +90,31 @@ fn subvolume_readonly_snapshot() {
     let (_td, mnt) = single_mount();
 
     let origin_name = CStr::from_bytes_with_nul(b"origin\0").unwrap();
-    subvolume_create(mnt.fd(), origin_name, &[]).expect("subvolume_create failed");
+    subvolume_create(mnt.fd(), origin_name, &[])
+        .expect("subvolume_create failed");
 
     write_test_data(&mnt.path().join("origin"), "data.bin", 1_000_000);
     sync(mnt.fd()).unwrap();
 
     let snap_name = CStr::from_bytes_with_nul(b"ro-snap\0").unwrap();
-    let origin_dir = File::open(mnt.path().join("origin")).expect("open origin failed");
-    snapshot_create(mnt.fd(), origin_dir.as_fd(), snap_name, true, &[]).expect("snapshot_create failed");
+    let origin_dir =
+        File::open(mnt.path().join("origin")).expect("open origin failed");
+    snapshot_create(mnt.fd(), origin_dir.as_fd(), snap_name, true, &[])
+        .expect("snapshot_create failed");
     drop(origin_dir);
 
-    let snap_dir = File::open(mnt.path().join("ro-snap")).expect("open snap failed");
-    let flags = subvolume_flags_get(snap_dir.as_fd()).expect("subvolume_flags_get failed");
+    let snap_dir =
+        File::open(mnt.path().join("ro-snap")).expect("open snap failed");
+    let flags = subvolume_flags_get(snap_dir.as_fd())
+        .expect("subvolume_flags_get failed");
     assert!(
         flags.contains(SubvolumeFlags::RDONLY),
         "readonly snapshot should have RDONLY flag, got {flags:?}",
     );
 
     // Writing to the snapshot should fail.
-    let write_result = File::create(mnt.path().join("ro-snap").join("new-file.txt"));
+    let write_result =
+        File::create(mnt.path().join("ro-snap").join("new-file.txt"));
     assert!(
         write_result.is_err(),
         "writing to readonly snapshot should fail"
@@ -144,10 +163,12 @@ fn subvolume_flags_get_set() {
     let name = CStr::from_bytes_with_nul(b"test-subvol\0").unwrap();
     subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
-    let subvol_dir = File::open(mnt.path().join("test-subvol")).expect("open failed");
+    let subvol_dir =
+        File::open(mnt.path().join("test-subvol")).expect("open failed");
 
     // Initially should not be readonly.
-    let flags = subvolume_flags_get(subvol_dir.as_fd()).expect("flags_get failed");
+    let flags =
+        subvolume_flags_get(subvol_dir.as_fd()).expect("flags_get failed");
     assert!(
         !flags.contains(SubvolumeFlags::RDONLY),
         "new subvolume should not be readonly",
@@ -157,7 +178,8 @@ fn subvolume_flags_get_set() {
     subvolume_flags_set(subvol_dir.as_fd(), SubvolumeFlags::RDONLY)
         .expect("flags_set RDONLY failed");
 
-    let flags = subvolume_flags_get(subvol_dir.as_fd()).expect("flags_get after set failed");
+    let flags = subvolume_flags_get(subvol_dir.as_fd())
+        .expect("flags_get after set failed");
     assert!(
         flags.contains(SubvolumeFlags::RDONLY),
         "should be readonly now"
@@ -173,7 +195,8 @@ fn subvolume_flags_get_set() {
     subvolume_flags_set(subvol_dir.as_fd(), SubvolumeFlags::empty())
         .expect("flags_set empty failed");
 
-    let flags = subvolume_flags_get(subvol_dir.as_fd()).expect("flags_get after clear failed");
+    let flags = subvolume_flags_get(subvol_dir.as_fd())
+        .expect("flags_get after clear failed");
     assert!(
         !flags.contains(SubvolumeFlags::RDONLY),
         "should not be readonly after clearing"
@@ -198,18 +221,22 @@ fn subvolume_default_get_set() {
     let name = CStr::from_bytes_with_nul(b"new-default\0").unwrap();
     subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
-    let subvol_dir = File::open(mnt.path().join("new-default")).expect("open failed");
-    let info = subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
+    let subvol_dir =
+        File::open(mnt.path().join("new-default")).expect("open failed");
+    let info =
+        subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
     drop(subvol_dir);
 
     subvolume_default_set(mnt.fd(), info.id).expect("default_set failed");
 
-    let new_default = subvolume_default_get(mnt.fd()).expect("default_get after set failed");
+    let new_default =
+        subvolume_default_get(mnt.fd()).expect("default_get after set failed");
     assert_eq!(new_default, info.id, "default should be the new subvolume");
 
     // Reset back to 5.
     subvolume_default_set(mnt.fd(), 5).expect("default_set back to 5 failed");
-    let reset = subvolume_default_get(mnt.fd()).expect("default_get after reset failed");
+    let reset = subvolume_default_get(mnt.fd())
+        .expect("default_get after reset failed");
     assert_eq!(reset, 5, "default should be back to 5");
 }
 
@@ -230,7 +257,8 @@ fn subvolume_list_nested() {
     drop(a_dir);
 
     // Create C inside A/B.
-    let b_dir = File::open(mnt.path().join("A").join("B")).expect("open B failed");
+    let b_dir =
+        File::open(mnt.path().join("A").join("B")).expect("open B failed");
     let c_name = CStr::from_bytes_with_nul(b"C\0").unwrap();
     subvolume_create(b_dir.as_fd(), c_name, &[]).expect("create C failed");
     drop(b_dir);

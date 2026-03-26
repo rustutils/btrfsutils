@@ -12,17 +12,19 @@ use crate::{
     field_size,
     filesystem::FilesystemInfo,
     raw::{
-        BTRFS_DEV_STATS_RESET, BTRFS_DEVICE_SPEC_BY_ID,
+        BTRFS_DEV_EXTENT_KEY, BTRFS_DEV_STATS_RESET, BTRFS_DEV_TREE_OBJECTID,
+        BTRFS_DEVICE_SPEC_BY_ID, btrfs_dev_extent,
         btrfs_dev_stat_values_BTRFS_DEV_STAT_CORRUPTION_ERRS,
         btrfs_dev_stat_values_BTRFS_DEV_STAT_FLUSH_ERRS,
         btrfs_dev_stat_values_BTRFS_DEV_STAT_GENERATION_ERRS,
         btrfs_dev_stat_values_BTRFS_DEV_STAT_READ_ERRS,
         btrfs_dev_stat_values_BTRFS_DEV_STAT_VALUES_MAX,
-        btrfs_dev_stat_values_BTRFS_DEV_STAT_WRITE_ERRS, btrfs_ioc_add_dev, btrfs_ioc_dev_info,
-        btrfs_ioc_devices_ready, btrfs_ioc_forget_dev, btrfs_ioc_get_dev_stats, btrfs_ioc_rm_dev,
-        btrfs_ioc_rm_dev_v2, btrfs_ioc_scan_dev, btrfs_ioctl_dev_info_args,
-        btrfs_ioctl_get_dev_stats, btrfs_ioctl_vol_args, btrfs_ioctl_vol_args_v2,
-        BTRFS_DEV_EXTENT_KEY, BTRFS_DEV_TREE_OBJECTID, btrfs_dev_extent,
+        btrfs_dev_stat_values_BTRFS_DEV_STAT_WRITE_ERRS, btrfs_ioc_add_dev,
+        btrfs_ioc_dev_info, btrfs_ioc_devices_ready, btrfs_ioc_forget_dev,
+        btrfs_ioc_get_dev_stats, btrfs_ioc_rm_dev, btrfs_ioc_rm_dev_v2,
+        btrfs_ioc_scan_dev, btrfs_ioctl_dev_info_args,
+        btrfs_ioctl_get_dev_stats, btrfs_ioctl_vol_args,
+        btrfs_ioctl_vol_args_v2,
     },
     tree_search::{SearchKey, tree_search},
 };
@@ -152,14 +154,19 @@ fn open_control() -> nix::Result<std::fs::File> {
         .read(true)
         .write(true)
         .open("/dev/btrfs-control")
-        .map_err(|e| Errno::from_raw(e.raw_os_error().unwrap_or(nix::libc::ENODEV)))
+        .map_err(|e| {
+            Errno::from_raw(e.raw_os_error().unwrap_or(nix::libc::ENODEV))
+        })
 }
 
 /// Query information about the device with the given `devid` on the filesystem
 /// referred to by `fd`.
 ///
 /// Returns `None` if no device with that ID exists (`ENODEV`).
-pub fn device_info(fd: BorrowedFd, devid: u64) -> nix::Result<Option<DeviceInfo>> {
+pub fn device_info(
+    fd: BorrowedFd,
+    devid: u64,
+) -> nix::Result<Option<DeviceInfo>> {
     let mut raw: btrfs_ioctl_dev_info_args = unsafe { mem::zeroed() };
     raw.devid = devid;
 
@@ -187,7 +194,10 @@ pub fn device_info(fd: BorrowedFd, devid: u64) -> nix::Result<Option<DeviceInfo>
 ///
 /// Iterates devids `1..=max_id`, skipping any that return `ENODEV` (holes in
 /// the devid space are normal when devices have been removed).
-pub fn device_info_all(fd: BorrowedFd, fs_info: &FilesystemInfo) -> nix::Result<Vec<DeviceInfo>> {
+pub fn device_info_all(
+    fd: BorrowedFd,
+    fs_info: &FilesystemInfo,
+) -> nix::Result<Vec<DeviceInfo>> {
     let mut devices = Vec::with_capacity(fs_info.num_devices as usize);
     for devid in 1..=fs_info.max_id {
         if let Some(info) = device_info(fd, devid)? {
@@ -226,13 +236,16 @@ pub fn device_remove(fd: BorrowedFd, spec: DeviceSpec) -> nix::Result<()> {
         }
         DeviceSpec::Path(path) => {
             // SAFETY: name is the active union member when flags == 0.
-            unsafe { copy_path_to_name(&mut args.__bindgen_anon_2.name, path) }?;
+            unsafe {
+                copy_path_to_name(&mut args.__bindgen_anon_2.name, path)
+            }?;
             match unsafe { btrfs_ioc_rm_dev_v2(fd.as_raw_fd(), &args) } {
                 Ok(_) => {}
                 // Fall back to the old single-arg ioctl on kernels that either
                 // don't know about v2 (ENOTTY) or don't recognise our flags (EOPNOTSUPP).
                 Err(Errno::ENOTTY) | Err(Errno::EOPNOTSUPP) => {
-                    let mut old: btrfs_ioctl_vol_args = unsafe { mem::zeroed() };
+                    let mut old: btrfs_ioctl_vol_args =
+                        unsafe { mem::zeroed() };
                     copy_path_to_name(&mut old.name, path)?;
                     unsafe { btrfs_ioc_rm_dev(fd.as_raw_fd(), &old) }?;
                 }
@@ -296,7 +309,11 @@ pub fn device_ready(path: &CStr) -> nix::Result<()> {
 ///
 /// If `reset` is `true`, the kernel atomically returns the current values and
 /// then resets all counters to zero. The kernel requires `CAP_SYS_ADMIN`.
-pub fn device_stats(fd: BorrowedFd, devid: u64, reset: bool) -> nix::Result<DeviceStats> {
+pub fn device_stats(
+    fd: BorrowedFd,
+    devid: u64,
+    reset: bool,
+) -> nix::Result<DeviceStats> {
     let mut raw: btrfs_ioctl_get_dev_stats = unsafe { mem::zeroed() };
     raw.devid = devid;
     raw.nr_items = btrfs_dev_stat_values_BTRFS_DEV_STAT_VALUES_MAX as u64;
@@ -308,15 +325,21 @@ pub fn device_stats(fd: BorrowedFd, devid: u64, reset: bool) -> nix::Result<Devi
 
     Ok(DeviceStats {
         devid,
-        write_errs: raw.values[btrfs_dev_stat_values_BTRFS_DEV_STAT_WRITE_ERRS as usize],
-        read_errs: raw.values[btrfs_dev_stat_values_BTRFS_DEV_STAT_READ_ERRS as usize],
-        flush_errs: raw.values[btrfs_dev_stat_values_BTRFS_DEV_STAT_FLUSH_ERRS as usize],
-        corruption_errs: raw.values[btrfs_dev_stat_values_BTRFS_DEV_STAT_CORRUPTION_ERRS as usize],
-        generation_errs: raw.values[btrfs_dev_stat_values_BTRFS_DEV_STAT_GENERATION_ERRS as usize],
+        write_errs: raw.values
+            [btrfs_dev_stat_values_BTRFS_DEV_STAT_WRITE_ERRS as usize],
+        read_errs: raw.values
+            [btrfs_dev_stat_values_BTRFS_DEV_STAT_READ_ERRS as usize],
+        flush_errs: raw.values
+            [btrfs_dev_stat_values_BTRFS_DEV_STAT_FLUSH_ERRS as usize],
+        corruption_errs: raw.values
+            [btrfs_dev_stat_values_BTRFS_DEV_STAT_CORRUPTION_ERRS as usize],
+        generation_errs: raw.values
+            [btrfs_dev_stat_values_BTRFS_DEV_STAT_GENERATION_ERRS as usize],
     })
 }
 
-const DEV_EXTENT_LENGTH_OFF: usize = std::mem::offset_of!(btrfs_dev_extent, length);
+const DEV_EXTENT_LENGTH_OFF: usize =
+    std::mem::offset_of!(btrfs_dev_extent, length);
 
 const SZ_1M: u64 = 1024 * 1024;
 const SZ_32M: u64 = 32 * 1024 * 1024;
@@ -366,7 +389,9 @@ pub fn device_min_size(fd: BorrowedFd, devid: u64) -> nix::Result<u64> {
             devid,
         ),
         |hdr, data| {
-            if data.len() < DEV_EXTENT_LENGTH_OFF + field_size!(btrfs_dev_extent, length) {
+            if data.len()
+                < DEV_EXTENT_LENGTH_OFF + field_size!(btrfs_dev_extent, length)
+            {
                 return Ok(());
             }
             let phys_start = hdr.offset;
@@ -420,7 +445,11 @@ fn hole_includes_sb_mirror(start: u64, end: u64) -> bool {
 ///
 /// Adds scratch space (largest relocated extent + 32 MiB for a potential
 /// system chunk allocation) when any relocation is needed.
-fn adjust_min_size(extents: &mut Vec<Extent>, holes: &mut Vec<Extent>, min_size: &mut u64) {
+fn adjust_min_size(
+    extents: &mut Vec<Extent>,
+    holes: &mut Vec<Extent>,
+    min_size: &mut u64,
+) {
     let mut scratch_space: u64 = 0;
 
     while let Some(&ext) = extents.first() {
@@ -443,7 +472,10 @@ fn adjust_min_size(extents: &mut Vec<Extent>, holes: &mut Vec<Extent>, min_size:
 
         // If the target hole contains a superblock mirror location,
         // pessimistically assume we need one more extent worth of space.
-        if hole_includes_sb_mirror(holes[idx].start, holes[idx].start + extent_len - 1) {
+        if hole_includes_sb_mirror(
+            holes[idx].start,
+            holes[idx].start + extent_len - 1,
+        ) {
             *min_size += extent_len;
         }
 

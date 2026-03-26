@@ -1,4 +1,7 @@
-use super::{PropertyObjectType, detect_object_types, property_names, property_description};
+use super::{
+    PropertyObjectType, detect_object_types, property_description,
+    property_names,
+};
 use crate::{Format, Runnable};
 use anyhow::{Result, anyhow, bail};
 use clap::Parser;

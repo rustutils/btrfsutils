@@ -4,7 +4,10 @@
 //! others use snapshot testing for output verification.
 
 use super::{btrfs, btrfs_ok, common, redact};
-use common::{BackingFile, LoopbackDevice, single_mount, verify_test_data, write_test_data};
+use common::{
+    BackingFile, LoopbackDevice, single_mount, verify_test_data,
+    write_test_data,
+};
 use std::path::Path;
 
 // ── filesystem (assertions) ──────────────────────────────────────────
@@ -13,7 +16,8 @@ use std::path::Path;
 #[ignore = "requires elevated privileges"]
 fn filesystem_sync() {
     let (_td, mnt) = single_mount();
-    let (_, _, code) = btrfs(&["filesystem", "sync", mnt.path().to_str().unwrap()]);
+    let (_, _, code) =
+        btrfs(&["filesystem", "sync", mnt.path().to_str().unwrap()]);
     assert_eq!(code, 0);
 }
 
@@ -305,7 +309,8 @@ fn property_force_clear_received_uuid() {
     );
 
     // Without -f, flipping ro→rw should fail.
-    let (_, stderr, code) = btrfs(&["property", "set", "-t", "subvol", &received, "ro", "false"]);
+    let (_, stderr, code) =
+        btrfs(&["property", "set", "-t", "subvol", &received, "ro", "false"]);
     assert_ne!(code, 0, "expected failure without -f");
     assert!(
         stderr.contains("received_uuid"),
@@ -347,9 +352,10 @@ fn send_receive_dump() {
 
     let out = btrfs_ok(&["receive", "--dump", "-f", &stream_file]);
 
-    let re_uuid =
-        regex_lite::Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-            .unwrap();
+    let re_uuid = regex_lite::Regex::new(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    )
+    .unwrap();
     let re_offset = regex_lite::Regex::new(r"offset=\d+").unwrap();
     let re_len = regex_lite::Regex::new(r"len=\d+").unwrap();
     let re_mode = regex_lite::Regex::new(r"mode=\d+").unwrap();
@@ -373,7 +379,8 @@ fn send_receive_roundtrip() {
     let (_td2, mnt2) = single_mount();
     let mp1 = mnt1.path().to_str().unwrap();
     let mp2 = mnt2.path().to_str().unwrap();
-    let stream_file = format!("{}/roundtrip.bin", _td1.path().to_str().unwrap());
+    let stream_file =
+        format!("{}/roundtrip.bin", _td1.path().to_str().unwrap());
 
     let src = format!("{mp1}/origin");
     btrfs_ok(&["subvolume", "create", &src]);
@@ -486,7 +493,11 @@ fn send_receive_incremental() {
     );
 
     // New directory and file should be present.
-    verify_test_data(Path::new(&format!("{recv_incr}/newdir")), "fresh.bin", 4096);
+    verify_test_data(
+        Path::new(&format!("{recv_incr}/newdir")),
+        "fresh.bin",
+        4096,
+    );
 }
 
 #[test]
@@ -969,7 +980,9 @@ fn replace_status_never_started() {
 
     let out = btrfs_ok(&["replace", "status", mp]);
     assert!(
-        out.contains("no device replace") || out.contains("Never") || out.contains("started"),
+        out.contains("no device replace")
+            || out.contains("Never")
+            || out.contains("started"),
         "expected never-started status:\n{out}"
     );
 }

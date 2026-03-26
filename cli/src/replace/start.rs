@@ -57,8 +57,9 @@ impl Runnable for ReplaceStartCommand {
         // Validate the target device before opening the filesystem.
         check_device_for_overwrite(&self.target, self.force)?;
 
-        let file = File::open(&self.mount_point)
-            .with_context(|| format!("failed to open '{}'", self.mount_point.display()))?;
+        let file = File::open(&self.mount_point).with_context(|| {
+            format!("failed to open '{}'", self.mount_point.display())
+        })?;
         let fd = file.as_fd();
 
         // If --enqueue is set, wait for any running exclusive operation to finish.
@@ -70,12 +71,13 @@ impl Runnable for ReplaceStartCommand {
                 )
             })?;
             let sysfs = SysfsBtrfs::new(&info.uuid);
-            let op = sysfs.wait_for_exclusive_operation().with_context(|| {
-                format!(
-                    "failed to check exclusive operation on '{}'",
-                    self.mount_point.display()
-                )
-            })?;
+            let op =
+                sysfs.wait_for_exclusive_operation().with_context(|| {
+                    format!(
+                        "failed to check exclusive operation on '{}'",
+                        self.mount_point.display()
+                    )
+                })?;
             if op != "none" {
                 eprintln!("waited for exclusive operation '{op}' to finish");
             }
@@ -101,13 +103,16 @@ impl Runnable for ReplaceStartCommand {
             ReplaceSource::DevId(devid)
         } else {
             ReplaceSource::Path(
-                &CString::new(self.source.as_bytes())
-                    .with_context(|| format!("invalid source device path '{}'", self.source))?,
+                &CString::new(self.source.as_bytes()).with_context(|| {
+                    format!("invalid source device path '{}'", self.source)
+                })?,
             )
         };
 
         let tgtdev = CString::new(self.target.as_os_str().as_encoded_bytes())
-            .with_context(|| format!("invalid target device path '{}'", self.target.display()))?;
+            .with_context(|| {
+            format!("invalid target device path '{}'", self.target.display())
+        })?;
 
         // Discard (TRIM) the target device unless --nodiscard is set.
         if !self.nodiscard {
@@ -122,7 +127,10 @@ impl Runnable for ReplaceStartCommand {
                 })?;
             match btrfs_uapi::blkdev::discard_whole_device(tgtfile.as_fd()) {
                 Ok(0) => {}
-                Ok(_) => eprintln!("discarded target device '{}'", self.target.display()),
+                Ok(_) => eprintln!(
+                    "discarded target device '{}'",
+                    self.target.display()
+                ),
                 Err(e) => {
                     eprintln!(
                         "warning: discard failed on '{}': {e}; continuing anyway",
@@ -132,12 +140,13 @@ impl Runnable for ReplaceStartCommand {
             }
         }
 
-        match replace_start(fd, source, &tgtdev, self.redundancy_only).with_context(|| {
-            format!(
-                "failed to start replace on '{}'",
-                self.mount_point.display()
-            )
-        })? {
+        match replace_start(fd, source, &tgtdev, self.redundancy_only)
+            .with_context(|| {
+                format!(
+                    "failed to start replace on '{}'",
+                    self.mount_point.display()
+                )
+            })? {
             Ok(()) => {}
             Err(e) => bail!("{e}"),
         }
@@ -162,7 +171,8 @@ impl Runnable for ReplaceStartCommand {
                 let pct = status.progress_1000 as f64 / 10.0;
                 eprint!(
                     "\r{pct:.1}% done, {} write errs, {} uncorr. read errs",
-                    status.num_write_errors, status.num_uncorrectable_read_errors,
+                    status.num_write_errors,
+                    status.num_uncorrectable_read_errors,
                 );
 
                 if status.state != ReplaceState::Started {
@@ -175,7 +185,10 @@ impl Runnable for ReplaceStartCommand {
                             bail!("replace was cancelled");
                         }
                         _ => {
-                            bail!("replace ended in unexpected state: {:?}", status.state);
+                            bail!(
+                                "replace ended in unexpected state: {:?}",
+                                status.state
+                            );
                         }
                     }
                     break;
@@ -186,4 +199,3 @@ impl Runnable for ReplaceStartCommand {
         Ok(())
     }
 }
-

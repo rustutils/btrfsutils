@@ -49,9 +49,9 @@ pub struct ReceiveCommand {
 impl Runnable for ReceiveCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         let input: Box<dyn io::Read> = match &self.file {
-            Some(path) => Box::new(
-                File::open(path).with_context(|| format!("cannot open '{}'", path.display()))?,
-            ),
+            Some(path) => Box::new(File::open(path).with_context(|| {
+                format!("cannot open '{}'", path.display())
+            })?),
             None => Box::new(io::stdin()),
         };
 
@@ -59,10 +59,9 @@ impl Runnable for ReceiveCommand {
             return dump::dump_stream(input);
         }
 
-        let mount = self
-            .mount
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("mount point is required (unless --dump)"))?;
+        let mount = self.mount.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("mount point is required (unless --dump)")
+        })?;
 
         if !mount.is_dir() {
             bail!("'{}' is not a directory", mount.display());
@@ -75,16 +74,17 @@ impl Runnable for ReceiveCommand {
         let dest = if self.chroot {
             // Confine the process to the mount point. After this, all paths
             // in the stream are resolved relative to "/".
-            let mount_cstr = std::ffi::CString::new(
-                mount
-                    .to_str()
-                    .ok_or_else(|| anyhow::anyhow!("mount path is not valid UTF-8"))?,
-            )
-            .context("mount path contains null byte")?;
+            let mount_cstr =
+                std::ffi::CString::new(mount.to_str().ok_or_else(|| {
+                    anyhow::anyhow!("mount path is not valid UTF-8")
+                })?)
+                .context("mount path contains null byte")?;
 
             if unsafe { nix::libc::chroot(mount_cstr.as_ptr()) } != 0 {
-                return Err(std::io::Error::last_os_error())
-                    .context(format!("failed to chroot to '{}'", mount.display()));
+                return Err(std::io::Error::last_os_error()).context(format!(
+                    "failed to chroot to '{}'",
+                    mount.display()
+                ));
             }
             if unsafe { nix::libc::chdir(c"/".as_ptr()) } != 0 {
                 return Err(std::io::Error::last_os_error())
@@ -143,7 +143,8 @@ impl Runnable for ReceiveCommand {
                 Ok(Some(cmd)) => {
                     if matches!(
                         &cmd,
-                        StreamCommand::Subvol { .. } | StreamCommand::Snapshot { .. }
+                        StreamCommand::Subvol { .. }
+                            | StreamCommand::Snapshot { .. }
                     ) {
                         received_subvol = true;
                     }

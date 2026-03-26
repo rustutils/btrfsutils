@@ -64,14 +64,17 @@ impl Runnable for FilesystemResizeCommand {
             anyhow::bail!("--enqueue is not yet implemented");
         }
 
-        let args = parse_resize_args(&self.size)
-            .with_context(|| format!("invalid resize argument: '{}'", self.size))?;
+        let args = parse_resize_args(&self.size).with_context(|| {
+            format!("invalid resize argument: '{}'", self.size)
+        })?;
 
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
 
-        resize(file.as_fd(), args)
-            .with_context(|| format!("resize failed on '{}'", self.path.display()))?;
+        resize(file.as_fd(), args).with_context(|| {
+            format!("resize failed on '{}'", self.path.display())
+        })?;
 
         Ok(())
     }

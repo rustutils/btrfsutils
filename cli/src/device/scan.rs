@@ -28,21 +28,30 @@ impl Runnable for DeviceScanCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         if self.forget {
             if self.devices.is_empty() {
-                device_forget(None).context("failed to unregister stale devices from kernel")?;
+                device_forget(None).context(
+                    "failed to unregister stale devices from kernel",
+                )?;
                 println!("unregistered all stale devices");
             } else {
                 let mut had_error = false;
                 for device in &self.devices {
                     match forget_one(device) {
-                        Ok(()) => println!("unregistered '{}'", device.display()),
+                        Ok(()) => {
+                            println!("unregistered '{}'", device.display())
+                        }
                         Err(e) => {
-                            eprintln!("error unregistering '{}': {e}", device.display());
+                            eprintln!(
+                                "error unregistering '{}': {e}",
+                                device.display()
+                            );
                             had_error = true;
                         }
                     }
                 }
                 if had_error {
-                    anyhow::bail!("one or more devices could not be unregistered");
+                    anyhow::bail!(
+                        "one or more devices could not be unregistered"
+                    );
                 }
             }
         } else if self.devices.is_empty() {
@@ -53,7 +62,10 @@ impl Runnable for DeviceScanCommand {
                 match scan_one(device) {
                     Ok(()) => println!("registered '{}'", device.display()),
                     Err(e) => {
-                        eprintln!("error registering '{}': {e}", device.display());
+                        eprintln!(
+                            "error registering '{}': {e}",
+                            device.display()
+                        );
                         had_error = true;
                     }
                 }
@@ -109,8 +121,8 @@ fn scan_all() -> Result<()> {
 /// /proc/partitions has a two-line header followed by lines of the form:
 ///   major minor #blocks name
 fn block_devices_from_proc_partitions() -> Result<Vec<PathBuf>> {
-    let contents =
-        fs::read_to_string("/proc/partitions").context("failed to read /proc/partitions")?;
+    let contents = fs::read_to_string("/proc/partitions")
+        .context("failed to read /proc/partitions")?;
 
     let mut devices = Vec::new();
     for line in contents.lines().skip(2) {
@@ -124,22 +136,27 @@ fn block_devices_from_proc_partitions() -> Result<Vec<PathBuf>> {
 }
 
 fn scan_one(device: &PathBuf) -> Result<()> {
-    let path_str = device
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("path is not valid UTF-8: '{}'", device.display()))?;
-    let cpath = CString::new(path_str)
-        .with_context(|| format!("path contains a null byte: '{}'", device.display()))?;
-    device_scan(&cpath).with_context(|| format!("failed to register '{}'", device.display()))?;
+    let path_str = device.to_str().ok_or_else(|| {
+        anyhow::anyhow!("path is not valid UTF-8: '{}'", device.display())
+    })?;
+    let cpath = CString::new(path_str).with_context(|| {
+        format!("path contains a null byte: '{}'", device.display())
+    })?;
+    device_scan(&cpath).with_context(|| {
+        format!("failed to register '{}'", device.display())
+    })?;
     Ok(())
 }
 
 fn forget_one(device: &PathBuf) -> Result<()> {
-    let path_str = device
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("path is not valid UTF-8: '{}'", device.display()))?;
-    let cpath = CString::new(path_str)
-        .with_context(|| format!("path contains a null byte: '{}'", device.display()))?;
-    device_forget(Some(&cpath))
-        .with_context(|| format!("failed to unregister '{}'", device.display()))?;
+    let path_str = device.to_str().ok_or_else(|| {
+        anyhow::anyhow!("path is not valid UTF-8: '{}'", device.display())
+    })?;
+    let cpath = CString::new(path_str).with_context(|| {
+        format!("path contains a null byte: '{}'", device.display())
+    })?;
+    device_forget(Some(&cpath)).with_context(|| {
+        format!("failed to unregister '{}'", device.display())
+    })?;
     Ok(())
 }

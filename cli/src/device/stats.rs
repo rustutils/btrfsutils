@@ -30,8 +30,9 @@ pub struct DeviceStatsCommand {
 
 impl Runnable for DeviceStatsCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         let fd = file.as_fd();
 
         let fs = filesystem_info(fd).with_context(|| {
@@ -41,8 +42,9 @@ impl Runnable for DeviceStatsCommand {
             )
         })?;
 
-        let devices = device_info_all(fd, &fs)
-            .with_context(|| format!("failed to get device info for '{}'", self.path.display()))?;
+        let devices = device_info_all(fd, &fs).with_context(|| {
+            format!("failed to get device info for '{}'", self.path.display())
+        })?;
 
         if devices.is_empty() {
             anyhow::bail!("no devices found for '{}'", self.path.display());
@@ -51,12 +53,13 @@ impl Runnable for DeviceStatsCommand {
         let mut any_nonzero = false;
 
         for dev in &devices {
-            let stats = device_stats(fd, dev.devid, self.reset).with_context(|| {
-                format!(
-                    "failed to get stats for device {} ({})",
-                    dev.devid, dev.path
-                )
-            })?;
+            let stats =
+                device_stats(fd, dev.devid, self.reset).with_context(|| {
+                    format!(
+                        "failed to get stats for device {} ({})",
+                        dev.devid, dev.path
+                    )
+                })?;
 
             print_stats(&dev.path, &stats);
 

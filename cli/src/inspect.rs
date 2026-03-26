@@ -2,27 +2,22 @@ use crate::{Format, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
-pub mod dump_super;
-pub mod dump_tree;
-pub mod inode_resolve;
-pub mod list_chunks;
-pub mod logical_resolve;
-pub mod map_swapfile;
-pub mod min_dev_size;
-pub mod rootid;
-pub mod subvolid_resolve;
-pub mod tree_stats;
+mod dump_super;
+mod dump_tree;
+mod inode_resolve;
+mod list_chunks;
+mod logical_resolve;
+mod map_swapfile;
+mod min_dev_size;
+mod rootid;
+mod subvolid_resolve;
+mod tree_stats;
 
-use dump_super::DumpSuperCommand;
-use dump_tree::DumpTreeCommand;
-use inode_resolve::InodeResolveCommand;
-use list_chunks::ListChunksCommand;
-use logical_resolve::LogicalResolveCommand;
-use map_swapfile::MapSwapfileCommand;
-use min_dev_size::MinDevSizeCommand;
-use rootid::RootidCommand;
-use subvolid_resolve::SubvolidResolveCommand;
-use tree_stats::TreeStatsCommand;
+pub use self::{
+    dump_super::*, dump_tree::*, inode_resolve::*, list_chunks::*,
+    logical_resolve::*, map_swapfile::*, min_dev_size::*, rootid::*,
+    subvolid_resolve::*, tree_stats::*,
+};
 
 /// Query various internal filesystem information.
 ///

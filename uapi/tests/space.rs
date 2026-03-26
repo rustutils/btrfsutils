@@ -1,7 +1,7 @@
 use crate::common::{single_mount, write_test_data};
 use btrfs_uapi::{
-    space::{BlockGroupFlags, space_info},
     filesystem::sync,
+    space::{BlockGroupFlags, space_info},
 };
 
 /// space_info should return at least Data and Metadata entries with

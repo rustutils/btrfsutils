@@ -12,9 +12,10 @@
 use crate::{
     field_size,
     raw::{
-        BTRFS_BLOCK_GROUP_ITEM_KEY, BTRFS_CHUNK_ITEM_KEY, BTRFS_CHUNK_TREE_OBJECTID,
-        BTRFS_EXTENT_TREE_OBJECTID, BTRFS_FIRST_CHUNK_TREE_OBJECTID, btrfs_block_group_item,
-        btrfs_chunk, btrfs_stripe,
+        BTRFS_BLOCK_GROUP_ITEM_KEY, BTRFS_CHUNK_ITEM_KEY,
+        BTRFS_CHUNK_TREE_OBJECTID, BTRFS_EXTENT_TREE_OBJECTID,
+        BTRFS_FIRST_CHUNK_TREE_OBJECTID, btrfs_block_group_item, btrfs_chunk,
+        btrfs_stripe,
     },
     space::BlockGroupFlags,
     tree_search::{SearchKey, tree_search},
@@ -39,9 +40,11 @@ pub struct DeviceAllocation {
 }
 
 const CHUNK_LENGTH_OFF: usize = std::mem::offset_of!(btrfs_chunk, length);
-const CHUNK_STRIPE_LEN_OFF: usize = std::mem::offset_of!(btrfs_chunk, stripe_len);
+const CHUNK_STRIPE_LEN_OFF: usize =
+    std::mem::offset_of!(btrfs_chunk, stripe_len);
 const CHUNK_TYPE_OFF: usize = std::mem::offset_of!(btrfs_chunk, type_);
-const CHUNK_NUM_STRIPES_OFF: usize = std::mem::offset_of!(btrfs_chunk, num_stripes);
+const CHUNK_NUM_STRIPES_OFF: usize =
+    std::mem::offset_of!(btrfs_chunk, num_stripes);
 const CHUNK_FIRST_STRIPE_OFF: usize = std::mem::offset_of!(btrfs_chunk, stripe);
 
 const STRIPE_SIZE: usize = std::mem::size_of::<btrfs_stripe>();
@@ -87,7 +90,9 @@ pub struct ChunkEntry {
 /// struct followed by `num_stripes - 1` additional `btrfs_stripe` structs.
 /// The `stripe_len` field of each stripe is accumulated per `(devid, flags)`
 /// to produce the physical byte counts in the returned list.
-pub fn device_chunk_allocations(fd: BorrowedFd) -> nix::Result<Vec<DeviceAllocation>> {
+pub fn device_chunk_allocations(
+    fd: BorrowedFd,
+) -> nix::Result<Vec<DeviceAllocation>> {
     let mut allocs: Vec<DeviceAllocation> = Vec::new();
 
     tree_search(
@@ -175,7 +180,9 @@ fn block_group_used(fd: BorrowedFd, logical_start: u64) -> Option<u64> {
         },
         |_hdr, data| {
             let used_off = std::mem::offset_of!(btrfs_block_group_item, used);
-            if data.len() >= used_off + field_size!(btrfs_block_group_item, used) {
+            if data.len()
+                >= used_off + field_size!(btrfs_block_group_item, used)
+            {
                 used = Some(read_le_u64(data, used_off));
             }
             Ok(())
@@ -189,7 +196,9 @@ fn block_group_used(fd: BorrowedFd, logical_start: u64) -> Option<u64> {
 ///
 /// Returns `(stripe_len, flags, devids)` on success, or `None` if the buffer
 /// is too small to be a valid chunk item.
-fn parse_chunk(data: &[u8]) -> Option<(u64, BlockGroupFlags, impl Iterator<Item = u64> + '_)> {
+fn parse_chunk(
+    data: &[u8],
+) -> Option<(u64, BlockGroupFlags, impl Iterator<Item = u64> + '_)> {
     if data.len() < CHUNK_MIN_LEN {
         return None;
     }
@@ -219,7 +228,9 @@ fn parse_chunk(data: &[u8]) -> Option<(u64, BlockGroupFlags, impl Iterator<Item 
 /// physical_start)` pairs for each stripe.
 ///
 /// Returns `None` if the buffer is too small to be a valid chunk item.
-fn parse_chunk_stripes(data: &[u8]) -> Option<impl Iterator<Item = (u64, u64)> + '_> {
+fn parse_chunk_stripes(
+    data: &[u8],
+) -> Option<impl Iterator<Item = (u64, u64)> + '_> {
     if data.len() < CHUNK_MIN_LEN {
         return None;
     }
@@ -242,7 +253,12 @@ fn parse_chunk_stripes(data: &[u8]) -> Option<impl Iterator<Item = (u64, u64)> +
 
 /// Add `stripe_len` bytes to the `(devid, flags)` entry, creating it if
 /// it does not yet exist.
-fn accumulate(allocs: &mut Vec<DeviceAllocation>, devid: u64, flags: BlockGroupFlags, bytes: u64) {
+fn accumulate(
+    allocs: &mut Vec<DeviceAllocation>,
+    devid: u64,
+    flags: BlockGroupFlags,
+    bytes: u64,
+) {
     if let Some(entry) = allocs
         .iter_mut()
         .find(|a| a.devid == devid && a.flags == flags)
@@ -279,10 +295,12 @@ mod tests {
     ) -> Vec<u8> {
         let total = CHUNK_FIRST_STRIPE_OFF + stripes.len() * STRIPE_SIZE;
         let mut buf = vec![0u8; total];
-        buf[CHUNK_LENGTH_OFF..CHUNK_LENGTH_OFF + 8].copy_from_slice(&length.to_le_bytes());
+        buf[CHUNK_LENGTH_OFF..CHUNK_LENGTH_OFF + 8]
+            .copy_from_slice(&length.to_le_bytes());
         buf[CHUNK_STRIPE_LEN_OFF..CHUNK_STRIPE_LEN_OFF + 8]
             .copy_from_slice(&stripe_len.to_le_bytes());
-        buf[CHUNK_TYPE_OFF..CHUNK_TYPE_OFF + 8].copy_from_slice(&type_bits.to_le_bytes());
+        buf[CHUNK_TYPE_OFF..CHUNK_TYPE_OFF + 8]
+            .copy_from_slice(&type_bits.to_le_bytes());
         buf[CHUNK_NUM_STRIPES_OFF..CHUNK_NUM_STRIPES_OFF + 2]
             .copy_from_slice(&num_stripes.to_le_bytes());
         for (i, &(devid, offset)) in stripes.iter().enumerate() {
@@ -324,8 +342,15 @@ mod tests {
 
     #[test]
     fn parse_chunk_two_stripes() {
-        let flags_bits = (BlockGroupFlags::DATA | BlockGroupFlags::RAID1).bits();
-        let buf = build_chunk_buf(1 << 30, 1 << 30, flags_bits, 2, &[(1, 0), (2, 4096)]);
+        let flags_bits =
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID1).bits();
+        let buf = build_chunk_buf(
+            1 << 30,
+            1 << 30,
+            flags_bits,
+            2,
+            &[(1, 0), (2, 4096)],
+        );
         let (_, flags, devids) = parse_chunk(&buf).unwrap();
         assert_eq!(flags, BlockGroupFlags::DATA | BlockGroupFlags::RAID1);
         let devids: Vec<u64> = devids.collect();
@@ -364,8 +389,10 @@ mod tests {
 
     #[test]
     fn parse_chunk_stripes_returns_devid_and_offset() {
-        let buf = build_chunk_buf(1 << 20, 1 << 20, 0, 2, &[(3, 8192), (7, 16384)]);
-        let stripes: Vec<(u64, u64)> = parse_chunk_stripes(&buf).unwrap().collect();
+        let buf =
+            build_chunk_buf(1 << 20, 1 << 20, 0, 2, &[(3, 8192), (7, 16384)]);
+        let stripes: Vec<(u64, u64)> =
+            parse_chunk_stripes(&buf).unwrap().collect();
         assert_eq!(stripes, vec![(3, 8192), (7, 16384)]);
     }
 

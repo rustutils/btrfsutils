@@ -16,8 +16,9 @@ pub struct FilesystemCommitStatsCommand {
 
 impl Runnable for FilesystemCommitStatsCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
 
         let info = filesystem_info(file.as_fd()).with_context(|| {
             format!(

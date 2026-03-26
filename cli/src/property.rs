@@ -14,9 +14,7 @@ mod get;
 mod list;
 mod set;
 
-use get::PropertyGetCommand;
-use list::PropertyListCommand;
-use set::PropertySetCommand;
+pub use self::{get::*, list::*, set::*};
 
 /// Object type for property operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -115,16 +113,16 @@ fn probe_object_attrs(path: &Path) -> ObjectAttrs {
                 ino: 0,
                 is_subvolume: false,
                 is_fs_root: false,
-            }
+            };
         }
     };
 
     let is_block_device = metadata.file_type().is_block_device();
     let ino = metadata.ino();
 
-    let is_subvolume = File::open(path)
-        .ok()
-        .is_some_and(|f| btrfs_uapi::subvolume::subvolume_info(f.as_fd()).is_ok());
+    let is_subvolume = File::open(path).ok().is_some_and(|f| {
+        btrfs_uapi::subvolume::subvolume_info(f.as_fd()).is_ok()
+    });
 
     let is_fs_root = is_filesystem_root(path).unwrap_or(false);
 
@@ -165,7 +163,9 @@ fn property_names(obj_type: PropertyObjectType) -> &'static [&'static str] {
     match obj_type {
         PropertyObjectType::Inode => &["compression"],
         PropertyObjectType::Subvol => &["ro"],
-        PropertyObjectType::Filesystem | PropertyObjectType::Device => &["label"],
+        PropertyObjectType::Filesystem | PropertyObjectType::Device => {
+            &["label"]
+        }
     }
 }
 
@@ -290,10 +290,7 @@ mod tests {
 
     #[test]
     fn property_names_filesystem() {
-        assert_eq!(
-            property_names(PropertyObjectType::Filesystem),
-            &["label"]
-        );
+        assert_eq!(property_names(PropertyObjectType::Filesystem), &["label"]);
     }
 
     #[test]
@@ -342,7 +339,10 @@ mod tests {
 
     #[test]
     fn description_known_properties() {
-        assert_eq!(property_description("ro"), "read-only status of a subvolume");
+        assert_eq!(
+            property_description("ro"),
+            "read-only status of a subvolume"
+        );
         assert_eq!(property_description("label"), "label of the filesystem");
         assert_eq!(
             property_description("compression"),

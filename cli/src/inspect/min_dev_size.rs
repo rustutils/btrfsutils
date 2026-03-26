@@ -20,17 +20,21 @@ pub struct MinDevSizeCommand {
 
 impl Runnable for MinDevSizeCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
 
-        let size =
-            btrfs_uapi::device::device_min_size(file.as_fd(), self.devid).with_context(|| {
-                format!(
-                    "failed to determine min device size for devid {} on '{}'",
-                    self.devid,
-                    self.path.display()
-                )
-            })?;
+        let size = btrfs_uapi::device::device_min_size(
+            file.as_fd(),
+            self.devid,
+        )
+        .with_context(|| {
+            format!(
+                "failed to determine min device size for devid {} on '{}'",
+                self.devid,
+                self.path.display()
+            )
+        })?;
 
         println!("{} bytes ({})", size, human_bytes(size));
         Ok(())

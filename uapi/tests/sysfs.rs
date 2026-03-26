@@ -1,8 +1,7 @@
 use crate::common::{single_mount, write_test_data};
 use btrfs_uapi::{
-    filesystem::filesystem_info,
+    filesystem::{filesystem_info, sync},
     quota::{quota_disable, quota_enable, quota_rescan_wait},
-    filesystem::sync,
     sysfs::SysfsBtrfs,
 };
 
@@ -27,7 +26,8 @@ fn sysfs_read_info() {
         "sysfs sectorsize should match filesystem_info",
     );
 
-    let metadata_uuid = sysfs.metadata_uuid().expect("sysfs metadata_uuid failed");
+    let metadata_uuid =
+        sysfs.metadata_uuid().expect("sysfs metadata_uuid failed");
     // metadata_uuid equals fsid when no separate metadata UUID is set.
     assert_eq!(
         metadata_uuid, info.uuid,

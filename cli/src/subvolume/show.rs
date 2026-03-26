@@ -27,7 +27,12 @@ pub struct SubvolumeShowCommand {
     pub rootid: Option<u64>,
 
     /// Look up subvolume by its UUID instead of path
-    #[clap(short = 'u', long = "uuid", value_name = "UUID", conflicts_with = "rootid")]
+    #[clap(
+        short = 'u',
+        long = "uuid",
+        value_name = "UUID",
+        conflicts_with = "rootid"
+    )]
     pub uuid: Option<ParsedUuid>,
 
     /// Path to a subvolume or any file within it
@@ -36,8 +41,9 @@ pub struct SubvolumeShowCommand {
 
 impl Runnable for SubvolumeShowCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
 
         let info = if let Some(rootid) = self.rootid {
             subvolume_info_by_id(file.as_fd(), rootid).with_context(|| {
@@ -46,13 +52,18 @@ impl Runnable for SubvolumeShowCommand {
         } else if let Some(ref uuid) = self.uuid {
             let inner = &**uuid;
             let rootid = subvolume_search_by_uuid(file.as_fd(), inner)
-                .with_context(|| format!("failed to find subvolume with UUID {inner}"))?;
+                .with_context(|| {
+                    format!("failed to find subvolume with UUID {inner}")
+                })?;
             subvolume_info_by_id(file.as_fd(), rootid).with_context(|| {
                 format!("failed to get subvolume info for UUID {inner}")
             })?
         } else {
             subvolume_info(file.as_fd()).with_context(|| {
-                format!("failed to get subvolume info for '{}'", self.path.display())
+                format!(
+                    "failed to get subvolume info for '{}'",
+                    self.path.display()
+                )
             })?
         };
 

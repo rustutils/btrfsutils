@@ -25,20 +25,26 @@ pub struct QuotaRescanCommand {
 
 impl Runnable for QuotaRescanCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path)
-            .with_context(|| format!("failed to open '{}'", self.path.display()))?;
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
         let fd = file.as_fd();
 
         if self.status {
-            let st = btrfs_uapi::quota::quota_rescan_status(fd).with_context(|| {
-                format!(
-                    "failed to get quota rescan status on '{}'",
-                    self.path.display()
-                )
-            })?;
+            let st = btrfs_uapi::quota::quota_rescan_status(fd).with_context(
+                || {
+                    format!(
+                        "failed to get quota rescan status on '{}'",
+                        self.path.display()
+                    )
+                },
+            )?;
 
             if st.running {
-                println!("rescan operation running (current key {})", st.progress);
+                println!(
+                    "rescan operation running (current key {})",
+                    st.progress
+                );
             } else {
                 println!("no rescan operation in progress");
             }
@@ -68,7 +74,10 @@ impl Runnable for QuotaRescanCommand {
             }
             Err(e) => {
                 return Err(e).with_context(|| {
-                    format!("failed to start quota rescan on '{}'", self.path.display())
+                    format!(
+                        "failed to start quota rescan on '{}'",
+                        self.path.display()
+                    )
                 });
             }
         }
