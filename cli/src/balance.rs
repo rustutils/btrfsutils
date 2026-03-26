@@ -4,6 +4,7 @@ use clap::Parser;
 use std::{fs::File, path::PathBuf};
 
 mod cancel;
+pub mod filters;
 mod pause;
 mod resume;
 mod start;

@@ -1,7 +1,7 @@
-use super::open_path;
+use super::{filters::parse_filters, open_path};
 use crate::{Format, Runnable};
 use anyhow::{Context, Result};
-use btrfs_uapi::balance::{BalanceArgs, BalanceFlags, balance};
+use btrfs_uapi::balance::{BalanceFlags, balance};
 use clap::Parser;
 use nix::errno::Errno;
 use std::{os::unix::io::AsFd, path::PathBuf, thread, time::Duration};
@@ -61,33 +61,32 @@ impl Runnable for BalanceStartCommand {
 
         let mut flags = BalanceFlags::empty();
 
-        // TODO: parse filter strings into BalanceArgs (e.g. "usage=50,profiles=raid1")
-        let data_args: Option<BalanceArgs> = if self.data_filters.is_some() {
-            flags |= BalanceFlags::DATA;
-            Some(BalanceArgs::new())
-        } else {
-            None
+        let data_args = match &self.data_filters {
+            Some(f) => {
+                flags |= BalanceFlags::DATA;
+                Some(parse_filters(f).context("invalid data filter")?)
+            }
+            None => None,
         };
 
         // When metadata is balanced, system is always included with the same
         // args, matching the behaviour of the C tool.
-        let meta_args: Option<BalanceArgs> = if self.metadata_filters.is_some() {
-            flags |= BalanceFlags::METADATA | BalanceFlags::SYSTEM;
-            Some(BalanceArgs::new())
-        } else {
-            None
+        let meta_args = match &self.metadata_filters {
+            Some(f) => {
+                flags |= BalanceFlags::METADATA | BalanceFlags::SYSTEM;
+                Some(parse_filters(f).context("invalid metadata filter")?)
+            }
+            None => None,
         };
 
         // System args: explicitly requested, OR copied from meta if meta was
         // given but system was not explicitly specified (see C reference).
-        let sys_args: Option<BalanceArgs> = if self.system_filters.is_some() {
-            flags |= BalanceFlags::SYSTEM;
-            Some(BalanceArgs::new())
-        } else {
-            // Already handled by the metadata branch above; pass None here so
-            // balance() leaves the sys field zeroed (same as a default-constructed
-            // BalanceArgs since flags on the copied args are what matters).
-            meta_args.clone()
+        let sys_args = match &self.system_filters {
+            Some(f) => {
+                flags |= BalanceFlags::SYSTEM;
+                Some(parse_filters(f).context("invalid system filter")?)
+            }
+            None => meta_args.clone(),
         };
 
         if !has_filters {
