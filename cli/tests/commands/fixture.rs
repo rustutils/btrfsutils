@@ -321,11 +321,66 @@ fn property_get_ro_writable() {
 
 #[test]
 #[ignore = "requires elevated privileges"]
+fn property_get_label() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs property get -t filesystem <MOUNT> label",
+        btrfs_ok(&["property", "get", "-t", "filesystem", mp, "label"])
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn property_get_compression_file() {
+    let (_td, mnt) = common::fixture_mount();
+    let file = format!("{}/toplevel.txt", mnt.path().to_str().unwrap());
+    snap!(
+        "btrfs property get <MOUNT>/toplevel.txt compression",
+        btrfs_ok(&["property", "get", &file, "compression"])
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn property_get_all_inode() {
+    let (_td, mnt) = common::fixture_mount();
+    let file = format!("{}/toplevel.txt", mnt.path().to_str().unwrap());
+    snap!(
+        "btrfs property get <MOUNT>/toplevel.txt (all)",
+        btrfs_ok(&["property", "get", &file])
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
 fn property_list_subvol() {
     let (_td, mnt) = common::fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs property list -t subvol <MOUNT>/subvol1",
         btrfs_ok(&["property", "list", "-t", "subvol", &subvol])
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn property_list_inode() {
+    let (_td, mnt) = common::fixture_mount();
+    let file = format!("{}/toplevel.txt", mnt.path().to_str().unwrap());
+    snap!(
+        "btrfs property list <MOUNT>/toplevel.txt",
+        btrfs_ok(&["property", "list", &file])
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn property_list_filesystem() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs property list -t filesystem <MOUNT>",
+        btrfs_ok(&["property", "list", "-t", "filesystem", mp])
     );
 }

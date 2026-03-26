@@ -247,6 +247,94 @@ fn property_get_set_ro() {
     assert!(out.contains("false"), "expected ro=false:\n{out}");
 }
 
+#[test]
+#[ignore = "requires elevated privileges"]
+fn property_set_compression() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    let file = format!("{mp}/comptest.txt");
+    std::fs::write(&file, "hello").unwrap();
+
+    // Set compression to zlib
+    btrfs_ok(&["property", "set", &file, "compression", "zlib"]);
+    let out = btrfs_ok(&["property", "get", &file, "compression"]);
+    assert!(out.contains("zlib"), "expected compression=zlib:\n{out}");
+
+    // Set compression to lzo
+    btrfs_ok(&["property", "set", &file, "compression", "lzo"]);
+    let out = btrfs_ok(&["property", "get", &file, "compression"]);
+    assert!(out.contains("lzo"), "expected compression=lzo:\n{out}");
+
+    // Clear compression
+    btrfs_ok(&["property", "set", &file, "compression", ""]);
+    let out = btrfs_ok(&["property", "get", &file, "compression"]);
+    assert!(!out.contains("compression="), "expected no compression:\n{out}");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn property_set_label() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    btrfs_ok(&["property", "set", "-t", "filesystem", mp, "label", "newlabel"]);
+    let out =
+        btrfs_ok(&["property", "get", "-t", "filesystem", mp, "label"]);
+    assert!(out.contains("newlabel"), "expected label=newlabel:\n{out}");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn property_set_ro_invalid_value() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    let subvol = format!("{mp}/badval");
+
+    btrfs_ok(&["subvolume", "create", &subvol]);
+    let (_stdout, stderr, code) =
+        btrfs(&["property", "set", "-t", "subvol", &subvol, "ro", "yes"]);
+    assert_ne!(code, 0, "expected failure for invalid ro value");
+    assert!(
+        stderr.contains("invalid value"),
+        "expected 'invalid value' in stderr:\n{stderr}"
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn property_wrong_property_for_type() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    let file = format!("{mp}/wrongprop.txt");
+    std::fs::write(&file, "test").unwrap();
+
+    // "ro" is not valid on an inode
+    let (_stdout, stderr, code) =
+        btrfs(&["property", "get", &file, "ro"]);
+    assert_ne!(code, 0, "expected failure for wrong property type");
+    assert!(
+        stderr.contains("not applicable"),
+        "expected 'not applicable' in stderr:\n{stderr}"
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn property_ro_no_change_when_already_set() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    let subvol = format!("{mp}/nochange");
+
+    btrfs_ok(&["subvolume", "create", &subvol]);
+
+    // Setting ro=false on an already-rw subvolume should succeed (no-op)
+    btrfs_ok(&["property", "set", "-t", "subvol", &subvol, "ro", "false"]);
+    let out = btrfs_ok(&["property", "get", "-t", "subvol", &subvol, "ro"]);
+    assert!(out.contains("false"), "expected ro=false:\n{out}");
+}
+
 // ── receive --chroot ─────────────────────────────────────────────────
 
 #[test]

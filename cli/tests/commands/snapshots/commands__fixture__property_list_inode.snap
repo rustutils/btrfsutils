@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs property list <MOUNT>/toplevel.txt
+expression: "btrfs_ok(&[\"property\", \"list\", &file])"
+---
+compression         compression algorithm for the file or directory

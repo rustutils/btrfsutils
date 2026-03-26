@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs property get -t filesystem <MOUNT> label
+expression: "btrfs_ok(&[\"property\", \"get\", \"-t\", \"filesystem\", mp, \"label\"])"
+---
+label=test-fixture

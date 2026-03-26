@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs property get <MOUNT>/toplevel.txt compression
+expression: "btrfs_ok(&[\"property\", \"get\", &file, \"compression\"])"
+---
+
