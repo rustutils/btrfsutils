@@ -22,5 +22,6 @@ pub mod space;
 pub mod subvolume;
 pub mod sync;
 pub mod sysfs;
+pub mod verity;
 pub mod tree_search;
 pub(crate) mod util;

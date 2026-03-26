@@ -1,6 +1,6 @@
 ---
 source: cli/tests/arguments.rs
-expression: "parse(&[\"btrfs\", \"subvolume\", \"delete\", \"/mnt/subvol\"])"
+expression: "parse(&[\"btrfs\", \"subvolume\", \"delete\", \"-i\", \"256\", \"/mnt\"])"
 ---
 Arguments {
     global: GlobalOptions {
@@ -16,11 +16,13 @@ Arguments {
                 SubvolumeDeleteCommand {
                     commit_after: false,
                     commit_each: false,
-                    subvolid: None,
+                    subvolid: Some(
+                        256,
+                    ),
                     recursive: false,
                     verbose: false,
                     paths: [
-                        "/mnt/subvol",
+                        "/mnt",
                     ],
                 },
             ),

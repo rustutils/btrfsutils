@@ -1,0 +1,5 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse_err(&[\"btrfs\", \"subvolume\", \"delete\", \"-c\", \"-C\", \"/mnt/subvol\"])"
+---
+error: the argument '--commit-after' cannot be used with '--commit-each'

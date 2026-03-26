@@ -55,14 +55,6 @@ pub struct FilesystemDefragCommand {
 
 impl Runnable for FilesystemDefragCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        if self.recursive {
-            anyhow::bail!("--recursive is not yet implemented");
-        }
-
-        if self.step.is_some() {
-            anyhow::bail!("--step is not yet implemented");
-        }
-
         let compress = self.compress.as_ref().map(|ct| CompressSpec {
             compress_type: ct.unwrap_or(CompressType::Zlib),
             level: self.compress_level,
@@ -87,15 +79,158 @@ impl Runnable for FilesystemDefragCommand {
             args = args.compress(spec);
         }
 
+        let mut errors = 0u64;
+
         for path in &self.paths {
-            if self.verbose {
-                println!("{}", path.display());
+            let meta = std::fs::symlink_metadata(path)
+                .with_context(|| format!("cannot access '{}'", path.display()))?;
+
+            if self.recursive && meta.is_dir() {
+                errors += self.defrag_recursive(path, &args)?;
+            } else {
+                if let Err(e) = self.defrag_one(path, &args) {
+                    eprintln!("error: {e:#}");
+                    errors += 1;
+                }
             }
-            let file =
-                File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
-            defrag_range(file.as_fd(), &args)
+        }
+
+        if errors > 0 {
+            anyhow::bail!("{errors} error(s) during defragmentation");
+        }
+
+        Ok(())
+    }
+}
+
+impl FilesystemDefragCommand {
+    /// Defragment a single file.
+    fn defrag_one(&self, path: &std::path::Path, args: &DefragRangeArgs) -> Result<()> {
+        if self.verbose {
+            println!("{}", path.display());
+        }
+        let file =
+            File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
+
+        if let Some(step) = self.step {
+            self.defrag_in_steps(&file, path, args, step)?;
+        } else {
+            defrag_range(file.as_fd(), args)
                 .with_context(|| format!("defrag failed on '{}'", path.display()))?;
         }
+        Ok(())
+    }
+
+    /// Walk a directory tree and defragment every regular file.
+    ///
+    /// Does not follow symlinks and does not cross filesystem boundaries,
+    /// matching the C reference's `nftw(path, cb, 10, FTW_MOUNT | FTW_PHYS)`.
+    fn defrag_recursive(&self, dir: &std::path::Path, args: &DefragRangeArgs) -> Result<u64> {
+        use std::os::unix::fs::MetadataExt;
+
+        let dir_dev = std::fs::metadata(dir)
+            .with_context(|| format!("cannot stat '{}'", dir.display()))?
+            .dev();
+
+        let mut errors = 0u64;
+        let mut stack = vec![dir.to_path_buf()];
+
+        while let Some(current) = stack.pop() {
+            let entries = match std::fs::read_dir(&current) {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("error: cannot read '{}': {e}", current.display());
+                    errors += 1;
+                    continue;
+                }
+            };
+
+            for entry in entries {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(e) => {
+                        eprintln!("error: directory entry read failed: {e}");
+                        errors += 1;
+                        continue;
+                    }
+                };
+
+                let path = entry.path();
+
+                // Use symlink_metadata to avoid following symlinks (FTW_PHYS).
+                let meta = match std::fs::symlink_metadata(&path) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("error: cannot stat '{}': {e}", path.display());
+                        errors += 1;
+                        continue;
+                    }
+                };
+
+                if meta.is_dir() {
+                    // Don't cross filesystem boundaries (FTW_MOUNT).
+                    if meta.dev() == dir_dev {
+                        stack.push(path);
+                    }
+                } else if meta.is_file() {
+                    if let Err(e) = self.defrag_one(&path, args) {
+                        eprintln!("error: {e:#}");
+                        errors += 1;
+                    }
+                }
+                // Skip symlinks, sockets, fifos, etc.
+            }
+        }
+
+        Ok(errors)
+    }
+
+    /// Process a file in fixed-size steps, flushing between each step.
+    ///
+    /// Matches `defrag_range_in_steps` from the C reference.
+    fn defrag_in_steps(
+        &self,
+        file: &File,
+        path: &std::path::Path,
+        args: &DefragRangeArgs,
+        step: u64,
+    ) -> Result<()> {
+        use std::os::unix::fs::MetadataExt;
+
+        let file_size = file.metadata()?.size();
+        let mut offset = args.start;
+        let end = if args.len == u64::MAX {
+            u64::MAX
+        } else {
+            args.start.saturating_add(args.len)
+        };
+
+        while offset < end {
+            // Re-check file size each iteration in case it changed.
+            let current_size = file.metadata()?.size();
+            if offset >= current_size {
+                break;
+            }
+
+            let remaining = end.saturating_sub(offset).min(step);
+            let mut step_args = args.clone();
+            step_args.start = offset;
+            step_args.len = remaining;
+            // Always flush between steps.
+            step_args.flush = true;
+
+            defrag_range(file.as_fd(), &step_args)
+                .with_context(|| format!("defrag failed on '{}' at offset {offset}", path.display()))?;
+
+            offset = match offset.checked_add(step) {
+                Some(next) => next,
+                None => break, // overflow means we've covered the whole file
+            };
+        }
+
+        // If the file grew since we started, the original file_size might be
+        // less than the current size, but we only defrag through `end`.
+        let _ = file_size;
 
         Ok(())
     }

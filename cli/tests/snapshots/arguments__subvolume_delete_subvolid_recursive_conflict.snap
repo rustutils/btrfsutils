@@ -1,0 +1,5 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse_err(&[\"btrfs\", \"subvolume\", \"delete\", \"-i\", \"256\", \"-R\", \"/mnt\"])"
+---
+error: the argument '--subvolid <SUBVOLID>' cannot be used with '--recursive'

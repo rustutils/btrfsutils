@@ -130,9 +130,13 @@ impl ReceiveContext {
                 // not reliably transferable across systems.
                 Ok(())
             }
-            StreamCommand::EnableVerity { .. } => {
-                bail!("v3 ENABLE_VERITY is not yet implemented")
-            }
+            StreamCommand::EnableVerity {
+                path,
+                algorithm,
+                block_size,
+                salt,
+                sig,
+            } => self.process_enable_verity(path, *algorithm, *block_size, salt, sig),
             StreamCommand::End => unreachable!("End is handled by the caller"),
         }
     }
@@ -617,6 +621,30 @@ impl ReceiveContext {
             return Err(std::io::Error::last_os_error())
                 .with_context(|| format!("fallocate failed on '{}'", full.display()));
         }
+        Ok(())
+    }
+
+    fn process_enable_verity(
+        &mut self,
+        path: &str,
+        algorithm: u8,
+        block_size: u32,
+        salt: &[u8],
+        sig: &[u8],
+    ) -> Result<()> {
+        let full = self.full_path(path)?;
+
+        // Must close any cached write fd first: enabling verity requires no
+        // open writable file descriptors.
+        self.close_write_fd();
+
+        // fs-verity requires the file to be opened read-only.
+        let file = File::open(&full)
+            .with_context(|| format!("cannot open '{}' for verity", full.display()))?;
+
+        btrfs_uapi::verity::enable_verity(file.as_fd(), algorithm, block_size, salt, sig)
+            .with_context(|| format!("FS_IOC_ENABLE_VERITY failed on '{}'", full.display()))?;
+
         Ok(())
     }
 

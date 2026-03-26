@@ -1015,3 +1015,99 @@ fn subvolume_create_multiple() {
     assert!(out.contains("multi2"), "expected multi2:\n{out}");
     assert!(out.contains("multi3"), "expected multi3:\n{out}");
 }
+
+// ── subvolume delete flags ───────────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_delete_commit_after() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    let subvol = format!("{mp}/commitvol");
+
+    btrfs_ok(&["subvolume", "create", &subvol]);
+    btrfs_ok(&["subvolume", "delete", "-c", &subvol]);
+    assert!(!Path::new(&subvol).exists());
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_delete_commit_each() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    btrfs_ok(&["subvolume", "create", &format!("{mp}/each1")]);
+    btrfs_ok(&["subvolume", "create", &format!("{mp}/each2")]);
+
+    btrfs_ok(&[
+        "subvolume",
+        "delete",
+        "-C",
+        &format!("{mp}/each1"),
+        &format!("{mp}/each2"),
+    ]);
+    assert!(!Path::new(&format!("{mp}/each1")).exists());
+    assert!(!Path::new(&format!("{mp}/each2")).exists());
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_delete_by_subvolid() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    let subvol = format!("{mp}/idvol");
+
+    btrfs_ok(&["subvolume", "create", &subvol]);
+
+    // Get the subvolume ID from `subvolume show`.
+    let out = btrfs_ok(&["subvolume", "show", &subvol]);
+    let id = out
+        .lines()
+        .find(|l| l.trim().starts_with("Subvolume ID:"))
+        .expect("expected Subvolume ID line")
+        .split(':')
+        .nth(1)
+        .unwrap()
+        .trim();
+
+    btrfs_ok(&["subvolume", "delete", "-i", id, mp]);
+    assert!(!Path::new(&subvol).exists());
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_delete_recursive() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    let parent = format!("{mp}/parent");
+    let child = format!("{parent}/child");
+    let grandchild = format!("{child}/grandchild");
+
+    btrfs_ok(&["subvolume", "create", &parent]);
+    btrfs_ok(&["subvolume", "create", &child]);
+    btrfs_ok(&["subvolume", "create", &grandchild]);
+
+    // Without --recursive, deleting parent should fail (has nested subvols).
+    let (_stdout, _stderr, code) = btrfs(&["subvolume", "delete", &parent]);
+    assert_ne!(code, 0, "expected failure without --recursive");
+
+    // With --recursive, it should succeed.
+    btrfs_ok(&["subvolume", "delete", "-R", &parent]);
+    assert!(!Path::new(&parent).exists());
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_delete_verbose() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    let subvol = format!("{mp}/verbvol");
+
+    btrfs_ok(&["subvolume", "create", &subvol]);
+
+    let out = btrfs_ok(&["subvolume", "delete", "-v", &subvol]);
+    assert!(
+        out.contains("Delete subvolume"),
+        "expected verbose delete message:\n{out}"
+    );
+}

@@ -13,8 +13,9 @@ use crate::{
         BTRFS_DIR_ITEM_KEY, BTRFS_FIRST_FREE_OBJECTID, BTRFS_FS_TREE_OBJECTID,
         BTRFS_LAST_FREE_OBJECTID, BTRFS_ROOT_BACKREF_KEY, BTRFS_ROOT_ITEM_KEY,
         BTRFS_ROOT_TREE_DIR_OBJECTID, BTRFS_ROOT_TREE_OBJECTID, BTRFS_SUBVOL_RDONLY,
-        btrfs_ioc_default_subvol, btrfs_ioc_get_subvol_info, btrfs_ioc_ino_lookup,
-        btrfs_ioc_snap_create_v2, btrfs_ioc_snap_destroy_v2, btrfs_ioc_subvol_create_v2,
+        BTRFS_SUBVOL_SPEC_BY_ID, btrfs_ioc_default_subvol, btrfs_ioc_get_subvol_info,
+        btrfs_ioc_ino_lookup, btrfs_ioc_snap_create_v2, btrfs_ioc_snap_destroy_v2,
+        btrfs_ioc_subvol_create_v2,
         btrfs_ioc_subvol_getflags, btrfs_ioc_subvol_setflags, btrfs_ioctl_get_subvol_info_args,
         btrfs_ioctl_ino_lookup_args, btrfs_ioctl_vol_args_v2, btrfs_root_item, btrfs_timespec,
     },
@@ -162,6 +163,19 @@ pub fn subvolume_delete(parent_fd: BorrowedFd, name: &CStr) -> nix::Result<()> {
     let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
     set_v2_name(&mut args, name)?;
     unsafe { btrfs_ioc_snap_destroy_v2(parent_fd.as_raw_fd(), &args) }?;
+    Ok(())
+}
+
+/// Delete a subvolume by its numeric subvolume ID.
+///
+/// `fd` must be an open file descriptor on the filesystem (typically the mount
+/// point).  Unlike `subvolume_delete`, this does not require knowing the
+/// subvolume's path.  Requires `CAP_SYS_ADMIN`.
+pub fn subvolume_delete_by_id(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> {
+    let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
+    args.flags = BTRFS_SUBVOL_SPEC_BY_ID as u64;
+    args.__bindgen_anon_2.subvolid = subvolid;
+    unsafe { btrfs_ioc_snap_destroy_v2(fd.as_raw_fd(), &args) }?;
     Ok(())
 }
 

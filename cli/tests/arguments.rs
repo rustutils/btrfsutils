@@ -40,6 +40,57 @@ fn subvolume_delete() {
 }
 
 #[test]
+fn subvolume_delete_commit_after() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "delete", "-c", "/mnt/subvol"
+    ]));
+}
+
+#[test]
+fn subvolume_delete_commit_each() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "delete", "-C", "/mnt/subvol1", "/mnt/subvol2"
+    ]));
+}
+
+#[test]
+fn subvolume_delete_by_subvolid() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "delete", "-i", "256", "/mnt"
+    ]));
+}
+
+#[test]
+fn subvolume_delete_recursive() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "delete", "-R", "/mnt/subvol"
+    ]));
+}
+
+#[test]
+fn subvolume_delete_verbose() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "delete", "-v", "/mnt/subvol"
+    ]));
+}
+
+#[test]
+fn subvolume_delete_commit_conflict() {
+    // -c and -C are mutually exclusive
+    insta::assert_snapshot!(parse_err(&[
+        "btrfs", "subvolume", "delete", "-c", "-C", "/mnt/subvol"
+    ]));
+}
+
+#[test]
+fn subvolume_delete_subvolid_recursive_conflict() {
+    // --subvolid and --recursive are mutually exclusive
+    insta::assert_snapshot!(parse_err(&[
+        "btrfs", "subvolume", "delete", "-i", "256", "-R", "/mnt"
+    ]));
+}
+
+#[test]
 fn subvolume_delete_missing_path() {
     insta::assert_snapshot!(parse_err(&["btrfs", "subvolume", "delete"]));
 }
