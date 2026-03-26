@@ -1,5 +1,5 @@
 use crate::common::{BackingFile, LoopbackDevice, Mount, write_test_data};
-use btrfs_uapi::{dev_extent::min_dev_size, device::device_add, sync::sync};
+use btrfs_uapi::{dev_extent::min_dev_size, device::device_add, filesystem::sync};
 use std::ffi::CString;
 
 /// min_dev_size should return a sensible value and increase after writing data.

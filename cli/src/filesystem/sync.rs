@@ -1,6 +1,6 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result};
-use btrfs_uapi::sync::sync;
+use btrfs_uapi::filesystem::sync;
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 

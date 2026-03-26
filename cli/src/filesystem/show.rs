@@ -1,7 +1,7 @@
 use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
-    device::device_info_all, filesystem::fs_info, label::label_get, space::space_info,
+    device::device_info_all, filesystem::{fs_info, label_get}, space::space_info,
 };
 use clap::Parser;
 use std::{collections::HashSet, fs::File, os::unix::io::AsFd};

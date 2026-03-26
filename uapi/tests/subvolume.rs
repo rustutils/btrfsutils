@@ -5,7 +5,7 @@ use btrfs_uapi::{
         subvolume_default_set, subvolume_delete, subvolume_flags_get, subvolume_flags_set,
         subvolume_info, subvolume_list,
     },
-    sync::sync,
+    filesystem::sync,
 };
 use std::{ffi::CStr, fs::File, os::unix::io::AsFd};
 

@@ -7,7 +7,7 @@ use btrfs_uapi::{
         BTRFS_FILE_EXTENT_REG, btrfs_file_extent_item,
     },
     subvolume::subvolume_info,
-    sync::sync,
+    filesystem::sync,
     tree_search::{SearchKey, tree_search},
 };
 use clap::Parser;

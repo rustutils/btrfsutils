@@ -6,7 +6,7 @@ use btrfs_uapi::{
     chunk::device_chunk_allocations,
     device::device_add,
     space::{BlockGroupFlags, space_info},
-    sync::sync,
+    filesystem::sync,
 };
 use nix::errno::Errno;
 use std::{ffi::CString, fs::File, os::unix::io::AsFd};

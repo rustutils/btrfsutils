@@ -3,7 +3,7 @@ use btrfs_uapi::{
     dev_extent::min_dev_size,
     device::device_info,
     resize::{ResizeAmount, ResizeArgs, resize},
-    sync::sync,
+    filesystem::sync,
 };
 
 /// Growing a filesystem by enlarging the backing device and calling resize

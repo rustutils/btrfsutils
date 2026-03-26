@@ -1,7 +1,7 @@
 use crate::common::{single_mount, write_compressible_data};
 use btrfs_uapi::{
     defrag::{CompressSpec, CompressType, DefragRangeArgs, defrag_range},
-    sync::sync,
+    filesystem::sync,
 };
 use std::{fs::File, os::unix::io::AsFd};
 

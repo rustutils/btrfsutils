@@ -1,7 +1,7 @@
 use super::PropertyObjectType;
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, anyhow, bail};
-use btrfs_uapi::{label::label_get, subvolume::subvolume_flags_get};
+use btrfs_uapi::{filesystem::label_get, subvolume::subvolume_flags_get};
 use clap::Parser;
 use std::{
     fs::File,

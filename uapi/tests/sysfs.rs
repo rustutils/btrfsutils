@@ -2,7 +2,7 @@ use crate::common::{single_mount, write_test_data};
 use btrfs_uapi::{
     filesystem::fs_info,
     quota::{quota_disable, quota_enable, quota_rescan_wait},
-    sync::sync,
+    filesystem::sync,
     sysfs::SysfsBtrfs,
 };
 

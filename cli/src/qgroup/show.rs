@@ -1,6 +1,6 @@
 use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
-use btrfs_uapi::qgroup::{
+use btrfs_uapi::quota::{
     QgroupInfo, QgroupLimitFlags, QgroupStatusFlags, qgroupid_level, qgroupid_subvolid,
 };
 use clap::Parser;
@@ -183,11 +183,11 @@ impl Runnable for QgroupShowCommand {
         let fd = file.as_fd();
 
         if self.sync {
-            btrfs_uapi::sync::sync(fd)
+            btrfs_uapi::filesystem::sync(fd)
                 .with_context(|| format!("failed to sync '{}'", self.path.display()))?;
         }
 
-        let list = btrfs_uapi::qgroup::qgroup_list(fd)
+        let list = btrfs_uapi::quota::qgroup_list(fd)
             .with_context(|| format!("failed to list qgroups on '{}'", self.path.display()))?;
 
         if list.qgroups.is_empty() {

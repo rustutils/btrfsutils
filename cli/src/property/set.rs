@@ -2,7 +2,7 @@ use super::PropertyObjectType;
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, anyhow, bail};
 use btrfs_uapi::{
-    label::label_set,
+    filesystem::label_set,
     subvolume::{SubvolumeFlags, subvolume_flags_get, subvolume_flags_set},
 };
 use clap::Parser;
@@ -214,7 +214,7 @@ fn set_readonly_property(file: &File, value: &str, force: bool, path: &PathBuf) 
                     info.received_uuid.as_hyphenated()
                 );
                 if let Err(e) =
-                    btrfs_uapi::receive::received_subvol_set(file.as_fd(), &uuid::Uuid::nil(), 0)
+                    btrfs_uapi::send_receive::received_subvol_set(file.as_fd(), &uuid::Uuid::nil(), 0)
                 {
                     eprintln!(
                         "WARNING: failed to clear received_uuid on '{}': {e}",

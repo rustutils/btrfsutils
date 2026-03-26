@@ -4,7 +4,7 @@ use btrfs_uapi::{
     chunk::{chunk_list, device_chunk_allocations},
     device::device_add,
     space::BlockGroupFlags,
-    sync::sync,
+    filesystem::sync,
 };
 use std::ffi::CString;
 

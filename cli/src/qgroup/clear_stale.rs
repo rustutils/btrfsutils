@@ -15,7 +15,7 @@ impl Runnable for QgroupClearStaleCommand {
         let file = File::open(&self.path)
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
 
-        let n = btrfs_uapi::qgroup::qgroup_clear_stale(file.as_fd()).with_context(|| {
+        let n = btrfs_uapi::quota::qgroup_clear_stale(file.as_fd()).with_context(|| {
             format!("failed to clear stale qgroups on '{}'", self.path.display())
         })?;
 

@@ -3,7 +3,7 @@ use btrfs_uapi::{
     fiemap::file_extents,
     inode::{ino_paths, logical_ino, lookup_path_rootid, subvolid_resolve},
     subvolume::{subvolume_create, subvolume_info},
-    sync::sync,
+    filesystem::sync,
 };
 use std::{ffi::CStr, fs::File, os::unix::io::AsFd};
 

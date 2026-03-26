@@ -1,7 +1,7 @@
 use crate::{Format, Runnable, util::ParsedUuid};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
-    receive::subvolume_search_by_uuid,
+    send_receive::subvolume_search_by_uuid,
     subvolume::{subvolume_info, subvolume_info_by_id},
 };
 use clap::Parser;

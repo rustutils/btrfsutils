@@ -1,12 +1,11 @@
 use crate::common::single_mount;
 use btrfs_uapi::{
-    qgroup::{
+    filesystem::sync,
+    quota::{
         QgroupLimitFlags, qgroup_assign, qgroup_clear_stale, qgroup_create, qgroup_destroy,
-        qgroup_limit, qgroup_list, qgroup_remove,
+        qgroup_limit, qgroup_list, qgroup_remove, quota_enable, quota_rescan_wait,
     },
-    quota::{quota_enable, quota_rescan_wait},
     subvolume::{subvolume_create, subvolume_delete, subvolume_info},
-    sync::sync,
 };
 use std::{ffi::CStr, fs::File, os::unix::io::AsFd};
 

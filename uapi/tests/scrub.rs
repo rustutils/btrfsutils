@@ -1,7 +1,7 @@
 use crate::common::{BackingFile, LoopbackDevice, Mount, single_mount, write_test_data};
 use btrfs_uapi::{
     scrub::{scrub_cancel, scrub_start},
-    sync::sync,
+    filesystem::sync,
 };
 use nix::errno::Errno;
 use std::{fs::File, os::unix::io::AsFd};

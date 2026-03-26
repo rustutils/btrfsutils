@@ -2,7 +2,7 @@ use crate::common::{single_mount, write_test_data};
 use btrfs_uapi::{
     fiemap::file_extents,
     subvolume::{snapshot_create, subvolume_create},
-    sync::sync,
+    filesystem::sync,
 };
 use std::{ffi::CStr, fs::File, os::unix::io::AsFd};
 

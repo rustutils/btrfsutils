@@ -34,7 +34,7 @@ impl Runnable for QgroupRemoveCommand {
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
         let fd = file.as_fd();
 
-        let needs_rescan = match btrfs_uapi::qgroup::qgroup_remove(fd, src, dst) {
+        let needs_rescan = match btrfs_uapi::quota::qgroup_remove(fd, src, dst) {
             Ok(needs_rescan) => needs_rescan,
             Err(Errno::ENOTCONN) => bail!("quota not enabled on '{}'", self.path.display()),
             Err(e) => {

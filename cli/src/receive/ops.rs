@@ -158,7 +158,7 @@ impl ReceiveContext {
             .with_context(|| format!("cannot open subvolume '{}'", subvol_path.display()))?;
         let fd = subvol_file.as_fd();
 
-        btrfs_uapi::receive::received_subvol_set(fd, &uuid, self.stransid).with_context(|| {
+        btrfs_uapi::send_receive::received_subvol_set(fd, &uuid, self.stransid).with_context(|| {
             format!(
                 "failed to set received subvol on '{}'",
                 subvol_path.display()
@@ -230,9 +230,9 @@ impl ReceiveContext {
 
         // Find the parent subvolume by its received UUID, then fall back to UUID.
         let parent_root_id =
-            btrfs_uapi::receive::subvolume_search_by_received_uuid(self.mnt_fd.as_fd(), clone_uuid)
+            btrfs_uapi::send_receive::subvolume_search_by_received_uuid(self.mnt_fd.as_fd(), clone_uuid)
                 .or_else(|_| {
-                    btrfs_uapi::receive::subvolume_search_by_uuid(self.mnt_fd.as_fd(), clone_uuid)
+                    btrfs_uapi::send_receive::subvolume_search_by_uuid(self.mnt_fd.as_fd(), clone_uuid)
                 })
                 .with_context(|| {
                     format!(
@@ -465,9 +465,9 @@ impl ReceiveContext {
 
         // Find the clone source subvolume.
         let clone_subvol_root =
-            btrfs_uapi::receive::subvolume_search_by_received_uuid(self.mnt_fd.as_fd(), clone_uuid)
+            btrfs_uapi::send_receive::subvolume_search_by_received_uuid(self.mnt_fd.as_fd(), clone_uuid)
                 .or_else(|_| {
-                    btrfs_uapi::receive::subvolume_search_by_uuid(self.mnt_fd.as_fd(), clone_uuid)
+                    btrfs_uapi::send_receive::subvolume_search_by_uuid(self.mnt_fd.as_fd(), clone_uuid)
                 })
                 .with_context(|| {
                     format!(
@@ -496,7 +496,7 @@ impl ReceiveContext {
             .open(&full)
             .with_context(|| format!("cannot open '{}' for clone", full.display()))?;
 
-        btrfs_uapi::receive::clone_range(
+        btrfs_uapi::send_receive::clone_range(
             dest_file.as_fd(),
             clone_file.as_fd(),
             clone_offset,
@@ -681,7 +681,7 @@ impl ReceiveContext {
         // Try the encoded write ioctl first — passes compressed data directly
         // to the filesystem without decompression.
         let fd = self.write_fd.as_ref().unwrap();
-        match btrfs_uapi::receive::encoded_write(
+        match btrfs_uapi::send_receive::encoded_write(
             fd.as_fd(),
             data,
             offset,

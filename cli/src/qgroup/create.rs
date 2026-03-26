@@ -21,7 +21,7 @@ impl Runnable for QgroupCreateCommand {
         let file = File::open(&self.path)
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
 
-        match btrfs_uapi::qgroup::qgroup_create(file.as_fd(), qgroupid) {
+        match btrfs_uapi::quota::qgroup_create(file.as_fd(), qgroupid) {
             Ok(()) => {
                 println!("qgroup {} created", self.qgroupid);
                 Ok(())

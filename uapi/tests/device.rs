@@ -6,7 +6,7 @@ use btrfs_uapi::{
         device_scan, device_stats,
     },
     filesystem::fs_info,
-    sync::sync,
+    filesystem::sync,
 };
 use std::ffi::CString;
 

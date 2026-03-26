@@ -1,6 +1,6 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result};
-use btrfs_uapi::label::{label_get, label_set};
+use btrfs_uapi::filesystem::{label_get, label_set};
 use clap::Parser;
 use std::{
     ffi::CString,

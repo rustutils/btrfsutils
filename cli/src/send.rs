@@ -1,7 +1,7 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
 use btrfs_uapi::{
-    send::SendFlags,
+    send_receive::SendFlags,
     subvolume::{SubvolumeFlags, subvolume_flags_get, subvolume_info},
     sysfs::SysfsBtrfs,
 };
@@ -316,7 +316,7 @@ impl Runnable for SendCommand {
             let out = open_output(&self.outfile)?;
             let reader = spawn_reader_thread(pipe_read, out, buf_size);
 
-            let send_result = btrfs_uapi::send::send(
+            let send_result = btrfs_uapi::send_receive::send(
                 subvol_file.as_fd(),
                 pipe_write.as_raw_fd(),
                 this_parent,

@@ -1,6 +1,6 @@
 use crate::{Format, Runnable, util::parse_qgroupid};
 use anyhow::{Context, Result, bail};
-use btrfs_uapi::qgroup::qgroupid_level;
+use btrfs_uapi::quota::qgroupid_level;
 use clap::Parser;
 use nix::errno::Errno;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
@@ -39,7 +39,7 @@ impl Runnable for QgroupAssignCommand {
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
         let fd = file.as_fd();
 
-        let needs_rescan = match btrfs_uapi::qgroup::qgroup_assign(fd, src, dst) {
+        let needs_rescan = match btrfs_uapi::quota::qgroup_assign(fd, src, dst) {
             Ok(needs_rescan) => needs_rescan,
             Err(Errno::ENOTCONN) => bail!("quota not enabled on '{}'", self.path.display()),
             Err(e) => {

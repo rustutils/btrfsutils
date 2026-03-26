@@ -3,7 +3,7 @@ use crate::{
     util::{parse_qgroupid, parse_size_with_suffix},
 };
 use anyhow::{Context, Result};
-use btrfs_uapi::qgroup::QgroupLimitFlags;
+use btrfs_uapi::quota::QgroupLimitFlags;
 use clap::Parser;
 use nix::errno::Errno;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
@@ -88,7 +88,7 @@ impl Runnable for QgroupLimitCommand {
         let file = File::open(&fs_path)
             .with_context(|| format!("failed to open '{}'", fs_path.display()))?;
 
-        match btrfs_uapi::qgroup::qgroup_limit(file.as_fd(), qgroupid, flags, max_rfer, max_excl) {
+        match btrfs_uapi::quota::qgroup_limit(file.as_fd(), qgroupid, flags, max_rfer, max_excl) {
             Ok(()) => Ok(()),
             Err(Errno::ENOTCONN) => {
                 anyhow::bail!("quota not enabled on '{}'", fs_path.display())

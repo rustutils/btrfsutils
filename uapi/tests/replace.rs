@@ -5,7 +5,7 @@ use btrfs_uapi::{
     filesystem::fs_info,
     replace::{ReplaceSource, ReplaceState, replace_cancel, replace_start, replace_status},
     space::BlockGroupFlags,
-    sync::sync,
+    filesystem::sync,
 };
 use std::ffi::CString;
 

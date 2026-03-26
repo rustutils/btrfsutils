@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use btrfs_uapi::subvolume::{
     subvolume_delete, subvolume_delete_by_id, subvolume_info, subvolume_list,
 };
-use btrfs_uapi::sync::{start_sync, wait_sync};
+use btrfs_uapi::filesystem::{start_sync, wait_sync};
 use clap::Parser;
 use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
 

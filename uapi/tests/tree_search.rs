@@ -1,7 +1,7 @@
 use crate::common::single_mount;
 use btrfs_uapi::{
     subvolume::{subvolume_create, subvolume_info},
-    sync::sync,
+    filesystem::sync,
     tree_search::{SearchKey, tree_search},
 };
 use std::{
