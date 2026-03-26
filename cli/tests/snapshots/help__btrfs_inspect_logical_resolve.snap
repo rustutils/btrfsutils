@@ -1,0 +1,27 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Get file system paths for the given logical address
+
+Usage: logical-resolve [OPTIONS] <LOGICAL> <PATH>
+
+Arguments:
+  <LOGICAL>
+          Logical address
+
+  <PATH>
+          Path to a file or directory on the btrfs filesystem
+
+Options:
+  -P, --skip-paths
+          Skip the path resolving and print the inodes instead
+
+  -o, --ignore-offset
+          Ignore offsets when matching references
+
+  -s, --bufsize <BUFSIZE>
+          Set inode container's size
+
+  -h, --help
+          Print help

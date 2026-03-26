@@ -1,0 +1,20 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Completely remove the v1 or v2 free space cache
+
+Usage: clear-space-cache <VERSION> <DEVICE>
+
+Arguments:
+  <VERSION>
+          Free space cache version to remove
+          
+          [possible values: v1, v2]
+
+  <DEVICE>
+          Path to the btrfs device
+
+Options:
+  -h, --help
+          Print help

@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Remove leftover items pertaining to the deprecated inode cache feature
+
+Usage: clear-ino-cache <DEVICE>
+
+Arguments:
+  <DEVICE>
+          Path to the btrfs device
+
+Options:
+  -h, --help
+          Print help

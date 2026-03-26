@@ -1,0 +1,18 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Create a subvolume quota group
+
+Usage: create <QGROUPID> <PATH>
+
+Arguments:
+  <QGROUPID>
+          Qgroup id in the form LEVEL/ID
+
+  <PATH>
+          Path to a mounted btrfs filesystem
+
+Options:
+  -h, --help
+          Print help

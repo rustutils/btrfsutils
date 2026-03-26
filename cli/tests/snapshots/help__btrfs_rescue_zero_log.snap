@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Clear the tree log (usable if it's corrupted and prevents mount)
+
+Usage: zero-log <DEVICE>
+
+Arguments:
+  <DEVICE>
+          Path to the btrfs device
+
+Options:
+  -h, --help
+          Print help

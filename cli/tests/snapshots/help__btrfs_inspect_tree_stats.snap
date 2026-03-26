@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Print statistics about trees in a btrfs filesystem
+
+Usage: tree-stats <PATH>
+
+Arguments:
+  <PATH>
+          Path to a file or directory on the btrfs filesystem
+
+Options:
+  -h, --help
+          Print help

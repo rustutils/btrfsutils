@@ -1,0 +1,25 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Get a property value of a btrfs object
+
+If no name is specified, all properties for the object are printed.
+
+Usage: get [OPTIONS] <OBJECT> [NAME]
+
+Arguments:
+  <OBJECT>
+          Path to the btrfs object
+
+  [NAME]
+          Property name to retrieve
+
+Options:
+  -t, --type <OBJECT_TYPE>
+          Object type (inode, subvol, filesystem, device)
+          
+          [possible values: inode, subvol, filesystem, device]
+
+  -h, --help
+          Print help (see a summary with '-h')

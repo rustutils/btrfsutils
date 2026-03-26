@@ -1,0 +1,21 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Resume a previously cancelled or interrupted scrub
+
+Scrubs all devices sequentially. This command blocks until the scrub completes;
+use Ctrl-C to cancel.
+
+Usage: resume [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Path to a mounted btrfs filesystem or a device
+
+Options:
+  -r, --readonly
+          Read-only mode: check for errors but do not attempt repairs
+
+  -h, --help
+          Print help (see a summary with '-h')

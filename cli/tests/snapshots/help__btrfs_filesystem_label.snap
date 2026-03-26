@@ -1,0 +1,18 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Get or set the label of a btrfs filesystem
+
+Usage: label <PATH> [NEW_LABEL]
+
+Arguments:
+  <PATH>
+          The device or mount point to operate on
+
+  [NEW_LABEL]
+          The new label to set (if omitted, the current label is printed)
+
+Options:
+  -h, --help
+          Print help

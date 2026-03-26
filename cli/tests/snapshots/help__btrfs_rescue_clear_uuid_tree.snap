@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Delete uuid tree so that kernel can rebuild it at mount time
+
+Usage: clear-uuid-tree <DEVICE>
+
+Arguments:
+  <DEVICE>
+          Path to the btrfs device
+
+Options:
+  -h, --help
+          Print help

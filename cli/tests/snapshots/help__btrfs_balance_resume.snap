@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Resume a paused balance operation
+
+Usage: resume <PATH>
+
+Arguments:
+  <PATH>
+          
+
+Options:
+  -h, --help
+          Print help

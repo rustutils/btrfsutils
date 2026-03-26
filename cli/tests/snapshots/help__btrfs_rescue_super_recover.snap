@@ -1,0 +1,18 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Recover bad superblocks from good copies
+
+Usage: super-recover [OPTIONS] <DEVICE>
+
+Arguments:
+  <DEVICE>
+          Path to the device
+
+Options:
+  -y, --yes
+          Assume an answer of 'yes' to all questions
+
+  -h, --help
+          Print help

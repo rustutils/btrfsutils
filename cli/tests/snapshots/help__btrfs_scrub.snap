@@ -1,0 +1,24 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Verify checksums of data and metadata.
+
+Scrub reads all data and metadata on a filesystem and verifies checksums. This
+detects hardware errors and bit rot. Scrub is typically a long-running operation
+and can be paused, resumed, or cancelled. Progress and status can be queried,
+and speed limits can be configured. Requires CAP_SYS_ADMIN.
+
+Usage: scrub <COMMAND>
+
+Commands:
+  start   Start a new scrub on the filesystem or a device
+  cancel  Cancel a running scrub
+  resume  Resume a previously cancelled or interrupted scrub
+  status  Show the status of a running or finished scrub
+  limit   Show or set the per-device scrub throughput limit
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')

@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Re-align device and super block sizes
+
+Usage: fix-device-size <DEVICE>
+
+Arguments:
+  <DEVICE>
+          Path to the btrfs device
+
+Options:
+  -h, --help
+          Print help

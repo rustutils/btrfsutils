@@ -1,0 +1,18 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Recover the chunk tree by scanning the devices one by one
+
+Usage: chunk-recover [OPTIONS] <DEVICE>
+
+Arguments:
+  <DEVICE>
+          Device to recover
+
+Options:
+  -y, --yes
+          Assume an answer of 'yes' to all questions
+
+  -h, --help
+          Print help

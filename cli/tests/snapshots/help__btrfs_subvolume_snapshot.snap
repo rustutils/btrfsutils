@@ -1,0 +1,26 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Create a snapshot of a subvolume
+
+Usage: snapshot [OPTIONS] <SOURCE> <DEST>
+
+Arguments:
+  <SOURCE>
+          Path to the source subvolume
+
+  <DEST>
+          Destination: either an existing directory (snapshot will be named
+          after the source) or a full path for the new snapshot
+
+Options:
+  -r, --readonly
+          Make the snapshot read-only
+
+  -i <QGROUPID>
+          Add the newly created snapshot to a qgroup (can be given multiple
+          times)
+
+  -h, --help
+          Print help

@@ -1,0 +1,18 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Set the flags of a subvolume
+
+Usage: set-flags <FLAGS> <PATH>
+
+Arguments:
+  <FLAGS>
+          Flags to set ("readonly" or "-" to clear)
+
+  <PATH>
+          Path to a subvolume
+
+Options:
+  -h, --help
+          Print help

@@ -1,0 +1,24 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Trash all qgroup numbers and scan the metadata again
+
+Usage: rescan [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Path to a mounted btrfs filesystem
+
+Options:
+  -s, --status
+          Show status of a running rescan operation
+
+  -w, --wait
+          Start rescan and wait for it to finish
+
+  -W, --wait-norescan
+          Wait for rescan to finish without starting it
+
+  -h, --help
+          Print help

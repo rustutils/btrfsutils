@@ -1,0 +1,24 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Fix data checksum mismatches
+
+Usage: fix-data-checksum [OPTIONS] <DEVICE>
+
+Arguments:
+  <DEVICE>
+          Device to operate on
+
+Options:
+  -r, --readonly
+          Readonly mode, only report errors without repair
+
+  -i, --interactive
+          Interactive mode, ignore the error by default
+
+  -m, --mirror <MIRROR>
+          Update csum item using specified mirror
+
+  -h, --help
+          Print help

@@ -1,0 +1,31 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Dump the btrfs superblock from a device or image file.
+
+Reads and displays the superblock stored on a btrfs block device or filesystem
+image. By default only the primary superblock (mirror 0, at offset 64 KiB) is
+printed. Use -a to print all mirrors, or -s to select a specific one.
+
+Usage: dump-super [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Path to a btrfs block device or image file
+
+Options:
+  -f, --full
+          Print full information including sys_chunk_array and backup roots
+
+  -a, --all
+          Print all superblock mirrors (0, 1, 2)
+
+  -s, --super <MIRROR>
+          Print only this superblock mirror (0, 1, or 2)
+
+  -F, --force
+          Attempt to print superblocks with bad magic
+
+  -h, --help
+          Print help (see a summary with '-h')

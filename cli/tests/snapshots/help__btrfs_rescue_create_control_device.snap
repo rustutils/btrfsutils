@@ -1,0 +1,11 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Create /dev/btrfs-control
+
+Usage: create-control-device
+
+Options:
+  -h, --help
+          Print help

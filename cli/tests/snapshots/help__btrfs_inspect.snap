@@ -1,0 +1,30 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Query various internal filesystem information.
+
+Access advanced information about filesystem internals including inode
+resolution, logical extent to physical block mapping, subvolume IDs, chunk
+layout, and other diagnostic data. These commands are primarily useful for
+debugging, analysis, and recovery operations. Most operations require
+CAP_SYS_ADMIN.
+
+Usage: inspect <COMMAND>
+
+Commands:
+  rootid            Get tree ID of the containing subvolume of path
+  inode-resolve     Get file system paths for the given inode
+  logical-resolve   Get file system paths for the given logical address
+  subvolid-resolve  Get subvolume ID and tree ID of the given path
+  map-swapfile      Print physical extents of a file suitable for swap
+  min-dev-size      Print the minimum size a device can be shrunk to
+  dump-tree         Dump tree blocks from a btrfs filesystem
+  dump-super        Dump the btrfs superblock from a device or image file
+  tree-stats        Print statistics about trees in a btrfs filesystem
+  list-chunks       List all chunks in the filesystem, one row per stripe
+  help              Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')

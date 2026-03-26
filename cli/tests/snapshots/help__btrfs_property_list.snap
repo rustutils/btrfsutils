@@ -1,0 +1,20 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+List available properties with their descriptions for the given object
+
+Usage: list [OPTIONS] <OBJECT>
+
+Arguments:
+  <OBJECT>
+          Btrfs object path to list properties for
+
+Options:
+  -t, --type <OBJECT_TYPE>
+          Object type (inode, subvol, filesystem, device)
+          
+          [possible values: inode, subvol, filesystem, device]
+
+  -h, --help
+          Print help

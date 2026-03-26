@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Cancel a running scrub
+
+Usage: cancel <PATH>
+
+Arguments:
+  <PATH>
+          Path to a mounted btrfs filesystem or a device
+
+Options:
+  -h, --help
+          Print help

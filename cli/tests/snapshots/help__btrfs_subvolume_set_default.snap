@@ -1,0 +1,21 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Set the default subvolume of a filesystem.
+
+Accepts either a subvolume path (btrfs subvolume set-default /mnt/fs/subvol) or
+a numeric ID with a filesystem path (btrfs subvolume set-default 256 /mnt/fs).
+
+Usage: set-default <SUBVOL_OR_ID> [PATH]
+
+Arguments:
+  <SUBVOL_OR_ID>
+          Subvolume path OR numeric subvolume ID
+
+  [PATH]
+          Filesystem mount point (required when first arg is a numeric ID)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
