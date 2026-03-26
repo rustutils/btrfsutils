@@ -1,7 +1,7 @@
 # btrfs-cli
 
-A Rust reimplementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs)
-command-line tool.
+An alternative implementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs)
+command-line tool, written in Rust.
 
 This crate builds the `btrfs` binary. If you are a user who wants to manage
 btrfs filesystems, install this. If you are a developer building tools on

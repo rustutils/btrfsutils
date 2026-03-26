@@ -1,12 +1,11 @@
 # btrfs-progrs
 
-A Rust reimplementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs) command-line tool.
+An alternative implementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs) command-line tool, written in Rust.
 
 ## Status
 
-This project is under active development. Many commands are fully implemented and
-produce output matching the C original. See the [implementation status](#implemented-commands)
-below for details.
+This project is under active development. Most commands are fully implemented and
+produce output matching the C original.
 
 ## Building
 
@@ -35,13 +34,15 @@ btrfs scrub start /mnt/data
 
 Most commands that talk to the kernel require root privileges or `CAP_SYS_ADMIN`.
 
-## Crate structure
+## Folder structure
 
-| Crate | Description |
+| Folder | Description |
 |-------|-------------|
-| `btrfs-uapi` | Safe Rust wrappers around btrfs kernel ioctls, sysfs, and procfs. Linux-only. |
-| `btrfs-disk` | Platform-independent parsing of btrfs on-disk structures (superblocks, tree nodes, etc.) from block devices or image files. |
-| `btrfs-cli` | The command-line tool, built on top of `uapi` and `disk`. |
+| `uapi` | Safe Rust wrappers around btrfs kernel ioctls, sysfs, and procfs. Linux-only. |
+| `disk` | Platform-independent parsing of btrfs on-disk structures (superblocks, tree nodes, etc.) from block devices or image files. |
+| `stream` | Send stream parser and receive operations. Platform-independent parser with optional Linux-only receive support. |
+| `cli` | The command-line tool, built on top of `uapi`, `disk`, and `stream`. |
+| `docs` | Documentation, rendered with mdBook. |
 
 Not all commands from btrfs-progs are implemented yet. Run `btrfs help` to see
 what is available.

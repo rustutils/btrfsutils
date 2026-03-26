@@ -1,7 +1,7 @@
-//! # btrfs-cli: a Rust reimplementation of the btrfs command-line tool
+//! # btrfs-cli: the btrfs command-line tool
 //!
-//! This crate provides the `btrfs` command-line binary, a Rust reimplementation
-//! of btrfs-progs. It is built on top of `btrfs-uapi` for kernel communication,
+//! This crate provides the `btrfs` command-line binary, an alternative
+//! implementation of btrfs-progs written in Rust. It is built on top of `btrfs-uapi` for kernel communication,
 //! `btrfs-disk` for direct on-disk structure parsing, and `btrfs-stream` for
 //! send/receive stream processing.
 //!
