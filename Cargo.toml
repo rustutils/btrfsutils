@@ -1,5 +1,5 @@
 [workspace]
-members = ["uapi", "disk", "cli"]
+members = ["uapi", "disk", "cli", "mangen"]
 resolver = "2"
 
 [workspace.package]

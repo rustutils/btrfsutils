@@ -62,7 +62,7 @@ coverage:
 
 # Generate man pages to target/man/
 man:
-    cargo run --package btrfs-cli --features mangen --bin btrfs-mangen
+    cargo run --package btrfs-mangen
 
 format:
     cargo +nightly fmt --all

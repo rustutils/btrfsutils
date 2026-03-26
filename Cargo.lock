@@ -131,7 +131,6 @@ dependencies = [
  "btrfs-disk",
  "btrfs-uapi",
  "clap",
- "clap_mangen",
  "env_logger",
  "flate2",
  "insta",
@@ -152,6 +151,15 @@ dependencies = [
  "bindgen",
  "crc32c",
  "uuid",
+]
+
+[[package]]
+name = "btrfs-mangen"
+version = "0.2.0"
+dependencies = [
+ "btrfs-cli",
+ "clap",
+ "clap_mangen",
 ]
 
 [[package]]

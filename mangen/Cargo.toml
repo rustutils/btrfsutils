@@ -1,0 +1,14 @@
+[package]
+name = "btrfs-mangen"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "btrfs-mangen"
+path = "src/main.rs"
+
+[dependencies]
+btrfs-cli = { path = "../cli" }
+clap = { workspace = true }
+clap_mangen = "0.2"

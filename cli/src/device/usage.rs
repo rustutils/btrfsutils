@@ -15,7 +15,7 @@ pub struct DeviceUsageCommand {
     pub raw: bool,
 
     /// Show human-friendly numbers using base 1024 (default)
-    #[clap(short = 'h', long, overrides_with_all = ["raw", "human_base1000", "iec", "si", "kbytes", "mbytes", "gbytes", "tbytes"])]
+    #[clap(long, overrides_with_all = ["raw", "human_base1000", "iec", "si", "kbytes", "mbytes", "gbytes", "tbytes"])]
     pub human_readable: bool,
 
     /// Show human-friendly numbers using base 1000
