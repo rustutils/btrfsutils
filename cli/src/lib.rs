@@ -1,4 +1,13 @@
-#![doc = include_str!("../README.md")]
+//! # btrfs-cli: a Rust reimplementation of the btrfs command-line tool
+//!
+//! This crate provides the `btrfs` command-line binary, a Rust reimplementation
+//! of btrfs-progs. It is built on top of `btrfs-uapi` for kernel communication,
+//! `btrfs-disk` for direct on-disk structure parsing, and `btrfs-stream` for
+//! send/receive stream processing.
+//!
+//! Not all commands from btrfs-progs are implemented yet. Run `btrfs help` to
+//! see what is available. Most commands require root privileges or
+//! `CAP_SYS_ADMIN`.
 
 use anyhow::Result;
 use clap::{Parser, ValueEnum};

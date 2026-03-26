@@ -1,17 +1,19 @@
-# btrfs-cli: a Rust reimplementation of the btrfs command-line tool
+# btrfs-cli
 
-This crate provides the `btrfs` command-line binary, a Rust reimplementation
-of [btrfs-progs](https://github.com/kdave/btrfs-progs). It is built on top
-of [`btrfs-uapi`](../uapi) for kernel communication and
-[`btrfs-disk`](../disk) for direct on-disk structure parsing.
+A Rust reimplementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs)
+command-line tool.
 
-Not all commands from btrfs-progs are implemented yet. Run `btrfs help` to
-see what is available.
-
-## Usage
+This crate builds the `btrfs` binary. If you are a user who wants to manage
+btrfs filesystems, install this. If you are a developer building tools on
+top of btrfs, depend on `btrfs-uapi`, `btrfs-disk`, or `btrfs-stream`
+instead.
 
 ```text
 btrfs <command> [<subcommand>] [<args>]
 ```
 
-Most commands require root privileges or `CAP_SYS_ADMIN`.
+Not all commands from btrfs-progs are implemented yet. Run `btrfs help` to
+see what is available. Most commands require root privileges or
+`CAP_SYS_ADMIN`.
+
+Part of the [btrfs-progrs](https://github.com/rustutils/btrfs-progrs) project.
