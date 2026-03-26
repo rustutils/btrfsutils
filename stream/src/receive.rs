@@ -10,6 +10,33 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Find the mount root for a given path by walking up the directory tree
+/// while the device ID (`st_dev`) remains the same. The mount root is the
+/// highest directory on the same device.
+fn find_mount_root(path: &Path) -> Result<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    let path = path.canonicalize().with_context(|| {
+        format!("cannot canonicalize '{}'", path.display())
+    })?;
+    let dev = path.metadata()
+        .with_context(|| format!("cannot stat '{}'", path.display()))?
+        .dev();
+
+    let mut root = path.clone();
+    while let Some(parent) = root.parent() {
+        let parent_dev = parent.metadata()
+            .with_context(|| format!("cannot stat '{}'", parent.display()))?
+            .dev();
+        if parent_dev != dev {
+            break;
+        }
+        root = parent.to_path_buf();
+    }
+
+    Ok(root)
+}
+
 /// Applies a parsed btrfs send stream to a mounted btrfs filesystem.
 ///
 /// `ReceiveContext` is the receive-side counterpart to the kernel's
@@ -52,6 +79,8 @@ use std::{
 pub struct ReceiveContext {
     /// File descriptor to the mount root (for UUID tree searches and snapshots).
     mnt_fd: File,
+    /// Absolute path of the filesystem mount root (for resolving subvolid paths).
+    mount_root: PathBuf,
     /// Absolute path of the destination directory.
     dest_dir: PathBuf,
     /// Path of the current subvolume being received (relative name).
@@ -71,16 +100,19 @@ pub struct ReceiveContext {
 impl ReceiveContext {
     /// Create a new receive context rooted at `dest_dir`.
     ///
-    /// `dest_dir` must be a directory on a mounted btrfs filesystem. An fd to
-    /// this directory is kept open for the lifetime of the context and used for
-    /// UUID tree lookups when resolving snapshot parents and clone sources.
+    /// `dest_dir` must be a directory on a mounted btrfs filesystem. The mount
+    /// root is auto-detected by walking up the directory tree while the device
+    /// ID stays the same. An fd to the mount root is kept open for UUID tree
+    /// lookups; subvolumes are created under `dest_dir`.
     pub fn new(dest_dir: &Path) -> Result<Self> {
-        let mnt_fd = File::open(dest_dir).with_context(|| {
-            format!("cannot open destination '{}'", dest_dir.display())
+        let mount_root = find_mount_root(dest_dir)?;
+        let mnt_fd = File::open(&mount_root).with_context(|| {
+            format!("cannot open mount root '{}'", mount_root.display())
         })?;
 
         Ok(Self {
             mnt_fd,
+            mount_root,
             dest_dir: dest_dir.to_path_buf(),
             cur_subvol: None,
             cur_subvol_path: None,
@@ -365,7 +397,9 @@ impl ReceiveContext {
         })?;
 
         // Open the parent subvolume to verify ctransid and create the snapshot.
-        let parent_full = self.dest_dir.join(&parent_path);
+        // The path from subvolid_resolve is relative to the filesystem root,
+        // so join with mount_root, not dest_dir.
+        let parent_full = self.mount_root.join(&parent_path);
         let parent_file = File::open(&parent_full).with_context(|| {
             format!("cannot open parent subvolume '{}'", parent_full.display())
         })?;
@@ -644,7 +678,9 @@ impl ReceiveContext {
                     format!("cannot resolve path for clone source subvolume {clone_subvol_root}")
                 })?;
 
-        let clone_full = self.dest_dir.join(&subvol_path).join(clone_path);
+        // The path from subvolid_resolve is relative to the filesystem root,
+        // so join with mount_root, not dest_dir.
+        let clone_full = self.mount_root.join(&subvol_path).join(clone_path);
         let clone_file = File::open(&clone_full).with_context(|| {
             format!("cannot open clone source '{}'", clone_full.display())
         })?;
