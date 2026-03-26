@@ -42,7 +42,9 @@ impl std::str::FromStr for CompressType {
             "zlib" => Ok(Self::Zlib),
             "lzo" => Ok(Self::Lzo),
             "zstd" => Ok(Self::Zstd),
-            _ => Err(format!("unknown compress type '{s}'; expected zlib, lzo, or zstd")),
+            _ => Err(format!(
+                "unknown compress type '{s}'; expected zlib, lzo, or zstd"
+            )),
         }
     }
 }

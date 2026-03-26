@@ -5,9 +5,7 @@
 //! written to a pipe; the caller reads from the other end and writes it to a
 //! file or stdout for later consumption by `btrfs receive`.
 
-use crate::raw::{
-    self, btrfs_ioc_send, btrfs_ioctl_send_args,
-};
+use crate::raw::{self, btrfs_ioc_send, btrfs_ioctl_send_args};
 use bitflags::bitflags;
 use nix::libc::c_int;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};

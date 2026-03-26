@@ -109,7 +109,7 @@ impl std::str::FromStr for SortKey {
             _ => {
                 return Err(format!(
                     "unknown sort field '{name}'; expected qgroupid, rfer, excl, max_rfer, or max_excl"
-                ))
+                ));
             }
         };
         Ok(SortKey { field, descending })

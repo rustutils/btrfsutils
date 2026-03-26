@@ -1,14 +1,12 @@
 mod dump;
 mod ops;
 
-use btrfs_disk::stream::{StreamCommand, StreamReader};
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
+use btrfs_disk::stream::{StreamCommand, StreamReader};
 use clap::Parser;
 use ops::ReceiveContext;
-use std::fs::File;
-use std::io;
-use std::path::PathBuf;
+use std::{fs::File, io, path::PathBuf};
 
 /// Receive subvolumes from a stream.
 ///
@@ -54,8 +52,7 @@ impl Runnable for ReceiveCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         let input: Box<dyn io::Read> = match &self.file {
             Some(path) => Box::new(
-                File::open(path)
-                    .with_context(|| format!("cannot open '{}'", path.display()))?,
+                File::open(path).with_context(|| format!("cannot open '{}'", path.display()))?,
             ),
             None => Box::new(io::stdin()),
         };
@@ -81,8 +78,11 @@ impl Runnable for ReceiveCommand {
             // Confine the process to the mount point. After this, all paths
             // in the stream are resolved relative to "/".
             let mount_cstr = std::ffi::CString::new(
-                mount.to_str().ok_or_else(|| anyhow::anyhow!("mount path is not valid UTF-8"))?
-            ).context("mount path contains null byte")?;
+                mount
+                    .to_str()
+                    .ok_or_else(|| anyhow::anyhow!("mount path is not valid UTF-8"))?,
+            )
+            .context("mount path contains null byte")?;
 
             if unsafe { nix::libc::chroot(mount_cstr.as_ptr()) } != 0 {
                 return Err(std::io::Error::last_os_error())
@@ -143,8 +143,10 @@ impl Runnable for ReceiveCommand {
                     continue;
                 }
                 Ok(Some(cmd)) => {
-                    if matches!(&cmd, StreamCommand::Subvol { .. } | StreamCommand::Snapshot { .. })
-                    {
+                    if matches!(
+                        &cmd,
+                        StreamCommand::Subvol { .. } | StreamCommand::Snapshot { .. }
+                    ) {
                         received_subvol = true;
                     }
                     if let Err(e) = ctx.process_command(&cmd) {

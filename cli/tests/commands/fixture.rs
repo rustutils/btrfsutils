@@ -22,7 +22,10 @@ use super::{btrfs_ok, common, redact_paths};
 fn filesystem_df() {
     let (_td, mnt) = common::fixture_mount();
     let mp = mnt.path().to_str().unwrap();
-    snap!("btrfs filesystem df <MOUNT>", redact_paths(&btrfs_ok(&["filesystem", "df", mp]), &mnt));
+    snap!(
+        "btrfs filesystem df <MOUNT>",
+        redact_paths(&btrfs_ok(&["filesystem", "df", mp]), &mnt)
+    );
 }
 
 #[test]
@@ -30,7 +33,10 @@ fn filesystem_df() {
 fn filesystem_show() {
     let (_td, mnt) = common::fixture_mount();
     let mp = mnt.path().to_str().unwrap();
-    snap!("btrfs filesystem show <MOUNT>", redact_paths(&btrfs_ok(&["filesystem", "show", mp]), &mnt));
+    snap!(
+        "btrfs filesystem show <MOUNT>",
+        redact_paths(&btrfs_ok(&["filesystem", "show", mp]), &mnt)
+    );
 }
 
 #[test]
@@ -38,7 +44,10 @@ fn filesystem_show() {
 fn filesystem_usage() {
     let (_td, mnt) = common::fixture_mount();
     let mp = mnt.path().to_str().unwrap();
-    snap!("btrfs filesystem usage <MOUNT>", redact_paths(&btrfs_ok(&["filesystem", "usage", mp]), &mnt));
+    snap!(
+        "btrfs filesystem usage <MOUNT>",
+        redact_paths(&btrfs_ok(&["filesystem", "usage", mp]), &mnt)
+    );
 }
 
 #[test]
@@ -46,7 +55,10 @@ fn filesystem_usage() {
 fn filesystem_label() {
     let (_td, mnt) = common::fixture_mount();
     let mp = mnt.path().to_str().unwrap();
-    snap!("btrfs filesystem label <MOUNT>", btrfs_ok(&["filesystem", "label", mp]));
+    snap!(
+        "btrfs filesystem label <MOUNT>",
+        btrfs_ok(&["filesystem", "label", mp])
+    );
 }
 
 #[test]
@@ -78,7 +90,10 @@ fn filesystem_du_summarize() {
 fn subvolume_list() {
     let (_td, mnt) = common::fixture_mount();
     let mp = mnt.path().to_str().unwrap();
-    snap!("btrfs subvolume list <MOUNT>", redact_paths(&btrfs_ok(&["subvolume", "list", mp]), &mnt));
+    snap!(
+        "btrfs subvolume list <MOUNT>",
+        redact_paths(&btrfs_ok(&["subvolume", "list", mp]), &mnt)
+    );
 }
 
 #[test]
@@ -108,7 +123,10 @@ fn subvolume_show_snapshot() {
 fn subvolume_get_default() {
     let (_td, mnt) = common::fixture_mount();
     let mp = mnt.path().to_str().unwrap();
-    snap!("btrfs subvolume get-default <MOUNT>", btrfs_ok(&["subvolume", "get-default", mp]));
+    snap!(
+        "btrfs subvolume get-default <MOUNT>",
+        btrfs_ok(&["subvolume", "get-default", mp])
+    );
 }
 
 #[test]
@@ -116,7 +134,10 @@ fn subvolume_get_default() {
 fn subvolume_get_flags_readonly() {
     let (_td, mnt) = common::fixture_mount();
     let snap1 = format!("{}/snap1", mnt.path().to_str().unwrap());
-    snap!("btrfs subvolume get-flags <MOUNT>/snap1", btrfs_ok(&["subvolume", "get-flags", &snap1]));
+    snap!(
+        "btrfs subvolume get-flags <MOUNT>/snap1",
+        btrfs_ok(&["subvolume", "get-flags", &snap1])
+    );
 }
 
 #[test]
@@ -124,7 +145,10 @@ fn subvolume_get_flags_readonly() {
 fn subvolume_get_flags_writable() {
     let (_td, mnt) = common::fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
-    snap!("btrfs subvolume get-flags <MOUNT>/subvol1", btrfs_ok(&["subvolume", "get-flags", &subvol]));
+    snap!(
+        "btrfs subvolume get-flags <MOUNT>/subvol1",
+        btrfs_ok(&["subvolume", "get-flags", &subvol])
+    );
 }
 
 // ── device ───────────────────────────────────────────────────────────
@@ -134,7 +158,10 @@ fn subvolume_get_flags_writable() {
 fn device_stats() {
     let (_td, mnt) = common::fixture_mount();
     let mp = mnt.path().to_str().unwrap();
-    snap!("btrfs device stats <MOUNT>", redact_paths(&btrfs_ok(&["device", "stats", mp]), &mnt));
+    snap!(
+        "btrfs device stats <MOUNT>",
+        redact_paths(&btrfs_ok(&["device", "stats", mp]), &mnt)
+    );
 }
 
 // ── inspect-internal ─────────────────────────────────────────────────
@@ -144,7 +171,10 @@ fn device_stats() {
 fn inspect_rootid() {
     let (_td, mnt) = common::fixture_mount();
     let mp = mnt.path().to_str().unwrap();
-    snap!("btrfs inspect-internal rootid <MOUNT>", btrfs_ok(&["inspect-internal", "rootid", mp]));
+    snap!(
+        "btrfs inspect-internal rootid <MOUNT>",
+        btrfs_ok(&["inspect-internal", "rootid", mp])
+    );
 }
 
 #[test]
@@ -152,7 +182,10 @@ fn inspect_rootid() {
 fn inspect_rootid_subvol() {
     let (_td, mnt) = common::fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
-    snap!("btrfs inspect-internal rootid <MOUNT>/subvol1", btrfs_ok(&["inspect-internal", "rootid", &subvol]));
+    snap!(
+        "btrfs inspect-internal rootid <MOUNT>/subvol1",
+        btrfs_ok(&["inspect-internal", "rootid", &subvol])
+    );
 }
 
 #[test]
@@ -160,7 +193,10 @@ fn inspect_rootid_subvol() {
 fn inspect_list_chunks() {
     let (_td, mnt) = common::fixture_mount();
     let mp = mnt.path().to_str().unwrap();
-    snap!("btrfs inspect-internal list-chunks <MOUNT>", redact_paths(&btrfs_ok(&["inspect-internal", "list-chunks", mp]), &mnt));
+    snap!(
+        "btrfs inspect-internal list-chunks <MOUNT>",
+        redact_paths(&btrfs_ok(&["inspect-internal", "list-chunks", mp]), &mnt)
+    );
 }
 
 #[test]
@@ -168,7 +204,10 @@ fn inspect_list_chunks() {
 fn inspect_min_dev_size() {
     let (_td, mnt) = common::fixture_mount();
     let mp = mnt.path().to_str().unwrap();
-    snap!("btrfs inspect-internal min-dev-size <MOUNT>", btrfs_ok(&["inspect-internal", "min-dev-size", mp]));
+    snap!(
+        "btrfs inspect-internal min-dev-size <MOUNT>",
+        btrfs_ok(&["inspect-internal", "min-dev-size", mp])
+    );
 }
 
 #[test]
@@ -193,7 +232,10 @@ fn inspect_inode_resolve() {
     // resolve to a file in the top-level subvolume.
     let out = btrfs_ok(&["inspect-internal", "inode-resolve", "257", mp]);
     assert!(!out.is_empty(), "expected at least one path for inode 257");
-    snap!("btrfs inspect-internal inode-resolve 257 <MOUNT>", redact_paths(&out, &mnt));
+    snap!(
+        "btrfs inspect-internal inode-resolve 257 <MOUNT>",
+        redact_paths(&out, &mnt)
+    );
 }
 
 #[test]
@@ -203,7 +245,10 @@ fn inspect_subvolid_resolve() {
     let mp = mnt.path().to_str().unwrap();
     // subvol1 was the first subvolume created, should be ID 256.
     let out = btrfs_ok(&["inspect-internal", "subvolid-resolve", "256", mp]);
-    snap!("btrfs inspect-internal subvolid-resolve 256 <MOUNT>", redact_paths(&out, &mnt));
+    snap!(
+        "btrfs inspect-internal subvolid-resolve 256 <MOUNT>",
+        redact_paths(&out, &mnt)
+    );
 }
 
 // ── property ─────────────────────────────────────────────────────────
@@ -213,7 +258,10 @@ fn inspect_subvolid_resolve() {
 fn property_get_ro_snapshot() {
     let (_td, mnt) = common::fixture_mount();
     let snap1 = format!("{}/snap1", mnt.path().to_str().unwrap());
-    snap!("btrfs property get -t subvol <MOUNT>/snap1 ro", btrfs_ok(&["property", "get", "-t", "subvol", &snap1, "ro"]));
+    snap!(
+        "btrfs property get -t subvol <MOUNT>/snap1 ro",
+        btrfs_ok(&["property", "get", "-t", "subvol", &snap1, "ro"])
+    );
 }
 
 #[test]
@@ -221,7 +269,10 @@ fn property_get_ro_snapshot() {
 fn property_get_ro_writable() {
     let (_td, mnt) = common::fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
-    snap!("btrfs property get -t subvol <MOUNT>/subvol1 ro", btrfs_ok(&["property", "get", "-t", "subvol", &subvol, "ro"]));
+    snap!(
+        "btrfs property get -t subvol <MOUNT>/subvol1 ro",
+        btrfs_ok(&["property", "get", "-t", "subvol", &subvol, "ro"])
+    );
 }
 
 #[test]
@@ -229,5 +280,8 @@ fn property_get_ro_writable() {
 fn property_list_subvol() {
     let (_td, mnt) = common::fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
-    snap!("btrfs property list -t subvol <MOUNT>/subvol1", btrfs_ok(&["property", "list", "-t", "subvol", &subvol]));
+    snap!(
+        "btrfs property list -t subvol <MOUNT>/subvol1",
+        btrfs_ok(&["property", "list", "-t", "subvol", &subvol])
+    );
 }

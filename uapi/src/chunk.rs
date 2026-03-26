@@ -346,7 +346,8 @@ mod tests {
         // which means expected_len = CHUNK_FIRST_STRIPE_OFF + 0*STRIPE_SIZE
         // but the function also checks num_stripes == 0
         let mut padded = vec![0u8; CHUNK_MIN_LEN];
-        padded[..buf.len().min(CHUNK_MIN_LEN)].copy_from_slice(&buf[..buf.len().min(CHUNK_MIN_LEN)]);
+        padded[..buf.len().min(CHUNK_MIN_LEN)]
+            .copy_from_slice(&buf[..buf.len().min(CHUNK_MIN_LEN)]);
         padded[CHUNK_NUM_STRIPES_OFF..CHUNK_NUM_STRIPES_OFF + 2]
             .copy_from_slice(&0u16.to_le_bytes());
         assert!(parse_chunk(&padded).is_none());

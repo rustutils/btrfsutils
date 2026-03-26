@@ -43,21 +43,25 @@ fn redact(output: &str, mnt: &common::Mount) -> String {
     s = s.replace(dev, "<DEV>");
 
     let re_transid = regex_lite::Regex::new(r"transid[=:]\s*\d+").unwrap();
-    s = re_transid.replace_all(&s, "transid: <TRANSID>").into_owned();
+    s = re_transid
+        .replace_all(&s, "transid: <TRANSID>")
+        .into_owned();
 
-    let re_timestamp = regex_lite::Regex::new(
-        r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}"
-    ).unwrap();
+    let re_timestamp =
+        regex_lite::Regex::new(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{4}").unwrap();
     s = re_timestamp.replace_all(&s, "<TIMESTAMP>").into_owned();
 
     let re_epoch = regex_lite::Regex::new(r"\d{10,}\.\d+").unwrap();
     s = re_epoch.replace_all(&s, "<EPOCH>").into_owned();
 
     let re_gen_at = regex_lite::Regex::new(r"Gen at creation:\s+\d+").unwrap();
-    s = re_gen_at.replace_all(&s, "Gen at creation: \t<GEN>").into_owned();
+    s = re_gen_at
+        .replace_all(&s, "Gen at creation: \t<GEN>")
+        .into_owned();
 
     // Filter out SELinux xattr lines (not present on all systems).
-    s = s.lines()
+    s = s
+        .lines()
         .filter(|l| !l.contains("security.selinux"))
         .collect::<Vec<_>>()
         .join("\n");

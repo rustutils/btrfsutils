@@ -4,7 +4,7 @@
 //! others use snapshot testing for output verification.
 
 use super::{btrfs, btrfs_ok, common, redact};
-use common::{BackingFile, LoopbackDevice, single_mount, write_test_data, verify_test_data};
+use common::{BackingFile, LoopbackDevice, single_mount, verify_test_data, write_test_data};
 use std::path::Path;
 
 // ── filesystem (assertions) ──────────────────────────────────────────
@@ -26,7 +26,10 @@ fn filesystem_label_get_set() {
     btrfs_ok(&["filesystem", "label", mp, "test-label"]);
 
     let out = btrfs_ok(&["filesystem", "label", mp]);
-    assert!(out.contains("test-label"), "expected label in output:\n{out}");
+    assert!(
+        out.contains("test-label"),
+        "expected label in output:\n{out}"
+    );
 }
 
 #[test]
@@ -40,7 +43,10 @@ fn filesystem_resize_grow_shrink() {
     btrfs_ok(&["filesystem", "resize", "max", mp]);
 
     let out = btrfs_ok(&["filesystem", "usage", mp]);
-    assert!(out.contains("Device size:"), "expected usage output:\n{out}");
+    assert!(
+        out.contains("Device size:"),
+        "expected usage output:\n{out}"
+    );
 
     btrfs_ok(&["filesystem", "resize", "512m", mp]);
 }
@@ -68,7 +74,12 @@ fn filesystem_defrag_compress() {
     common::write_compressible_data(Path::new(mp), "compressible.bin", 131072);
     btrfs_ok(&["filesystem", "sync", mp]);
 
-    btrfs_ok(&["filesystem", "defragment", "-czstd", &format!("{mp}/compressible.bin")]);
+    btrfs_ok(&[
+        "filesystem",
+        "defragment",
+        "-czstd",
+        &format!("{mp}/compressible.bin"),
+    ]);
 }
 
 #[test]
@@ -79,8 +90,14 @@ fn filesystem_commit_stats() {
     btrfs_ok(&["filesystem", "sync", mp]);
 
     let out = btrfs_ok(&["filesystem", "commit-stats", mp]);
-    assert!(out.contains("Total commits"), "expected commit count:\n{out}");
-    assert!(out.contains("Max commit duration"), "expected max duration:\n{out}");
+    assert!(
+        out.contains("Total commits"),
+        "expected commit count:\n{out}"
+    );
+    assert!(
+        out.contains("Max commit duration"),
+        "expected max duration:\n{out}"
+    );
 }
 
 #[test]
@@ -94,7 +111,11 @@ fn filesystem_mkswapfile() {
     assert!(Path::new(&swapfile).exists(), "swapfile not created");
 
     let meta = std::fs::metadata(&swapfile).unwrap();
-    assert!(meta.len() >= 16 * 1024 * 1024, "swapfile too small: {} bytes", meta.len());
+    assert!(
+        meta.len() >= 16 * 1024 * 1024,
+        "swapfile too small: {} bytes",
+        meta.len()
+    );
 }
 
 // ── subvolume ────────────────────────────────────────────────────────
@@ -110,7 +131,10 @@ fn subvolume_create_show_delete() {
     assert!(Path::new(&subvol).is_dir());
 
     let out = btrfs_ok(&["subvolume", "show", &subvol]);
-    assert!(out.contains("testvol"), "expected name in show output:\n{out}");
+    assert!(
+        out.contains("testvol"),
+        "expected name in show output:\n{out}"
+    );
 
     btrfs_ok(&["subvolume", "delete", &subvol]);
     assert!(!Path::new(&subvol).exists());
@@ -179,7 +203,10 @@ fn subvolume_get_set_flags() {
     btrfs_ok(&["subvolume", "create", &subvol]);
 
     let out = btrfs_ok(&["subvolume", "get-flags", &subvol]);
-    assert!(!out.contains("readonly"), "expected no readonly flag:\n{out}");
+    assert!(
+        !out.contains("readonly"),
+        "expected no readonly flag:\n{out}"
+    );
 
     btrfs_ok(&["subvolume", "set-flags", "readonly", &subvol]);
     let out = btrfs_ok(&["subvolume", "get-flags", &subvol]);
@@ -187,7 +214,10 @@ fn subvolume_get_set_flags() {
 
     btrfs_ok(&["subvolume", "set-flags", "-", &subvol]);
     let out = btrfs_ok(&["subvolume", "get-flags", &subvol]);
-    assert!(!out.contains("readonly"), "expected no readonly flag:\n{out}");
+    assert!(
+        !out.contains("readonly"),
+        "expected no readonly flag:\n{out}"
+    );
 }
 
 // ── property ─────────────────────────────────────────────────────────
@@ -263,20 +293,29 @@ fn property_force_clear_received_uuid() {
     // The received subvolume should be read-only with a received_uuid.
     let received = format!("{mp2}/src");
     let out = btrfs_ok(&["subvolume", "show", &received]);
-    assert!(out.contains("Received UUID:"), "expected Received UUID field:\n{out}");
+    assert!(
+        out.contains("Received UUID:"),
+        "expected Received UUID field:\n{out}"
+    );
     // The received UUID should not be "-" (nil).
     assert!(
-        !out.lines().any(|l| l.contains("Received UUID:") && l.contains("-\n")),
+        !out.lines()
+            .any(|l| l.contains("Received UUID:") && l.contains("-\n")),
         "expected non-nil received UUID"
     );
 
     // Without -f, flipping ro→rw should fail.
     let (_, stderr, code) = btrfs(&["property", "set", "-t", "subvol", &received, "ro", "false"]);
     assert_ne!(code, 0, "expected failure without -f");
-    assert!(stderr.contains("received_uuid"), "expected received_uuid error:\n{stderr}");
+    assert!(
+        stderr.contains("received_uuid"),
+        "expected received_uuid error:\n{stderr}"
+    );
 
     // With -f, it should succeed and clear the received_uuid.
-    btrfs_ok(&["property", "set", "-t", "subvol", "-f", &received, "ro", "false"]);
+    btrfs_ok(&[
+        "property", "set", "-t", "subvol", "-f", &received, "ro", "false",
+    ]);
 
     // Verify: subvolume is now writable.
     let out = btrfs_ok(&["property", "get", "-t", "subvol", &received, "ro"]);
@@ -308,9 +347,9 @@ fn send_receive_dump() {
 
     let out = btrfs_ok(&["receive", "--dump", "-f", &stream_file]);
 
-    let re_uuid = regex_lite::Regex::new(
-        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    ).unwrap();
+    let re_uuid =
+        regex_lite::Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+            .unwrap();
     let re_offset = regex_lite::Regex::new(r"offset=\d+").unwrap();
     let re_len = regex_lite::Regex::new(r"len=\d+").unwrap();
     let re_mode = regex_lite::Regex::new(r"mode=\d+").unwrap();
@@ -401,7 +440,11 @@ fn send_receive_incremental() {
     verify_test_data(Path::new(&recv_base), "unchanged.bin", 8192);
     verify_test_data(Path::new(&recv_base), "modified.bin", 4096);
     verify_test_data(Path::new(&recv_base), "deleted.bin", 2048);
-    verify_test_data(Path::new(&format!("{recv_base}/subdir")), "nested.bin", 1024);
+    verify_test_data(
+        Path::new(&format!("{recv_base}/subdir")),
+        "nested.bin",
+        1024,
+    );
 
     // Incremental send: only the changes since base.
     btrfs_ok(&["send", "-p", &base_snap, "-f", &incr_stream, &incr_snap]);
@@ -415,7 +458,10 @@ fn send_receive_incremental() {
 
     // Verify the incremental snapshot has the correct final state.
     let recv_incr = format!("{mp2}/snap_incr");
-    assert!(Path::new(&recv_incr).is_dir(), "incremental snapshot not found");
+    assert!(
+        Path::new(&recv_incr).is_dir(),
+        "incremental snapshot not found"
+    );
 
     // Unchanged file should be intact.
     verify_test_data(Path::new(&recv_incr), "unchanged.bin", 8192);
@@ -433,7 +479,11 @@ fn send_receive_incremental() {
     verify_test_data(Path::new(&recv_incr), "added.bin", 16384);
 
     // Original nested file should still be there.
-    verify_test_data(Path::new(&format!("{recv_incr}/subdir")), "nested.bin", 1024);
+    verify_test_data(
+        Path::new(&format!("{recv_incr}/subdir")),
+        "nested.bin",
+        1024,
+    );
 
     // New directory and file should be present.
     verify_test_data(Path::new(&format!("{recv_incr}/newdir")), "fresh.bin", 4096);
@@ -485,7 +535,10 @@ fn send_receive_v2_compressed() {
     // zeros.bin: 256KB of all zeros.
     let zeros = std::fs::read(format!("{received}/zeros.bin")).unwrap();
     assert_eq!(zeros.len(), 256 * 1024);
-    assert!(zeros.iter().all(|&b| b == 0), "zeros.bin contains non-zero data");
+    assert!(
+        zeros.iter().all(|&b| b == 0),
+        "zeros.bin contains non-zero data"
+    );
 
     // pattern.bin: deterministic test data.
     verify_test_data(Path::new(&received), "pattern.bin", 64 * 1024);
@@ -524,7 +577,10 @@ fn device_add_remove() {
     btrfs_ok(&["device", "add", dev2_path, mp]);
 
     let out = btrfs_ok(&["filesystem", "show", mp]);
-    assert!(out.contains(dev2_path), "expected new device in show output:\n{out}");
+    assert!(
+        out.contains(dev2_path),
+        "expected new device in show output:\n{out}"
+    );
 
     btrfs_ok(&["device", "remove", dev2_path, mp]);
 
@@ -541,7 +597,10 @@ fn device_scan() {
     let dev = mnt.loopback().path().to_str().unwrap();
 
     let out = btrfs_ok(&["device", "scan", dev]);
-    assert!(out.contains("registered"), "expected registered message:\n{out}");
+    assert!(
+        out.contains("registered"),
+        "expected registered message:\n{out}"
+    );
 }
 
 #[test]
@@ -657,7 +716,10 @@ fn qgroup_show() {
     assert!(out.contains("qgroupid"), "expected header:\n{out}");
     assert!(out.contains("rfer"), "expected rfer column:\n{out}");
     assert!(out.contains("excl"), "expected excl column:\n{out}");
-    assert!(out.contains("0/"), "expected level-0 qgroup entries:\n{out}");
+    assert!(
+        out.contains("0/"),
+        "expected level-0 qgroup entries:\n{out}"
+    );
 
     btrfs_ok(&["quota", "disable", mp]);
 }
@@ -710,7 +772,10 @@ fn qgroup_assign_remove() {
     btrfs_ok(&["qgroup", "assign", "--no-rescan", "0/256", "1/100", mp]);
 
     let out = btrfs_ok(&["qgroup", "show", "-pc", mp]);
-    assert!(out.contains("1/100"), "expected parent group in show:\n{out}");
+    assert!(
+        out.contains("1/100"),
+        "expected parent group in show:\n{out}"
+    );
 
     // Remove the assignment.
     btrfs_ok(&["qgroup", "remove", "--no-rescan", "0/256", "1/100", mp]);
@@ -860,7 +925,8 @@ fn subvolume_create_multiple() {
     let mp = mnt.path().to_str().unwrap();
 
     btrfs_ok(&[
-        "subvolume", "create",
+        "subvolume",
+        "create",
         &format!("{mp}/multi1"),
         &format!("{mp}/multi2"),
         &format!("{mp}/multi3"),

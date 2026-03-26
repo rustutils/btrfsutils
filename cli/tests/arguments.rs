@@ -46,12 +46,25 @@ fn subvolume_delete_missing_path() {
 
 #[test]
 fn subvolume_snapshot() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "snapshot", "/mnt/src", "/mnt/dst"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "subvolume",
+        "snapshot",
+        "/mnt/src",
+        "/mnt/dst"
+    ]));
 }
 
 #[test]
 fn subvolume_snapshot_readonly() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "snapshot", "-r", "/mnt/src", "/mnt/dst"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "subvolume",
+        "snapshot",
+        "-r",
+        "/mnt/src",
+        "/mnt/dst"
+    ]));
 }
 
 #[test]
@@ -128,7 +141,13 @@ fn filesystem_label_get() {
 
 #[test]
 fn filesystem_label_set() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "filesystem", "label", "/dev/sda1", "my-label"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "filesystem",
+        "label",
+        "/dev/sda1",
+        "my-label"
+    ]));
 }
 
 #[test]
@@ -148,7 +167,13 @@ fn filesystem_defrag() {
 
 #[test]
 fn filesystem_defrag_compress() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "filesystem", "defragment", "-czstd", "/mnt/file"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "filesystem",
+        "defragment",
+        "-czstd",
+        "/mnt/file"
+    ]));
 }
 
 #[test]
@@ -158,7 +183,14 @@ fn filesystem_mkswapfile() {
 
 #[test]
 fn filesystem_mkswapfile_with_size() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "filesystem", "mkswapfile", "-s", "4G", "/mnt/swap"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "filesystem",
+        "mkswapfile",
+        "-s",
+        "4G",
+        "/mnt/swap"
+    ]));
 }
 
 // ── device ───────────────────────────────────────────────────────────
@@ -207,7 +239,9 @@ fn balance_start() {
 
 #[test]
 fn balance_start_with_filters() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "balance", "start", "-d", "usage=50", "-f", "/mnt"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "balance", "start", "-d", "usage=50", "-f", "/mnt"
+    ]));
 }
 
 #[test]
@@ -271,7 +305,13 @@ fn inspect_rootid() {
 
 #[test]
 fn inspect_inode_resolve() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "inspect-internal", "inode-resolve", "256", "/mnt"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "inspect-internal",
+        "inode-resolve",
+        "256",
+        "/mnt"
+    ]));
 }
 
 #[test]
@@ -281,17 +321,34 @@ fn inspect_inode_resolve_missing_args() {
 
 #[test]
 fn inspect_logical_resolve() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "inspect-internal", "logical-resolve", "12345", "/mnt"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "inspect-internal",
+        "logical-resolve",
+        "12345",
+        "/mnt"
+    ]));
 }
 
 #[test]
 fn inspect_subvolid_resolve() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "inspect-internal", "subvolid-resolve", "256", "/mnt"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "inspect-internal",
+        "subvolid-resolve",
+        "256",
+        "/mnt"
+    ]));
 }
 
 #[test]
 fn inspect_min_dev_size() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "inspect-internal", "min-dev-size", "/mnt"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "inspect-internal",
+        "min-dev-size",
+        "/mnt"
+    ]));
 }
 
 #[test]
@@ -301,12 +358,24 @@ fn inspect_list_chunks() {
 
 #[test]
 fn inspect_dump_super() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "inspect-internal", "dump-super", "/dev/sda1"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "inspect-internal",
+        "dump-super",
+        "/dev/sda1"
+    ]));
 }
 
 #[test]
 fn inspect_dump_super_full_all() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "inspect-internal", "dump-super", "-f", "-a", "/dev/sda1"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "inspect-internal",
+        "dump-super",
+        "-f",
+        "-a",
+        "/dev/sda1"
+    ]));
 }
 
 // ── quota ────────────────────────────────────────────────────────────
@@ -360,17 +429,29 @@ fn qgroup_destroy() {
 
 #[test]
 fn qgroup_assign() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "qgroup", "assign", "0/256", "1/100", "/mnt"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "qgroup", "assign", "0/256", "1/100", "/mnt"
+    ]));
 }
 
 #[test]
 fn qgroup_assign_no_rescan() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "qgroup", "assign", "--no-rescan", "0/256", "1/100", "/mnt"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "qgroup",
+        "assign",
+        "--no-rescan",
+        "0/256",
+        "1/100",
+        "/mnt"
+    ]));
 }
 
 #[test]
 fn qgroup_remove() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "qgroup", "remove", "0/256", "1/100", "/mnt"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "qgroup", "remove", "0/256", "1/100", "/mnt"
+    ]));
 }
 
 #[test]
@@ -402,7 +483,9 @@ fn qgroup_clear_stale() {
 
 #[test]
 fn replace_start() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "replace", "start", "/dev/sda", "/dev/sdb", "/mnt"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "replace", "start", "/dev/sda", "/dev/sdb", "/mnt"
+    ]));
 }
 
 #[test]
@@ -456,7 +539,13 @@ fn receive_basic() {
 
 #[test]
 fn receive_from_file() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "receive", "-f", "/tmp/stream", "/mnt/dest"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "receive",
+        "-f",
+        "/tmp/stream",
+        "/mnt/dest"
+    ]));
 }
 
 #[test]
@@ -478,12 +567,25 @@ fn property_get_named() {
 
 #[test]
 fn property_set() {
-    insta::assert_debug_snapshot!(parse(&["btrfs", "property", "set", "/mnt/subvol", "ro", "true"]));
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "property",
+        "set",
+        "/mnt/subvol",
+        "ro",
+        "true"
+    ]));
 }
 
 #[test]
 fn property_set_missing_value() {
-    insta::assert_snapshot!(parse_err(&["btrfs", "property", "set", "/mnt/subvol", "ro"]));
+    insta::assert_snapshot!(parse_err(&[
+        "btrfs",
+        "property",
+        "set",
+        "/mnt/subvol",
+        "ro"
+    ]));
 }
 
 #[test]

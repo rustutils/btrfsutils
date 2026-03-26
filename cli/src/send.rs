@@ -1,14 +1,21 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
-use btrfs_uapi::send::SendFlags;
-use btrfs_uapi::subvolume::{SubvolumeFlags, subvolume_flags_get, subvolume_info};
-use btrfs_uapi::sysfs::SysfsBtrfs;
+use btrfs_uapi::{
+    send::SendFlags,
+    subvolume::{SubvolumeFlags, subvolume_flags_get, subvolume_info},
+    sysfs::SysfsBtrfs,
+};
 use clap::Parser;
-use std::io::{self, Read, Write};
-use std::os::fd::{AsFd, AsRawFd, OwnedFd};
-use std::os::unix::io::FromRawFd;
-use std::path::PathBuf;
-use std::{fs::File, thread};
+use std::{
+    fs::File,
+    io::{self, Read, Write},
+    os::{
+        fd::{AsFd, AsRawFd, OwnedFd},
+        unix::io::FromRawFd,
+    },
+    path::PathBuf,
+    thread,
+};
 
 /// Send the subvolume(s) to stdout.
 ///
@@ -101,8 +108,7 @@ fn find_good_parent(
         })?;
 
         // Check if this clone source shares the same parent or IS the parent.
-        if cs_info.parent_uuid != subvol_info.parent_uuid
-            && cs_info.uuid != subvol_info.parent_uuid
+        if cs_info.parent_uuid != subvol_info.parent_uuid && cs_info.uuid != subvol_info.parent_uuid
         {
             continue;
         }

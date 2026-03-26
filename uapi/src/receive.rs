@@ -5,11 +5,14 @@
 //! extents between files (`CLONE_RANGE`), and searching the UUID tree to locate
 //! subvolumes by their UUID or received UUID.
 
-use crate::raw::{
-    self, btrfs_ioc_clone_range, btrfs_ioc_encoded_write, btrfs_ioc_set_received_subvol,
-    btrfs_ioctl_clone_range_args, btrfs_ioctl_encoded_io_args, btrfs_ioctl_received_subvol_args,
+use crate::{
+    raw::{
+        self, btrfs_ioc_clone_range, btrfs_ioc_encoded_write, btrfs_ioc_set_received_subvol,
+        btrfs_ioctl_clone_range_args, btrfs_ioctl_encoded_io_args,
+        btrfs_ioctl_received_subvol_args,
+    },
+    tree_search::{SearchKey, tree_search},
 };
-use crate::tree_search::{SearchKey, tree_search};
 use nix::libc::c_int;
 use std::os::fd::{AsRawFd, BorrowedFd};
 use uuid::Uuid;
@@ -26,11 +29,7 @@ pub struct SubvolSearchResult {
 /// After applying a send stream, this ioctl records the sender's UUID and
 /// transaction ID so that future incremental sends can use this subvolume as
 /// a reference. Returns the receive transaction ID assigned by the kernel.
-pub fn received_subvol_set(
-    fd: BorrowedFd<'_>,
-    uuid: &Uuid,
-    stransid: u64,
-) -> nix::Result<u64> {
+pub fn received_subvol_set(fd: BorrowedFd<'_>, uuid: &Uuid, stransid: u64) -> nix::Result<u64> {
     let mut args: btrfs_ioctl_received_subvol_args = unsafe { std::mem::zeroed() };
 
     let uuid_bytes = uuid.as_bytes();
@@ -121,10 +120,7 @@ pub fn encoded_write(
 ///
 /// Returns the root ID of the matching subvolume, or `Errno::ENOENT` if not
 /// found.
-pub fn subvolume_search_by_uuid(
-    fd: BorrowedFd<'_>,
-    uuid: &Uuid,
-) -> nix::Result<u64> {
+pub fn subvolume_search_by_uuid(fd: BorrowedFd<'_>, uuid: &Uuid) -> nix::Result<u64> {
     search_uuid_tree(fd, uuid, raw::BTRFS_UUID_KEY_SUBVOL as u32)
 }
 
@@ -132,10 +128,7 @@ pub fn subvolume_search_by_uuid(
 ///
 /// Returns the root ID of the matching subvolume, or `Errno::ENOENT` if not
 /// found.
-pub fn subvolume_search_by_received_uuid(
-    fd: BorrowedFd<'_>,
-    uuid: &Uuid,
-) -> nix::Result<u64> {
+pub fn subvolume_search_by_received_uuid(fd: BorrowedFd<'_>, uuid: &Uuid) -> nix::Result<u64> {
     search_uuid_tree(fd, uuid, raw::BTRFS_UUID_KEY_RECEIVED_SUBVOL as u32)
 }
 
@@ -145,19 +138,12 @@ pub fn subvolume_search_by_received_uuid(
 /// bytes [0..8], offset = LE u64 from bytes [8..16]. The item type selects
 /// whether we are looking for regular UUIDs or received UUIDs. The data
 /// payload is a single LE u64 root ID.
-fn search_uuid_tree(
-    fd: BorrowedFd<'_>,
-    uuid: &Uuid,
-    item_type: u32,
-) -> nix::Result<u64> {
+fn search_uuid_tree(fd: BorrowedFd<'_>, uuid: &Uuid, item_type: u32) -> nix::Result<u64> {
     let bytes = uuid.as_bytes();
     let objectid = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
     let offset = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
 
-    let mut key = SearchKey::for_type(
-        raw::BTRFS_UUID_TREE_OBJECTID as u64,
-        item_type,
-    );
+    let mut key = SearchKey::for_type(raw::BTRFS_UUID_TREE_OBJECTID as u64, item_type);
     key.min_objectid = objectid;
     key.max_objectid = objectid;
     key.min_offset = offset;

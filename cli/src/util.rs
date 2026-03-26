@@ -116,7 +116,10 @@ mod tests {
     #[test]
     fn human_bytes_fractional() {
         // 1.5 GiB = 1024^3 + 512*1024^2
-        assert_eq!(human_bytes(1024 * 1024 * 1024 + 512 * 1024 * 1024), "1.50GiB");
+        assert_eq!(
+            human_bytes(1024 * 1024 * 1024 + 512 * 1024 * 1024),
+            "1.50GiB"
+        );
     }
 
     #[test]
@@ -147,7 +150,10 @@ mod tests {
     #[test]
     fn parse_size_case_insensitive() {
         assert_eq!(parse_size_with_suffix("4k").unwrap(), 4 * 1024);
-        assert_eq!(parse_size_with_suffix("2g").unwrap(), 2 * 1024 * 1024 * 1024);
+        assert_eq!(
+            parse_size_with_suffix("2g").unwrap(),
+            2 * 1024 * 1024 * 1024
+        );
     }
 
     #[test]

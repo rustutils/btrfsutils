@@ -61,8 +61,10 @@ impl BackingFile {
             "mkfs.btrfs",
             &[
                 "-f",
-                "--uuid", uuid,
-                "--label", label,
+                "--uuid",
+                uuid,
+                "--label",
+                label,
                 self.path.to_str().unwrap(),
             ],
         );
@@ -315,16 +317,13 @@ pub fn deterministic_mount() -> (tempfile::TempDir, Mount) {
 /// on first use. The cache lives at `target/test-fixtures/test-fs.img` so it
 /// survives across test runs but is cleaned by `cargo clean`.
 fn cached_fixture_image() -> PathBuf {
-    let cache_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../target/test-fixtures");
+    let cache_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-fixtures");
     let cached = cache_dir.join("test-fs.img");
 
     if !cached.exists() {
-        fs::create_dir_all(&cache_dir).unwrap_or_else(|e| {
-            panic!("failed to create {}: {e}", cache_dir.display())
-        });
-        let gz_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/commands/fixture.img.gz");
+        fs::create_dir_all(&cache_dir)
+            .unwrap_or_else(|e| panic!("failed to create {}: {e}", cache_dir.display()));
+        let gz_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/commands/fixture.img.gz");
         let status = Command::new("gunzip")
             .args(["-k", "-c"])
             .arg(&gz_path)
@@ -356,8 +355,10 @@ pub fn fixture_mount() -> (tempfile::TempDir, Mount) {
     run(
         "mount",
         &[
-            "-t", "btrfs",
-            "-o", "ro",
+            "-t",
+            "btrfs",
+            "-o",
+            "ro",
             lo.path().to_str().unwrap(),
             mountpoint.to_str().unwrap(),
         ],

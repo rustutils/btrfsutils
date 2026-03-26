@@ -638,8 +638,10 @@ fn ioctl_timespec_to_system_time(sec: u64, nsec: u32) -> SystemTime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use std::time::{Duration, UNIX_EPOCH};
+    use std::{
+        collections::HashMap,
+        time::{Duration, UNIX_EPOCH},
+    };
     use uuid::Uuid;
 
     fn test_item(root_id: u64, parent_id: u64) -> SubvolumeListItem {
@@ -767,7 +769,14 @@ mod tests {
         let id_to_idx: HashMap<u64, usize> = [(256, 0)].into();
         let mut cache = HashMap::new();
 
-        let path = build_full_path(256, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        let path = build_full_path(
+            256,
+            FS_TREE_OBJECTID,
+            &id_to_idx,
+            &segments,
+            &items,
+            &mut cache,
+        );
         assert_eq!(path, "mysub");
     }
 
@@ -783,7 +792,14 @@ mod tests {
         let id_to_idx: HashMap<u64, usize> = [(256, 0), (257, 1), (258, 2)].into();
         let mut cache = HashMap::new();
 
-        let path = build_full_path(258, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        let path = build_full_path(
+            258,
+            FS_TREE_OBJECTID,
+            &id_to_idx,
+            &segments,
+            &items,
+            &mut cache,
+        );
         assert_eq!(path, "A/B/C");
     }
 
@@ -819,16 +835,20 @@ mod tests {
     #[test]
     fn build_full_path_cycle_detection() {
         // A (256) parent is B (257), B (257) parent is A (256) — mutual cycle
-        let items = vec![
-            test_item(256, 257),
-            test_item(257, 256),
-        ];
+        let items = vec![test_item(256, 257), test_item(257, 256)];
         let segments = vec!["A".to_string(), "B".to_string()];
         let id_to_idx: HashMap<u64, usize> = [(256, 0), (257, 1)].into();
         let mut cache = HashMap::new();
 
         // Must not hang. The result is truncated due to cycle detection.
-        let _path = build_full_path(256, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        let _path = build_full_path(
+            256,
+            FS_TREE_OBJECTID,
+            &id_to_idx,
+            &segments,
+            &items,
+            &mut cache,
+        );
         // Just verify it terminates and returns something (exact value depends
         // on cycle truncation heuristic).
     }
@@ -847,7 +867,14 @@ mod tests {
         let mut cache = HashMap::new();
         cache.insert(257, "A/B".to_string());
 
-        let path = build_full_path(258, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        let path = build_full_path(
+            258,
+            FS_TREE_OBJECTID,
+            &id_to_idx,
+            &segments,
+            &items,
+            &mut cache,
+        );
         assert_eq!(path, "A/B/C");
     }
 
@@ -859,7 +886,14 @@ mod tests {
         let id_to_idx: HashMap<u64, usize> = [(256, 0)].into();
         let mut cache = HashMap::new();
 
-        let path = build_full_path(256, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        let path = build_full_path(
+            256,
+            FS_TREE_OBJECTID,
+            &id_to_idx,
+            &segments,
+            &items,
+            &mut cache,
+        );
         assert_eq!(path, "orphan");
     }
 
@@ -871,7 +905,14 @@ mod tests {
         let id_to_idx: HashMap<u64, usize> = [(256, 0)].into();
         let mut cache = HashMap::new();
 
-        let path = build_full_path(256, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        let path = build_full_path(
+            256,
+            FS_TREE_OBJECTID,
+            &id_to_idx,
+            &segments,
+            &items,
+            &mut cache,
+        );
         assert_eq!(path, "noparent");
     }
 
@@ -884,7 +925,14 @@ mod tests {
         let mut cache = HashMap::new();
         cache.insert(256, "cached/path".to_string());
 
-        let path = build_full_path(256, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        let path = build_full_path(
+            256,
+            FS_TREE_OBJECTID,
+            &id_to_idx,
+            &segments,
+            &items,
+            &mut cache,
+        );
         assert_eq!(path, "cached/path");
     }
 
@@ -896,7 +944,14 @@ mod tests {
         let id_to_idx: HashMap<u64, usize> = [(256, 0)].into();
         let mut cache = HashMap::new();
 
-        let path = build_full_path(999, FS_TREE_OBJECTID, &id_to_idx, &segments, &items, &mut cache);
+        let path = build_full_path(
+            999,
+            FS_TREE_OBJECTID,
+            &id_to_idx,
+            &segments,
+            &items,
+            &mut cache,
+        );
         assert_eq!(path, "");
     }
 }

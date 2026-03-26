@@ -334,12 +334,7 @@ impl<R: Read> StreamReader<R> {
                 path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
                 uuid: attr_uuid(&self.buf, &attrs, BTRFS_SEND_A_UUID, "uuid")?,
                 ctransid: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_CTRANSID, "ctransid")?,
-                clone_uuid: attr_uuid(
-                    &self.buf,
-                    &attrs,
-                    BTRFS_SEND_A_CLONE_UUID,
-                    "clone_uuid",
-                )?,
+                clone_uuid: attr_uuid(&self.buf, &attrs, BTRFS_SEND_A_CLONE_UUID, "clone_uuid")?,
                 clone_ctransid: attr_u64(
                     &self.buf,
                     &attrs,
@@ -400,24 +395,14 @@ impl<R: Read> StreamReader<R> {
                 path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
                 offset: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILE_OFFSET, "file_offset")?,
                 len: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_CLONE_LEN, "clone_len")?,
-                clone_uuid: attr_uuid(
-                    &self.buf,
-                    &attrs,
-                    BTRFS_SEND_A_CLONE_UUID,
-                    "clone_uuid",
-                )?,
+                clone_uuid: attr_uuid(&self.buf, &attrs, BTRFS_SEND_A_CLONE_UUID, "clone_uuid")?,
                 clone_ctransid: attr_u64(
                     &self.buf,
                     &attrs,
                     BTRFS_SEND_A_CLONE_CTRANSID,
                     "clone_ctransid",
                 )?,
-                clone_path: attr_string(
-                    &self.buf,
-                    &attrs,
-                    BTRFS_SEND_A_CLONE_PATH,
-                    "clone_path",
-                )?,
+                clone_path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_CLONE_PATH, "clone_path")?,
                 clone_offset: attr_u64(
                     &self.buf,
                     &attrs,
@@ -451,7 +436,12 @@ impl<R: Read> StreamReader<R> {
             })),
             BTRFS_SEND_C_FALLOCATE => Ok(Some(StreamCommand::Fallocate {
                 path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                mode: attr_u32(&self.buf, &attrs, BTRFS_SEND_A_FALLOCATE_MODE, "fallocate_mode")?,
+                mode: attr_u32(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_FALLOCATE_MODE,
+                    "fallocate_mode",
+                )?,
                 offset: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILE_OFFSET, "file_offset")?,
                 len: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_SIZE, "size")?,
             })),
@@ -463,13 +453,22 @@ impl<R: Read> StreamReader<R> {
                 path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
                 offset: attr_u64(&self.buf, &attrs, BTRFS_SEND_A_FILE_OFFSET, "file_offset")?,
                 unencoded_file_len: attr_u64(
-                    &self.buf, &attrs, BTRFS_SEND_A_UNENCODED_FILE_LEN, "unencoded_file_len",
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_UNENCODED_FILE_LEN,
+                    "unencoded_file_len",
                 )?,
                 unencoded_len: attr_u64(
-                    &self.buf, &attrs, BTRFS_SEND_A_UNENCODED_LEN, "unencoded_len",
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_UNENCODED_LEN,
+                    "unencoded_len",
                 )?,
                 unencoded_offset: attr_u64(
-                    &self.buf, &attrs, BTRFS_SEND_A_UNENCODED_OFFSET, "unencoded_offset",
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_UNENCODED_OFFSET,
+                    "unencoded_offset",
                 )?,
                 // Compression and encryption default to 0 if absent.
                 compression: attr_opt_u32(&self.buf, &attrs, BTRFS_SEND_A_COMPRESSION, 0),
@@ -478,10 +477,30 @@ impl<R: Read> StreamReader<R> {
             })),
             BTRFS_SEND_C_ENABLE_VERITY => Ok(Some(StreamCommand::EnableVerity {
                 path: attr_string(&self.buf, &attrs, BTRFS_SEND_A_PATH, "path")?,
-                algorithm: attr_u8(&self.buf, &attrs, BTRFS_SEND_A_VERITY_ALGORITHM, "verity_algorithm")?,
-                block_size: attr_u32(&self.buf, &attrs, BTRFS_SEND_A_VERITY_BLOCK_SIZE, "verity_block_size")?,
-                salt: attr_data(&self.buf, &attrs, BTRFS_SEND_A_VERITY_SALT_DATA, "verity_salt")?,
-                sig: attr_data(&self.buf, &attrs, BTRFS_SEND_A_VERITY_SIG_DATA, "verity_sig")?,
+                algorithm: attr_u8(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_VERITY_ALGORITHM,
+                    "verity_algorithm",
+                )?,
+                block_size: attr_u32(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_VERITY_BLOCK_SIZE,
+                    "verity_block_size",
+                )?,
+                salt: attr_data(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_VERITY_SALT_DATA,
+                    "verity_salt",
+                )?,
+                sig: attr_data(
+                    &self.buf,
+                    &attrs,
+                    BTRFS_SEND_A_VERITY_SIG_DATA,
+                    "verity_sig",
+                )?,
             })),
             BTRFS_SEND_C_END => Ok(Some(StreamCommand::End)),
             _ => bail!("unknown send stream command type {cmd}"),
@@ -554,12 +573,7 @@ fn parse_tlv_attrs(payload: &[u8], version: u32) -> Result<AttrTable> {
     Ok(attrs)
 }
 
-fn get_attr<'a>(
-    buf: &'a [u8],
-    attrs: &AttrTable,
-    attr_type: u16,
-    name: &str,
-) -> Result<&'a [u8]> {
+fn get_attr<'a>(buf: &'a [u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<&'a [u8]> {
     let (offset, len) = attrs[(attr_type - 1) as usize]
         .ok_or_else(|| anyhow::anyhow!("missing required attribute: {name}"))?;
     Ok(&buf[offset..offset + len])
@@ -581,8 +595,7 @@ fn attr_string(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Res
     } else {
         data
     };
-    String::from_utf8(s.to_vec())
-        .with_context(|| format!("attribute {name} is not valid UTF-8"))
+    String::from_utf8(s.to_vec()).with_context(|| format!("attribute {name} is not valid UTF-8"))
 }
 
 fn attr_uuid(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<Uuid> {
@@ -593,12 +606,7 @@ fn attr_uuid(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Resul
     Ok(Uuid::from_bytes(data[0..16].try_into().unwrap()))
 }
 
-fn attr_timespec(
-    buf: &[u8],
-    attrs: &AttrTable,
-    attr_type: u16,
-    name: &str,
-) -> Result<Timespec> {
+fn attr_timespec(buf: &[u8], attrs: &AttrTable, attr_type: u16, name: &str) -> Result<Timespec> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     if data.len() < 12 {
         bail!(
