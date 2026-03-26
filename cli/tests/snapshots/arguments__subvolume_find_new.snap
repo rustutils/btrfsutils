@@ -1,6 +1,6 @@
 ---
 source: cli/tests/arguments.rs
-expression: "parse(&[\"btrfs\", \"subvolume\", \"show\", \"/mnt/subvol\"])"
+expression: "parse(&[\"btrfs\", \"subvolume\", \"find-new\", \"/mnt/subvol\", \"100\"])"
 ---
 Arguments {
     global: GlobalOptions {
@@ -12,11 +12,10 @@ Arguments {
     },
     command: Subvolume(
         SubvolumeCommand {
-            subcommand: Show(
-                SubvolumeShowCommand {
-                    rootid: None,
-                    uuid: None,
+            subcommand: FindNew(
+                SubvolumeFindNewCommand {
                     path: "/mnt/subvol",
+                    last_gen: 100,
                 },
             ),
         },

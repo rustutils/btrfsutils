@@ -1,6 +1,6 @@
 ---
 source: cli/tests/arguments.rs
-expression: "parse(&[\"btrfs\", \"subvolume\", \"list\", \"/mnt\"])"
+expression: "parse(&[\"btrfs\", \"subvolume\", \"list\", \"-otc\", \"-G\", \"+5\", \"--sort\", \"-gen\",\n\"/mnt\"])"
 ---
 Arguments {
     global: GlobalOptions {
@@ -16,19 +16,28 @@ Arguments {
                 SubvolumeListCommand {
                     parent: false,
                     generation: false,
-                    ogeneration: false,
+                    ogeneration: true,
                     uuid: false,
                     parent_uuid: false,
                     received_uuid: false,
                     readonly: false,
                     snapshots_only: false,
-                    only_below: false,
+                    only_below: true,
                     all: false,
                     deleted: false,
-                    table: false,
-                    gen_filter: None,
+                    table: true,
+                    gen_filter: Some(
+                        AtLeast(
+                            5,
+                        ),
+                    ),
                     ogen_filter: None,
-                    sort: [],
+                    sort: [
+                        SortKey {
+                            field: Gen,
+                            descending: true,
+                        },
+                    ],
                     path: "/mnt",
                 },
             ),

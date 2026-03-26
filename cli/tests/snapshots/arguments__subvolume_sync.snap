@@ -1,6 +1,6 @@
 ---
 source: cli/tests/arguments.rs
-expression: "parse(&[\"btrfs\", \"subvolume\", \"show\", \"/mnt/subvol\"])"
+expression: "parse(&[\"btrfs\", \"subvolume\", \"sync\", \"/mnt\"])"
 ---
 Arguments {
     global: GlobalOptions {
@@ -12,11 +12,11 @@ Arguments {
     },
     command: Subvolume(
         SubvolumeCommand {
-            subcommand: Show(
-                SubvolumeShowCommand {
-                    rootid: None,
-                    uuid: None,
-                    path: "/mnt/subvol",
+            subcommand: Sync(
+                SubvolumeSyncCommand {
+                    path: "/mnt",
+                    subvolids: [],
+                    sleep: None,
                 },
             ),
         },

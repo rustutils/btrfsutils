@@ -1,6 +1,9 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::ParsedUuid};
 use anyhow::{Context, Result};
-use btrfs_uapi::subvolume::subvolume_info;
+use btrfs_uapi::{
+    receive::subvolume_search_by_uuid,
+    subvolume::{subvolume_info, subvolume_info_by_id},
+};
 use clap::Parser;
 use std::{
     fs::File,
@@ -14,8 +17,19 @@ use std::{
 ///
 /// Displays UUIDs, generation numbers, creation time, flags, and send/receive
 /// transaction IDs for the subvolume that contains the given path.
+///
+/// The subvolume can be specified by path (default), or by root id or UUID
+/// that are looked up relative to the given path.
 #[derive(Parser, Debug)]
 pub struct SubvolumeShowCommand {
+    /// Look up subvolume by its root ID instead of path
+    #[clap(short = 'r', long = "rootid", value_name = "ID")]
+    pub rootid: Option<u64>,
+
+    /// Look up subvolume by its UUID instead of path
+    #[clap(short = 'u', long = "uuid", value_name = "UUID", conflicts_with = "rootid")]
+    pub uuid: Option<ParsedUuid>,
+
     /// Path to a subvolume or any file within it
     pub path: PathBuf,
 }
@@ -25,9 +39,22 @@ impl Runnable for SubvolumeShowCommand {
         let file = File::open(&self.path)
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
 
-        let info = subvolume_info(file.as_fd()).with_context(|| {
-            format!("failed to get subvolume info for '{}'", self.path.display())
-        })?;
+        let info = if let Some(rootid) = self.rootid {
+            subvolume_info_by_id(file.as_fd(), rootid).with_context(|| {
+                format!("failed to get subvolume info for rootid {rootid}")
+            })?
+        } else if let Some(ref uuid) = self.uuid {
+            let inner = &**uuid;
+            let rootid = subvolume_search_by_uuid(file.as_fd(), inner)
+                .with_context(|| format!("failed to find subvolume with UUID {inner}"))?;
+            subvolume_info_by_id(file.as_fd(), rootid).with_context(|| {
+                format!("failed to get subvolume info for UUID {inner}")
+            })?
+        } else {
+            subvolume_info(file.as_fd()).with_context(|| {
+                format!("failed to get subvolume info for '{}'", self.path.display())
+            })?
+        };
 
         println!("{}", self.path.display());
         println!("\tName: \t\t\t{}", info.name);

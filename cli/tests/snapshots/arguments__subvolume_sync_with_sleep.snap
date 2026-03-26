@@ -1,0 +1,28 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"subvolume\", \"sync\", \"-s\", \"5\", \"/mnt\", \"256\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: false,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Subvolume(
+        SubvolumeCommand {
+            subcommand: Sync(
+                SubvolumeSyncCommand {
+                    path: "/mnt",
+                    subvolids: [
+                        256,
+                    ],
+                    sleep: Some(
+                        5,
+                    ),
+                },
+            ),
+        },
+    ),
+}

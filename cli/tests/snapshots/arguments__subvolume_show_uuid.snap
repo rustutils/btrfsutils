@@ -1,6 +1,6 @@
 ---
 source: cli/tests/arguments.rs
-expression: "parse(&[\"btrfs\", \"subvolume\", \"show\", \"/mnt/subvol\"])"
+expression: "parse(&[\"btrfs\", \"subvolume\", \"show\", \"-u\",\n\"550e8400-e29b-41d4-a716-446655440000\", \"/mnt\"])"
 ---
 Arguments {
     global: GlobalOptions {
@@ -15,8 +15,12 @@ Arguments {
             subcommand: Show(
                 SubvolumeShowCommand {
                     rootid: None,
-                    uuid: None,
-                    path: "/mnt/subvol",
+                    uuid: Some(
+                        ParsedUuid(
+                            550e8400-e29b-41d4-a716-446655440000,
+                        ),
+                    ),
+                    path: "/mnt",
                 },
             ),
         },

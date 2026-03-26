@@ -171,6 +171,39 @@ fn subvolume_show() {
 }
 
 #[test]
+fn subvolume_show_rootid() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "show", "-r", "256", "/mnt"
+    ]));
+}
+
+#[test]
+fn subvolume_show_uuid() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "subvolume",
+        "show",
+        "-u",
+        "550e8400-e29b-41d4-a716-446655440000",
+        "/mnt"
+    ]));
+}
+
+#[test]
+fn subvolume_show_rootid_uuid_conflict() {
+    insta::assert_snapshot!(parse_err(&[
+        "btrfs",
+        "subvolume",
+        "show",
+        "-r",
+        "256",
+        "-u",
+        "550e8400-e29b-41d4-a716-446655440000",
+        "/mnt"
+    ]));
+}
+
+#[test]
 fn subvolume_list() {
     insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "list", "/mnt"]));
 }
@@ -181,6 +214,67 @@ fn subvolume_list_with_flags() {
 }
 
 #[test]
+fn subvolume_list_only_below() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "list", "-o", "/mnt"]));
+}
+
+#[test]
+fn subvolume_list_table() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "list", "-t", "/mnt"]));
+}
+
+#[test]
+fn subvolume_list_gen_filter_exact() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "list", "-G", "100", "/mnt"]));
+}
+
+#[test]
+fn subvolume_list_gen_filter_atleast() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "list", "-G", "+50", "/mnt"]));
+}
+
+#[test]
+fn subvolume_list_gen_filter_atmost() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "list", "-G", "-200", "/mnt"]));
+}
+
+#[test]
+fn subvolume_list_ogen_filter() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "list", "-C", "+10", "/mnt"]));
+}
+
+#[test]
+fn subvolume_list_sort() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "list", "--sort", "gen,-path", "/mnt"
+    ]));
+}
+
+#[test]
+fn subvolume_list_sort_invalid() {
+    insta::assert_snapshot!(parse_err(&[
+        "btrfs", "subvolume", "list", "--sort", "bogus", "/mnt"
+    ]));
+}
+
+#[test]
+fn subvolume_list_combined() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "list", "-otc", "-G", "+5", "--sort", "-gen", "/mnt"
+    ]));
+}
+
+#[test]
+fn subvolume_list_all() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "list", "-a", "/mnt"]));
+}
+
+#[test]
+fn subvolume_list_deleted() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "list", "-d", "/mnt"]));
+}
+
+#[test]
 fn subvolume_get_default() {
     insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "get-default", "/mnt"]));
 }
@@ -188,6 +282,35 @@ fn subvolume_get_default() {
 #[test]
 fn subvolume_set_default() {
     insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "set-default", "256", "/mnt"]));
+}
+
+#[test]
+fn subvolume_find_new() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "find-new", "/mnt/subvol", "100"]));
+}
+
+#[test]
+fn subvolume_find_new_missing_gen() {
+    insta::assert_snapshot!(parse_err(&["btrfs", "subvolume", "find-new", "/mnt/subvol"]));
+}
+
+#[test]
+fn subvolume_sync() {
+    insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "sync", "/mnt"]));
+}
+
+#[test]
+fn subvolume_sync_with_ids() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "sync", "/mnt", "256", "257"
+    ]));
+}
+
+#[test]
+fn subvolume_sync_with_sleep() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "sync", "-s", "5", "/mnt", "256"
+    ]));
 }
 
 // ── filesystem ───────────────────────────────────────────────────────

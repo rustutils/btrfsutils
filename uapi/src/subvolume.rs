@@ -266,7 +266,17 @@ pub fn snapshot_create(
 /// `fd` can be any file or directory within the target subvolume.
 /// Does not require elevated privileges.
 pub fn subvolume_info(fd: BorrowedFd) -> nix::Result<SubvolumeInfo> {
+    subvolume_info_by_id(fd, 0)
+}
+
+/// Query detailed information about a subvolume by its numeric root ID.
+///
+/// `fd` can be any open file descriptor on the filesystem.  If `rootid` is 0,
+/// the subvolume that `fd` belongs to is queried (equivalent to
+/// `subvolume_info`).  Does not require elevated privileges.
+pub fn subvolume_info_by_id(fd: BorrowedFd, rootid: u64) -> nix::Result<SubvolumeInfo> {
     let mut raw: btrfs_ioctl_get_subvol_info_args = unsafe { mem::zeroed() };
+    raw.treeid = rootid;
     unsafe { btrfs_ioc_get_subvol_info(fd.as_raw_fd(), &mut raw) }?;
 
     let name = unsafe { CStr::from_ptr(raw.name.as_ptr()) }
