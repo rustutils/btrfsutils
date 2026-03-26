@@ -28,7 +28,7 @@ fn qgroup_lifecycle() {
 
     // Create a subvolume — the kernel auto-creates a 0/N qgroup for it.
     let name = CStr::from_bytes_with_nul(b"test-subvol\0").unwrap();
-    subvolume_create(mnt.fd(), name).expect("subvolume_create failed");
+    subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
     let subvol_dir = File::open(mnt.path().join("test-subvol")).expect("open subvol failed");
     let info = subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
@@ -97,7 +97,7 @@ fn qgroup_clear_stale_test() {
     // Create three subvolumes.
     for name in [b"sub-a\0", b"sub-b\0", b"sub-c\0"] {
         let cname = CStr::from_bytes_with_nul(name).unwrap();
-        subvolume_create(mnt.fd(), cname).expect("subvolume_create failed");
+        subvolume_create(mnt.fd(), cname, &[]).expect("subvolume_create failed");
     }
     sync(mnt.fd()).unwrap();
 

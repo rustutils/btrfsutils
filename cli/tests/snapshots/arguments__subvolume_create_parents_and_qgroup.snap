@@ -1,6 +1,6 @@
 ---
 source: cli/tests/arguments.rs
-expression: "parse(&[\"btrfs\", \"subvolume\", \"create\", \"/mnt/subvol\"])"
+expression: "parse(&[\"btrfs\", \"subvolume\", \"create\", \"-p\", \"-i\", \"0/100\", \"/mnt/a/subvol\"])"
 ---
 Arguments {
     global: GlobalOptions {
@@ -14,10 +14,12 @@ Arguments {
         SubvolumeCommand {
             subcommand: Create(
                 SubvolumeCreateCommand {
-                    qgroups: [],
-                    parents: false,
+                    qgroups: [
+                        "0/100",
+                    ],
+                    parents: true,
                     paths: [
-                        "/mnt/subvol",
+                        "/mnt/a/subvol",
                     ],
                 },
             ),

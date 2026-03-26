@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::parse_qgroupid};
 use anyhow::{Context, Result};
 use btrfs_uapi::subvolume::subvolume_create;
 use clap::Parser;
@@ -6,16 +6,30 @@ use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
 
 /// Create a new subvolume at each given path.
 ///
-/// The parent directory must already exist and be on a btrfs filesystem.
-/// Requires CAP_SYS_ADMIN.
+/// The parent directory must already exist and be on a btrfs filesystem
+/// (unless -p is given). Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 pub struct SubvolumeCreateCommand {
+    /// Add the newly created subvolume to a qgroup (can be given multiple times)
+    #[clap(short = 'i', value_name = "QGROUPID", action = clap::ArgAction::Append)]
+    pub qgroups: Vec<String>,
+
+    /// Create any missing parent directories (like mkdir -p)
+    #[clap(short = 'p', long = "parents")]
+    pub parents: bool,
+
     #[clap(required = true)]
     pub paths: Vec<PathBuf>,
 }
 
 impl Runnable for SubvolumeCreateCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+        let qgroup_ids: Vec<u64> = self
+            .qgroups
+            .iter()
+            .map(|s| parse_qgroupid(s))
+            .collect::<Result<_>>()?;
+
         let mut had_error = false;
 
         for path in &self.paths {
@@ -66,6 +80,16 @@ impl Runnable for SubvolumeCreateCommand {
                 }
             };
 
+            if self.parents {
+                if let Err(e) = std::fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create parent directories for '{}'", parent.display()))
+                {
+                    eprintln!("error creating '{}': {e}", path.display());
+                    had_error = true;
+                    continue;
+                }
+            }
+
             let file = match File::open(parent)
                 .with_context(|| format!("failed to open '{}'", parent.display()))
             {
@@ -77,7 +101,7 @@ impl Runnable for SubvolumeCreateCommand {
                 }
             };
 
-            match subvolume_create(file.as_fd(), &cname) {
+            match subvolume_create(file.as_fd(), &cname, &qgroup_ids) {
                 Ok(()) => println!("Create subvolume '{}'", path.display()),
                 Err(e) => {
                     eprintln!("error creating '{}': {e}", path.display());

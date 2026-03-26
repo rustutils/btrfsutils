@@ -22,7 +22,7 @@ fn inode_lookup_path_rootid() {
 
     // Create a subvolume and check its root ID.
     let name = CStr::from_bytes_with_nul(b"test-subvol\0").unwrap();
-    subvolume_create(mnt.fd(), name).expect("subvolume_create failed");
+    subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
     let subvol_dir = File::open(mnt.path().join("test-subvol")).expect("open subvol failed");
     let subvol_root_id =
@@ -143,7 +143,7 @@ fn inode_subvolid_resolve() {
     let (_td, mnt) = single_mount();
 
     let name = CStr::from_bytes_with_nul(b"my-subvol\0").unwrap();
-    subvolume_create(mnt.fd(), name).expect("subvolume_create failed");
+    subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
     let subvol_dir = File::open(mnt.path().join("my-subvol")).expect("open subvol failed");
     let info = subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");

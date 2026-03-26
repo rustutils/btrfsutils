@@ -205,7 +205,7 @@ impl ReceiveContext {
             .with_context(|| format!("cannot open '{}'", self.dest_dir.display()))?;
         let c_name = CString::new(path)
             .with_context(|| format!("subvolume name contains null byte: {path}"))?;
-        btrfs_uapi::subvolume::subvolume_create(parent_dir.as_fd(), &c_name)
+        btrfs_uapi::subvolume::subvolume_create(parent_dir.as_fd(), &c_name, &[])
             .with_context(|| format!("failed to create subvolume '{}'", subvol_path.display()))?;
 
         self.cur_subvol = Some(path.to_string());
@@ -280,6 +280,7 @@ impl ReceiveContext {
             parent_file.as_fd(),
             &c_name,
             false,
+            &[],
         )
         .with_context(|| format!("failed to create snapshot '{}'", subvol_path.display()))?;
 

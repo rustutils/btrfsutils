@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::parse_qgroupid};
 use anyhow::{Context, Result};
 use btrfs_uapi::subvolume::snapshot_create;
 use clap::Parser;
@@ -11,6 +11,10 @@ pub struct SubvolumeSnapshotCommand {
     #[clap(short)]
     pub readonly: bool,
 
+    /// Add the newly created snapshot to a qgroup (can be given multiple times)
+    #[clap(short = 'i', value_name = "QGROUPID", action = clap::ArgAction::Append)]
+    pub qgroups: Vec<String>,
+
     /// Path to the source subvolume
     pub source: PathBuf,
 
@@ -20,6 +24,12 @@ pub struct SubvolumeSnapshotCommand {
 
 impl Runnable for SubvolumeSnapshotCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+        let qgroup_ids: Vec<u64> = self
+            .qgroups
+            .iter()
+            .map(|s| parse_qgroupid(s))
+            .collect::<Result<_>>()?;
+
         let (dest_parent, name_os) = if self.dest.is_dir() {
             let name_os = self
                 .source
@@ -60,6 +70,7 @@ impl Runnable for SubvolumeSnapshotCommand {
             source_file.as_fd(),
             &cname,
             self.readonly,
+            &qgroup_ids,
         )
         .with_context(|| {
             format!(

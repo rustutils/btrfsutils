@@ -16,7 +16,7 @@ fn subvolume_create_info_delete() {
     let (_td, mnt) = single_mount();
 
     let name = CStr::from_bytes_with_nul(b"test-subvol\0").unwrap();
-    subvolume_create(mnt.fd(), name).expect("subvolume_create failed");
+    subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
     // subvolume_info should return valid metadata.
     let subvol_dir = File::open(mnt.path().join("test-subvol")).expect("open subvol failed");
@@ -47,7 +47,7 @@ fn subvolume_snapshot() {
     let (_td, mnt) = single_mount();
 
     let origin_name = CStr::from_bytes_with_nul(b"origin\0").unwrap();
-    subvolume_create(mnt.fd(), origin_name).expect("subvolume_create failed");
+    subvolume_create(mnt.fd(), origin_name, &[]).expect("subvolume_create failed");
 
     write_test_data(&mnt.path().join("origin"), "data.bin", 1_000_000);
     sync(mnt.fd()).unwrap();
@@ -55,7 +55,7 @@ fn subvolume_snapshot() {
     // Create a snapshot.
     let snap_name = CStr::from_bytes_with_nul(b"snap1\0").unwrap();
     let origin_dir = File::open(mnt.path().join("origin")).expect("open origin failed");
-    snapshot_create(mnt.fd(), origin_dir.as_fd(), snap_name, false)
+    snapshot_create(mnt.fd(), origin_dir.as_fd(), snap_name, false, &[])
         .expect("snapshot_create failed");
     drop(origin_dir);
 
@@ -77,14 +77,14 @@ fn subvolume_readonly_snapshot() {
     let (_td, mnt) = single_mount();
 
     let origin_name = CStr::from_bytes_with_nul(b"origin\0").unwrap();
-    subvolume_create(mnt.fd(), origin_name).expect("subvolume_create failed");
+    subvolume_create(mnt.fd(), origin_name, &[]).expect("subvolume_create failed");
 
     write_test_data(&mnt.path().join("origin"), "data.bin", 1_000_000);
     sync(mnt.fd()).unwrap();
 
     let snap_name = CStr::from_bytes_with_nul(b"ro-snap\0").unwrap();
     let origin_dir = File::open(mnt.path().join("origin")).expect("open origin failed");
-    snapshot_create(mnt.fd(), origin_dir.as_fd(), snap_name, true).expect("snapshot_create failed");
+    snapshot_create(mnt.fd(), origin_dir.as_fd(), snap_name, true, &[]).expect("snapshot_create failed");
     drop(origin_dir);
 
     let snap_dir = File::open(mnt.path().join("ro-snap")).expect("open snap failed");
@@ -113,7 +113,7 @@ fn subvolume_list_test() {
         CStr::from_bytes_with_nul(b"beta\0").unwrap(),
         CStr::from_bytes_with_nul(b"gamma\0").unwrap(),
     ] {
-        subvolume_create(mnt.fd(), name).expect("subvolume_create failed");
+        subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
     }
     sync(mnt.fd()).unwrap();
 
@@ -142,7 +142,7 @@ fn subvolume_flags_get_set() {
     let (_td, mnt) = single_mount();
 
     let name = CStr::from_bytes_with_nul(b"test-subvol\0").unwrap();
-    subvolume_create(mnt.fd(), name).expect("subvolume_create failed");
+    subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
     let subvol_dir = File::open(mnt.path().join("test-subvol")).expect("open failed");
 
@@ -196,7 +196,7 @@ fn subvolume_default_get_set() {
 
     // Create a subvolume and set it as default.
     let name = CStr::from_bytes_with_nul(b"new-default\0").unwrap();
-    subvolume_create(mnt.fd(), name).expect("subvolume_create failed");
+    subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
     let subvol_dir = File::open(mnt.path().join("new-default")).expect("open failed");
     let info = subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
@@ -221,18 +221,18 @@ fn subvolume_list_nested() {
 
     // Create A.
     let a_name = CStr::from_bytes_with_nul(b"A\0").unwrap();
-    subvolume_create(mnt.fd(), a_name).expect("create A failed");
+    subvolume_create(mnt.fd(), a_name, &[]).expect("create A failed");
 
     // Create B inside A.
     let a_dir = File::open(mnt.path().join("A")).expect("open A failed");
     let b_name = CStr::from_bytes_with_nul(b"B\0").unwrap();
-    subvolume_create(a_dir.as_fd(), b_name).expect("create B failed");
+    subvolume_create(a_dir.as_fd(), b_name, &[]).expect("create B failed");
     drop(a_dir);
 
     // Create C inside A/B.
     let b_dir = File::open(mnt.path().join("A").join("B")).expect("open B failed");
     let c_name = CStr::from_bytes_with_nul(b"C\0").unwrap();
-    subvolume_create(b_dir.as_fd(), c_name).expect("create C failed");
+    subvolume_create(b_dir.as_fd(), c_name, &[]).expect("create C failed");
     drop(b_dir);
 
     sync(mnt.fd()).unwrap();

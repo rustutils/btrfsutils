@@ -1,6 +1,6 @@
 ---
 source: cli/tests/arguments.rs
-expression: "parse(&[\"btrfs\", \"subvolume\", \"snapshot\", \"/mnt/src\", \"/mnt/dst\"])"
+expression: "parse(&[\"btrfs\", \"subvolume\", \"snapshot\", \"-i\", \"0/100\", \"/mnt/src\",\n\"/mnt/dst\"])"
 ---
 Arguments {
     global: GlobalOptions {
@@ -15,7 +15,9 @@ Arguments {
             subcommand: Snapshot(
                 SubvolumeSnapshotCommand {
                     readonly: false,
-                    qgroups: [],
+                    qgroups: [
+                        "0/100",
+                    ],
                     source: "/mnt/src",
                     dest: "/mnt/dst",
                 },

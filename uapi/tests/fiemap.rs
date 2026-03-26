@@ -35,7 +35,7 @@ fn fiemap_shared_after_snapshot() {
 
     // Create a subvolume and write data into it.
     let subvol_name = CStr::from_bytes_with_nul(b"origin\0").unwrap();
-    subvolume_create(mnt.fd(), subvol_name).expect("subvolume_create failed");
+    subvolume_create(mnt.fd(), subvol_name, &[]).expect("subvolume_create failed");
 
     write_test_data(&mnt.path().join("origin"), "data.bin", 5_000_000);
     sync(mnt.fd()).unwrap();
@@ -43,7 +43,7 @@ fn fiemap_shared_after_snapshot() {
     // Snapshot the subvolume.
     let snap_name = CStr::from_bytes_with_nul(b"snap\0").unwrap();
     let origin_dir = File::open(mnt.path().join("origin")).expect("open origin failed");
-    snapshot_create(mnt.fd(), origin_dir.as_fd(), snap_name, false)
+    snapshot_create(mnt.fd(), origin_dir.as_fd(), snap_name, false, &[])
         .expect("snapshot_create failed");
     sync(mnt.fd()).unwrap();
 

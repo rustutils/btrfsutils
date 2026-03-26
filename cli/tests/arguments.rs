@@ -35,6 +35,34 @@ fn subvolume_create_missing_path() {
 }
 
 #[test]
+fn subvolume_create_parents() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "create", "-p", "/mnt/a/b/subvol"
+    ]));
+}
+
+#[test]
+fn subvolume_create_qgroup() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "create", "-i", "0/100", "/mnt/subvol"
+    ]));
+}
+
+#[test]
+fn subvolume_create_multiple_qgroups() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "create", "-i", "0/100", "-i", "1/0", "/mnt/subvol"
+    ]));
+}
+
+#[test]
+fn subvolume_create_parents_and_qgroup() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "create", "-p", "-i", "0/100", "/mnt/a/subvol"
+    ]));
+}
+
+#[test]
 fn subvolume_delete() {
     insta::assert_debug_snapshot!(parse(&["btrfs", "subvolume", "delete", "/mnt/subvol"]));
 }
@@ -115,6 +143,20 @@ fn subvolume_snapshot_readonly() {
         "-r",
         "/mnt/src",
         "/mnt/dst"
+    ]));
+}
+
+#[test]
+fn subvolume_snapshot_qgroup() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "snapshot", "-i", "0/100", "/mnt/src", "/mnt/dst"
+    ]));
+}
+
+#[test]
+fn subvolume_snapshot_readonly_qgroup() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs", "subvolume", "snapshot", "-r", "-i", "0/100", "-i", "1/0", "/mnt/src", "/mnt/dst"
     ]));
 }
 

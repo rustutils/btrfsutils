@@ -12,12 +12,14 @@ use crate::{
     raw::{
         BTRFS_DIR_ITEM_KEY, BTRFS_FIRST_FREE_OBJECTID, BTRFS_FS_TREE_OBJECTID,
         BTRFS_LAST_FREE_OBJECTID, BTRFS_ROOT_BACKREF_KEY, BTRFS_ROOT_ITEM_KEY,
-        BTRFS_ROOT_TREE_DIR_OBJECTID, BTRFS_ROOT_TREE_OBJECTID, BTRFS_SUBVOL_RDONLY,
-        BTRFS_SUBVOL_SPEC_BY_ID, btrfs_ioc_default_subvol, btrfs_ioc_get_subvol_info,
+        BTRFS_ROOT_TREE_DIR_OBJECTID, BTRFS_ROOT_TREE_OBJECTID, BTRFS_SUBVOL_QGROUP_INHERIT,
+        BTRFS_SUBVOL_RDONLY, BTRFS_SUBVOL_SPEC_BY_ID, btrfs_ioc_default_subvol,
+        btrfs_ioc_get_subvol_info,
         btrfs_ioc_ino_lookup, btrfs_ioc_snap_create_v2, btrfs_ioc_snap_destroy_v2,
         btrfs_ioc_subvol_create_v2,
         btrfs_ioc_subvol_getflags, btrfs_ioc_subvol_setflags, btrfs_ioctl_get_subvol_info_args,
-        btrfs_ioctl_ino_lookup_args, btrfs_ioctl_vol_args_v2, btrfs_root_item, btrfs_timespec,
+        btrfs_ioctl_ino_lookup_args, btrfs_ioctl_vol_args_v2, btrfs_qgroup_inherit,
+        btrfs_root_item, btrfs_timespec,
     },
     tree_search::{SearchKey, tree_search},
 };
@@ -143,14 +145,63 @@ fn set_v2_name(args: &mut btrfs_ioctl_vol_args_v2, name: &CStr) -> nix::Result<(
     Ok(())
 }
 
+/// Build a `btrfs_qgroup_inherit` buffer for the given qgroup IDs.
+///
+/// The returned `Vec<u64>` is sized to hold the base struct plus the trailing
+/// `qgroups[]` array, with 8-byte alignment guaranteed by the `u64` element
+/// type.
+fn build_qgroup_inherit(qgroups: &[u64]) -> Vec<u64> {
+    let base_size = mem::size_of::<btrfs_qgroup_inherit>();
+    let total_size = base_size + qgroups.len() * mem::size_of::<u64>();
+    let num_u64 = (total_size + 7) / 8;
+    let mut buf = vec![0u64; num_u64];
+
+    // SAFETY: buf is large enough and zeroed; we write through a properly
+    // aligned pointer (btrfs_qgroup_inherit has 8-byte alignment).
+    let inherit = unsafe { &mut *(buf.as_mut_ptr() as *mut btrfs_qgroup_inherit) };
+    inherit.num_qgroups = qgroups.len() as u64;
+
+    // Write the qgroup IDs into the flexible array member.
+    if !qgroups.is_empty() {
+        let array = unsafe { inherit.qgroups.as_mut_slice(qgroups.len()) };
+        array.copy_from_slice(qgroups);
+    }
+
+    buf
+}
+
+/// Set the `BTRFS_SUBVOL_QGROUP_INHERIT` fields on a `vol_args_v2` struct.
+///
+/// `buf` must be the buffer returned by `build_qgroup_inherit`.
+fn set_qgroup_inherit(args: &mut btrfs_ioctl_vol_args_v2, buf: &[u64], num_qgroups: usize) {
+    args.flags |= BTRFS_SUBVOL_QGROUP_INHERIT as u64;
+    let base_size = mem::size_of::<btrfs_qgroup_inherit>();
+    let total_size = base_size + num_qgroups * mem::size_of::<u64>();
+    args.__bindgen_anon_1.__bindgen_anon_1.size = total_size as u64;
+    args.__bindgen_anon_1.__bindgen_anon_1.qgroup_inherit =
+        buf.as_ptr() as *mut btrfs_qgroup_inherit;
+}
+
 /// Create a new subvolume named `name` inside the directory referred to by
 /// `parent_fd`.
 ///
 /// `name` must be a plain leaf name (no slashes).  The caller is responsible
-/// for opening the correct parent directory.  Requires `CAP_SYS_ADMIN`.
-pub fn subvolume_create(parent_fd: BorrowedFd, name: &CStr) -> nix::Result<()> {
+/// for opening the correct parent directory.  If `qgroups` is non-empty, the
+/// new subvolume is added to those qgroups.  Requires `CAP_SYS_ADMIN`.
+pub fn subvolume_create(
+    parent_fd: BorrowedFd,
+    name: &CStr,
+    qgroups: &[u64],
+) -> nix::Result<()> {
     let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
     set_v2_name(&mut args, name)?;
+
+    let inherit_buf;
+    if !qgroups.is_empty() {
+        inherit_buf = build_qgroup_inherit(qgroups);
+        set_qgroup_inherit(&mut args, &inherit_buf, qgroups.len());
+    }
+
     unsafe { btrfs_ioc_subvol_create_v2(parent_fd.as_raw_fd(), &args) }?;
     Ok(())
 }
@@ -182,13 +233,15 @@ pub fn subvolume_delete_by_id(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> 
 /// Create a snapshot of the subvolume referred to by `source_fd`, placing it
 /// as `name` inside the directory referred to by `parent_fd`.
 ///
-/// If `readonly` is `true` the new snapshot is created read-only.
+/// If `readonly` is `true` the new snapshot is created read-only.  If
+/// `qgroups` is non-empty, the new snapshot is added to those qgroups.
 /// Requires `CAP_SYS_ADMIN`.
 pub fn snapshot_create(
     parent_fd: BorrowedFd,
     source_fd: BorrowedFd,
     name: &CStr,
     readonly: bool,
+    qgroups: &[u64],
 ) -> nix::Result<()> {
     let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
     // The `fd` field carries the source subvolume file descriptor.
@@ -197,6 +250,13 @@ pub fn snapshot_create(
         args.flags = BTRFS_SUBVOL_RDONLY as u64;
     }
     set_v2_name(&mut args, name)?;
+
+    let inherit_buf;
+    if !qgroups.is_empty() {
+        inherit_buf = build_qgroup_inherit(qgroups);
+        set_qgroup_inherit(&mut args, &inherit_buf, qgroups.len());
+    }
+
     unsafe { btrfs_ioc_snap_create_v2(parent_fd.as_raw_fd(), &args) }?;
     Ok(())
 }

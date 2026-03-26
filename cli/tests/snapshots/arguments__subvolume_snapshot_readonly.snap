@@ -15,6 +15,7 @@ Arguments {
             subcommand: Snapshot(
                 SubvolumeSnapshotCommand {
                     readonly: true,
+                    qgroups: [],
                     source: "/mnt/src",
                     dest: "/mnt/dst",
                 },
