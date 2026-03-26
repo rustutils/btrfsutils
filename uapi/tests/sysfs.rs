@@ -1,37 +1,37 @@
 use crate::common::{single_mount, write_test_data};
 use btrfs_uapi::{
-    filesystem::fs_info,
+    filesystem::filesystem_info,
     quota::{quota_disable, quota_enable, quota_rescan_wait},
     filesystem::sync,
     sysfs::SysfsBtrfs,
 };
 
-/// SysfsBtrfs should read filesystem properties that match fs_info.
+/// SysfsBtrfs should read filesystem properties that match filesystem_info.
 #[test]
 #[ignore = "requires elevated privileges"]
 fn sysfs_read_info() {
     let (_td, mnt) = single_mount();
 
-    let info = fs_info(mnt.fd()).expect("fs_info failed");
+    let info = filesystem_info(mnt.fd()).expect("filesystem_info failed");
     let sysfs = SysfsBtrfs::new(&info.uuid);
 
     let nodesize = sysfs.nodesize().expect("sysfs nodesize failed");
     assert_eq!(
         nodesize, info.nodesize as u64,
-        "sysfs nodesize should match fs_info",
+        "sysfs nodesize should match filesystem_info",
     );
 
     let sectorsize = sysfs.sectorsize().expect("sysfs sectorsize failed");
     assert_eq!(
         sectorsize, info.sectorsize as u64,
-        "sysfs sectorsize should match fs_info",
+        "sysfs sectorsize should match filesystem_info",
     );
 
     let metadata_uuid = sysfs.metadata_uuid().expect("sysfs metadata_uuid failed");
     // metadata_uuid equals fsid when no separate metadata UUID is set.
     assert_eq!(
         metadata_uuid, info.uuid,
-        "sysfs metadata_uuid should match fs_info uuid (no separate metadata uuid set)",
+        "sysfs metadata_uuid should match filesystem_info uuid (no separate metadata uuid set)",
     );
 }
 
@@ -44,7 +44,7 @@ fn sysfs_commit_stats() {
     write_test_data(mnt.path(), "data.bin", 1_000_000);
     sync(mnt.fd()).unwrap();
 
-    let info = fs_info(mnt.fd()).expect("fs_info failed");
+    let info = filesystem_info(mnt.fd()).expect("filesystem_info failed");
     let sysfs = SysfsBtrfs::new(&info.uuid);
 
     let stats = sysfs.commit_stats().expect("commit_stats failed");
@@ -60,7 +60,7 @@ fn sysfs_commit_stats() {
 fn sysfs_quota_status() {
     let (_td, mnt) = single_mount();
 
-    let info = fs_info(mnt.fd()).expect("fs_info failed");
+    let info = filesystem_info(mnt.fd()).expect("filesystem_info failed");
     let sysfs = SysfsBtrfs::new(&info.uuid);
 
     // Quotas should be disabled initially.

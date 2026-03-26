@@ -2,18 +2,18 @@
 //!
 //! The kernel exposes per-filesystem information under
 //! `/sys/fs/btrfs/<uuid>/`, where `<uuid>` is the filesystem UUID as returned
-//! by [`fs_info`][`crate::filesystem::fs_info`]. This includes commit statistics,
+//! by [`filesystem_info`][`crate::filesystem::filesystem_info`]. This includes commit statistics,
 //! feature flags, quota state, and per-device scrub limits.
 //!
 //! The primary entry point is [`SysfsBtrfs`], which is constructed from a
 //! filesystem UUID and provides typed accessors for each sysfs file:
 //!
 //! ```no_run
-//! # use btrfs_uapi::{filesystem::fs_info, sysfs::SysfsBtrfs};
+//! # use btrfs_uapi::{filesystem::filesystem_info, sysfs::SysfsBtrfs};
 //! # use std::{fs::File, os::unix::io::AsFd};
 //! # let file = File::open("/mnt/btrfs").unwrap();
 //! # let fd = file.as_fd();
-//! let info = fs_info(fd).unwrap();
+//! let info = filesystem_info(fd).unwrap();
 //! let sysfs = SysfsBtrfs::new(&info.uuid);
 //! println!("label: {}", sysfs.label().unwrap());
 //! println!("quota status: {:?}", sysfs.quota_status().unwrap());

@@ -229,7 +229,7 @@ impl Runnable for SendCommand {
 
         // Determine protocol version.
         let first_file = open_subvol_ro(&self.subvolumes[0])?;
-        let fs = btrfs_uapi::filesystem::fs_info(first_file.as_fd())
+        let fs = btrfs_uapi::filesystem::filesystem_info(first_file.as_fd())
             .context("failed to get filesystem info")?;
         let sysfs = SysfsBtrfs::new(&fs.uuid);
         let proto_supported = sysfs.send_stream_version();

@@ -29,7 +29,7 @@ impl Runnable for QuotaStatusCommand {
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
         let fd = file.as_fd();
 
-        let fs = btrfs_uapi::filesystem::fs_info(fd).with_context(|| {
+        let fs = btrfs_uapi::filesystem::filesystem_info(fd).with_context(|| {
             format!(
                 "failed to get filesystem info for '{}'",
                 self.path.display()

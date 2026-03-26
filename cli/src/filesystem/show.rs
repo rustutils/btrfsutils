@@ -1,7 +1,7 @@
 use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
-    device::device_info_all, filesystem::{fs_info, label_get}, space::space_info,
+    device::device_info_all, filesystem::{filesystem_info, label_get}, space::space_info,
 };
 use clap::Parser;
 use std::{collections::HashSet, fs::File, os::unix::io::AsFd};
@@ -43,7 +43,7 @@ impl Runnable for FilesystemShowCommand {
             };
             let fd = file.as_fd();
 
-            let info = match fs_info(fd) {
+            let info = match filesystem_info(fd) {
                 Ok(i) => i,
                 Err(_) => continue,
             };

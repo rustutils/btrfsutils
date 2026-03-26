@@ -80,7 +80,7 @@ pub fn send(
 
 /// Result of searching the UUID tree for a subvolume.
 #[derive(Debug, Clone)]
-pub struct SubvolSearchResult {
+pub struct SubvolumeSearchResult {
     /// The root ID (subvolume ID) found in the UUID tree.
     pub root_id: u64,
 }

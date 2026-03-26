@@ -24,7 +24,7 @@ impl Runnable for MinDevSizeCommand {
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
 
         let size =
-            btrfs_uapi::dev_extent::min_dev_size(file.as_fd(), self.devid).with_context(|| {
+            btrfs_uapi::device::device_min_size(file.as_fd(), self.devid).with_context(|| {
                 format!(
                     "failed to determine min device size for devid {} on '{}'",
                     self.devid,

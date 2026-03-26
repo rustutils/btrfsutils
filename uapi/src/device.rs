@@ -1,14 +1,16 @@
-//! # Device management: adding, removing, and querying block devices in a filesystem
+//! # Device management: adding, removing, querying, and extent layout
 //!
 //! Covers adding and removing devices from a mounted filesystem, scanning a
 //! device to register it with the kernel, querying per-device I/O error
-//! statistics, and checking whether all devices of a multi-device filesystem
-//! are present and ready.
+//! statistics, checking whether all devices of a multi-device filesystem
+//! are present and ready, and computing minimum device sizes from the
+//! device extent tree.
 //!
 //! Most operations require `CAP_SYS_ADMIN`.
 
 use crate::{
-    filesystem::FsInfo,
+    field_size,
+    filesystem::FilesystemInfo,
     raw::{
         BTRFS_DEV_STATS_RESET, BTRFS_DEVICE_SPEC_BY_ID,
         btrfs_dev_stat_values_BTRFS_DEV_STAT_CORRUPTION_ERRS,
@@ -20,7 +22,9 @@ use crate::{
         btrfs_ioc_devices_ready, btrfs_ioc_forget_dev, btrfs_ioc_get_dev_stats, btrfs_ioc_rm_dev,
         btrfs_ioc_rm_dev_v2, btrfs_ioc_scan_dev, btrfs_ioctl_dev_info_args,
         btrfs_ioctl_get_dev_stats, btrfs_ioctl_vol_args, btrfs_ioctl_vol_args_v2,
+        BTRFS_DEV_EXTENT_KEY, BTRFS_DEV_TREE_OBJECTID, btrfs_dev_extent,
     },
+    tree_search::{SearchKey, tree_search},
 };
 use nix::{errno::Errno, libc::c_char};
 use std::{
@@ -34,7 +38,7 @@ use uuid::Uuid;
 /// Information about a single device within a btrfs filesystem, as returned
 /// by `BTRFS_IOC_DEV_INFO`.
 #[derive(Debug, Clone)]
-pub struct DevInfo {
+pub struct DeviceInfo {
     /// Device ID.
     pub devid: u64,
     /// Device UUID.
@@ -59,7 +63,7 @@ pub enum DeviceSpec<'a> {
 
 /// Per-device I/O error statistics, as returned by `BTRFS_IOC_GET_DEV_STATS`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct DevStats {
+pub struct DeviceStats {
     /// Device ID these stats belong to.
     pub devid: u64,
     /// Number of write I/O errors (EIO/EREMOTEIO from lower layers).
@@ -74,7 +78,7 @@ pub struct DevStats {
     pub generation_errs: u64,
 }
 
-impl DevStats {
+impl DeviceStats {
     /// Sum of all error counters.
     pub fn total_errs(&self) -> u64 {
         self.write_errs
@@ -96,14 +100,14 @@ mod tests {
 
     #[test]
     fn dev_stats_default_is_clean() {
-        let stats = DevStats::default();
+        let stats = DeviceStats::default();
         assert!(stats.is_clean());
         assert_eq!(stats.total_errs(), 0);
     }
 
     #[test]
     fn dev_stats_total_errs() {
-        let stats = DevStats {
+        let stats = DeviceStats {
             devid: 1,
             write_errs: 1,
             read_errs: 2,
@@ -117,9 +121,9 @@ mod tests {
 
     #[test]
     fn dev_stats_single_error_not_clean() {
-        let stats = DevStats {
+        let stats = DeviceStats {
             corruption_errs: 1,
-            ..DevStats::default()
+            ..DeviceStats::default()
         };
         assert!(!stats.is_clean());
         assert_eq!(stats.total_errs(), 1);
@@ -155,7 +159,7 @@ fn open_control() -> nix::Result<std::fs::File> {
 /// referred to by `fd`.
 ///
 /// Returns `None` if no device with that ID exists (`ENODEV`).
-pub fn device_info(fd: BorrowedFd, devid: u64) -> nix::Result<Option<DevInfo>> {
+pub fn device_info(fd: BorrowedFd, devid: u64) -> nix::Result<Option<DeviceInfo>> {
     let mut raw: btrfs_ioctl_dev_info_args = unsafe { mem::zeroed() };
     raw.devid = devid;
 
@@ -169,7 +173,7 @@ pub fn device_info(fd: BorrowedFd, devid: u64) -> nix::Result<Option<DevInfo>> {
         .to_string_lossy()
         .into_owned();
 
-    Ok(Some(DevInfo {
+    Ok(Some(DeviceInfo {
         devid: raw.devid,
         uuid: Uuid::from_bytes(raw.uuid),
         bytes_used: raw.bytes_used,
@@ -179,11 +183,11 @@ pub fn device_info(fd: BorrowedFd, devid: u64) -> nix::Result<Option<DevInfo>> {
 }
 
 /// Query information about all devices in the filesystem referred to by `fd`,
-/// using the device count from a previously obtained [`FsInfo`].
+/// using the device count from a previously obtained [`FilesystemInfo`].
 ///
 /// Iterates devids `1..=max_id`, skipping any that return `ENODEV` (holes in
 /// the devid space are normal when devices have been removed).
-pub fn device_info_all(fd: BorrowedFd, fs_info: &FsInfo) -> nix::Result<Vec<DevInfo>> {
+pub fn device_info_all(fd: BorrowedFd, fs_info: &FilesystemInfo) -> nix::Result<Vec<DeviceInfo>> {
     let mut devices = Vec::with_capacity(fs_info.num_devices as usize);
     for devid in 1..=fs_info.max_id {
         if let Some(info) = device_info(fd, devid)? {
@@ -292,7 +296,7 @@ pub fn device_ready(path: &CStr) -> nix::Result<()> {
 ///
 /// If `reset` is `true`, the kernel atomically returns the current values and
 /// then resets all counters to zero. The kernel requires `CAP_SYS_ADMIN`.
-pub fn device_stats(fd: BorrowedFd, devid: u64, reset: bool) -> nix::Result<DevStats> {
+pub fn device_stats(fd: BorrowedFd, devid: u64, reset: bool) -> nix::Result<DeviceStats> {
     let mut raw: btrfs_ioctl_get_dev_stats = unsafe { mem::zeroed() };
     raw.devid = devid;
     raw.nr_items = btrfs_dev_stat_values_BTRFS_DEV_STAT_VALUES_MAX as u64;
@@ -302,7 +306,7 @@ pub fn device_stats(fd: BorrowedFd, devid: u64, reset: bool) -> nix::Result<DevS
 
     unsafe { btrfs_ioc_get_dev_stats(fd.as_raw_fd(), &mut raw) }?;
 
-    Ok(DevStats {
+    Ok(DeviceStats {
         devid,
         write_errs: raw.values[btrfs_dev_stat_values_BTRFS_DEV_STAT_WRITE_ERRS as usize],
         read_errs: raw.values[btrfs_dev_stat_values_BTRFS_DEV_STAT_READ_ERRS as usize],
@@ -310,4 +314,161 @@ pub fn device_stats(fd: BorrowedFd, devid: u64, reset: bool) -> nix::Result<DevS
         corruption_errs: raw.values[btrfs_dev_stat_values_BTRFS_DEV_STAT_CORRUPTION_ERRS as usize],
         generation_errs: raw.values[btrfs_dev_stat_values_BTRFS_DEV_STAT_GENERATION_ERRS as usize],
     })
+}
+
+const DEV_EXTENT_LENGTH_OFF: usize = std::mem::offset_of!(btrfs_dev_extent, length);
+
+const SZ_1M: u64 = 1024 * 1024;
+const SZ_32M: u64 = 32 * 1024 * 1024;
+
+/// Number of superblock mirror copies btrfs maintains.
+const BTRFS_SUPER_MIRROR_MAX: usize = 3;
+
+/// Return the byte offset of superblock mirror `i`.
+///
+/// Mirror 0 is at 64 KiB, mirror 1 at 64 MiB, mirror 2 at 256 GiB.
+fn sb_offset(i: usize) -> u64 {
+    match i {
+        0 => 64 * 1024,
+        _ => 1u64 << (20 + 10 * (i as u64)),
+    }
+}
+
+/// A contiguous physical byte range on a device (inclusive end).
+#[derive(Debug, Clone, Copy)]
+struct Extent {
+    start: u64,
+    /// Inclusive end byte.
+    end: u64,
+}
+
+/// Compute the minimum size to which device `devid` can be shrunk.
+///
+/// Walks the device tree for all `DEV_EXTENT_KEY` items belonging to
+/// `devid`, sums their lengths, then adjusts for extents that sit beyond
+/// the sum by checking whether they can be relocated into holes closer to
+/// the start of the device. The algorithm matches `btrfs inspect-internal
+/// min-dev-size` from btrfs-progs.
+///
+/// Requires `CAP_SYS_ADMIN`.
+pub fn device_min_size(fd: BorrowedFd, devid: u64) -> nix::Result<u64> {
+    let mut min_size: u64 = SZ_1M;
+    let mut extents: Vec<Extent> = Vec::new();
+    let mut holes: Vec<Extent> = Vec::new();
+    let mut last_pos: Option<u64> = None;
+
+    tree_search(
+        fd,
+        SearchKey::for_objectid_range(
+            BTRFS_DEV_TREE_OBJECTID as u64,
+            BTRFS_DEV_EXTENT_KEY,
+            devid,
+            devid,
+        ),
+        |hdr, data| {
+            if data.len() < DEV_EXTENT_LENGTH_OFF + field_size!(btrfs_dev_extent, length) {
+                return Ok(());
+            }
+            let phys_start = hdr.offset;
+            let len = read_le_u64(data, DEV_EXTENT_LENGTH_OFF);
+
+            min_size += len;
+
+            // Extents are prepended (descending end offset) so that the
+            // adjustment pass processes the highest-addressed extent first.
+            extents.push(Extent {
+                start: phys_start,
+                end: phys_start + len - 1,
+            });
+
+            if let Some(prev_end) = last_pos {
+                if prev_end != phys_start {
+                    holes.push(Extent {
+                        start: prev_end,
+                        end: phys_start - 1,
+                    });
+                }
+            }
+
+            last_pos = Some(phys_start + len);
+            Ok(())
+        },
+    )?;
+
+    // Sort extents by descending end offset for the adjustment pass.
+    extents.sort_by(|a, b| b.end.cmp(&a.end));
+
+    adjust_min_size(&mut extents, &mut holes, &mut min_size);
+
+    Ok(min_size)
+}
+
+/// Check whether a byte range `[start, end]` contains a superblock mirror.
+fn hole_includes_sb_mirror(start: u64, end: u64) -> bool {
+    (0..BTRFS_SUPER_MIRROR_MAX).any(|i| {
+        let bytenr = sb_offset(i);
+        bytenr >= start && bytenr <= end
+    })
+}
+
+/// Adjust `min_size` downward by relocating tail extents into holes.
+///
+/// Processes extents in descending order of end offset. If an extent sits
+/// beyond the current `min_size`, try to find a hole large enough to
+/// relocate it. If no hole fits, the device cannot be shrunk past that
+/// extent and `min_size` is set to its end + 1.
+///
+/// Adds scratch space (largest relocated extent + 32 MiB for a potential
+/// system chunk allocation) when any relocation is needed.
+fn adjust_min_size(extents: &mut Vec<Extent>, holes: &mut Vec<Extent>, min_size: &mut u64) {
+    let mut scratch_space: u64 = 0;
+
+    while let Some(&ext) = extents.first() {
+        if ext.end < *min_size {
+            break;
+        }
+
+        let extent_len = ext.end - ext.start + 1;
+
+        // Find the first hole large enough to hold this extent.
+        let hole_idx = holes.iter().position(|h| {
+            let hole_len = h.end - h.start + 1;
+            hole_len >= extent_len
+        });
+
+        let Some(idx) = hole_idx else {
+            *min_size = ext.end + 1;
+            break;
+        };
+
+        // If the target hole contains a superblock mirror location,
+        // pessimistically assume we need one more extent worth of space.
+        if hole_includes_sb_mirror(holes[idx].start, holes[idx].start + extent_len - 1) {
+            *min_size += extent_len;
+        }
+
+        // Shrink or remove the hole.
+        let hole_len = holes[idx].end - holes[idx].start + 1;
+        if hole_len > extent_len {
+            holes[idx].start += extent_len;
+        } else {
+            holes.remove(idx);
+        }
+
+        extents.remove(0);
+
+        if extent_len > scratch_space {
+            scratch_space = extent_len;
+        }
+    }
+
+    if scratch_space > 0 {
+        *min_size += scratch_space;
+        // Chunk allocation may require a new system chunk (up to 32 MiB).
+        *min_size += SZ_32M;
+    }
+}
+
+fn read_le_u64(buf: &[u8], off: usize) -> u64 {
+    u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
 }

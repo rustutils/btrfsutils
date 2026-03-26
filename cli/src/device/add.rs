@@ -1,6 +1,6 @@
 use crate::{Format, Runnable, util::check_device_for_overwrite};
 use anyhow::{Context, Result};
-use btrfs_uapi::{device::device_add, filesystem::fs_info, sysfs::SysfsBtrfs};
+use btrfs_uapi::{device::device_add, filesystem::filesystem_info, sysfs::SysfsBtrfs};
 use clap::Parser;
 use std::{ffi::CString, fs, os::unix::io::AsFd, path::PathBuf};
 
@@ -38,7 +38,7 @@ impl Runnable for DeviceAddCommand {
 
         // If --enqueue is set, wait for any running exclusive operation to finish.
         if self.enqueue {
-            let info = fs_info(fd).with_context(|| {
+            let info = filesystem_info(fd).with_context(|| {
                 format!(
                     "failed to get filesystem info for '{}'",
                     self.target.display()

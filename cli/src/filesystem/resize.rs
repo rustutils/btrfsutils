@@ -1,6 +1,6 @@
 use crate::{Format, Runnable, util::parse_size_with_suffix};
 use anyhow::{Context, Result};
-use btrfs_uapi::resize::{ResizeAmount, ResizeArgs, resize};
+use btrfs_uapi::filesystem::{ResizeAmount, ResizeArgs, resize};
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 

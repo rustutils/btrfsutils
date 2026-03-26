@@ -2,7 +2,7 @@ use crate::common::{BackingFile, LoopbackDevice, Mount, single_mount, write_test
 use btrfs_uapi::{
     balance::{BalanceArgs, BalanceFlags, balance},
     device::{device_add, device_info_all},
-    filesystem::fs_info,
+    filesystem::filesystem_info,
     replace::{ReplaceSource, ReplaceState, replace_cancel, replace_start, replace_status},
     space::BlockGroupFlags,
     filesystem::sync,
@@ -81,7 +81,7 @@ fn replace_device() {
     crate::common::verify_test_data(mnt.path(), "data.bin", 50_000_000);
 
     // The replacement device should now be device 2.
-    let info = fs_info(mnt.fd()).expect("fs_info failed");
+    let info = filesystem_info(mnt.fd()).expect("filesystem_info failed");
     let devs = device_info_all(mnt.fd(), &info).expect("device_info_all failed");
     assert_eq!(devs.len(), 2, "should still have 2 devices");
     let dev2 = devs

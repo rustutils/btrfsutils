@@ -1,6 +1,6 @@
 use crate::{Format, Runnable, util::human_bytes};
 use anyhow::{Context, Result};
-use btrfs_uapi::{device::device_info_all, filesystem::fs_info, scrub::scrub_progress};
+use btrfs_uapi::{device::device_info_all, filesystem::filesystem_info, scrub::scrub_progress};
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
@@ -21,7 +21,7 @@ impl Runnable for ScrubStatusCommand {
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
         let fd = file.as_fd();
 
-        let fs = fs_info(fd).with_context(|| {
+        let fs = filesystem_info(fd).with_context(|| {
             format!(
                 "failed to get filesystem info for '{}'",
                 self.path.display()

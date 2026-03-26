@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use btrfs_uapi::{
     chunk::device_chunk_allocations,
     device::device_info_all,
-    filesystem::fs_info,
+    filesystem::filesystem_info,
     space::{BlockGroupFlags, SpaceInfo, space_info},
 };
 use clap::Parser;
@@ -95,7 +95,7 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
     let file = File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
     let fd = file.as_fd();
 
-    let fs = fs_info(fd)
+    let fs = filesystem_info(fd)
         .with_context(|| format!("failed to get filesystem info for '{}'", path.display()))?;
     let devices = device_info_all(fd, &fs)
         .with_context(|| format!("failed to get device info for '{}'", path.display()))?;

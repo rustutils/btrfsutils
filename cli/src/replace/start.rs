@@ -1,7 +1,7 @@
 use crate::{Format, Runnable, util::check_device_for_overwrite};
 use anyhow::{Context, Result, bail};
 use btrfs_uapi::{
-    filesystem::fs_info,
+    filesystem::filesystem_info,
     replace::{ReplaceSource, ReplaceState, replace_start, replace_status},
     sysfs::SysfsBtrfs,
 };
@@ -63,7 +63,7 @@ impl Runnable for ReplaceStartCommand {
 
         // If --enqueue is set, wait for any running exclusive operation to finish.
         if self.enqueue {
-            let info = fs_info(fd).with_context(|| {
+            let info = filesystem_info(fd).with_context(|| {
                 format!(
                     "failed to get filesystem info for '{}'",
                     self.mount_point.display()

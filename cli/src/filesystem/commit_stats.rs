@@ -1,6 +1,6 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result};
-use btrfs_uapi::{filesystem::fs_info, sysfs::SysfsBtrfs};
+use btrfs_uapi::{filesystem::filesystem_info, sysfs::SysfsBtrfs};
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
@@ -19,7 +19,7 @@ impl Runnable for FilesystemCommitStatsCommand {
         let file = File::open(&self.path)
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
 
-        let info = fs_info(file.as_fd()).with_context(|| {
+        let info = filesystem_info(file.as_fd()).with_context(|| {
             format!(
                 "failed to get filesystem info for '{}'",
                 self.path.display()

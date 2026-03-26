@@ -1,8 +1,8 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
-    device::{DevStats, device_info_all, device_stats},
-    filesystem::fs_info,
+    device::{DeviceStats, device_info_all, device_stats},
+    filesystem::filesystem_info,
 };
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
@@ -34,7 +34,7 @@ impl Runnable for DeviceStatsCommand {
             .with_context(|| format!("failed to open '{}'", self.path.display()))?;
         let fd = file.as_fd();
 
-        let fs = fs_info(fd).with_context(|| {
+        let fs = filesystem_info(fd).with_context(|| {
             format!(
                 "failed to get filesystem info for '{}'",
                 self.path.display()
@@ -75,7 +75,7 @@ impl Runnable for DeviceStatsCommand {
 
 /// Print the five counters for one device in the same layout as the C tool:
 /// `[/dev/path].counter_name   <value>`
-fn print_stats(path: &str, stats: &DevStats) {
+fn print_stats(path: &str, stats: &DeviceStats) {
     let p = path;
     println!("[{p}].{:<24} {}", "write_io_errs", stats.write_errs);
     println!("[{p}].{:<24} {}", "read_io_errs", stats.read_errs);
