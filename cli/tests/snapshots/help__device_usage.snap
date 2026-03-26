@@ -4,6 +4,11 @@ expression: "help(&[\"device\", \"usage\"])"
 ---
 Show detailed information about internal allocations in devices
 
+For each device, prints the total device size, the "slack" (difference between
+the physical block device size and the size btrfs uses), per-profile chunk
+allocations (Data, Metadata, System), and unallocated space. Requires
+CAP_SYS_ADMIN for the chunk tree walk.
+
 Usage: usage [OPTIONS] <PATHS>...
 
 Arguments:
@@ -39,4 +44,4 @@ Options:
           Show sizes in TiB, or TB with --si
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')

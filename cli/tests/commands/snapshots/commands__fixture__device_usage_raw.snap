@@ -1,0 +1,12 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs device usage --raw <MOUNT>
+expression: "redact_paths(&btrfs_ok(&[\"device\", \"usage\", \"--raw\", mp]), &mnt)"
+---
+<DEV>, ID: 1
+   Device size:          114294784
+   Device slack:                 0
+   Data,single:              65536
+   Metadata,DUP:            131072
+   System,DUP:              131072
+   Unallocated:          113967104

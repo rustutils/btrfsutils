@@ -164,6 +164,50 @@ fn device_stats() {
     );
 }
 
+#[test]
+#[ignore = "requires elevated privileges"]
+fn device_usage() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs device usage <MOUNT>",
+        redact_paths(&btrfs_ok(&["device", "usage", mp]), &mnt)
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn device_usage_raw() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs device usage --raw <MOUNT>",
+        redact_paths(&btrfs_ok(&["device", "usage", "--raw", mp]), &mnt)
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn device_usage_kbytes() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs device usage --kbytes <MOUNT>",
+        redact_paths(&btrfs_ok(&["device", "usage", "--kbytes", mp]), &mnt)
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn device_usage_gbytes() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs device usage --gbytes <MOUNT>",
+        redact_paths(&btrfs_ok(&["device", "usage", "--gbytes", mp]), &mnt)
+    );
+}
+
 // ── inspect-internal ─────────────────────────────────────────────────
 
 #[test]

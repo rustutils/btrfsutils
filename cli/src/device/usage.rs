@@ -1,9 +1,19 @@
-use crate::{Format, Runnable};
-use anyhow::Result;
+use crate::{Format, Runnable, util::human_bytes};
+use anyhow::{Context, Result};
+use btrfs_uapi::{
+    chunk::device_chunk_allocations,
+    device::device_info_all,
+    filesystem::filesystem_info,
+};
 use clap::Parser;
-use std::path::PathBuf;
+use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
 /// Show detailed information about internal allocations in devices
+///
+/// For each device, prints the total device size, the "slack" (difference
+/// between the physical block device size and the size btrfs uses), per-profile
+/// chunk allocations (Data, Metadata, System), and unallocated space. Requires
+/// CAP_SYS_ADMIN for the chunk tree walk.
 #[derive(Parser, Debug)]
 pub struct DeviceUsageCommand {
     /// Path(s) to a mounted btrfs filesystem
@@ -39,7 +49,7 @@ pub struct DeviceUsageCommand {
     pub mbytes: bool,
 
     /// Show sizes in GiB, or GB with --si
-    #[clap(short = 'g', long, overrides_with_all = ["raw", "human_readable", "human_base1000", "iec", "si", "kbytes", "mbytes", "tbytes"])]
+    #[clap(short = 'g', long, overrides_with_all = ["raw", "human_readable", "human_base1000", "iec", "si", "kbytes", "mbytes", "gbytes"])]
     pub gbytes: bool,
 
     /// Show sizes in TiB, or TB with --si
@@ -47,8 +57,171 @@ pub struct DeviceUsageCommand {
     pub tbytes: bool,
 }
 
+/// Resolved unit mode: how to format byte counts.
+enum UnitMode {
+    Raw,
+    HumanIec,
+    HumanSi,
+    Fixed(u64),
+}
+
+fn fmt_size(bytes: u64, mode: &UnitMode) -> String {
+    match mode {
+        UnitMode::Raw => bytes.to_string(),
+        UnitMode::HumanIec => human_bytes(bytes),
+        UnitMode::HumanSi => human_bytes_si(bytes),
+        UnitMode::Fixed(divisor) => format!("{}", bytes / divisor),
+    }
+}
+
+fn human_bytes_si(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "kB", "MB", "GB", "TB", "PB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1000.0 && unit + 1 < UNITS.len() {
+        value /= 1000.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes}B")
+    } else {
+        format!("{value:.2}{}", UNITS[unit])
+    }
+}
+
+/// Try to get the physical block device size.  Returns 0 on failure (e.g.
+/// device path is empty, inaccessible, or not a block device).
+fn physical_device_size(path: &str) -> u64 {
+    if path.is_empty() {
+        return 0;
+    }
+    let Ok(file) = File::open(path) else {
+        return 0;
+    };
+    btrfs_uapi::blkdev::device_size(file.as_fd()).unwrap_or(0)
+}
+
+impl DeviceUsageCommand {
+    fn unit_mode(&self) -> UnitMode {
+        if self.raw {
+            UnitMode::Raw
+        } else if self.kbytes {
+            UnitMode::Fixed(if self.si { 1000 } else { 1024 })
+        } else if self.mbytes {
+            UnitMode::Fixed(if self.si { 1000 * 1000 } else { 1024 * 1024 })
+        } else if self.gbytes {
+            UnitMode::Fixed(if self.si {
+                1000 * 1000 * 1000
+            } else {
+                1024 * 1024 * 1024
+            })
+        } else if self.tbytes {
+            UnitMode::Fixed(if self.si {
+                1000u64.pow(4)
+            } else {
+                1024u64.pow(4)
+            })
+        } else if self.si || self.human_base1000 {
+            UnitMode::HumanSi
+        } else {
+            UnitMode::HumanIec
+        }
+    }
+}
+
 impl Runnable for DeviceUsageCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        todo!("implement device usage")
+        let mode = self.unit_mode();
+        for (i, path) in self.paths.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
+            print_device_usage(path, &mode)?;
+        }
+        Ok(())
     }
+}
+
+fn print_device_usage(
+    path: &std::path::Path,
+    mode: &UnitMode,
+) -> Result<()> {
+    let file = File::open(path).with_context(|| {
+        format!("failed to open '{}'", path.display())
+    })?;
+    let fd = file.as_fd();
+
+    let fs = filesystem_info(fd).with_context(|| {
+        format!(
+            "failed to get filesystem info for '{}'",
+            path.display()
+        )
+    })?;
+    let devices = device_info_all(fd, &fs).with_context(|| {
+        format!("failed to get device info for '{}'", path.display())
+    })?;
+    let allocs = device_chunk_allocations(fd).with_context(|| {
+        format!(
+            "failed to get chunk allocations for '{}'",
+            path.display()
+        )
+    })?;
+
+    for (di, dev) in devices.iter().enumerate() {
+        if di > 0 {
+            println!();
+        }
+
+        let phys_size = physical_device_size(&dev.path);
+        let slack = if phys_size > 0 {
+            phys_size.saturating_sub(dev.total_bytes)
+        } else {
+            0
+        };
+
+        println!("{}, ID: {}", dev.path, dev.devid);
+
+        print_line("Device size", &fmt_size(dev.total_bytes, mode));
+        print_line("Device slack", &fmt_size(slack, mode));
+
+        let mut allocated: u64 = 0;
+        let mut dev_allocs: Vec<_> = allocs
+            .iter()
+            .filter(|a| a.devid == dev.devid)
+            .collect();
+        dev_allocs.sort_by_key(|a| {
+            let type_order = if a.flags.contains(
+                btrfs_uapi::space::BlockGroupFlags::DATA,
+            ) {
+                0
+            } else if a.flags.contains(
+                btrfs_uapi::space::BlockGroupFlags::METADATA,
+            ) {
+                1
+            } else {
+                2
+            };
+            (type_order, a.flags.bits())
+        });
+
+        for alloc in &dev_allocs {
+            allocated += alloc.bytes;
+            let label = format!(
+                "{},{}",
+                alloc.flags.type_name(),
+                alloc.flags.profile_name()
+            );
+            print_line(&label, &fmt_size(alloc.bytes, mode));
+        }
+
+        let unallocated = dev.total_bytes.saturating_sub(allocated);
+        print_line("Unallocated", &fmt_size(unallocated, mode));
+    }
+
+    Ok(())
+}
+
+fn print_line(label: &str, value: &str) {
+    let padding = 20usize.saturating_sub(label.len());
+    println!("   {label}:{:>pad$}{value:>10}", "", pad = padding);
 }
