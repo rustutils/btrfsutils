@@ -1,0 +1,73 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"subvolume\", \"list\"])"
+---
+List subvolumes and snapshots in the filesystem
+
+The default output format matches btrfs-progs: ID NNN gen NNN top level NNN path NAME
+
+Optional flags enable additional columns or filter the results.
+
+Usage: list [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Path to a mounted btrfs filesystem
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+Path filtering:
+  -o
+          Print only subvolumes below the given path
+
+  -a
+          Print all subvolumes in the filesystem, including deleted ones, and distinguish absolute
+          and relative paths with respect to the given path
+
+Field selection:
+  -p
+          Print parent ID column (same as top level for non-snapshots)
+
+  -c
+          Print ogeneration (generation at creation) column
+
+  -g
+          Print generation column (already shown by default; kept for compatibility with btrfs-progs
+          CLI)
+
+  -u
+          Print UUID column
+
+  -Q
+          Print parent UUID column
+
+  -R
+          Print received UUID column
+
+Type filtering:
+  -s
+          List only snapshots (subvolumes with a non-nil parent UUID)
+
+  -r
+          List only read-only subvolumes
+
+  -d
+          List deleted subvolumes that are not yet cleaned
+
+Other:
+  -t
+          Print the result as a table
+
+Sorting:
+  -G <[+|-]VALUE>
+          Filter by generation: VALUE (exact), +VALUE (>= VALUE), -VALUE (<= VALUE)
+
+  -C <[+|-]VALUE>
+          Filter by ogeneration: VALUE (exact), +VALUE (>= VALUE), -VALUE (<= VALUE)
+
+      --sort <KEYS>
+          Sort by comma-separated keys: gen, ogen, rootid, path
+          
+          Prefix with + (ascending, default) or - (descending). Example: --sort=gen,-ogen,path

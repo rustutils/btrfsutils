@@ -1,0 +1,42 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"device\", \"usage\"])"
+---
+Show detailed information about internal allocations in devices
+
+Usage: usage [OPTIONS] <PATHS>...
+
+Arguments:
+  <PATHS>...
+          Path(s) to a mounted btrfs filesystem
+
+Options:
+  -b, --raw
+          Show raw numbers in bytes
+
+      --human-readable
+          Show human-friendly numbers using base 1024 (default)
+
+  -H
+          Show human-friendly numbers using base 1000
+
+      --iec
+          Use 1024 as a base (KiB, MiB, GiB, TiB)
+
+      --si
+          Use 1000 as a base (kB, MB, GB, TB)
+
+  -k, --kbytes
+          Show sizes in KiB, or kB with --si
+
+  -m, --mbytes
+          Show sizes in MiB, or MB with --si
+
+  -g, --gbytes
+          Show sizes in GiB, or GB with --si
+
+  -t, --tbytes
+          Show sizes in TiB, or TB with --si
+
+  -h, --help
+          Print help

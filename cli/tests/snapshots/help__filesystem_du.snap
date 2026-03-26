@@ -1,0 +1,48 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"filesystem\", \"du\"])"
+---
+Summarize disk usage of each file, showing shared extents
+
+For each path, prints three columns:
+
+Total      — logical bytes used by non-inline extents Exclusive  — bytes not
+shared with any other file Set shared — (top-level only) physical bytes shared
+within this subtree
+
+Usage: du [OPTIONS] <PATHS>...
+
+Arguments:
+  <PATHS>...
+          One or more files or directories to summarize
+
+Options:
+  -s, --summarize
+          Display only a total for each argument, not per-file lines
+
+      --raw
+          Show raw numbers in bytes
+
+      --human-readable
+          Show human-friendly numbers using base 1024 (default)
+
+      --iec
+          Use 1024 as a base (KiB, MiB, GiB, TiB)
+
+      --si
+          Use 1000 as a base (kB, MB, GB, TB)
+
+      --kbytes
+          Show sizes in KiB, or kB with --si
+
+      --mbytes
+          Show sizes in MiB, or MB with --si
+
+      --gbytes
+          Show sizes in GiB, or GB with --si
+
+      --tbytes
+          Show sizes in TiB, or TB with --si
+
+  -h, --help
+          Print help (see a summary with '-h')

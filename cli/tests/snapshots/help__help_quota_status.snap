@@ -1,0 +1,18 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"quota\", \"status\"])"
+---
+Show status information about quota on the filesystem
+
+Usage: status [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Path to a mounted btrfs filesystem
+
+Options:
+      --is-enabled
+          Only check if quotas are enabled, without printing full status
+
+  -h, --help
+          Print help

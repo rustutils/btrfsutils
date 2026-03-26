@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"balance\", \"cancel\"])"
+---
+Cancel a running balance operation
+
+Usage: cancel <PATH>
+
+Arguments:
+  <PATH>
+          
+
+Options:
+  -h, --help
+          Print help

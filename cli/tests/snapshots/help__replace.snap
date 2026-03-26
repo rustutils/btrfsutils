@@ -1,0 +1,21 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"replace\"])"
+---
+Replace a device in the filesystem.
+
+Replace a device with another device or a spare. During replacement, data is
+read from the old device and written to the new one. The replace operation can
+be monitored and cancelled. Requires CAP_SYS_ADMIN.
+
+Usage: replace <COMMAND>
+
+Commands:
+  start   Replace a device in the filesystem
+  status  Print status of a running device replace operation
+  cancel  Cancel a running device replace operation
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')

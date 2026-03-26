@@ -1,0 +1,27 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"subvolume\", \"sync\"])"
+---
+Wait until given subvolume(s) are completely removed from the filesystem
+
+Wait until given subvolume(s) are completely removed from the filesystem after
+deletion. If no subvolume id is given, wait until all current deletion requests
+are completed, but do not wait for subvolumes deleted meanwhile. The status of
+subvolume ids is checked periodically.
+
+Usage: sync [OPTIONS] <PATH> [SUBVOLIDS]...
+
+Arguments:
+  <PATH>
+          Path to the btrfs filesystem mount point
+
+  [SUBVOLIDS]...
+          One or more subvolume IDs to wait for (waits for all pending if
+          omitted)
+
+Options:
+  -s, --sleep <N>
+          Sleep N seconds between checks (default: 1)
+
+  -h, --help
+          Print help (see a summary with '-h')

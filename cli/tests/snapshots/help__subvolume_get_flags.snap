@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"subvolume\", \"get-flags\"])"
+---
+Show the flags of a subvolume
+
+Usage: get-flags <PATH>
+
+Arguments:
+  <PATH>
+          Path to a subvolume
+
+Options:
+  -h, --help
+          Print help

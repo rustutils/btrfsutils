@@ -1,0 +1,18 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"replace\", \"cancel\"])"
+---
+Cancel a running device replace operation.
+
+If a replace operation is in progress on the filesystem mounted at mount_point, it is cancelled. The
+target device is left in an undefined state and should not be used further without reformatting.
+
+Usage: cancel <MOUNT_POINT>
+
+Arguments:
+  <MOUNT_POINT>
+          Path to the mounted btrfs filesystem
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')

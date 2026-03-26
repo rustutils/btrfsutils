@@ -1,0 +1,28 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"qgroup\", \"limit\"])"
+---
+Set limits on a subvolume quota group
+
+Usage: limit [OPTIONS] <SIZE> <QGROUPID_OR_PATH> [PATH]
+
+Arguments:
+  <SIZE>
+          Size limit in bytes (use suffix K/M/G/T), or "none" to remove the
+          limit
+
+  <QGROUPID_OR_PATH>
+          Qgroup ID (e.g. "0/5") or path if qgroupid is omitted
+
+  [PATH]
+          Path to the filesystem (required when qgroupid is given)
+
+Options:
+  -c
+          Limit amount of data after compression
+
+  -e
+          Limit space exclusively assigned to this qgroup
+
+  -h, --help
+          Print help

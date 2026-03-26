@@ -1,0 +1,22 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"replace\", \"status\"])"
+---
+Print status of a running device replace operation.
+
+Without -1 the status is printed continuously until the replace operation
+finishes or is cancelled. With -1 the status is printed once and the command
+exits.
+
+Usage: status [OPTIONS] <MOUNT_POINT>
+
+Arguments:
+  <MOUNT_POINT>
+          Path to a mounted btrfs filesystem
+
+Options:
+  -1
+          Print once instead of continuously until the replace finishes
+
+  -h, --help
+          Print help (see a summary with '-h')

@@ -1,0 +1,27 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"device\", \"scan\"])"
+---
+Scan or unregister devices for multi-device btrfs filesystems
+
+Without --forget, registers each given device with the kernel so that
+multi-device filesystems can be assembled and mounted.
+
+With --forget, unregisters the given devices (or all stale devices if none are
+specified) so the kernel no longer tracks them.
+
+Usage: scan [OPTIONS] [DEVICES]...
+
+Arguments:
+  [DEVICES]...
+          Block devices to scan or unregister
+
+Options:
+  -u, --forget
+          Unregister devices instead of registering them.
+          
+          If no devices are given, all devices that are not part of a currently
+          mounted filesystem are unregistered.
+
+  -h, --help
+          Print help (see a summary with '-h')

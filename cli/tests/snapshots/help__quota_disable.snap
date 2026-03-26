@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"quota\", \"disable\"])"
+---
+Disable subvolume quota support for a filesystem
+
+Usage: disable <PATH>
+
+Arguments:
+  <PATH>
+          Path to a mounted btrfs filesystem
+
+Options:
+  -h, --help
+          Print help

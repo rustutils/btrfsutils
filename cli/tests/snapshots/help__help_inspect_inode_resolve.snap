@@ -1,0 +1,18 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"inspect\", \"inode-resolve\"])"
+---
+Get file system paths for the given inode
+
+Usage: inode-resolve <INODE> <PATH>
+
+Arguments:
+  <INODE>
+          Inode number
+
+  <PATH>
+          Path to a file or directory on the btrfs filesystem
+
+Options:
+  -h, --help
+          Print help

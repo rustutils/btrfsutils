@@ -1,0 +1,18 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"filesystem\", \"commit-stats\"])"
+---
+Show commit statistics for a mounted filesystem
+
+Usage: commit-stats [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          
+
+Options:
+  -z, --reset
+          Print stats then reset the max_commit_ms counter (requires root)
+
+  -h, --help
+          Print help

@@ -1,0 +1,64 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"check\"])"
+---
+Check structural integrity of a filesystem (unmounted).
+
+Verify the integrity of a btrfs filesystem by checking internal structures,
+extent trees, and data checksums. The filesystem must be unmounted before
+running this command. This is a potentially slow operation that requires
+CAP_SYS_ADMIN. Use --readonly to perform checks without attempting repairs.
+
+Usage: check [OPTIONS] <DEVICE>
+
+Arguments:
+  <DEVICE>
+          Path to the device containing the btrfs filesystem
+
+Options:
+  -s, --super <SUPERBLOCK>
+          Use this superblock copy
+
+  -b, --backup
+          Use the first valid backup root copy
+
+  -r, --tree-root <TREE_ROOT>
+          Use the given bytenr for the tree root
+
+      --chunk-root <CHUNK_ROOT>
+          Use the given bytenr for the chunk tree root
+
+      --readonly
+          Run in read-only mode (default)
+
+      --repair
+          Try to repair the filesystem (dangerous)
+
+      --force
+          Skip mount checks
+
+      --mode <MODE>
+          Checker operating mode
+          
+          [possible values: original, lowmem]
+
+      --init-csum-tree
+          Create a new CRC tree
+
+      --init-extent-tree
+          Create a new extent tree
+
+      --check-data-csum
+          Verify checksums of data blocks
+
+  -Q, --qgroup-report
+          Print a report on qgroup consistency
+
+  -E, --subvol-extents <SUBVOL_EXTENTS>
+          Print subvolume extents and sharing state for the given subvolume ID
+
+  -p, --progress
+          Indicate progress
+
+  -h, --help
+          Print help (see a summary with '-h')

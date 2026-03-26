@@ -1,0 +1,18 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"quota\", \"enable\"])"
+---
+Enable subvolume quota support for a filesystem
+
+Usage: enable [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Path to a mounted btrfs filesystem
+
+Options:
+  -s, --simple
+          Simple qgroups: account ownership by extent lifetime rather than backref walks
+
+  -h, --help
+          Print help

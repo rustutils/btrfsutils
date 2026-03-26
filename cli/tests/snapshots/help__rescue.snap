@@ -1,0 +1,33 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"rescue\"])"
+---
+Toolbox for specific rescue operations.
+
+Provide emergency recovery tools for damaged or unrecoverable filesystems. These
+operations are potentially dangerous and should only be used when the filesystem
+cannot be mounted or accessed through normal means. Most rescue operations
+require CAP_SYS_ADMIN and an unmounted filesystem.
+
+Usage: rescue <COMMAND>
+
+Commands:
+  chunk-recover          Recover the chunk tree by scanning the devices one by
+                         one
+  super-recover          Recover bad superblocks from good copies
+  zero-log               Clear the tree log (usable if it's corrupted and
+                         prevents mount)
+  fix-device-size        Re-align device and super block sizes
+  fix-data-checksum      Fix data checksum mismatches
+  create-control-device  Create /dev/btrfs-control
+  clear-ino-cache        Remove leftover items pertaining to the deprecated
+                         inode cache feature
+  clear-space-cache      Completely remove the v1 or v2 free space cache
+  clear-uuid-tree        Delete uuid tree so that kernel can rebuild it at mount
+                         time
+  help                   Print this message or the help of the given
+                         subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')

@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"filesystem\", \"sync\"])"
+---
+Force a sync on a mounted filesystem
+
+Usage: sync <PATH>
+
+Arguments:
+  <PATH>
+          
+
+Options:
+  -h, --help
+          Print help

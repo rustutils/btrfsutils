@@ -1,0 +1,48 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"filesystem\", \"defragment\"])"
+---
+Defragment files or directories on a btrfs filesystem
+
+Usage: defragment [OPTIONS] <PATHS>...
+
+Arguments:
+  <PATHS>...
+          One or more files or directories to defragment
+
+Options:
+  -v, --verbose
+          Be verbose, print file names as they are defragmented
+
+  -r, --recursive
+          Defragment files in subdirectories recursively
+
+  -f, --flush
+          Flush data to disk immediately after defragmentation
+
+  -h, --help
+          Print help
+
+Compression:
+  -c, --compress [<COMPRESS>]
+          Compress the file while defragmenting (optionally specify type: zlib, lzo, zstd)
+
+  -L, --level <COMPRESS_LEVEL>
+          Compression level (used together with --compress)
+
+      --nocomp
+          Disable compression during defragmentation
+
+Range:
+  -s, --start <START>
+          Defragment only bytes starting at this offset
+
+      --len <LEN>
+          Defragment only this many bytes
+
+  -t, --target <TARGET>
+          Target extent size threshold in bytes; extents larger than this are considered already
+          defragmented
+
+      --step <STEP>
+          Process the file in steps of this size rather than all at once

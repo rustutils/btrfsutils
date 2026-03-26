@@ -1,0 +1,48 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"inspect\", \"list-chunks\"])"
+---
+List all chunks in the filesystem, one row per stripe
+
+Enumerates every chunk across all devices by walking the chunk tree. For striped
+profiles (RAID0, RAID10, RAID5, RAID6) each logical chunk maps to multiple
+stripes on different devices, so it appears on multiple rows. For DUP each
+logical chunk maps to two physical stripes on the same device, so it also
+appears twice. For single and non-striped profiles there is a 1:1 correspondence
+between logical chunks and rows.
+
+Requires CAP_SYS_ADMIN.
+
+Columns:
+
+Devid: btrfs device ID the stripe lives on.
+
+PNumber: physical chunk index on this device, ordered by physical start offset
+(1-based).
+
+Type/profile: block-group type (data, metadata, system) and replication profile
+(single, dup, raid0, raid1, ...).
+
+PStart: physical byte offset of this stripe on the device.
+
+Length: logical length of the chunk (shared by all its stripes).
+
+PEnd: physical byte offset of the end of this stripe (PStart + Length).
+
+LNumber: logical chunk index for this device, ordered by logical start offset
+(1-based); DUP stripes share the same value.
+
+LStart: logical byte offset of the chunk in the filesystem address space.
+
+Usage%: percentage of the chunk's logical space currently occupied (used /
+length * 100), sourced from the extent tree.
+
+Usage: list-chunks <PATH>
+
+Arguments:
+  <PATH>
+          Path to a file or directory on the btrfs filesystem
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')

@@ -1,0 +1,21 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"inspect\", \"dump-tree\"])"
+---
+Dump tree blocks from a btrfs filesystem
+
+Usage: dump-tree [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Path to a file or directory on the btrfs filesystem
+
+Options:
+  -t, --tree <TREE>
+          Only dump blocks from this tree
+
+  -b, --block <BLOCK>
+          Only dump blocks at this block number
+
+  -h, --help
+          Print help

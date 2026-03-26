@@ -1,0 +1,27 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"scrub\", \"limit\"])"
+---
+Show or set the per-device scrub throughput limit
+
+Without options, shows the current limit for each device. Use -l with either -a or -d to set a
+limit. Pass 0 to -l to remove a limit.
+
+Usage: limit [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Path to a mounted btrfs filesystem
+
+Options:
+  -a, --all
+          Apply the limit to all devices
+
+  -d, --devid <DEVID>
+          Select a single device by devid
+
+  -l, --limit <SIZE>
+          Set the throughput limit (e.g. 100m, 1g); 0 removes the limit
+
+  -h, --help
+          Print help (see a summary with '-h')

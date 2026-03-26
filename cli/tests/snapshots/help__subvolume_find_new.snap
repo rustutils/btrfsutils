@@ -1,0 +1,21 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"subvolume\", \"find-new\"])"
+---
+List the recently modified files in a subvolume
+
+Prints all files that have been modified since the given generation number. The
+generation can be found with `btrfs subvolume show`.
+
+Usage: find-new <PATH> <LAST_GEN>
+
+Arguments:
+  <PATH>
+          Path to the subvolume to search
+
+  <LAST_GEN>
+          Only show files modified at or after this generation number
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')

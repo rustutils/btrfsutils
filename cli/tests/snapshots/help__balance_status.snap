@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"balance\", \"status\"])"
+---
+Show status of running or paused balance operation
+
+Usage: status <PATH>
+
+Arguments:
+  <PATH>
+          
+
+Options:
+  -h, --help
+          Print help

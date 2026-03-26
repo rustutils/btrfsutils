@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"qgroup\", \"clear-stale\"])"
+---
+Clear all stale qgroups (level 0/subvolid) without a subvolume
+
+Usage: clear-stale <PATH>
+
+Arguments:
+  <PATH>
+          Path to a mounted btrfs filesystem
+
+Options:
+  -h, --help
+          Print help

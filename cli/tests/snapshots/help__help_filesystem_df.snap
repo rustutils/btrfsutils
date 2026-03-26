@@ -1,0 +1,15 @@
+---
+source: cli/tests/help.rs
+expression: "help(&[\"filesystem\", \"df\"])"
+---
+Show space usage information for a mounted filesystem
+
+Usage: df <PATH>
+
+Arguments:
+  <PATH>
+          
+
+Options:
+  -h, --help
+          Print help
