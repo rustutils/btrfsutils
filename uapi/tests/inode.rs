@@ -181,22 +181,26 @@ fn inode_ino_lookup_user() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn inode_ino_lookup_user_nested_dir() {
-    use btrfs_uapi::raw::BTRFS_FIRST_FREE_OBJECTID;
+    use std::os::unix::fs::MetadataExt;
 
     let (_td, mnt) = single_mount();
 
     std::fs::create_dir(mnt.path().join("parent-dir")).expect("mkdir failed");
-    let name = CStr::from_bytes_with_nul(b"parent-dir/nested\0").unwrap();
-    subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
+    let parent_dir = File::open(mnt.path().join("parent-dir"))
+        .expect("open parent-dir failed");
+    let parent_ino = parent_dir.metadata().unwrap().ino();
+    let name = CStr::from_bytes_with_nul(b"nested\0").unwrap();
+    subvolume_create(parent_dir.as_fd(), name, &[])
+        .expect("subvolume_create failed");
 
     let subvol_dir = File::open(mnt.path().join("parent-dir/nested"))
         .expect("open subvol failed");
     let info =
         subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
 
-    let result =
-        ino_lookup_user(mnt.fd(), info.id, BTRFS_FIRST_FREE_OBJECTID as u64)
-            .expect("ino_lookup_user failed");
+    // dirid is the inode of the directory containing the subvolume entry
+    let result = ino_lookup_user(mnt.fd(), info.id, parent_ino)
+        .expect("ino_lookup_user failed");
 
     assert_eq!(result.name, "nested");
     assert!(
