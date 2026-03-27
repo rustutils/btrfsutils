@@ -6,7 +6,6 @@
 
 use crate::{
     chunk::{self, ChunkTreeCache},
-    print::PrintOptions,
     raw,
     superblock::{self, Superblock},
     tree::{KeyType, TreeBlock},
@@ -167,31 +166,30 @@ pub enum Traversal {
     Dfs,
 }
 
-/// Walk and print a tree starting at `root_logical`.
+/// Walk a tree starting at `root_logical`, calling `visitor` for each block.
 pub fn walk_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
     traversal: Traversal,
-    opts: &PrintOptions,
+    visitor: &mut dyn FnMut(&TreeBlock),
 ) -> io::Result<()> {
     match traversal {
-        Traversal::Bfs => walk_tree_bfs(reader, root_logical, opts),
-        Traversal::Dfs => walk_tree_dfs(reader, root_logical, opts),
+        Traversal::Bfs => walk_tree_bfs(reader, root_logical, visitor),
+        Traversal::Dfs => walk_tree_dfs(reader, root_logical, visitor),
     }
 }
 
 fn walk_tree_dfs<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     logical: u64,
-    opts: &PrintOptions,
+    visitor: &mut dyn FnMut(&TreeBlock),
 ) -> io::Result<()> {
-    let nodesize = reader.nodesize();
     let block = reader.read_tree_block(logical)?;
-    crate::print::print_tree_block(&block, nodesize, opts);
+    visitor(&block);
 
     if let TreeBlock::Node { ptrs, .. } = &block {
         for ptr in ptrs {
-            walk_tree_dfs(reader, ptr.blockptr, opts)?;
+            walk_tree_dfs(reader, ptr.blockptr, visitor)?;
         }
     }
 
@@ -201,14 +199,12 @@ fn walk_tree_dfs<R: Read + Seek>(
 fn walk_tree_bfs<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
-    opts: &PrintOptions,
+    visitor: &mut dyn FnMut(&TreeBlock),
 ) -> io::Result<()> {
-    let nodesize = reader.nodesize();
     let root_block = reader.read_tree_block(root_logical)?;
     let root_level = root_block.header().level;
-    crate::print::print_tree_block(&root_block, nodesize, opts);
+    visitor(&root_block);
 
-    // Collect child pointers from the root if it's a node
     let mut current_level_ptrs: Vec<u64> = match &root_block {
         TreeBlock::Node { ptrs, .. } => {
             ptrs.iter().map(|p| p.blockptr).collect()
@@ -216,13 +212,12 @@ fn walk_tree_bfs<R: Read + Seek>(
         TreeBlock::Leaf { .. } => return Ok(()),
     };
 
-    // Process each level from root_level-1 down to 0
     for _level in (0..root_level).rev() {
         let mut next_level_ptrs = Vec::new();
 
         for logical in &current_level_ptrs {
             let block = reader.read_tree_block(*logical)?;
-            crate::print::print_tree_block(&block, nodesize, opts);
+            visitor(&block);
 
             if let TreeBlock::Node { ptrs, .. } = &block {
                 next_level_ptrs.extend(ptrs.iter().map(|p| p.blockptr));
@@ -235,20 +230,19 @@ fn walk_tree_bfs<R: Read + Seek>(
     Ok(())
 }
 
-/// Walk and print a single block (and optionally its children with --follow).
-pub fn print_block<R: Read + Seek>(
+/// Read a single block and call `visitor` (and optionally walk children with `follow`).
+pub fn visit_block<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     logical: u64,
     follow: bool,
     traversal: Traversal,
-    opts: &PrintOptions,
+    visitor: &mut dyn FnMut(&TreeBlock),
 ) -> io::Result<()> {
     if follow {
-        walk_tree(reader, logical, traversal, opts)
+        walk_tree(reader, logical, traversal, visitor)
     } else {
-        let nodesize = reader.nodesize();
         let block = reader.read_tree_block(logical)?;
-        crate::print::print_tree_block(&block, nodesize, opts);
+        visitor(&block);
         Ok(())
     }
 }

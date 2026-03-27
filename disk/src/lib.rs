@@ -9,7 +9,7 @@
 //! device or image file can use it.
 
 pub mod chunk;
-pub mod print;
+pub mod items;
 pub mod raw;
 pub mod reader;
 pub mod superblock;

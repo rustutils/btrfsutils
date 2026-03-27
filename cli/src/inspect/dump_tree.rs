@@ -1,12 +1,13 @@
+use super::print_tree::{self, PrintOptions};
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
 use btrfs_disk::{
-    print::PrintOptions,
     reader::{self, Traversal},
-    tree::ObjectId,
+    superblock::Superblock,
+    tree::{ObjectId, TreeBlock},
 };
 use clap::Parser;
-use std::{fs::File, path::PathBuf};
+use std::{collections::BTreeMap, fs::File, path::PathBuf};
 
 /// Dump tree blocks from a btrfs device or image file.
 ///
@@ -96,6 +97,7 @@ impl Runnable for DumpTreeCommand {
         };
 
         let csum_size = open.superblock.csum_type.size();
+        let nodesize = open.superblock.nodesize;
         let opts = PrintOptions {
             hide_names: self.hide_names,
             csum_headers: self.csum_headers,
@@ -106,16 +108,19 @@ impl Runnable for DumpTreeCommand {
         let mut reader = open.reader;
         let sb = &open.superblock;
         let tree_roots = &open.tree_roots;
+        let mut print = |block: &TreeBlock| {
+            print_tree::print_tree_block(block, nodesize, &opts);
+        };
 
         // --block: print specific blocks
         if !self.block.is_empty() {
             for &logical in &self.block {
-                reader::print_block(
+                reader::visit_block(
                     &mut reader,
                     logical,
                     self.follow,
                     traversal,
-                    &opts,
+                    &mut print,
                 )?;
             }
             return Ok(());
@@ -125,7 +130,7 @@ impl Runnable for DumpTreeCommand {
         if let Some(ref tree_name) = self.tree {
             let tree_id = parse_tree_id(tree_name)?;
             let root_bytenr = find_tree_root(tree_id, sb, tree_roots)?;
-            reader::walk_tree(&mut reader, root_bytenr, traversal, &opts)?;
+            reader::walk_tree(&mut reader, root_bytenr, traversal, &mut print)?;
             return Ok(());
         }
 
@@ -140,10 +145,8 @@ impl Runnable for DumpTreeCommand {
 
         // --uuid: print only UUID tree
         if self.uuid {
-            if let Some(&root) = tree_roots
-                .get(&(btrfs_disk::raw::BTRFS_UUID_TREE_OBJECTID as u64))
-            {
-                reader::walk_tree(&mut reader, root, traversal, &opts)?;
+            if let Some(&root) = tree_roots.get(&ObjectId::UuidTree.to_raw()) {
+                reader::walk_tree(&mut reader, root, traversal, &mut print)?;
             } else {
                 bail!("UUID tree not found");
             }
@@ -152,14 +155,18 @@ impl Runnable for DumpTreeCommand {
 
         // --extents: extent and device trees
         if self.extents {
-            for &tree_id in &[
-                btrfs_disk::raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
-                btrfs_disk::raw::BTRFS_DEV_TREE_OBJECTID as u64,
-            ] {
+            for &tree_id in
+                &[ObjectId::ExtentTree.to_raw(), ObjectId::DevTree.to_raw()]
+            {
                 if let Some(&root) = tree_roots.get(&tree_id) {
                     let name = ObjectId::from_raw(tree_id);
                     println!("{name}:");
-                    reader::walk_tree(&mut reader, root, traversal, &opts)?;
+                    reader::walk_tree(
+                        &mut reader,
+                        root,
+                        traversal,
+                        &mut print,
+                    )?;
                     println!();
                 }
             }
@@ -168,41 +175,41 @@ impl Runnable for DumpTreeCommand {
 
         // --device: root tree, chunk tree, device tree
         if self.device {
-            // Root tree
             println!("ROOT_TREE:");
-            reader::walk_tree(&mut reader, sb.root, traversal, &opts)?;
+            reader::walk_tree(&mut reader, sb.root, traversal, &mut print)?;
             println!();
 
-            // Chunk tree
             println!("CHUNK_TREE:");
-            reader::walk_tree(&mut reader, sb.chunk_root, traversal, &opts)?;
+            reader::walk_tree(
+                &mut reader,
+                sb.chunk_root,
+                traversal,
+                &mut print,
+            )?;
             println!();
 
-            // Device tree
-            if let Some(&root) = tree_roots
-                .get(&(btrfs_disk::raw::BTRFS_DEV_TREE_OBJECTID as u64))
-            {
+            if let Some(&root) = tree_roots.get(&ObjectId::DevTree.to_raw()) {
                 println!("DEV_TREE:");
-                reader::walk_tree(&mut reader, root, traversal, &opts)?;
+                reader::walk_tree(&mut reader, root, traversal, &mut print)?;
                 println!();
             }
             return Ok(());
         }
 
         // Default: print all trees
-        // First: root tree
-        reader::walk_tree(&mut reader, sb.root, traversal, &opts)?;
+        reader::walk_tree(&mut reader, sb.root, traversal, &mut print)?;
+        reader::walk_tree(&mut reader, sb.chunk_root, traversal, &mut print)?;
 
-        // Then: chunk tree
-        reader::walk_tree(&mut reader, sb.chunk_root, traversal, &opts)?;
-
-        // Then: all trees found in the root tree
-        // Sort by tree ID for deterministic output
         let mut sorted_roots: Vec<_> = tree_roots.iter().collect();
         sorted_roots.sort_by_key(|&(id, _)| *id);
 
         for (_, root_bytenr) in &sorted_roots {
-            reader::walk_tree(&mut reader, **root_bytenr, traversal, &opts)?;
+            reader::walk_tree(
+                &mut reader,
+                **root_bytenr,
+                traversal,
+                &mut print,
+            )?;
         }
 
         Ok(())
@@ -219,19 +226,17 @@ fn parse_tree_id(name: &str) -> Result<u64> {
 
 fn find_tree_root(
     tree_id: u64,
-    sb: &btrfs_disk::superblock::Superblock,
-    tree_roots: &std::collections::BTreeMap<u64, u64>,
+    sb: &Superblock,
+    tree_roots: &BTreeMap<u64, u64>,
 ) -> Result<u64> {
     // Special cases: root tree and chunk tree are in the superblock
-    if tree_id == btrfs_disk::raw::BTRFS_ROOT_TREE_OBJECTID as u64 {
+    if tree_id == ObjectId::RootTree.to_raw() {
         return Ok(sb.root);
     }
-    if tree_id == btrfs_disk::raw::BTRFS_CHUNK_TREE_OBJECTID as u64 {
+    if tree_id == ObjectId::ChunkTree.to_raw() {
         return Ok(sb.chunk_root);
     }
-    if tree_id == btrfs_disk::raw::BTRFS_TREE_LOG_OBJECTID as u64
-        && sb.log_root != 0
-    {
+    if tree_id == ObjectId::TreeLog.to_raw() && sb.log_root != 0 {
         return Ok(sb.log_root);
     }
 
@@ -241,10 +246,7 @@ fn find_tree_root(
     })
 }
 
-fn print_roots(
-    sb: &btrfs_disk::superblock::Superblock,
-    tree_roots: &std::collections::BTreeMap<u64, u64>,
-) {
+fn print_roots(sb: &Superblock, tree_roots: &BTreeMap<u64, u64>) {
     println!("root tree bytenr {} level {}", sb.root, sb.root_level);
     println!(
         "chunk tree bytenr {} level {}",
@@ -262,7 +264,7 @@ fn print_roots(
     }
 }
 
-fn print_backup_roots(sb: &btrfs_disk::superblock::Superblock) {
+fn print_backup_roots(sb: &Superblock) {
     for (i, root) in sb.backup_roots.iter().enumerate() {
         println!("backup {i}:");
         println!(
