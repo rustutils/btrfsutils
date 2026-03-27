@@ -12,6 +12,7 @@ mod balance;
 mod chunk;
 mod defrag;
 mod device;
+mod features;
 mod fiemap;
 mod filesystem;
 mod inode;

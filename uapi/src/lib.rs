@@ -41,6 +41,7 @@ pub mod blkdev;
 pub mod chunk;
 pub mod defrag;
 pub mod device;
+pub mod features;
 pub mod fiemap;
 pub mod filesystem;
 pub mod inode;
