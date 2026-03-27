@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
-/// Get subvolume ID and tree ID of the given path
+/// Resolve the path of a subvolume given its ID
 #[derive(Parser, Debug)]
 pub struct SubvolidResolveCommand {
     /// Subvolume ID to resolve
@@ -20,10 +20,24 @@ impl Runnable for SubvolidResolveCommand {
         })?;
         let fd = file.as_fd();
 
-        let resolved_path =
-            btrfs_uapi::inode::subvolid_resolve(fd, self.subvolid).context(
-                "failed to resolve subvolume ID (is this a btrfs filesystem?)",
-            )?;
+        let resolved_path = btrfs_uapi::inode::subvolid_resolve(
+            fd,
+            self.subvolid,
+        )
+        .map_err(|e| match e {
+            nix::errno::Errno::EPERM | nix::errno::Errno::EACCES => {
+                anyhow::anyhow!(
+                    "failed to resolve subvolume ID {}: permission denied \
+                         (requires CAP_SYS_ADMIN)",
+                    self.subvolid,
+                )
+            }
+            _ => anyhow::anyhow!(
+                "failed to resolve subvolume ID {}: {}",
+                self.subvolid,
+                e,
+            ),
+        })?;
 
         println!("{}", resolved_path);
         Ok(())

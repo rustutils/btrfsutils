@@ -7,8 +7,10 @@
 
 use crate::{
     raw::{
-        BTRFS_FIRST_FREE_OBJECTID, btrfs_ioc_ino_lookup, btrfs_ioc_ino_paths,
-        btrfs_ioc_logical_ino_v2, btrfs_root_ref,
+        BTRFS_FIRST_FREE_OBJECTID, btrfs_ioc_ino_lookup,
+        btrfs_ioc_ino_lookup_user, btrfs_ioc_ino_paths,
+        btrfs_ioc_logical_ino_v2, btrfs_ioctl_ino_lookup_user_args,
+        btrfs_root_ref,
     },
     tree_search::{SearchKey, tree_search},
 };
@@ -353,4 +355,55 @@ fn subvolid_resolve_sub(
     }
 
     Ok(())
+}
+
+/// Result of an unprivileged inode lookup (`BTRFS_IOC_INO_LOOKUP_USER`).
+///
+/// Contains the subvolume name and the path from the fd's subvolume root
+/// to the directory containing the subvolume.
+#[derive(Debug, Clone)]
+pub struct InoLookupUserResult {
+    /// Name of the subvolume.
+    pub name: String,
+    /// Path from the fd's subvolume root to the directory containing the
+    /// subvolume entry (`dirid`). Empty if the subvolume sits directly
+    /// under the subvolume root.
+    pub path: String,
+}
+
+/// Unprivileged inode lookup: resolve a subvolume's name and parent path.
+///
+/// Given a subvolume ID (`treeid`) and the inode of the directory that
+/// contains it (`dirid`), returns the subvolume name and the path from
+/// the fd's subvolume root to that directory.
+///
+/// Unlike [`subvolid_resolve`], this does not require `CAP_SYS_ADMIN`.
+/// However, it only resolves one level — for nested subvolumes the caller
+/// must walk up the tree.
+pub fn ino_lookup_user(
+    fd: BorrowedFd<'_>,
+    treeid: u64,
+    dirid: u64,
+) -> nix::Result<InoLookupUserResult> {
+    let mut args = btrfs_ioctl_ino_lookup_user_args {
+        dirid,
+        treeid,
+        ..unsafe { std::mem::zeroed() }
+    };
+
+    unsafe {
+        btrfs_ioc_ino_lookup_user(fd.as_raw_fd() as c_int, &mut args)?;
+    }
+
+    let name = unsafe { std::ffi::CStr::from_ptr(args.name.as_ptr()) }
+        .to_str()
+        .map_err(|_| nix::errno::Errno::EINVAL)?
+        .to_owned();
+
+    let path = unsafe { std::ffi::CStr::from_ptr(args.path.as_ptr()) }
+        .to_str()
+        .map_err(|_| nix::errno::Errno::EINVAL)?
+        .to_owned();
+
+    Ok(InoLookupUserResult { name, path })
 }

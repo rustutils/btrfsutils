@@ -2,7 +2,7 @@
 source: cli/tests/help.rs
 expression: text
 ---
-Get subvolume ID and tree ID of the given path
+Resolve the path of a subvolume given its ID
 
 Usage: subvolid-resolve <SUBVOLID> <PATH>
 

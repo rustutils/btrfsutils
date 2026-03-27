@@ -16,7 +16,7 @@ Commands:
   rootid            Get tree ID of the containing subvolume of path
   inode-resolve     Get file system paths for the given inode
   logical-resolve   Get file system paths for the given logical address
-  subvolid-resolve  Get subvolume ID and tree ID of the given path
+  subvolid-resolve  Resolve the path of a subvolume given its ID
   map-swapfile      Print physical extents of a file suitable for swap
   min-dev-size      Print the minimum size a device can be shrunk to
   dump-tree         Dump tree blocks from a btrfs filesystem

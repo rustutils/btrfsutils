@@ -2,7 +2,10 @@ use crate::common::{single_mount, write_test_data};
 use btrfs_uapi::{
     fiemap::file_extents,
     filesystem::sync,
-    inode::{ino_paths, logical_ino, lookup_path_rootid, subvolid_resolve},
+    inode::{
+        ino_lookup_user, ino_paths, logical_ino, lookup_path_rootid,
+        subvolid_resolve,
+    },
     subvolume::{subvolume_create, subvolume_info},
 };
 use std::{ffi::CStr, fs::File, os::unix::io::AsFd};
@@ -142,6 +145,64 @@ fn inode_logical_ino() {
     assert!(
         results.iter().any(|r| r.inode == inum),
         "logical_ino should find our file's inode {inum}: {results:?}",
+    );
+}
+
+/// ino_lookup_user should resolve a subvolume's name and parent path
+/// without requiring CAP_SYS_ADMIN.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn inode_ino_lookup_user() {
+    use btrfs_uapi::raw::BTRFS_FIRST_FREE_OBJECTID;
+
+    let (_td, mnt) = single_mount();
+
+    let name = CStr::from_bytes_with_nul(b"lookup-subvol\0").unwrap();
+    subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
+
+    let subvol_dir = File::open(mnt.path().join("lookup-subvol"))
+        .expect("open subvol failed");
+    let info =
+        subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
+
+    let result =
+        ino_lookup_user(mnt.fd(), info.id, BTRFS_FIRST_FREE_OBJECTID as u64)
+            .expect("ino_lookup_user failed");
+
+    assert_eq!(
+        result.name, "lookup-subvol",
+        "subvolume name should match, got '{}'",
+        result.name,
+    );
+}
+
+/// ino_lookup_user should resolve the path when a subvolume is inside a
+/// subdirectory.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn inode_ino_lookup_user_nested_dir() {
+    use btrfs_uapi::raw::BTRFS_FIRST_FREE_OBJECTID;
+
+    let (_td, mnt) = single_mount();
+
+    std::fs::create_dir(mnt.path().join("parent-dir")).expect("mkdir failed");
+    let name = CStr::from_bytes_with_nul(b"parent-dir/nested\0").unwrap();
+    subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
+
+    let subvol_dir = File::open(mnt.path().join("parent-dir/nested"))
+        .expect("open subvol failed");
+    let info =
+        subvolume_info(subvol_dir.as_fd()).expect("subvolume_info failed");
+
+    let result =
+        ino_lookup_user(mnt.fd(), info.id, BTRFS_FIRST_FREE_OBJECTID as u64)
+            .expect("ino_lookup_user failed");
+
+    assert_eq!(result.name, "nested");
+    assert!(
+        result.path.contains("parent-dir"),
+        "path should contain 'parent-dir', got '{}'",
+        result.path,
     );
 }
 
