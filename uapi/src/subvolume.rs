@@ -14,13 +14,15 @@ use crate::{
         BTRFS_LAST_FREE_OBJECTID, BTRFS_ROOT_BACKREF_KEY, BTRFS_ROOT_ITEM_KEY,
         BTRFS_ROOT_TREE_DIR_OBJECTID, BTRFS_ROOT_TREE_OBJECTID,
         BTRFS_SUBVOL_QGROUP_INHERIT, BTRFS_SUBVOL_RDONLY,
-        BTRFS_SUBVOL_SPEC_BY_ID, btrfs_ioc_default_subvol,
+        BTRFS_SUBVOL_SPEC_BY_ID, BTRFS_SUBVOL_SYNC_WAIT_FOR_ONE,
+        BTRFS_SUBVOL_SYNC_WAIT_FOR_QUEUED, btrfs_ioc_default_subvol,
         btrfs_ioc_get_subvol_info, btrfs_ioc_ino_lookup,
         btrfs_ioc_snap_create_v2, btrfs_ioc_snap_destroy_v2,
         btrfs_ioc_subvol_create_v2, btrfs_ioc_subvol_getflags,
-        btrfs_ioc_subvol_setflags, btrfs_ioctl_get_subvol_info_args,
-        btrfs_ioctl_ino_lookup_args, btrfs_ioctl_vol_args_v2,
-        btrfs_qgroup_inherit, btrfs_root_item, btrfs_timespec,
+        btrfs_ioc_subvol_setflags, btrfs_ioc_subvol_sync_wait,
+        btrfs_ioctl_get_subvol_info_args, btrfs_ioctl_ino_lookup_args,
+        btrfs_ioctl_subvol_wait, btrfs_ioctl_vol_args_v2, btrfs_qgroup_inherit,
+        btrfs_root_item, btrfs_timespec,
     },
     tree_search::{SearchKey, tree_search},
 };
@@ -755,6 +757,40 @@ fn ioctl_timespec_to_system_time(sec: u64, nsec: u32) -> SystemTime {
         return UNIX_EPOCH;
     }
     UNIX_EPOCH + Duration::new(sec, nsec)
+}
+
+/// Wait for a specific deleted subvolume to be fully cleaned by the kernel.
+///
+/// Blocks until the background cleaner has finished removing the on-disk
+/// data for the given subvolume ID. Returns `Ok(())` both when the wait
+/// completes and when the subvolume is already gone (`ENOENT`).
+/// Useful after `subvolume_delete` when subsequent operations depend on
+/// the subvolume being fully gone (e.g. qgroup staleness checks).
+pub fn subvol_sync_wait_one(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> {
+    let args = btrfs_ioctl_subvol_wait {
+        subvolid,
+        mode: BTRFS_SUBVOL_SYNC_WAIT_FOR_ONE,
+        count: 0,
+    };
+    match unsafe { btrfs_ioc_subvol_sync_wait(fd.as_raw_fd(), &args) } {
+        Ok(_) | Err(nix::errno::Errno::ENOENT) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Wait for all currently queued subvolume deletions to complete.
+///
+/// Blocks until every subvolume that was in the deletion queue at the time
+/// of the call has been fully cleaned. Does not wait for subvolumes
+/// deleted after the call is made.
+pub fn subvol_sync_wait_all(fd: BorrowedFd) -> nix::Result<()> {
+    let args = btrfs_ioctl_subvol_wait {
+        subvolid: 0,
+        mode: BTRFS_SUBVOL_SYNC_WAIT_FOR_QUEUED,
+        count: 0,
+    };
+    unsafe { btrfs_ioc_subvol_sync_wait(fd.as_raw_fd(), &args) }?;
+    Ok(())
 }
 
 #[cfg(test)]

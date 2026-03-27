@@ -6,7 +6,10 @@ use btrfs_uapi::{
         qgroup_destroy, qgroup_limit, qgroup_list, qgroup_remove,
         quota_disable, quota_enable, quota_rescan_wait,
     },
-    subvolume::{subvolume_create, subvolume_delete, subvolume_info},
+    subvolume::{
+        subvol_sync_wait_one, subvolume_create, subvolume_delete,
+        subvolume_info,
+    },
 };
 use nix::errno::Errno;
 use std::{ffi::CStr, fs::File, os::unix::io::AsFd};
@@ -149,35 +152,20 @@ fn qgroup_clear_stale_test() {
     let b_name = CStr::from_bytes_with_nul(b"sub-b\0").unwrap();
     subvolume_delete(mnt.fd(), b_name).expect("subvolume_delete failed");
 
-    // see this: https://www.spinics.net/lists/linux-btrfs/msg145753.html
+    // Sync triggers a transaction commit which nudges the kernel cleaner
+    // thread, then wait for it to fully remove sub-b's on-disk data.
+    // Without this, qgroup_list may not yet mark the qgroup as stale.
+    sync(mnt.fd()).unwrap();
+    subvol_sync_wait_one(mnt.fd(), sub_b_qgroupid)
+        .expect("subvol_sync_wait_one failed");
 
-    // The kernel deletes subvolumes lazily via a background cleaner thread.
-    // We need to wait for the ROOT_ITEM to actually disappear before
-    // qgroup_list will mark the qgroup as stale. Sync + short retry loop.
-    let mut stale_visible = false;
-    for _ in 0..10 {
-        sync(mnt.fd()).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(200));
-
-        let list = qgroup_list(mnt.fd()).expect("qgroup_list failed");
-        if let Some(qg) =
-            list.qgroups.iter().find(|q| q.qgroupid == sub_b_qgroupid)
-        {
-            if qg.stale {
-                stale_visible = true;
-                break;
-            }
-        } else {
-            // Qgroup already gone (kernel cleaned it up itself) — nothing to test.
-            return;
-        }
-    }
-
-    if !stale_visible {
-        // Kernel cleaner hasn't run yet — skip rather than flake.
-        eprintln!(
-            "qgroup_clear_stale_test: subvolume cleaner hasn't run, skipping"
-        );
+    // Verify the qgroup is now stale.
+    let list = qgroup_list(mnt.fd()).expect("qgroup_list failed");
+    if let Some(qg) = list.qgroups.iter().find(|q| q.qgroupid == sub_b_qgroupid)
+    {
+        assert!(qg.stale, "qgroup should be stale after sync wait");
+    } else {
+        // Qgroup already gone (kernel cleaned it up itself) — nothing to test.
         return;
     }
 
