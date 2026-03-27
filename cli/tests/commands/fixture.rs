@@ -461,6 +461,48 @@ fn property_list_filesystem() {
     );
 }
 
+// ── inspect-internal dump-tree (no privileges needed) ────────────────
+
+#[test]
+fn inspect_dump_tree_roots() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    snap!(
+        "btrfs inspect-internal dump-tree --roots <IMG>",
+        btrfs_ok(&["inspect-internal", "dump-tree", "--roots", img_str])
+    );
+}
+
+#[test]
+fn inspect_dump_tree_root_tree() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    snap!(
+        "btrfs inspect-internal dump-tree -t root <IMG>",
+        btrfs_ok(&["inspect-internal", "dump-tree", "-t", "root", img_str])
+    );
+}
+
+#[test]
+fn inspect_dump_tree_chunk_tree() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    snap!(
+        "btrfs inspect-internal dump-tree -t chunk <IMG>",
+        btrfs_ok(&["inspect-internal", "dump-tree", "-t", "chunk", img_str])
+    );
+}
+
+#[test]
+fn inspect_dump_tree() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    snap!(
+        "btrfs inspect-internal dump-tree <IMG>",
+        btrfs_ok(&["inspect-internal", "dump-tree", img_str])
+    );
+}
+
 // ── quota ────────────────────────────────────────────────────────────
 
 #[test]

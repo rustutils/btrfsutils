@@ -8,5 +8,10 @@
 //! platform-independent: any system that can read raw bytes from a block
 //! device or image file can use it.
 
+pub mod chunk;
+pub mod print;
 pub mod raw;
+pub mod reader;
 pub mod superblock;
+pub mod tree;
+pub mod util;

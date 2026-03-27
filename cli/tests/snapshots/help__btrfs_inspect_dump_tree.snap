@@ -2,20 +2,62 @@
 source: cli/tests/help.rs
 expression: text
 ---
-Dump tree blocks from a btrfs filesystem
+Dump tree blocks from a btrfs device or image file.
+
+Reads raw btrfs tree blocks from a block device or filesystem image and prints
+their contents in a human-readable format. By default all trees are printed. Use
+-t to select a specific tree, -b to print a specific block, or -e/-d/-u to print
+subsets.
 
 Usage: dump-tree [OPTIONS] <PATH>
 
 Arguments:
   <PATH>
-          Path to a file or directory on the btrfs filesystem
+          Path to a btrfs block device or image file
 
 Options:
+  -e, --extents
+          Print only extent-related trees (extent tree and device tree)
+
+  -d, --device
+          Print only device-related trees (root tree, chunk tree, device tree)
+
+  -r, --roots
+          Print only short root node info
+
+  -R, --backups
+          Print root node info and backup roots
+
+  -u, --uuid
+          Print only the UUID tree
+
   -t, --tree <TREE>
-          Only dump blocks from this tree
+          Print only the specified tree (by name or numeric ID).
+          
+          Tree names: root, extent, chunk, dev, fs, csum, uuid, quota,
+          free-space, block-group, raid-stripe, remap, tree-log, data-reloc.
+          Numeric IDs (e.g. 5 for the filesystem tree) are also accepted.
 
   -b, --block <BLOCK>
-          Only dump blocks at this block number
+          Print only the block at this logical byte number (repeatable)
+
+      --follow
+          With -b, also print all child blocks
+
+      --bfs
+          Use breadth-first traversal (default)
+
+      --dfs
+          Use depth-first traversal
+
+      --hide-names
+          Hide filenames, subvolume names, xattr names and data
+
+      --csum-headers
+          Print checksums stored in metadata block headers
+
+      --csum-items
+          Print checksums stored in checksum items
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')

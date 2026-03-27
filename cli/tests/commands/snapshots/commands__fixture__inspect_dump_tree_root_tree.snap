@@ -1,0 +1,180 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs inspect-internal dump-tree -t root <IMG>
+expression: "btrfs_ok(&[\"inspect-internal\", \"dump-tree\", \"-t\", \"root\", img_str])"
+---
+leaf 31064064 items 21 free space 15758 generation 10 owner ROOT_TREE
+leaf 31064064 flags 0x1(WRITTEN) backref revision 1
+fs uuid deadbeef-dead-beef-dead-beefdeadbeef
+chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
+	item 0 key (EXTENT_TREE ROOT_ITEM 0) itemoff 15844 itemsize 439
+		generation 10 root_dirid 0 bytenr 31162368 byte_limit 0 bytes_used 16384
+		last_snapshot 0 flags 0x0(none) refs 1
+		drop_progress key (0 UNKNOWN.0 0) drop_level 0
+		level 0 generation_v2 10
+		uuid 00000000-0000-0000-0000-000000000000
+		parent_uuid 00000000-0000-0000-0000-000000000000
+		received_uuid 00000000-0000-0000-0000-000000000000
+		ctransid 0 otransid 0 stransid 0 rtransid 0
+		ctime 0.0 (unknown)
+		otime 0.0 (unknown)
+		stime 0.0 (unknown)
+		rtime 0.0 (unknown)
+	item 1 key (DEV_TREE ROOT_ITEM 0) itemoff 15405 itemsize 439
+		generation 9 root_dirid 0 bytenr 31031296 byte_limit 0 bytes_used 16384
+		last_snapshot 0 flags 0x0(none) refs 1
+		drop_progress key (0 UNKNOWN.0 0) drop_level 0
+		level 0 generation_v2 9
+		uuid 00000000-0000-0000-0000-000000000000
+		parent_uuid 00000000-0000-0000-0000-000000000000
+		received_uuid 00000000-0000-0000-0000-000000000000
+		ctransid 0 otransid 0 stransid 0 rtransid 0
+		ctime 0.0 (unknown)
+		otime 0.0 (unknown)
+		stime 0.0 (unknown)
+		rtime 0.0 (unknown)
+	item 2 key (FS_TREE INODE_REF 6) itemoff 15388 itemsize 17
+		index 0 namelen 7 name: default
+	item 3 key (FS_TREE ROOT_ITEM 0) itemoff 14949 itemsize 439
+		generation 10 root_dirid 256 bytenr 31096832 byte_limit 0 bytes_used 344064
+		last_snapshot 0 flags 0x0(none) refs 1
+		drop_progress key (0 UNKNOWN.0 0) drop_level 0
+		level 1 generation_v2 10
+		uuid 79586de1-b549-4ca1-a48b-ecda306d6444
+		parent_uuid 00000000-0000-0000-0000-000000000000
+		received_uuid 00000000-0000-0000-0000-000000000000
+		ctransid 10 otransid 0 stransid 0 rtransid 0
+		ctime 1774481867.289252884 (unknown)
+		otime 1774481577.0 (unknown)
+		stime 0.0 (unknown)
+		rtime 0.0 (unknown)
+	item 4 key (FS_TREE ROOT_REF 256) itemoff 14924 itemsize 25
+		root ref key dirid 256 sequence 3 name subvol1
+	item 5 key (FS_TREE ROOT_REF 257) itemoff 14901 itemsize 23
+		root ref key dirid 256 sequence 4 name snap1
+	item 6 key (FS_TREE ROOT_REF 258) itemoff 14876 itemsize 25
+		root ref key dirid 256 sequence 5 name subvol2
+	item 7 key (ROOT_TREE_DIR INODE_ITEM 0) itemoff 14716 itemsize 160
+		generation 3 transid 0 size 0 nbytes 16384
+		block group 0 mode 40755 links 1 uid 0 gid 0 rdev 0
+		sequence 0 flags 0x0(none)
+		atime 1774481577.0 (unknown)
+		ctime 1774481577.0 (unknown)
+		mtime 1774481577.0 (unknown)
+		otime 1774481577.0 (unknown)
+	item 8 key (ROOT_TREE_DIR INODE_REF 6) itemoff 14704 itemsize 12
+		index 0 namelen 2 name: ..
+	item 9 key (ROOT_TREE_DIR DIR_ITEM 2378154706) itemoff 14667 itemsize 37
+		location key (FS_TREE ROOT_ITEM -1) type DIR
+		transid 3 data_len 0 name_len 7
+		name: default
+	item 10 key (CSUM_TREE ROOT_ITEM 0) itemoff 14228 itemsize 439
+		generation 10 root_dirid 0 bytenr 31145984 byte_limit 0 bytes_used 16384
+		last_snapshot 0 flags 0x0(none) refs 1
+		drop_progress key (0 UNKNOWN.0 0) drop_level 0
+		level 0 generation_v2 10
+		uuid 00000000-0000-0000-0000-000000000000
+		parent_uuid 00000000-0000-0000-0000-000000000000
+		received_uuid 00000000-0000-0000-0000-000000000000
+		ctransid 0 otransid 0 stransid 0 rtransid 0
+		ctime 0.0 (unknown)
+		otime 0.0 (unknown)
+		stime 0.0 (unknown)
+		rtime 0.0 (unknown)
+	item 11 key (UUID_TREE ROOT_ITEM 0) itemoff 13789 itemsize 439
+		generation 10 root_dirid 0 bytenr 31080448 byte_limit 0 bytes_used 16384
+		last_snapshot 0 flags 0x0(none) refs 1
+		drop_progress key (0 UNKNOWN.0 0) drop_level 0
+		level 0 generation_v2 10
+		uuid 00000000-0000-0000-0000-000000000000
+		parent_uuid 00000000-0000-0000-0000-000000000000
+		received_uuid 00000000-0000-0000-0000-000000000000
+		ctransid 0 otransid 0 stransid 0 rtransid 0
+		ctime 0.0 (unknown)
+		otime 0.0 (unknown)
+		stime 0.0 (unknown)
+		rtime 0.0 (unknown)
+	item 12 key (FREE_SPACE_TREE ROOT_ITEM 0) itemoff 13350 itemsize 439
+		generation 10 root_dirid 0 bytenr 31178752 byte_limit 0 bytes_used 16384
+		last_snapshot 0 flags 0x0(none) refs 1
+		drop_progress key (0 UNKNOWN.0 0) drop_level 0
+		level 0 generation_v2 10
+		uuid 00000000-0000-0000-0000-000000000000
+		parent_uuid 00000000-0000-0000-0000-000000000000
+		received_uuid 00000000-0000-0000-0000-000000000000
+		ctransid 0 otransid 0 stransid 0 rtransid 0
+		ctime 0.0 (unknown)
+		otime 0.0 (unknown)
+		stime 0.0 (unknown)
+		rtime 0.0 (unknown)
+	item 13 key (BLOCK_GROUP_TREE ROOT_ITEM 0) itemoff 12911 itemsize 439
+		generation 10 root_dirid 0 bytenr 31195136 byte_limit 0 bytes_used 16384
+		last_snapshot 0 flags 0x0(none) refs 1
+		drop_progress key (0 UNKNOWN.0 0) drop_level 0
+		level 0 generation_v2 10
+		uuid 00000000-0000-0000-0000-000000000000
+		parent_uuid 00000000-0000-0000-0000-000000000000
+		received_uuid 00000000-0000-0000-0000-000000000000
+		ctransid 0 otransid 0 stransid 0 rtransid 0
+		ctime 0.0 (unknown)
+		otime 0.0 (unknown)
+		stime 0.0 (unknown)
+		rtime 0.0 (unknown)
+	item 14 key (256 ROOT_ITEM 0) itemoff 12472 itemsize 439
+		generation 9 root_dirid 256 bytenr 30949376 byte_limit 0 bytes_used 16384
+		last_snapshot 9 flags 0x0(none) refs 1
+		drop_progress key (0 UNKNOWN.0 0) drop_level 0
+		level 0 generation_v2 9
+		uuid 63b095b9-2b65-ca41-87aa-a939e17e7679
+		parent_uuid 00000000-0000-0000-0000-000000000000
+		received_uuid 00000000-0000-0000-0000-000000000000
+		ctransid 9 otransid 9 stransid 0 rtransid 0
+		ctime 1774481867.283545813 (unknown)
+		otime 1774481867.280095265 (unknown)
+		stime 0.0 (unknown)
+		rtime 0.0 (unknown)
+	item 15 key (256 ROOT_BACKREF 5) itemoff 12447 itemsize 25
+		root ref key dirid 256 sequence 3 name subvol1
+	item 16 key (257 ROOT_ITEM 9) itemoff 12008 itemsize 439
+		generation 9 root_dirid 256 bytenr 31014912 byte_limit 0 bytes_used 16384
+		last_snapshot 9 flags 0x1(RDONLY) refs 1
+		drop_progress key (0 UNKNOWN.0 0) drop_level 0
+		level 0 generation_v2 9
+		uuid b0de66fd-e22d-5740-a224-dcaf9fc946a5
+		parent_uuid 63b095b9-2b65-ca41-87aa-a939e17e7679
+		received_uuid 00000000-0000-0000-0000-000000000000
+		ctransid 9 otransid 9 stransid 0 rtransid 0
+		ctime 1774481867.283545813 (unknown)
+		otime 1774481867.283095300 (unknown)
+		stime 0.0 (unknown)
+		rtime 0.0 (unknown)
+	item 17 key (257 ROOT_BACKREF 5) itemoff 11985 itemsize 23
+		root ref key dirid 256 sequence 4 name snap1
+	item 18 key (258 ROOT_ITEM 0) itemoff 11546 itemsize 439
+		generation 10 root_dirid 256 bytenr 31047680 byte_limit 0 bytes_used 16384
+		last_snapshot 0 flags 0x0(none) refs 1
+		drop_progress key (0 UNKNOWN.0 0) drop_level 0
+		level 0 generation_v2 10
+		uuid 5503469b-a91d-b74b-86d6-ffda030ff1a4
+		parent_uuid 00000000-0000-0000-0000-000000000000
+		received_uuid 00000000-0000-0000-0000-000000000000
+		ctransid 10 otransid 10 stransid 0 rtransid 0
+		ctime 1774481867.289307447 (unknown)
+		otime 1774481867.286095334 (unknown)
+		stime 0.0 (unknown)
+		rtime 0.0 (unknown)
+	item 19 key (258 ROOT_BACKREF 5) itemoff 11521 itemsize 25
+		root ref key dirid 256 sequence 5 name subvol2
+	item 20 key (DATA_RELOC_TREE ROOT_ITEM 0) itemoff 11082 itemsize 439
+		generation 5 root_dirid 256 bytenr 30556160 byte_limit 0 bytes_used 16384
+		last_snapshot 0 flags 0x0(none) refs 1
+		drop_progress key (0 UNKNOWN.0 0) drop_level 0
+		level 0 generation_v2 5
+		uuid 00000000-0000-0000-0000-000000000000
+		parent_uuid 00000000-0000-0000-0000-000000000000
+		received_uuid 00000000-0000-0000-0000-000000000000
+		ctransid 0 otransid 0 stransid 0 rtransid 0
+		ctime 0.0 (unknown)
+		otime 0.0 (unknown)
+		stime 0.0 (unknown)
+		rtime 0.0 (unknown)

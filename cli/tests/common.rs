@@ -328,7 +328,7 @@ pub fn deterministic_mount() -> (tempfile::TempDir, Mount) {
 /// Return the path to the cached decompressed fixture image, extracting it
 /// on first use. The cache lives at `target/test-fixtures/test-fs.img` so it
 /// survives across test runs but is cleaned by `cargo clean`.
-fn cached_fixture_image() -> PathBuf {
+pub fn cached_fixture_image() -> PathBuf {
     let cache_dir =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-fixtures");
     let cached = cache_dir.join("test-fs.img");

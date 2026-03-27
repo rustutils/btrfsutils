@@ -19,7 +19,7 @@ Commands:
   subvolid-resolve  Resolve the path of a subvolume given its ID
   map-swapfile      Print physical extents of a file suitable for swap
   min-dev-size      Print the minimum size a device can be shrunk to
-  dump-tree         Dump tree blocks from a btrfs filesystem
+  dump-tree         Dump tree blocks from a btrfs device or image file
   dump-super        Dump the btrfs superblock from a device or image file
   tree-stats        Print statistics about trees in a btrfs filesystem
   list-chunks       List all chunks in the filesystem, one row per stripe

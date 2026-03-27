@@ -1,0 +1,18 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs inspect-internal dump-tree --roots <IMG>
+expression: "btrfs_ok(&[\"inspect-internal\", \"dump-tree\", \"--roots\", img_str])"
+---
+root tree bytenr 31064064 level 0
+chunk tree bytenr 22036480 level 0
+tree EXTENT_TREE (id 2) bytenr 31162368
+tree DEV_TREE (id 4) bytenr 31031296
+tree FS_TREE (id 5) bytenr 31096832
+tree CSUM_TREE (id 7) bytenr 31145984
+tree UUID_TREE (id 9) bytenr 31080448
+tree FREE_SPACE_TREE (id 10) bytenr 31178752
+tree BLOCK_GROUP_TREE (id 11) bytenr 31195136
+tree 256 (id 256) bytenr 30949376
+tree 257 (id 257) bytenr 31014912
+tree 258 (id 258) bytenr 31047680
+tree DATA_RELOC_TREE (id 18446744073709551607) bytenr 30556160
