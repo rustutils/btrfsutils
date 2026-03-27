@@ -95,3 +95,59 @@ pub fn file_extent_same(
             .collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dedupe_result_deduped_debug() {
+        let r = DedupeResult::Deduped(4096);
+        assert_eq!(format!("{r:?}"), "Deduped(4096)");
+    }
+
+    #[test]
+    fn dedupe_result_data_differs_debug() {
+        let r = DedupeResult::DataDiffers;
+        assert_eq!(format!("{r:?}"), "DataDiffers");
+    }
+
+    #[test]
+    fn dedupe_result_error_debug() {
+        let r = DedupeResult::Error(-22);
+        assert_eq!(format!("{r:?}"), "Error(-22)");
+    }
+
+    #[test]
+    fn dedupe_result_equality() {
+        assert_eq!(DedupeResult::Deduped(100), DedupeResult::Deduped(100));
+        assert_ne!(DedupeResult::Deduped(100), DedupeResult::Deduped(200));
+        assert_eq!(DedupeResult::DataDiffers, DedupeResult::DataDiffers);
+        assert_ne!(DedupeResult::DataDiffers, DedupeResult::Deduped(0));
+        assert_eq!(DedupeResult::Error(-1), DedupeResult::Error(-1));
+        assert_ne!(DedupeResult::Error(-1), DedupeResult::Error(-2));
+    }
+
+    #[test]
+    fn allocation_sizing() {
+        // Verify the flexible array member allocation produces enough space.
+        let base_size = mem::size_of::<btrfs_ioctl_same_args>();
+        let info_size = mem::size_of::<btrfs_ioctl_same_extent_info>();
+
+        for count in [0, 1, 2, 5, 16, 255] {
+            let total_bytes = base_size + count * info_size;
+            let num_u64s = total_bytes.div_ceil(mem::size_of::<u64>());
+            let allocated = num_u64s * mem::size_of::<u64>();
+            assert!(
+                allocated >= total_bytes,
+                "count={count}: allocated {allocated} < needed {total_bytes}"
+            );
+        }
+    }
+
+    #[test]
+    fn btrfs_same_data_differs_value() {
+        // Sanity check: the constant should be 1 per the kernel header.
+        assert_eq!(BTRFS_SAME_DATA_DIFFERS, 1);
+    }
+}

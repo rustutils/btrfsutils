@@ -306,3 +306,76 @@ fn search_uuid_tree(
 
     result.ok_or(nix::errno::Errno::ENOENT)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn send_flags_no_file_data() {
+        let flags = SendFlags::NO_FILE_DATA;
+        assert!(flags.contains(SendFlags::NO_FILE_DATA));
+        assert!(!flags.contains(SendFlags::COMPRESSED));
+    }
+
+    #[test]
+    fn send_flags_combine() {
+        let flags = SendFlags::NO_FILE_DATA | SendFlags::COMPRESSED;
+        assert!(flags.contains(SendFlags::NO_FILE_DATA));
+        assert!(flags.contains(SendFlags::COMPRESSED));
+        assert!(!flags.contains(SendFlags::VERSION));
+    }
+
+    #[test]
+    fn send_flags_empty() {
+        let flags = SendFlags::empty();
+        assert!(flags.is_empty());
+        assert_eq!(flags.bits(), 0);
+    }
+
+    #[test]
+    fn send_flags_debug() {
+        let flags = SendFlags::OMIT_STREAM_HEADER | SendFlags::OMIT_END_CMD;
+        let s = format!("{flags:?}");
+        assert!(s.contains("OMIT_STREAM_HEADER"), "debug: {s}");
+        assert!(s.contains("OMIT_END_CMD"), "debug: {s}");
+    }
+
+    #[test]
+    fn encoded_read_result_equality() {
+        let a = EncodedReadResult {
+            offset: 0,
+            unencoded_file_len: 4096,
+            unencoded_len: 4096,
+            unencoded_offset: 0,
+            compression: 0,
+            encryption: 0,
+            bytes_read: 4096,
+        };
+        let b = a;
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn encoded_read_result_debug() {
+        let r = EncodedReadResult {
+            offset: 0,
+            unencoded_file_len: 4096,
+            unencoded_len: 8192,
+            unencoded_offset: 0,
+            compression: 3,
+            encryption: 0,
+            bytes_read: 1024,
+        };
+        let s = format!("{r:?}");
+        assert!(s.contains("compression: 3"), "debug: {s}");
+        assert!(s.contains("bytes_read: 1024"), "debug: {s}");
+    }
+
+    #[test]
+    fn subvolume_search_result_debug() {
+        let r = SubvolumeSearchResult { root_id: 256 };
+        let s = format!("{r:?}");
+        assert!(s.contains("256"), "debug: {s}");
+    }
+}

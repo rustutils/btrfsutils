@@ -10,6 +10,7 @@ mod common;
 
 mod balance;
 mod chunk;
+mod dedupe;
 mod defrag;
 mod device;
 mod features;
@@ -19,6 +20,7 @@ mod inode;
 mod quota;
 mod replace;
 mod scrub;
+mod send_receive;
 mod space;
 mod subvolume;
 mod sysfs;

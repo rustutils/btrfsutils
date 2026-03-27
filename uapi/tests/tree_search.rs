@@ -2,7 +2,7 @@ use crate::common::single_mount;
 use btrfs_uapi::{
     filesystem::sync,
     subvolume::{subvolume_create, subvolume_info},
-    tree_search::{SearchKey, tree_search},
+    tree_search::{SearchKey, tree_search, tree_search_v2},
 };
 use std::{
     ffi::{CStr, CString},
@@ -190,5 +190,102 @@ fn tree_search_large_result_no_duplicates() {
     assert_eq!(
         dup_count, 0,
         "should have no duplicate (objectid, offset) pairs, found {dup_count} duplicates"
+    );
+}
+
+/// tree_search_v2 should return the same items as tree_search (v1).
+#[test]
+#[ignore = "requires elevated privileges"]
+fn tree_search_v2_matches_v1() {
+    let (_td, mnt) = single_mount();
+
+    for name in [
+        CStr::from_bytes_with_nul(b"v2-a\0").unwrap(),
+        CStr::from_bytes_with_nul(b"v2-b\0").unwrap(),
+        CStr::from_bytes_with_nul(b"v2-c\0").unwrap(),
+    ] {
+        subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
+    }
+    sync(mnt.fd()).unwrap();
+
+    let key = SearchKey::for_type(
+        btrfs_uapi::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+        btrfs_uapi::raw::BTRFS_ROOT_ITEM_KEY as u32,
+    );
+
+    let mut v1_items: Vec<(u64, u32, u64)> = Vec::new();
+    tree_search(mnt.fd(), key.clone(), |hdr, _data| {
+        v1_items.push((hdr.objectid, hdr.item_type, hdr.offset));
+        Ok(())
+    })
+    .expect("tree_search v1 failed");
+
+    let mut v2_items: Vec<(u64, u32, u64)> = Vec::new();
+    tree_search_v2(mnt.fd(), key, None, |hdr, _data| {
+        v2_items.push((hdr.objectid, hdr.item_type, hdr.offset));
+        Ok(())
+    })
+    .expect("tree_search_v2 failed");
+
+    assert_eq!(v1_items, v2_items, "v2 should return the same items as v1");
+}
+
+/// tree_search_v2 with a small buffer should still return all results
+/// (automatic retry on EOVERFLOW).
+#[test]
+#[ignore = "requires elevated privileges"]
+fn tree_search_v2_small_buffer() {
+    let (_td, mnt) = single_mount();
+
+    for name in [
+        CStr::from_bytes_with_nul(b"sb-a\0").unwrap(),
+        CStr::from_bytes_with_nul(b"sb-b\0").unwrap(),
+    ] {
+        subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
+    }
+    sync(mnt.fd()).unwrap();
+
+    let key = SearchKey::for_type(
+        btrfs_uapi::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+        btrfs_uapi::raw::BTRFS_ROOT_ITEM_KEY as u32,
+    );
+
+    // Use a small buffer (one root item is ~439 bytes, so 512 bytes can
+    // hold at most one item per batch, forcing multiple batches).
+    let mut items: Vec<u64> = Vec::new();
+    tree_search_v2(mnt.fd(), key, Some(4096), |hdr, _data| {
+        items.push(hdr.objectid);
+        Ok(())
+    })
+    .expect("tree_search_v2 with small buffer failed");
+
+    assert!(
+        !items.is_empty(),
+        "should find at least some root items even with small buffer"
+    );
+}
+
+/// tree_search_v2 with a large custom buffer should work.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn tree_search_v2_large_buffer() {
+    let (_td, mnt) = single_mount();
+
+    let key = SearchKey::for_type(
+        btrfs_uapi::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+        btrfs_uapi::raw::BTRFS_ROOT_ITEM_KEY as u32,
+    );
+
+    let mut items: Vec<u64> = Vec::new();
+    tree_search_v2(mnt.fd(), key, Some(256 * 1024), |hdr, _data| {
+        items.push(hdr.objectid);
+        Ok(())
+    })
+    .expect("tree_search_v2 with large buffer failed");
+
+    // Should find at least FS_TREE (5).
+    assert!(
+        items.contains(&5),
+        "should find FS_TREE objectid 5: {items:?}"
     );
 }

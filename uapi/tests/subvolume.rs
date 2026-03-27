@@ -2,7 +2,7 @@ use crate::common::{single_mount, write_test_data};
 use btrfs_uapi::{
     filesystem::sync,
     subvolume::{
-        SubvolumeFlags, snapshot_create, subvolume_create,
+        SubvolumeFlags, snapshot_create, subvol_rootrefs, subvolume_create,
         subvolume_default_get, subvolume_default_set, subvolume_delete,
         subvolume_flags_get, subvolume_flags_set, subvolume_info,
         subvolume_list,
@@ -281,5 +281,57 @@ fn subvolume_list_nested() {
         list.iter().any(|i| i.name == "A/B/C"),
         "should find 'A/B/C': {:?}",
         list.iter().map(|i| &i.name).collect::<Vec<_>>(),
+    );
+}
+
+/// subvol_rootrefs should list created subvolumes as root references.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvol_rootrefs_lists_subvolumes() {
+    let (_td, mnt) = single_mount();
+
+    let mut expected_ids = Vec::new();
+    for name in [
+        CStr::from_bytes_with_nul(b"rr-a\0").unwrap(),
+        CStr::from_bytes_with_nul(b"rr-b\0").unwrap(),
+        CStr::from_bytes_with_nul(b"rr-c\0").unwrap(),
+    ] {
+        subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
+        let dir = File::open(mnt.path().join(name.to_str().unwrap()))
+            .expect("open failed");
+        let info = subvolume_info(dir.as_fd()).expect("subvolume_info failed");
+        expected_ids.push(info.id);
+    }
+    sync(mnt.fd()).unwrap();
+
+    let refs = subvol_rootrefs(mnt.fd()).expect("subvol_rootrefs failed");
+
+    for id in &expected_ids {
+        assert!(
+            refs.iter().any(|r| r.treeid == *id),
+            "subvol_rootrefs should contain treeid {id}: {refs:?}",
+        );
+    }
+
+    // All root refs should have dirid > 0 (directory inode in the parent).
+    for r in &refs {
+        assert!(r.dirid > 0, "dirid should be > 0: {r:?}");
+    }
+}
+
+/// subvol_rootrefs on a filesystem with no user-created subvolumes should
+/// return an empty list (or at most system entries).
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvol_rootrefs_empty_filesystem() {
+    let (_td, mnt) = single_mount();
+
+    let refs = subvol_rootrefs(mnt.fd()).expect("subvol_rootrefs failed");
+
+    // A fresh filesystem should have no subvolume root references
+    // (the top-level subvolume 5 itself is not listed as a rootref).
+    assert!(
+        refs.is_empty(),
+        "fresh filesystem should have no rootrefs, got {refs:?}",
     );
 }

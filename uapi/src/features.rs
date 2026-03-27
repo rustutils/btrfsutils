@@ -178,3 +178,114 @@ pub fn get_supported_features(
         ),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_feature_flags_empty() {
+        let raw = btrfs_ioctl_feature_flags {
+            compat_flags: 0,
+            compat_ro_flags: 0,
+            incompat_flags: 0,
+        };
+        let flags = parse_feature_flags(&raw);
+        assert!(flags.compat_ro.is_empty());
+        assert!(flags.incompat.is_empty());
+    }
+
+    #[test]
+    fn parse_feature_flags_known_bits() {
+        let raw = btrfs_ioctl_feature_flags {
+            compat_flags: 0,
+            compat_ro_flags: crate::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE
+                as u64,
+            incompat_flags: crate::raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES as u64
+                | crate::raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64,
+        };
+        let flags = parse_feature_flags(&raw);
+        assert!(flags.compat_ro.contains(CompatRoFlags::FREE_SPACE_TREE));
+        assert!(flags.incompat.contains(IncompatFlags::NO_HOLES));
+        assert!(flags.incompat.contains(IncompatFlags::SKINNY_METADATA));
+    }
+
+    #[test]
+    fn parse_feature_flags_truncates_unknown() {
+        let raw = btrfs_ioctl_feature_flags {
+            compat_flags: 0,
+            compat_ro_flags: 0xFFFF_FFFF_FFFF_FFFF,
+            incompat_flags: 0xFFFF_FFFF_FFFF_FFFF,
+        };
+        let flags = parse_feature_flags(&raw);
+        // Should not panic; unknown bits are silently dropped.
+        assert!(!flags.compat_ro.is_empty());
+        assert!(!flags.incompat.is_empty());
+    }
+
+    #[test]
+    fn feature_flags_equality() {
+        let a = FeatureFlags {
+            compat_ro: CompatRoFlags::FREE_SPACE_TREE,
+            incompat: IncompatFlags::NO_HOLES,
+        };
+        let b = FeatureFlags {
+            compat_ro: CompatRoFlags::FREE_SPACE_TREE,
+            incompat: IncompatFlags::NO_HOLES,
+        };
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn feature_flags_inequality() {
+        let a = FeatureFlags {
+            compat_ro: CompatRoFlags::FREE_SPACE_TREE,
+            incompat: IncompatFlags::NO_HOLES,
+        };
+        let b = FeatureFlags {
+            compat_ro: CompatRoFlags::empty(),
+            incompat: IncompatFlags::NO_HOLES,
+        };
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn compat_ro_flags_debug() {
+        let flags = CompatRoFlags::FREE_SPACE_TREE
+            | CompatRoFlags::FREE_SPACE_TREE_VALID;
+        let s = format!("{flags:?}");
+        assert!(s.contains("FREE_SPACE_TREE"), "debug: {s}");
+        assert!(s.contains("FREE_SPACE_TREE_VALID"), "debug: {s}");
+    }
+
+    #[test]
+    fn incompat_flags_debug() {
+        let flags = IncompatFlags::NO_HOLES | IncompatFlags::ZONED;
+        let s = format!("{flags:?}");
+        assert!(s.contains("NO_HOLES"), "debug: {s}");
+        assert!(s.contains("ZONED"), "debug: {s}");
+    }
+
+    #[test]
+    fn supported_features_struct_fields() {
+        let supported = SupportedFeatures {
+            compat_ro_supported: CompatRoFlags::FREE_SPACE_TREE,
+            compat_ro_safe_set: CompatRoFlags::empty(),
+            compat_ro_safe_clear: CompatRoFlags::empty(),
+            incompat_supported: IncompatFlags::NO_HOLES,
+            incompat_safe_set: IncompatFlags::empty(),
+            incompat_safe_clear: IncompatFlags::empty(),
+        };
+        assert!(
+            supported
+                .compat_ro_supported
+                .contains(CompatRoFlags::FREE_SPACE_TREE)
+        );
+        assert!(
+            supported
+                .incompat_supported
+                .contains(IncompatFlags::NO_HOLES)
+        );
+        assert!(supported.incompat_safe_set.is_empty());
+    }
+}
