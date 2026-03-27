@@ -784,6 +784,69 @@ fn ioctl_timespec_to_system_time(sec: u64, nsec: u32) -> SystemTime {
     UNIX_EPOCH + Duration::new(sec, nsec)
 }
 
+/// A child subvolume reference returned by [`subvol_rootrefs`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubvolRootRef {
+    /// Root ID (tree ID) of the child subvolume.
+    pub treeid: u64,
+    /// Directory inode ID where the child is attached in the parent.
+    pub dirid: u64,
+}
+
+/// List the child subvolumes directly under the subvolume opened by `fd`.
+///
+/// Returns all subvolumes whose root is referenced from the given
+/// subvolume. The kernel returns results in batches of up to 255; this
+/// function handles continuation automatically by advancing `min_treeid`.
+///
+/// Does not require `CAP_SYS_ADMIN`.
+///
+/// Errors: ENOTTY on kernels older than 4.18.
+pub fn subvol_rootrefs(fd: BorrowedFd) -> nix::Result<Vec<SubvolRootRef>> {
+    use crate::raw::{
+        btrfs_ioc_get_subvol_rootref, btrfs_ioctl_get_subvol_rootref_args,
+    };
+
+    let mut results = Vec::new();
+    let mut min_treeid: u64 = 0;
+
+    loop {
+        let mut args: btrfs_ioctl_get_subvol_rootref_args =
+            unsafe { std::mem::zeroed() };
+        args.min_treeid = min_treeid;
+
+        let ret =
+            unsafe { btrfs_ioc_get_subvol_rootref(fd.as_raw_fd(), &mut args) };
+
+        // The kernel returns EOVERFLOW when there are more results than
+        // fit in one batch. We read what we got and loop with the updated
+        // min_treeid.
+        let overflow = match ret {
+            Ok(_) => false,
+            Err(nix::errno::Errno::EOVERFLOW) => true,
+            Err(e) => return Err(e),
+        };
+
+        let count = args.num_items as usize;
+        for i in 0..count {
+            let r = &args.rootref[i];
+            results.push(SubvolRootRef {
+                treeid: r.treeid,
+                dirid: r.dirid,
+            });
+        }
+
+        if !overflow || count == 0 {
+            break;
+        }
+
+        // Advance past the last returned treeid for the next batch.
+        min_treeid = args.rootref[count - 1].treeid + 1;
+    }
+
+    Ok(results)
+}
+
 /// Wait for a specific deleted subvolume to be fully cleaned by the kernel.
 ///
 /// Blocks until the background cleaner has finished removing the on-disk

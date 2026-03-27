@@ -39,6 +39,7 @@
 pub mod balance;
 pub mod blkdev;
 pub mod chunk;
+pub mod dedupe;
 pub mod defrag;
 pub mod device;
 pub mod features;

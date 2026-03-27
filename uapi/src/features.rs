@@ -1,12 +1,12 @@
 //! # Feature flags: querying and setting filesystem feature flags
 //!
-//! Wraps `BTRFS_IOC_GET_FEATURES` and `BTRFS_IOC_GET_SUPPORTED_FEATURES`
-//! to query the active and supported feature flags of a mounted btrfs
-//! filesystem.
+//! Wraps `BTRFS_IOC_GET_FEATURES`, `BTRFS_IOC_GET_SUPPORTED_FEATURES`,
+//! and `BTRFS_IOC_SET_FEATURES` to query and modify the feature flags of
+//! a mounted btrfs filesystem.
 
 use crate::raw::{
     btrfs_ioc_get_features, btrfs_ioc_get_supported_features,
-    btrfs_ioctl_feature_flags,
+    btrfs_ioc_set_features, btrfs_ioctl_feature_flags,
 };
 use bitflags::bitflags;
 use nix::libc::c_int;
@@ -117,6 +117,31 @@ pub fn get_features(fd: BorrowedFd<'_>) -> nix::Result<FeatureFlags> {
     let mut flags: btrfs_ioctl_feature_flags = unsafe { std::mem::zeroed() };
     unsafe { btrfs_ioc_get_features(fd.as_raw_fd() as c_int, &mut flags) }?;
     Ok(parse_feature_flags(&flags))
+}
+
+/// Set or clear feature flags on the filesystem.
+///
+/// The `flags` argument specifies the desired values, and `mask` specifies
+/// which bits to change. Only bits set in `mask` are modified: they are set
+/// to the corresponding value in `flags`. Bits not in the mask are left
+/// unchanged.
+///
+/// Use `get_supported_features` first to check which flags can be safely
+/// set or cleared at runtime.
+///
+/// Requires `CAP_SYS_ADMIN`. Returns `EPERM` without it.
+pub fn set_features(
+    fd: BorrowedFd<'_>,
+    flags: &FeatureFlags,
+    mask: &FeatureFlags,
+) -> nix::Result<()> {
+    let mut buf: [btrfs_ioctl_feature_flags; 2] = unsafe { std::mem::zeroed() };
+    buf[0].compat_ro_flags = flags.compat_ro.bits();
+    buf[0].incompat_flags = flags.incompat.bits();
+    buf[1].compat_ro_flags = mask.compat_ro.bits();
+    buf[1].incompat_flags = mask.incompat.bits();
+    unsafe { btrfs_ioc_set_features(fd.as_raw_fd() as c_int, &buf) }?;
+    Ok(())
 }
 
 /// Query the feature flags supported by the running kernel.

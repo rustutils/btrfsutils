@@ -15,12 +15,17 @@
 //!
 //! # Ioctl version
 //!
-//! This module uses `BTRFS_IOC_TREE_SEARCH` (v1) with its fixed 3992-byte
-//! result buffer.  This is sufficient for all item types used by this crate;
-//! the v2 variant with a configurable buffer size is not needed.
+//! This module provides two variants:
+//!
+//! - [`tree_search`] uses `BTRFS_IOC_TREE_SEARCH` (v1) with its fixed
+//!   3992-byte result buffer. Sufficient for all item types used by this crate.
+//! - [`tree_search_v2`] uses `BTRFS_IOC_TREE_SEARCH_V2` with a caller-chosen
+//!   buffer size. Useful when items may be larger than what v1 can return in a
+//!   single batch.
 
 use crate::raw::{
-    btrfs_ioc_tree_search, btrfs_ioctl_search_args, btrfs_ioctl_search_header,
+    btrfs_ioc_tree_search, btrfs_ioc_tree_search_v2, btrfs_ioctl_search_args,
+    btrfs_ioctl_search_args_v2, btrfs_ioctl_search_header,
     btrfs_ioctl_search_key,
 };
 use std::{
@@ -206,6 +211,137 @@ pub fn tree_search(
         }
 
         if !advance_cursor(&mut args.key, &last) {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+/// Default buffer size for [`tree_search_v2`]: 64 KiB.
+const DEFAULT_V2_BUF_SIZE: usize = 64 * 1024;
+
+/// Like [`tree_search`] but uses `BTRFS_IOC_TREE_SEARCH_V2` with a larger
+/// result buffer.
+///
+/// `buf_size` controls the buffer size in bytes (default 64 KiB if `None`).
+/// The v2 ioctl is otherwise identical to v1 but can return more data per
+/// batch, reducing the number of round-trips for large result sets.
+///
+/// If `buf_size` is too small for even a single item, the kernel returns
+/// `EOVERFLOW` and sets `buf_size` to the required minimum. This function
+/// automatically retries with the larger buffer.
+pub fn tree_search_v2(
+    fd: BorrowedFd,
+    key: SearchKey,
+    buf_size: Option<usize>,
+    mut f: impl FnMut(&SearchHeader, &[u8]) -> nix::Result<()>,
+) -> nix::Result<()> {
+    let base_size = mem::size_of::<btrfs_ioctl_search_args_v2>();
+    let mut capacity = buf_size.unwrap_or(DEFAULT_V2_BUF_SIZE);
+
+    // Allocate as Vec<u64> for 8-byte alignment.
+    let alloc_bytes = base_size + capacity;
+    let num_u64s = alloc_bytes.div_ceil(mem::size_of::<u64>());
+    let mut buf = vec![0u64; num_u64s];
+
+    // SAFETY: buf is correctly sized and aligned for btrfs_ioctl_search_args_v2.
+    let args_ptr = buf.as_mut_ptr() as *mut btrfs_ioctl_search_args_v2;
+    unsafe {
+        fill_search_key(&mut (*args_ptr).key, &key);
+    }
+
+    loop {
+        unsafe {
+            (*args_ptr).key.nr_items = ITEMS_PER_BATCH;
+            (*args_ptr).buf_size = capacity as u64;
+        }
+
+        match unsafe {
+            btrfs_ioc_tree_search_v2(fd.as_raw_fd(), &mut *args_ptr)
+        } {
+            Ok(_) => {}
+            Err(nix::errno::Errno::EOVERFLOW) => {
+                // Kernel tells us the needed size via buf_size.
+                let needed = unsafe { (*args_ptr).buf_size } as usize;
+                if needed <= capacity {
+                    return Err(nix::errno::Errno::EOVERFLOW);
+                }
+                capacity = needed;
+                let alloc_bytes = base_size + capacity;
+                let num_u64s = alloc_bytes.div_ceil(mem::size_of::<u64>());
+                buf.resize(num_u64s, 0);
+                // args_ptr must be refreshed after reallocation.
+                let args_ptr_new =
+                    buf.as_mut_ptr() as *mut btrfs_ioctl_search_args_v2;
+                unsafe {
+                    (*args_ptr_new).key.nr_items = ITEMS_PER_BATCH;
+                    (*args_ptr_new).buf_size = capacity as u64;
+                    btrfs_ioc_tree_search_v2(
+                        fd.as_raw_fd(),
+                        &mut *args_ptr_new,
+                    )?;
+                }
+                // Fall through to process results with the new pointer.
+                // Update our local for the rest of the loop.
+                let _ = args_ptr_new;
+            }
+            Err(e) => return Err(e),
+        }
+
+        // Re-derive pointer after potential reallocation.
+        let args_ptr = buf.as_mut_ptr() as *mut btrfs_ioctl_search_args_v2;
+
+        let nr = unsafe { (*args_ptr).key.nr_items };
+        if nr == 0 {
+            break;
+        }
+
+        // The result data starts right after the base struct (at the
+        // flexible array member `buf[]`).
+        let data_base: *const u8 =
+            unsafe { (args_ptr as *const u8).add(base_size) };
+
+        let mut off = 0usize;
+        let mut last = SearchHeader {
+            transid: 0,
+            objectid: 0,
+            offset: 0,
+            item_type: 0,
+            len: 0,
+        };
+
+        for _ in 0..nr {
+            if off + SEARCH_HEADER_SIZE > capacity {
+                return Err(nix::errno::Errno::EOVERFLOW);
+            }
+            let raw_hdr: btrfs_ioctl_search_header = unsafe {
+                (data_base.add(off) as *const btrfs_ioctl_search_header)
+                    .read_unaligned()
+            };
+            let hdr = SearchHeader {
+                transid: raw_hdr.transid,
+                objectid: raw_hdr.objectid,
+                offset: raw_hdr.offset,
+                item_type: raw_hdr.type_,
+                len: raw_hdr.len,
+            };
+            off += SEARCH_HEADER_SIZE;
+
+            let data_len = hdr.len as usize;
+            if off + data_len > capacity {
+                return Err(nix::errno::Errno::EOVERFLOW);
+            }
+            let data: &[u8] = unsafe {
+                std::slice::from_raw_parts(data_base.add(off), data_len)
+            };
+            off += data_len;
+
+            f(&hdr, data)?;
+            last = hdr;
+        }
+
+        if !advance_cursor(unsafe { &mut (*args_ptr).key }, &last) {
             break;
         }
     }

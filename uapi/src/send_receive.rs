@@ -12,10 +12,10 @@
 
 use crate::{
     raw::{
-        self, btrfs_ioc_clone_range, btrfs_ioc_encoded_write, btrfs_ioc_send,
-        btrfs_ioc_set_received_subvol, btrfs_ioctl_clone_range_args,
-        btrfs_ioctl_encoded_io_args, btrfs_ioctl_received_subvol_args,
-        btrfs_ioctl_send_args,
+        self, btrfs_ioc_clone_range, btrfs_ioc_encoded_read,
+        btrfs_ioc_encoded_write, btrfs_ioc_send, btrfs_ioc_set_received_subvol,
+        btrfs_ioctl_clone_range_args, btrfs_ioctl_encoded_io_args,
+        btrfs_ioctl_received_subvol_args, btrfs_ioctl_send_args,
     },
     tree_search::{SearchKey, tree_search},
 };
@@ -187,6 +187,68 @@ pub fn encoded_write(
     }
 
     Ok(())
+}
+
+/// Metadata returned by [`encoded_read`] describing how the data is encoded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncodedReadResult {
+    /// File offset of the extent.
+    pub offset: u64,
+    /// Length of the extent in the file (after decompression).
+    pub unencoded_file_len: u64,
+    /// Unencoded (decompressed) length of the data.
+    pub unencoded_len: u64,
+    /// Offset within the unencoded data where the file content starts.
+    pub unencoded_offset: u64,
+    /// Compression type (0 = none, 1 = zlib, 2 = lzo, 3 = zstd).
+    pub compression: u32,
+    /// Encryption type (currently always 0).
+    pub encryption: u32,
+    /// Number of bytes actually read into the buffer.
+    pub bytes_read: usize,
+}
+
+/// Read compressed (encoded) data from a file using `BTRFS_IOC_ENCODED_READ`.
+///
+/// This reads the raw compressed extent data without decompressing it,
+/// which is the counterpart to [`encoded_write`]. The caller provides a
+/// buffer to receive the data; the returned [`EncodedReadResult`] describes
+/// the encoding and how many bytes were read.
+///
+/// Errors: ENOTTY on kernels that do not support encoded reads (pre-5.18).
+/// EINVAL if the offset or length are not accepted.
+pub fn encoded_read(
+    fd: BorrowedFd<'_>,
+    buf: &mut [u8],
+    offset: u64,
+    len: u64,
+) -> nix::Result<EncodedReadResult> {
+    let iov = nix::libc::iovec {
+        iov_base: buf.as_mut_ptr() as *mut _,
+        iov_len: buf.len(),
+    };
+
+    let mut args: btrfs_ioctl_encoded_io_args = unsafe { std::mem::zeroed() };
+    args.iov = &iov as *const _ as *mut _;
+    args.iovcnt = 1;
+    args.offset = offset as i64;
+    args.len = len;
+
+    // SAFETY: args.iov points to a stack-allocated iovec whose iov_base
+    // references `buf` which outlives this call. The ioctl writes encoded
+    // data into the iov buffers.
+    let ret =
+        unsafe { btrfs_ioc_encoded_read(fd.as_raw_fd() as c_int, &mut args) }?;
+
+    Ok(EncodedReadResult {
+        offset: args.offset as u64,
+        unencoded_file_len: args.len,
+        unencoded_len: args.unencoded_len,
+        unencoded_offset: args.unencoded_offset,
+        compression: args.compression,
+        encryption: args.encryption,
+        bytes_read: ret as usize,
+    })
 }
 
 /// Search the UUID tree for a subvolume by its UUID.

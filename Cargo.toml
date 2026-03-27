@@ -1,5 +1,6 @@
 [workspace]
 members = ["uapi", "disk", "stream", "cli", "mangen"]
+default-members = ["uapi", "disk", "stream", "cli"]
 resolver = "2"
 
 [workspace.package]
