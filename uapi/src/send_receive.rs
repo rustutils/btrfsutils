@@ -118,6 +118,10 @@ pub fn received_subvol_set(
 ///
 /// Both files must be on the same btrfs filesystem. The destination file
 /// descriptor `dest_fd` is the ioctl target.
+///
+/// Errors: EXDEV if source and destination are on different filesystems.
+/// EINVAL if the range is not sector-aligned or extends beyond EOF.
+/// ETXTBSY if the destination file is a swap file.
 pub fn clone_range(
     dest_fd: BorrowedFd<'_>,
     src_fd: BorrowedFd<'_>,
@@ -144,9 +148,11 @@ pub fn clone_range(
 ///
 /// This passes compressed data directly to the filesystem without
 /// decompression, which is more efficient than decompressing and writing.
-/// The kernel may reject the call with `ENOTTY` (old kernel), `EINVAL`
-/// (unsupported parameters), or `ENOSPC`; callers should fall back to
-/// manual decompression + pwrite in those cases.
+///
+/// Errors: ENOTTY on kernels that do not support encoded writes (pre-5.18).
+/// EINVAL if the compression type, alignment, or lengths are not accepted.
+/// ENOSPC if the filesystem has no room for the encoded extent.  Callers
+/// should fall back to manual decompression + pwrite for any of these.
 #[allow(clippy::too_many_arguments)]
 pub fn encoded_write(
     fd: BorrowedFd<'_>,

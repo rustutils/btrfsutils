@@ -224,6 +224,11 @@ pub fn device_add(fd: BorrowedFd, path: &CStr) -> nix::Result<()> {
 /// [`DeviceSpec`]. Uses `BTRFS_IOC_RM_DEV_V2` and falls back to the older
 /// `BTRFS_IOC_RM_DEV` ioctl on kernels that do not support the v2 variant
 /// (only possible when removing by path). The kernel requires `CAP_SYS_ADMIN`.
+///
+/// Errors: ENOTTY or EOPNOTSUPP from `RM_DEV_V2` triggers an automatic
+/// fallback to the v1 ioctl (path-based removal only; by-ID removal
+/// requires v2 and will propagate the error).  EBUSY if the device holds
+/// the only copy of some data and cannot be removed.
 pub fn device_remove(fd: BorrowedFd, spec: DeviceSpec) -> nix::Result<()> {
     let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
 

@@ -152,8 +152,15 @@ impl std::error::Error for ReplaceStartError {}
 /// device when no other zero-defect mirror is available (useful for replacing
 /// a device with known read errors).
 ///
-/// On success returns `Ok(Ok(()))`. If the kernel returns an application-level
-/// error in the result field, returns `Ok(Err(ReplaceStartError))`.
+/// Returns a two-level Result: the outer `nix::Result` covers ioctl-level
+/// failures (EPERM, EINVAL, etc.), while the inner `Result` covers
+/// application-level rejections reported by the kernel in the `result` field.
+/// `Ok(Ok(()))` means the replace started successfully.
+/// `Ok(Err(AlreadyStarted))` means another replace is in progress.
+/// `Ok(Err(ScrubInProgress))` means a scrub must finish or be cancelled first.
+///
+/// Errors: ENAMETOOLONG if source or target device paths exceed the kernel
+/// buffer size.
 pub fn replace_start(
     fd: BorrowedFd,
     source: ReplaceSource,

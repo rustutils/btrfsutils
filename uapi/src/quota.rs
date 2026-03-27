@@ -315,6 +315,9 @@ pub fn qgroup_destroy(fd: BorrowedFd, qgroupid: u64) -> nix::Result<()> {
 ///
 /// Returns `true` if the kernel indicates that a quota rescan is now needed
 /// (the ioctl returned a positive value).
+///
+/// Errors: ENOENT if either qgroup does not exist.  EEXIST if the
+/// relationship already exists.
 pub fn qgroup_assign(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
     let mut args: btrfs_ioctl_qgroup_assign_args = unsafe { mem::zeroed() };
     args.assign = 1;
@@ -326,9 +329,12 @@ pub fn qgroup_assign(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
     Ok(ret > 0)
 }
 
-/// Remove the child–parent relationship between qgroups `src` and `dst`.
+/// Remove the child-parent relationship between qgroups `src` and `dst`.
 ///
 /// Returns `true` if the kernel indicates that a quota rescan is now needed.
+///
+/// Errors: ENOENT if either qgroup does not exist or the relationship
+/// is not present.
 pub fn qgroup_remove(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
     let mut args: btrfs_ioctl_qgroup_assign_args = unsafe { mem::zeroed() };
     args.assign = 0;

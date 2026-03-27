@@ -284,6 +284,10 @@ impl From<btrfs_ioctl_space_info> for SpaceInfo {
 ///
 /// Uses a two-phase ioctl call: the first call with `space_slots = 0`
 /// retrieves the entry count, and the second call retrieves all entries.
+/// The entry count can change between calls if the kernel allocates new
+/// block groups concurrently; this is benign (the kernel fills at most
+/// `space_slots` entries and the second call will simply return fewer
+/// than expected).
 pub fn space_info(fd: BorrowedFd) -> nix::Result<Vec<SpaceInfo>> {
     // Phase 1: query with space_slots = 0 to discover the number of entries.
     let mut args: btrfs_ioctl_space_args = unsafe { mem::zeroed() };

@@ -96,6 +96,9 @@ pub fn label_get(fd: BorrowedFd) -> nix::Result<CString> {
 /// The label must be shorter than 256 bytes (not counting the null terminator).
 /// Further validation (e.g. rejecting labels that contain `/`) is left to the
 /// kernel.
+///
+/// Errors: EINVAL if the label is 256 bytes or longer (checked before the
+/// ioctl).  EPERM without `CAP_SYS_ADMIN`.
 pub fn label_set(fd: BorrowedFd, label: &CStr) -> nix::Result<()> {
     let bytes = label.to_bytes();
     if bytes.len() >= BTRFS_LABEL_SIZE as usize {

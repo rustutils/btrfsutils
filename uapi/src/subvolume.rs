@@ -199,6 +199,10 @@ fn set_qgroup_inherit(
 /// `name` must be a plain leaf name (no slashes).  The caller is responsible
 /// for opening the correct parent directory.  If `qgroups` is non-empty, the
 /// new subvolume is added to those qgroups.  Requires `CAP_SYS_ADMIN`.
+///
+/// Errors: ENAMETOOLONG if `name` does not fit in the 4040-byte kernel
+/// buffer.  EEXIST if a subvolume or directory with that name already exists.
+/// EPERM without `CAP_SYS_ADMIN`.
 pub fn subvolume_create(
     parent_fd: BorrowedFd,
     name: &CStr,
@@ -221,6 +225,14 @@ pub fn subvolume_create(
 /// to by `parent_fd`.
 ///
 /// `name` must be a plain leaf name (no slashes).  Requires `CAP_SYS_ADMIN`.
+///
+/// Deletion is asynchronous: the ioctl removes the directory entry
+/// immediately, but the kernel cleaner thread reclaims the on-disk data
+/// in the background. Until the next transaction commit the deletion is
+/// not visible to other operations (e.g. `subvolume_list` still shows
+/// the subvolume). Call `sync` to force a commit, or pass
+/// `-c`/`--commit-after` at the CLI level. To wait for the cleaner to
+/// finish, use [`subvol_sync_wait_one`].
 pub fn subvolume_delete(parent_fd: BorrowedFd, name: &CStr) -> nix::Result<()> {
     let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
     set_v2_name(&mut args, name)?;
@@ -233,6 +245,9 @@ pub fn subvolume_delete(parent_fd: BorrowedFd, name: &CStr) -> nix::Result<()> {
 /// `fd` must be an open file descriptor on the filesystem (typically the mount
 /// point).  Unlike `subvolume_delete`, this does not require knowing the
 /// subvolume's path.  Requires `CAP_SYS_ADMIN`.
+///
+/// See [`subvolume_delete`] for details on commit visibility and async
+/// cleanup.
 pub fn subvolume_delete_by_id(
     fd: BorrowedFd,
     subvolid: u64,
@@ -250,6 +265,11 @@ pub fn subvolume_delete_by_id(
 /// If `readonly` is `true` the new snapshot is created read-only.  If
 /// `qgroups` is non-empty, the new snapshot is added to those qgroups.
 /// Requires `CAP_SYS_ADMIN`.
+///
+/// Errors: ENAMETOOLONG if `name` does not fit in the 4040-byte kernel
+/// buffer.  EEXIST if a subvolume or directory with that name already exists.
+/// EROFS if `parent_fd` refers to a read-only subvolume.  EPERM without
+/// `CAP_SYS_ADMIN`.
 pub fn snapshot_create(
     parent_fd: BorrowedFd,
     source_fd: BorrowedFd,
@@ -288,6 +308,9 @@ pub fn subvolume_info(fd: BorrowedFd) -> nix::Result<SubvolumeInfo> {
 /// `fd` can be any open file descriptor on the filesystem.  If `rootid` is 0,
 /// the subvolume that `fd` belongs to is queried (equivalent to
 /// `subvolume_info`).  Does not require elevated privileges.
+///
+/// Errors: ENOENT if no subvolume with that `rootid` exists (or has been
+/// deleted but not yet cleaned).
 pub fn subvolume_info_by_id(
     fd: BorrowedFd,
     rootid: u64,
@@ -410,7 +433,9 @@ pub fn subvolume_default_set(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> {
 /// Subvolumes for which no backref is found are still included; their
 /// `parent_id`, `dir_id`, and `name` will be zeroed / empty.
 ///
-/// Requires `CAP_SYS_ADMIN`.
+/// Requires `CAP_SYS_ADMIN` for the tree search. Without it the kernel
+/// returns EPERM; the caller should degrade gracefully (e.g. show only the
+/// leaf name without full path resolution).
 pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
     let mut items: Vec<SubvolumeListItem> = Vec::new();
 
