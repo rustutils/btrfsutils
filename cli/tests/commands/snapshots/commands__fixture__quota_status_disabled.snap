@@ -1,0 +1,7 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs quota status <MOUNT> (disabled)
+expression: "redact_paths(&stdout, &mnt)"
+---
+Quotas on <MOUNT>:
+  Enabled:                 no

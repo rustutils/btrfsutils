@@ -1,0 +1,7 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs subvolume list -o <MOUNT>
+expression: "redact_paths(&btrfs_ok(&[\"subvolume\", \"list\", \"-o\", mp]), &mnt)"
+---
+ID 256 gen 9 top level 5 path subvol1
+ID 258 gen 10 top level 5 path subvol2

@@ -151,6 +151,68 @@ fn subvolume_get_flags_writable() {
     );
 }
 
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_list_table() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs subvolume list -t <MOUNT>",
+        redact_paths(&btrfs_ok(&["subvolume", "list", "-t", mp]), &mnt)
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_list_only_below() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs subvolume list -o <MOUNT>",
+        redact_paths(&btrfs_ok(&["subvolume", "list", "-o", mp]), &mnt)
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_list_sort_path() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs subvolume list --sort=path <MOUNT>",
+        redact_paths(
+            &btrfs_ok(&["subvolume", "list", "--sort=path", mp]),
+            &mnt,
+        )
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_list_sort_rootid_desc() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs subvolume list --sort=-rootid <MOUNT>",
+        redact_paths(
+            &btrfs_ok(&["subvolume", "list", "--sort=-rootid", mp]),
+            &mnt,
+        )
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_show_by_rootid() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    // subvol1 is ID 256.
+    snap!(
+        "btrfs subvolume show -r 256 <MOUNT>",
+        redact_paths(&btrfs_ok(&["subvolume", "show", "-r", "256", mp]), &mnt,)
+    );
+}
+
 // ── device ───────────────────────────────────────────────────────────
 
 #[test]
@@ -262,6 +324,20 @@ fn inspect_dump_super() {
     snap!(
         "btrfs inspect-internal dump-super <DEV>",
         redact_paths(&btrfs_ok(&["inspect-internal", "dump-super", dev]), &mnt)
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn inspect_dump_super_full() {
+    let (_td, mnt) = common::fixture_mount();
+    let dev = mnt.loopback().path().to_str().unwrap();
+    snap!(
+        "btrfs inspect-internal dump-super -f <DEV>",
+        redact_paths(
+            &btrfs_ok(&["inspect-internal", "dump-super", "-f", dev]),
+            &mnt,
+        )
     );
 }
 
@@ -382,5 +458,21 @@ fn property_list_filesystem() {
     snap!(
         "btrfs property list -t filesystem <MOUNT>",
         btrfs_ok(&["property", "list", "-t", "filesystem", mp])
+    );
+}
+
+// ── quota ────────────────────────────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn quota_status_disabled() {
+    let (_td, mnt) = common::fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    // The fixture image does not have quotas enabled, so status should
+    // report disabled.
+    let (stdout, _stderr, _code) = super::btrfs(&["quota", "status", mp]);
+    snap!(
+        "btrfs quota status <MOUNT> (disabled)",
+        redact_paths(&stdout, &mnt)
     );
 }

@@ -1,0 +1,109 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs inspect-internal dump-super -f <DEV>
+expression: "redact_paths(&btrfs_ok(&[\"inspect-internal\", \"dump-super\", \"-f\", dev]), &mnt,)"
+---
+superblock: bytenr=65536, device=<DEV>
+---------------------------------------------------------
+csum_type		0 (crc32c)
+csum_size		4
+csum			0x968af68b
+bytenr			65536
+flags			0x1
+			( WRITTEN )
+magic			_BHRfS_M [match]
+fsid			deadbeef-dead-beef-dead-beefdeadbeef
+metadata_uuid		00000000-0000-0000-0000-000000000000
+label			test-fixture
+generation		10
+root			31064064
+sys_array_size		129
+chunk_root_generation	8
+root_level		0
+chunk_root		22036480
+chunk_root_level	0
+log_root		0
+log_root_transid (deprecated)	0
+log_root_level		0
+total_bytes		114294784
+bytes_used		1564672
+sectorsize		4096
+nodesize		16384
+leafsize (deprecated)	16384
+stripesize		4096
+root_dir		6
+num_devices		1
+compat_flags		0x0
+compat_ro_flags		0xb
+			( FREE_SPACE_TREE|FREE_SPACE_TREE_VALID|BLOCK_GROUP_TREE )
+incompat_flags		0x361
+			( MIXED_BACKREF|BIG_METADATA|EXTENDED_IREF|SKINNY_METADATA|NO_HOLES )
+cache_generation	0
+uuid_tree_generation	10
+dev_item.uuid		b46f8ec6-0abe-41db-9009-505827210247
+dev_item.fsid		deadbeef-dead-beef-dead-beefdeadbeef [match]
+dev_item.type		0
+dev_item.total_bytes	114294784
+dev_item.bytes_used	92274688
+dev_item.io_align	4096
+dev_item.io_width	4096
+dev_item.sector_size	4096
+dev_item.devid		1
+dev_item.dev_group	0
+dev_item.seek_speed	0
+dev_item.bandwidth	0
+dev_item.generation	0
+sys_chunk_array[2048]:
+	item 0 key (256 228 22020096)
+		length 8388608 owner 2 stripe_len 65536 type 0x22
+		io_align 65536 io_width 65536 sector_size 4096
+		num_stripes 2 sub_stripes 1
+			stripe 0 devid 1 offset 22020096
+			dev_uuid b46f8ec6-0abe-41db-9009-505827210247
+			stripe 1 devid 1 offset 30408704
+			dev_uuid b46f8ec6-0abe-41db-9009-505827210247
+backup_roots[4]:
+	backup 0:
+		tree_root	30965760	gen	9
+		chunk_root	22036480	gen	8
+		extent_root	30539776	gen	9
+		fs_root		30490624	gen	9
+		dev_root	31031296	gen	9
+		csum_root	30638080	gen	9
+		total_bytes	114294784
+		bytes_used	1503232
+		num_devices	1
+		levels		tree 0 chunk 0 extent 0 fs 1 dev 0 csum 0
+	backup 1:
+		tree_root	31064064	gen	10
+		chunk_root	22036480	gen	8
+		extent_root	31162368	gen	10
+		fs_root		31096832	gen	10
+		dev_root	31031296	gen	9
+		csum_root	31145984	gen	10
+		total_bytes	114294784
+		bytes_used	1564672
+		num_devices	1
+		levels		tree 0 chunk 0 extent 0 fs 1 dev 0 csum 0
+	backup 2:
+		tree_root	30539776	gen	7
+		chunk_root	22020096	gen	5
+		extent_root	30490624	gen	7
+		fs_root		30441472	gen	5
+		dev_root	30474240	gen	5
+		csum_root	30523392	gen	5
+		total_bytes	114294784
+		bytes_used	163840
+		num_devices	1
+		levels		tree 0 chunk 0 extent 0 fs 0 dev 0 csum 0
+	backup 3:
+		tree_root	30605312	gen	8
+		chunk_root	22036480	gen	8
+		extent_root	30588928	gen	8
+		fs_root		30441472	gen	5
+		dev_root	30425088	gen	8
+		csum_root	30523392	gen	5
+		total_bytes	114294784
+		bytes_used	163840
+		num_devices	1
+		levels		tree 0 chunk 0 extent 0 fs 0 dev 0 csum 0
