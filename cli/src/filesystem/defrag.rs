@@ -4,7 +4,11 @@ use btrfs_uapi::defrag::{
     CompressSpec, CompressType, DefragRangeArgs, defrag_range,
 };
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{
+    fs::{self, File},
+    os::unix::io::AsFd,
+    path::PathBuf,
+};
 
 const HEADING_COMPRESSION: &str = "Compression";
 const HEADING_RANGE: &str = "Range";
@@ -87,7 +91,7 @@ impl Runnable for FilesystemDefragCommand {
         let mut errors = 0u64;
 
         for path in &self.paths {
-            let meta = std::fs::symlink_metadata(path).with_context(|| {
+            let meta = fs::symlink_metadata(path).with_context(|| {
                 format!("cannot access '{}'", path.display())
             })?;
 
@@ -143,7 +147,7 @@ impl FilesystemDefragCommand {
     ) -> Result<u64> {
         use std::os::unix::fs::MetadataExt;
 
-        let dir_dev = std::fs::metadata(dir)
+        let dir_dev = fs::metadata(dir)
             .with_context(|| format!("cannot stat '{}'", dir.display()))?
             .dev();
 
@@ -151,7 +155,7 @@ impl FilesystemDefragCommand {
         let mut stack = vec![dir.to_path_buf()];
 
         while let Some(current) = stack.pop() {
-            let entries = match std::fs::read_dir(&current) {
+            let entries = match fs::read_dir(&current) {
                 Ok(e) => e,
                 Err(e) => {
                     eprintln!(
@@ -176,7 +180,7 @@ impl FilesystemDefragCommand {
                 let path = entry.path();
 
                 // Use symlink_metadata to avoid following symlinks (FTW_PHYS).
-                let meta = match std::fs::symlink_metadata(&path) {
+                let meta = match fs::symlink_metadata(&path) {
                     Ok(m) => m,
                     Err(e) => {
                         eprintln!(

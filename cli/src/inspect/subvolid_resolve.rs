@@ -1,6 +1,8 @@
 use crate::{Format, Runnable};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
+use btrfs_uapi::inode::subvolid_resolve;
 use clap::Parser;
+use nix::errno::Errno;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
 /// Resolve the path of a subvolume given its ID
@@ -20,24 +22,21 @@ impl Runnable for SubvolidResolveCommand {
         })?;
         let fd = file.as_fd();
 
-        let resolved_path = btrfs_uapi::inode::subvolid_resolve(
-            fd,
-            self.subvolid,
-        )
-        .map_err(|e| match e {
-            nix::errno::Errno::EPERM | nix::errno::Errno::EACCES => {
-                anyhow::anyhow!(
-                    "failed to resolve subvolume ID {}: permission denied \
+        let resolved_path =
+            subvolid_resolve(fd, self.subvolid).map_err(|e| match e {
+                Errno::EPERM | Errno::EACCES => {
+                    anyhow!(
+                        "failed to resolve subvolume ID {}: permission denied \
                          (requires CAP_SYS_ADMIN)",
+                        self.subvolid,
+                    )
+                }
+                _ => anyhow!(
+                    "failed to resolve subvolume ID {}: {}",
                     self.subvolid,
-                )
-            }
-            _ => anyhow::anyhow!(
-                "failed to resolve subvolume ID {}: {}",
-                self.subvolid,
-                e,
-            ),
-        })?;
+                    e,
+                ),
+            })?;
 
         println!("{}", resolved_path);
         Ok(())

@@ -1,8 +1,20 @@
 use crate::stream::{StreamCommand, Timespec};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
+use btrfs_uapi::{
+    inode::subvolid_resolve,
+    send_receive::{
+        clone_range, encoded_write, received_subvol_set,
+        subvolume_search_by_received_uuid, subvolume_search_by_uuid,
+    },
+    subvolume::{
+        SubvolumeFlags, snapshot_create, subvolume_create, subvolume_flags_get,
+        subvolume_flags_set, subvolume_info,
+    },
+};
 use std::{
     ffi::CString,
     fs::{self, File, OpenOptions},
+    io,
     os::{
         fd::{AsFd, AsRawFd},
         unix::fs::PermissionsExt,
@@ -282,26 +294,25 @@ impl ReceiveContext {
         })?;
         let fd = subvol_file.as_fd();
 
-        btrfs_uapi::send_receive::received_subvol_set(fd, &uuid, self.stransid)
-            .with_context(|| {
-                format!(
-                    "failed to set received subvol on '{}'",
-                    subvol_path.display()
-                )
-            })?;
+        received_subvol_set(fd, &uuid, self.stransid).with_context(|| {
+            format!(
+                "failed to set received subvol on '{}'",
+                subvol_path.display()
+            )
+        })?;
 
         // Make the subvolume read-only.
-        let flags = btrfs_uapi::subvolume::subvolume_flags_get(fd)
-            .with_context(|| {
-                format!("failed to get flags for '{}'", subvol_path.display())
-            })?;
-        btrfs_uapi::subvolume::subvolume_flags_set(
-            fd,
-            flags | btrfs_uapi::subvolume::SubvolumeFlags::RDONLY,
-        )
-        .with_context(|| {
-            format!("failed to set read-only on '{}'", subvol_path.display())
+        let flags = subvolume_flags_get(fd).with_context(|| {
+            format!("failed to get flags for '{}'", subvol_path.display())
         })?;
+        subvolume_flags_set(fd, flags | SubvolumeFlags::RDONLY).with_context(
+            || {
+                format!(
+                    "failed to set read-only on '{}'",
+                    subvol_path.display()
+                )
+            },
+        )?;
 
         self.cur_subvol = None;
         self.cur_subvol_path = None;
@@ -326,7 +337,7 @@ impl ReceiveContext {
         let subvol_path = self
             .cur_subvol_path
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("no current subvolume"))?;
+            .ok_or_else(|| anyhow!("no current subvolume"))?;
         Ok(subvol_path.join(relative))
     }
 
@@ -347,14 +358,14 @@ impl ReceiveContext {
         let c_name = CString::new(path).with_context(|| {
             format!("subvolume name contains null byte: {path}")
         })?;
-        btrfs_uapi::subvolume::subvolume_create(
-            parent_dir.as_fd(),
-            &c_name,
-            &[],
-        )
-        .with_context(|| {
-            format!("failed to create subvolume '{}'", subvol_path.display())
-        })?;
+        subvolume_create(parent_dir.as_fd(), &c_name, &[]).with_context(
+            || {
+                format!(
+                    "failed to create subvolume '{}'",
+                    subvol_path.display()
+                )
+            },
+        )?;
 
         self.cur_subvol = Some(path.to_string());
         self.cur_subvol_path = Some(subvol_path);
@@ -377,13 +388,11 @@ impl ReceiveContext {
         let subvol_path = self.dest_dir.join(path);
 
         // Find the parent subvolume by its received UUID, then fall back to UUID.
-        let parent_root_id = btrfs_uapi::send_receive::subvolume_search_by_received_uuid(
+        let parent_root_id = subvolume_search_by_received_uuid(
             self.mnt_fd.as_fd(),
             clone_uuid,
         )
-        .or_else(|_| {
-            btrfs_uapi::send_receive::subvolume_search_by_uuid(self.mnt_fd.as_fd(), clone_uuid)
-        })
+        .or_else(|_| subvolume_search_by_uuid(self.mnt_fd.as_fd(), clone_uuid))
         .with_context(|| {
             format!(
                 "cannot find parent subvolume with UUID {} for snapshot '{}'",
@@ -393,13 +402,12 @@ impl ReceiveContext {
         })?;
 
         // Verify the parent's ctransid matches.
-        let parent_path = btrfs_uapi::inode::subvolid_resolve(
-            self.mnt_fd.as_fd(),
-            parent_root_id,
-        )
-        .with_context(|| {
-            format!("cannot resolve path for parent subvolume {parent_root_id}")
-        })?;
+        let parent_path = subvolid_resolve(self.mnt_fd.as_fd(), parent_root_id)
+            .with_context(|| {
+                format!(
+                    "cannot resolve path for parent subvolume {parent_root_id}"
+                )
+            })?;
 
         // Open the parent subvolume to verify ctransid and create the snapshot.
         // The path from subvolid_resolve is relative to the filesystem root,
@@ -410,13 +418,12 @@ impl ReceiveContext {
         })?;
 
         let parent_info =
-            btrfs_uapi::subvolume::subvolume_info(parent_file.as_fd())
-                .with_context(|| {
-                    format!(
-                        "failed to get info for parent '{}'",
-                        parent_full.display()
-                    )
-                })?;
+            subvolume_info(parent_file.as_fd()).with_context(|| {
+                format!(
+                    "failed to get info for parent '{}'",
+                    parent_full.display()
+                )
+            })?;
 
         // The parent's ctransid must match: check both ctransid and stransid
         // (stransid is set when the parent was itself received).
@@ -439,7 +446,7 @@ impl ReceiveContext {
         let c_name = CString::new(path).with_context(|| {
             format!("snapshot name contains null byte: {path}")
         })?;
-        btrfs_uapi::subvolume::snapshot_create(
+        snapshot_create(
             dest_dir_file.as_fd(),
             parent_file.as_fd(),
             &c_name,
@@ -455,17 +462,13 @@ impl ReceiveContext {
             format!("cannot open snapshot '{}'", subvol_path.display())
         })?;
         let snap_flags =
-            btrfs_uapi::subvolume::subvolume_flags_get(snap_file.as_fd())
-                .with_context(|| {
-                    format!(
-                        "failed to get flags for '{}'",
-                        subvol_path.display()
-                    )
-                })?;
-        if snap_flags.contains(btrfs_uapi::subvolume::SubvolumeFlags::RDONLY) {
-            btrfs_uapi::subvolume::subvolume_flags_set(
+            subvolume_flags_get(snap_file.as_fd()).with_context(|| {
+                format!("failed to get flags for '{}'", subvol_path.display())
+            })?;
+        if snap_flags.contains(SubvolumeFlags::RDONLY) {
+            subvolume_flags_set(
                 snap_file.as_fd(),
-                snap_flags & !btrfs_uapi::subvolume::SubvolumeFlags::RDONLY,
+                snap_flags & !SubvolumeFlags::RDONLY,
             )
             .with_context(|| {
                 format!(
@@ -515,7 +518,7 @@ impl ReceiveContext {
             )
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
+            return Err(io::Error::last_os_error()).with_context(|| {
                 format!("mknod failed for '{}'", full.display())
             });
         }
@@ -527,7 +530,7 @@ impl ReceiveContext {
         let c_path = path_to_cstring(&full)?;
         let ret = unsafe { nix::libc::mkfifo(c_path.as_ptr(), 0o600) };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
+            return Err(io::Error::last_os_error()).with_context(|| {
                 format!("mkfifo failed for '{}'", full.display())
             });
         }
@@ -541,7 +544,7 @@ impl ReceiveContext {
             nix::libc::mknod(c_path.as_ptr(), nix::libc::S_IFSOCK | 0o600, 0)
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
+            return Err(io::Error::last_os_error()).with_context(|| {
                 format!("mksock failed for '{}'", full.display())
             });
         }
@@ -630,7 +633,7 @@ impl ReceiveContext {
             )
         };
         if written < 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
+            return Err(io::Error::last_os_error()).with_context(|| {
                 format!("pwrite failed on '{}'", full.display())
             });
         }
@@ -661,25 +664,19 @@ impl ReceiveContext {
 
         // Find the clone source subvolume.
         let clone_subvol_root =
-            btrfs_uapi::send_receive::subvolume_search_by_received_uuid(
-                self.mnt_fd.as_fd(),
-                clone_uuid,
-            )
-            .or_else(|_| {
-                btrfs_uapi::send_receive::subvolume_search_by_uuid(
-                    self.mnt_fd.as_fd(),
-                    clone_uuid,
-                )
-            })
-            .with_context(|| {
-                format!(
-                    "cannot find clone source subvolume with UUID {}",
-                    clone_uuid.as_hyphenated()
-                )
-            })?;
+            subvolume_search_by_received_uuid(self.mnt_fd.as_fd(), clone_uuid)
+                .or_else(|_| {
+                    subvolume_search_by_uuid(self.mnt_fd.as_fd(), clone_uuid)
+                })
+                .with_context(|| {
+                    format!(
+                        "cannot find clone source subvolume with UUID {}",
+                        clone_uuid.as_hyphenated()
+                    )
+                })?;
 
         let subvol_path =
-            btrfs_uapi::inode::subvolid_resolve(self.mnt_fd.as_fd(), clone_subvol_root)
+            subvolid_resolve(self.mnt_fd.as_fd(), clone_subvol_root)
                 .with_context(|| {
                     format!("cannot resolve path for clone source subvolume {clone_subvol_root}")
                 })?;
@@ -703,7 +700,7 @@ impl ReceiveContext {
                 format!("cannot open '{}' for clone", full.display())
             })?;
 
-        btrfs_uapi::send_receive::clone_range(
+        clone_range(
             dest_file.as_fd(),
             clone_file.as_fd(),
             clone_offset,
@@ -737,7 +734,7 @@ impl ReceiveContext {
             )
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
+            return Err(io::Error::last_os_error()).with_context(|| {
                 format!("lsetxattr failed on '{}'", full.display())
             });
         }
@@ -753,7 +750,7 @@ impl ReceiveContext {
             nix::libc::lremovexattr(c_path.as_ptr(), c_name.as_ptr())
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
+            return Err(io::Error::last_os_error()).with_context(|| {
                 format!("lremovexattr failed on '{}'", full.display())
             });
         }
@@ -767,7 +764,7 @@ impl ReceiveContext {
             nix::libc::truncate(c_path.as_ptr(), size as nix::libc::off_t)
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
+            return Err(io::Error::last_os_error()).with_context(|| {
                 format!("truncate failed on '{}'", full.display())
             });
         }
@@ -792,7 +789,7 @@ impl ReceiveContext {
             )
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
+            return Err(io::Error::last_os_error()).with_context(|| {
                 format!("lchown failed on '{}'", full.display())
             });
         }
@@ -826,7 +823,7 @@ impl ReceiveContext {
             )
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
+            return Err(io::Error::last_os_error()).with_context(|| {
                 format!("utimensat failed on '{}'", full.display())
             });
         }
@@ -858,7 +855,7 @@ impl ReceiveContext {
             )
         };
         if ret < 0 {
-            return Err(std::io::Error::last_os_error()).with_context(|| {
+            return Err(io::Error::last_os_error()).with_context(|| {
                 format!("fallocate failed on '{}'", full.display())
             });
         }
@@ -932,7 +929,7 @@ impl ReceiveContext {
         // Try the encoded write ioctl first — passes compressed data directly
         // to the filesystem without decompression.
         let fd = self.write_fd.as_ref().unwrap();
-        match btrfs_uapi::send_receive::encoded_write(
+        match encoded_write(
             fd.as_fd(),
             data,
             offset,
@@ -1055,9 +1052,7 @@ fn decompress_lzo(
         let mut segment_out = vec![0u8; remaining];
         lzo1x::decompress(&data[pos..pos + seg_len], &mut segment_out)
             .map_err(|e| {
-                anyhow::anyhow!(
-                    "LZO decompression failed at offset {pos}: {e:?}"
-                )
+                anyhow!("LZO decompression failed at offset {pos}: {e:?}")
             })?;
         out.extend_from_slice(&segment_out);
 

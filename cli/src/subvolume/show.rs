@@ -5,6 +5,7 @@ use btrfs_uapi::{
     subvolume::{subvolume_info, subvolume_info_by_id},
 };
 use clap::Parser;
+use nix::libc;
 use std::{
     fs::File,
     mem,
@@ -101,15 +102,15 @@ fn format_time(t: SystemTime) -> String {
     }
 
     let secs = match t.duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_secs() as nix::libc::time_t,
+        Ok(d) => d.as_secs() as libc::time_t,
         Err(_) => return "-".to_string(),
     };
 
     // SAFETY: localtime_r is async-signal-safe and writes into the tm we
     // provide; we pass a valid pointer and the output is fully initialised
     // before we read it.
-    let mut tm: nix::libc::tm = unsafe { mem::zeroed() };
-    let result = unsafe { nix::libc::localtime_r(&secs, &mut tm) };
+    let mut tm: libc::tm = unsafe { mem::zeroed() };
+    let result = unsafe { libc::localtime_r(&secs, &mut tm) };
     if result.is_null() {
         return "-".to_string();
     }

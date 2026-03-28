@@ -2,9 +2,15 @@ use crate::{Format, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::replace::{ReplaceState, replace_status};
 use clap::Parser;
+use nix::libc;
 use std::{
-    fs::File, io::Write, os::unix::io::AsFd, path::PathBuf, thread,
-    time::Duration,
+    fs::File,
+    io::Write,
+    mem,
+    os::unix::io::AsFd,
+    path::PathBuf,
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 /// Print status of a running device replace operation.
@@ -22,26 +28,23 @@ pub struct ReplaceStatusCommand {
     pub mount_point: PathBuf,
 }
 
-fn format_time(t: &std::time::SystemTime) -> String {
-    let secs = t
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+fn format_time(t: &SystemTime) -> String {
+    let secs = t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
     // Use libc::localtime_r for locale-aware formatting, matching the
     // pattern used elsewhere in the codebase (subvolume show).
-    let secs_i64 = secs as nix::libc::time_t;
-    let mut tm: nix::libc::tm = unsafe { std::mem::zeroed() };
-    unsafe { nix::libc::localtime_r(&secs_i64, &mut tm) };
+    let secs_i64 = secs as libc::time_t;
+    let mut tm: libc::tm = unsafe { mem::zeroed() };
+    unsafe { libc::localtime_r(&secs_i64, &mut tm) };
 
     // Format as "%e.%b %T" to match btrfs-progs output.
     let mut buf = [0u8; 64];
     let fmt = b"%e.%b %T\0";
     let len = unsafe {
-        nix::libc::strftime(
-            buf.as_mut_ptr() as *mut nix::libc::c_char,
+        libc::strftime(
+            buf.as_mut_ptr() as *mut libc::c_char,
             buf.len(),
-            fmt.as_ptr() as *const nix::libc::c_char,
+            fmt.as_ptr() as *const libc::c_char,
             &tm,
         )
     };

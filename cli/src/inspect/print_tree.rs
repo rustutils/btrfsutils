@@ -3,6 +3,7 @@ use btrfs_disk::{
     raw,
     tree::{Header, ObjectId, TreeBlock, format_header_flags, format_key},
 };
+use nix::libc;
 use std::mem;
 
 pub struct PrintOptions {
@@ -129,10 +130,10 @@ fn print_header_flags_line(label: &str, header: &Header, opts: &PrintOptions) {
 }
 
 fn format_timespec(ts: &Timespec) -> String {
-    let secs = ts.sec as nix::libc::time_t;
-    let mut tm: nix::libc::tm = unsafe { mem::zeroed() };
+    let secs = ts.sec as libc::time_t;
+    let mut tm: libc::tm = unsafe { mem::zeroed() };
     // SAFETY: localtime_r writes into the provided tm struct.
-    let result = unsafe { nix::libc::localtime_r(&secs, &mut tm) };
+    let result = unsafe { libc::localtime_r(&secs, &mut tm) };
     if result.is_null() {
         return format!("{}.{}", ts.sec, ts.nsec);
     }

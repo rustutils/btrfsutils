@@ -2,7 +2,7 @@ use crate::{Format, Runnable};
 use anyhow::Result;
 use clap::Parser;
 use std::{
-    fs::File,
+    fs::{self, File},
     os::unix::{
         fs::{FileTypeExt, MetadataExt},
         io::AsFd,
@@ -104,7 +104,7 @@ fn classify_object(attrs: &ObjectAttrs) -> Vec<PropertyObjectType> {
 
 /// Probe the filesystem to build `ObjectAttrs` for the given path.
 fn probe_object_attrs(path: &Path) -> ObjectAttrs {
-    let metadata = match std::fs::metadata(path) {
+    let metadata = match fs::metadata(path) {
         Ok(m) => m,
         Err(_) => {
             return ObjectAttrs {
@@ -143,12 +143,12 @@ fn detect_object_types(path: &Path) -> Vec<PropertyObjectType> {
 /// Check whether `path` is a filesystem root (mount point) by comparing
 /// device numbers with its parent directory.
 fn is_filesystem_root(path: &Path) -> Result<bool> {
-    let canonical = std::fs::canonicalize(path)?;
+    let canonical = fs::canonicalize(path)?;
     let parent = canonical.parent();
 
     if let Some(parent) = parent {
-        let canonical_metadata = std::fs::metadata(&canonical)?;
-        let parent_metadata = std::fs::metadata(parent)?;
+        let canonical_metadata = fs::metadata(&canonical)?;
+        let parent_metadata = fs::metadata(parent)?;
 
         if canonical_metadata.dev() != parent_metadata.dev() {
             return Ok(true);
