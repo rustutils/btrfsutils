@@ -26,6 +26,26 @@ pub fn read_uuid(buf: &[u8], off: usize) -> Uuid {
     Uuid::from_bytes(buf[off..off + 16].try_into().unwrap())
 }
 
+/// Write a little-endian u64 into `buf` at byte offset `off`.
+pub fn write_le_u64(buf: &mut [u8], off: usize, val: u64) {
+    buf[off..off + 8].copy_from_slice(&val.to_le_bytes());
+}
+
+/// Write a little-endian u32 into `buf` at byte offset `off`.
+pub fn write_le_u32(buf: &mut [u8], off: usize, val: u32) {
+    buf[off..off + 4].copy_from_slice(&val.to_le_bytes());
+}
+
+/// Write a little-endian u16 into `buf` at byte offset `off`.
+pub fn write_le_u16(buf: &mut [u8], off: usize, val: u16) {
+    buf[off..off + 2].copy_from_slice(&val.to_le_bytes());
+}
+
+/// Write a UUID (16 bytes) into `buf` at byte offset `off`.
+pub fn write_uuid(buf: &mut [u8], off: usize, uuid: &Uuid) {
+    buf[off..off + 16].copy_from_slice(uuid.as_bytes());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -52,6 +72,52 @@ mod tests {
     fn test_read_le_u16() {
         let buf = [0x01, 0x02];
         assert_eq!(read_le_u16(&buf, 0), 0x0201);
+    }
+
+    #[test]
+    fn test_write_le_u64() {
+        let mut buf = [0u8; 8];
+        write_le_u64(&mut buf, 0, 0x0807060504030201);
+        assert_eq!(buf, [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+    }
+
+    #[test]
+    fn test_write_le_u32() {
+        let mut buf = [0u8; 4];
+        write_le_u32(&mut buf, 0, 0x04030201);
+        assert_eq!(buf, [0x01, 0x02, 0x03, 0x04]);
+    }
+
+    #[test]
+    fn test_write_le_u16() {
+        let mut buf = [0u8; 2];
+        write_le_u16(&mut buf, 0, 0x0201);
+        assert_eq!(buf, [0x01, 0x02]);
+    }
+
+    #[test]
+    fn test_write_uuid() {
+        let uuid =
+            Uuid::parse_str("deadbeef-dead-beef-dead-beefdeadbeef").unwrap();
+        let mut buf = [0u8; 16];
+        write_uuid(&mut buf, 0, &uuid);
+        assert_eq!(buf, *uuid.as_bytes());
+    }
+
+    #[test]
+    fn test_roundtrip_u64() {
+        let mut buf = [0u8; 16];
+        write_le_u64(&mut buf, 4, 0xDEADBEEF_CAFEBABE);
+        assert_eq!(read_le_u64(&buf, 4), 0xDEADBEEF_CAFEBABE);
+    }
+
+    #[test]
+    fn test_roundtrip_uuid() {
+        let uuid =
+            Uuid::parse_str("01234567-89ab-cdef-0123-456789abcdef").unwrap();
+        let mut buf = [0u8; 16];
+        write_uuid(&mut buf, 0, &uuid);
+        assert_eq!(read_uuid(&buf, 0), uuid);
     }
 
     #[test]

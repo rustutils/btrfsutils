@@ -19,3 +19,5 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 uuid = { workspace = true }
 btrfs-disk = { workspace = true }
+crc32c = { workspace = true }
+libc = { workspace = true }
