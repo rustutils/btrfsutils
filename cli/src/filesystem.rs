@@ -103,7 +103,7 @@ pub struct UnitMode {
 }
 
 impl UnitMode {
-    /// Resolve the clap flags into a [`SizeFormat`].
+    /// Resolve the clap flags into a `SizeFormat`.
     pub fn resolve(&self) -> SizeFormat {
         let si = self.si;
         if self.raw {

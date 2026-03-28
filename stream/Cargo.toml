@@ -11,11 +11,12 @@ categories = ["filesystem", "parser-implementations"]
 keywords = ["btrfs", "filesystem", "send", "receive", "stream"]
 
 [dependencies]
-anyhow = { workspace = true }
 crc32c = { workspace = true }
+thiserror = "2"
 uuid = { workspace = true }
 
 # receive feature dependencies
+anyhow = { workspace = true, optional = true }
 btrfs-uapi = { workspace = true, optional = true }
 nix = { workspace = true, optional = true }
 flate2 = { version = "1", optional = true }
@@ -23,4 +24,4 @@ zstd = { version = "0.13", optional = true }
 lzo1x = { version = "0.2", optional = true }
 
 [features]
-receive = ["dep:btrfs-uapi", "dep:nix", "dep:flate2", "dep:zstd", "dep:lzo1x"]
+receive = ["dep:anyhow", "dep:btrfs-uapi", "dep:nix", "dep:flate2", "dep:zstd", "dep:lzo1x"]

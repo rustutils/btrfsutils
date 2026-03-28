@@ -5,9 +5,54 @@
 //! by a sequence of commands, each with a CRC32C checksum and a set of
 //! typed TLV attributes.
 
-use anyhow::{Context, Result, bail};
 use std::io::Read;
 use uuid::Uuid;
+
+/// Errors that can occur while parsing a btrfs send stream.
+#[derive(Debug, thiserror::Error)]
+pub enum StreamError {
+    /// The stream header does not start with the btrfs send magic.
+    #[error("invalid send stream: bad magic")]
+    BadMagic,
+    /// The stream version is not supported (must be 1-3).
+    #[error("unsupported send stream version {0} (supported: 1-3)")]
+    UnsupportedVersion(u32),
+    /// CRC32C checksum mismatch on a command.
+    #[error(
+        "CRC mismatch for command {cmd}: expected {expected:#010x}, got {computed:#010x}"
+    )]
+    CrcMismatch {
+        cmd: u16,
+        expected: u32,
+        computed: u32,
+    },
+    /// The stream header could not be read completely.
+    #[error("truncated send stream header: {0}")]
+    TruncatedHeader(std::io::Error),
+    /// A command payload could not be read completely.
+    #[error("truncated send stream payload: {0}")]
+    TruncatedPayload(std::io::Error),
+    /// A TLV attribute structure is incomplete.
+    #[error("truncated TLV: {detail}")]
+    TruncatedTlv { detail: String },
+    /// A TLV attribute type is out of range.
+    #[error("invalid TLV attribute type {0}")]
+    InvalidTlvType(u16),
+    /// A required TLV attribute is missing from a command.
+    #[error("missing required attribute: {0}")]
+    MissingAttribute(&'static str),
+    /// A TLV attribute value is malformed (wrong size, bad encoding, etc.).
+    #[error("attribute {name}: {detail}")]
+    InvalidAttribute { name: &'static str, detail: String },
+    /// An unknown command type was encountered.
+    #[error("unknown send stream command type {0}")]
+    UnknownCommand(u16),
+    /// An underlying I/O error.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
+type Result<T> = std::result::Result<T, StreamError>;
 
 const SEND_STREAM_MAGIC: &[u8] = b"btrfs-stream\0";
 const SEND_STREAM_MAGIC_LEN: usize = 13;
@@ -249,10 +294,10 @@ impl<R: Read> StreamReader<R> {
         let mut header = [0u8; STREAM_HEADER_LEN];
         reader
             .read_exact(&mut header)
-            .context("failed to read stream header")?;
+            .map_err(StreamError::TruncatedHeader)?;
 
         if &header[..SEND_STREAM_MAGIC_LEN] != SEND_STREAM_MAGIC {
-            bail!("invalid send stream: bad magic");
+            return Err(StreamError::BadMagic);
         }
 
         let version = u32::from_le_bytes(
@@ -262,7 +307,7 @@ impl<R: Read> StreamReader<R> {
         );
 
         if version == 0 || version > 3 {
-            bail!("unsupported send stream version {version} (supported: 1-3)");
+            return Err(StreamError::UnsupportedVersion(version));
         }
 
         Ok(Self {
@@ -303,7 +348,7 @@ impl<R: Read> StreamReader<R> {
         self.buf.resize(payload_len, 0);
         self.reader
             .read_exact(&mut self.buf)
-            .context("truncated send stream: short payload")?;
+            .map_err(StreamError::TruncatedPayload)?;
 
         // Validate CRC32C: compute over header (with crc field zeroed) + payload.
         // The btrfs send stream uses a raw CRC-32C (init=0, xorout=0), not the
@@ -316,9 +361,11 @@ impl<R: Read> StreamReader<R> {
         crc_buf.extend_from_slice(&self.buf);
         let computed_crc = !crc32c::crc32c_append(!0, &crc_buf);
         if computed_crc != expected_crc {
-            bail!(
-                "CRC mismatch for command {cmd}: expected {expected_crc:#010x}, got {computed_crc:#010x}"
-            );
+            return Err(StreamError::CrcMismatch {
+                cmd,
+                expected: expected_crc,
+                computed: computed_crc,
+            });
         }
 
         // Parse TLV attributes from payload.
@@ -760,7 +807,7 @@ impl<R: Read> StreamReader<R> {
                 }))
             }
             BTRFS_SEND_C_END => Ok(Some(StreamCommand::End)),
-            _ => bail!("unknown send stream command type {cmd}"),
+            _ => Err(StreamError::UnknownCommand(cmd)),
         }
     }
 }
@@ -774,12 +821,15 @@ fn read_exact_or_eof(reader: &mut impl Read, buf: &mut [u8]) -> Result<bool> {
                 if pos == 0 {
                     return Ok(false);
                 }
-                bail!(
-                    "truncated send stream: unexpected EOF after {pos} bytes"
-                );
+                return Err(StreamError::TruncatedPayload(
+                    std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        format!("unexpected EOF after {pos} bytes"),
+                    ),
+                ));
             }
             Ok(n) => pos += n,
-            Err(e) => return Err(e).context("failed to read send stream"),
+            Err(e) => return Err(StreamError::TruncatedPayload(e)),
         }
     }
     Ok(true)
@@ -796,14 +846,16 @@ fn parse_tlv_attrs(payload: &[u8], version: u32) -> Result<AttrTable> {
 
     while pos < payload.len() {
         if pos + 2 > payload.len() {
-            bail!("truncated TLV: not enough bytes for type field");
+            return Err(StreamError::TruncatedTlv {
+                detail: "not enough bytes for type field".into(),
+            });
         }
         let tlv_type =
             u16::from_le_bytes(payload[pos..pos + 2].try_into().unwrap());
         pos += 2;
 
         if tlv_type == 0 || tlv_type as usize > MAX_ATTRS {
-            bail!("invalid TLV attribute type {tlv_type}");
+            return Err(StreamError::InvalidTlvType(tlv_type));
         }
 
         // In v2+, the DATA attribute has no length field — it extends to the
@@ -812,7 +864,9 @@ fn parse_tlv_attrs(payload: &[u8], version: u32) -> Result<AttrTable> {
             payload.len() - pos
         } else {
             if pos + 2 > payload.len() {
-                bail!("truncated TLV: not enough bytes for length field");
+                return Err(StreamError::TruncatedTlv {
+                    detail: "not enough bytes for length field".into(),
+                });
             }
             let len =
                 u16::from_le_bytes(payload[pos..pos + 2].try_into().unwrap())
@@ -822,10 +876,12 @@ fn parse_tlv_attrs(payload: &[u8], version: u32) -> Result<AttrTable> {
         };
 
         if pos + tlv_len > payload.len() {
-            bail!(
-                "truncated TLV: attribute type {tlv_type} needs {tlv_len} bytes but only {} remain",
-                payload.len() - pos
-            );
+            return Err(StreamError::TruncatedTlv {
+                detail: format!(
+                    "attribute type {tlv_type} needs {tlv_len} bytes but only {} remain",
+                    payload.len() - pos
+                ),
+            });
         }
 
         attrs[(tlv_type - 1) as usize] = Some((pos, tlv_len));
@@ -839,10 +895,10 @@ fn get_attr<'a>(
     buf: &'a [u8],
     attrs: &AttrTable,
     attr_type: u16,
-    name: &str,
+    name: &'static str,
 ) -> Result<&'a [u8]> {
     let (offset, len) = attrs[(attr_type - 1) as usize]
-        .ok_or_else(|| anyhow::anyhow!("missing required attribute: {name}"))?;
+        .ok_or(StreamError::MissingAttribute(name))?;
     Ok(&buf[offset..offset + len])
 }
 
@@ -850,11 +906,14 @@ fn attr_u64(
     buf: &[u8],
     attrs: &AttrTable,
     attr_type: u16,
-    name: &str,
+    name: &'static str,
 ) -> Result<u64> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     if data.len() < 8 {
-        bail!("attribute {name} too short for u64: {} bytes", data.len());
+        return Err(StreamError::InvalidAttribute {
+            name,
+            detail: format!("too short for u64: {} bytes", data.len()),
+        });
     }
     Ok(u64::from_le_bytes(data[0..8].try_into().unwrap()))
 }
@@ -863,7 +922,7 @@ fn attr_string(
     buf: &[u8],
     attrs: &AttrTable,
     attr_type: u16,
-    name: &str,
+    name: &'static str,
 ) -> Result<String> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     // Strings in the stream are null-terminated; strip the trailing NUL.
@@ -872,19 +931,24 @@ fn attr_string(
     } else {
         data
     };
-    String::from_utf8(s.to_vec())
-        .with_context(|| format!("attribute {name} is not valid UTF-8"))
+    String::from_utf8(s.to_vec()).map_err(|_| StreamError::InvalidAttribute {
+        name,
+        detail: "not valid UTF-8".into(),
+    })
 }
 
 fn attr_uuid(
     buf: &[u8],
     attrs: &AttrTable,
     attr_type: u16,
-    name: &str,
+    name: &'static str,
 ) -> Result<Uuid> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     if data.len() < 16 {
-        bail!("attribute {name} too short for UUID: {} bytes", data.len());
+        return Err(StreamError::InvalidAttribute {
+            name,
+            detail: format!("too short for UUID: {} bytes", data.len()),
+        });
     }
     Ok(Uuid::from_bytes(data[0..16].try_into().unwrap()))
 }
@@ -893,14 +957,14 @@ fn attr_timespec(
     buf: &[u8],
     attrs: &AttrTable,
     attr_type: u16,
-    name: &str,
+    name: &'static str,
 ) -> Result<Timespec> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     if data.len() < 12 {
-        bail!(
-            "attribute {name} too short for timespec: {} bytes",
-            data.len()
-        );
+        return Err(StreamError::InvalidAttribute {
+            name,
+            detail: format!("too short for timespec: {} bytes", data.len()),
+        });
     }
     Ok(Timespec {
         sec: u64::from_le_bytes(data[0..8].try_into().unwrap()),
@@ -912,11 +976,14 @@ fn attr_u32(
     buf: &[u8],
     attrs: &AttrTable,
     attr_type: u16,
-    name: &str,
+    name: &'static str,
 ) -> Result<u32> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     if data.len() < 4 {
-        bail!("attribute {name} too short for u32: {} bytes", data.len());
+        return Err(StreamError::InvalidAttribute {
+            name,
+            detail: format!("too short for u32: {} bytes", data.len()),
+        });
     }
     Ok(u32::from_le_bytes(data[0..4].try_into().unwrap()))
 }
@@ -925,11 +992,14 @@ fn attr_u8(
     buf: &[u8],
     attrs: &AttrTable,
     attr_type: u16,
-    name: &str,
+    name: &'static str,
 ) -> Result<u8> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     if data.is_empty() {
-        bail!("attribute {name} is empty");
+        return Err(StreamError::InvalidAttribute {
+            name,
+            detail: "is empty".into(),
+        });
     }
     Ok(data[0])
 }
@@ -963,7 +1033,7 @@ fn attr_data(
     buf: &[u8],
     attrs: &AttrTable,
     attr_type: u16,
-    name: &str,
+    name: &'static str,
 ) -> Result<Vec<u8>> {
     let data = get_attr(buf, attrs, attr_type, name)?;
     Ok(data.to_vec())
@@ -1100,10 +1170,7 @@ mod tests {
     fn truncated_header() {
         let buf = b"btrfs-str"; // too short
         let err = StreamReader::new(Cursor::new(buf.to_vec())).unwrap_err();
-        assert!(
-            format!("{err}").contains("failed to read stream header"),
-            "got: {err}"
-        );
+        assert!(matches!(err, StreamError::TruncatedHeader(_)), "got: {err}");
     }
 
     // --- END command ---
