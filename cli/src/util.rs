@@ -1,10 +1,12 @@
 use anyhow::{Context, Result, bail};
+use chrono::{DateTime, Local};
 use std::{
     fs::{self, File},
     io::BufRead,
     os::unix::fs::FileTypeExt,
     path::Path,
     str::FromStr,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use uuid::Uuid;
 
@@ -21,6 +23,41 @@ pub fn human_bytes(bytes: u64) -> String {
         format!("{bytes}B")
     } else {
         format!("{value:.2}{}", UNITS[unit])
+    }
+}
+
+/// Format a [`SystemTime`] as a local-time datetime string in the same style
+/// as the C btrfs-progs tool: `YYYY-MM-DD HH:MM:SS ±HHMM`.
+///
+/// Returns `"-"` when the time is [`UNIX_EPOCH`] (i.e. not set).
+pub fn format_time(t: SystemTime) -> String {
+    if t == UNIX_EPOCH {
+        return "-".to_string();
+    }
+    match DateTime::<Local>::from(t)
+        .format("%Y-%m-%d %H:%M:%S %z")
+        .to_string()
+    {
+        s if s.is_empty() => "-".to_string(),
+        s => s,
+    }
+}
+
+/// Format a [`SystemTime`] for replace-status output: `%e.%b %T`
+/// (e.g. ` 5.Mar 14:30:00`).
+pub fn format_time_short(t: &SystemTime) -> String {
+    DateTime::<Local>::from(*t).format("%e.%b %T").to_string()
+}
+
+/// Format a unix timestamp (sec, nsec) as `sec.nsec (YYYY-MM-DD HH:MM:SS)`.
+pub fn format_timespec(sec: u64, nsec: u32) -> String {
+    let sec_i64 = sec as i64;
+    match DateTime::from_timestamp(sec_i64, nsec) {
+        Some(utc) => {
+            let local = utc.with_timezone(&Local);
+            format!("{}.{} ({})", sec, nsec, local.format("%Y-%m-%d %H:%M:%S"))
+        }
+        None => format!("{sec}.{nsec}"),
     }
 }
 

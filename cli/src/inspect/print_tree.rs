@@ -1,9 +1,9 @@
+use crate::util::format_timespec;
 use btrfs_disk::{
     items::{self, FileExtentBody, InlineRef, ItemPayload, Timespec},
     raw,
     tree::{Header, ObjectId, TreeBlock, format_header_flags, format_key},
 };
-use nix::libc;
 use std::mem;
 
 pub struct PrintOptions {
@@ -129,24 +129,8 @@ fn print_header_flags_line(label: &str, header: &Header, opts: &PrintOptions) {
     println!("chunk uuid {}", header.chunk_tree_uuid.as_hyphenated());
 }
 
-fn format_timespec(ts: &Timespec) -> String {
-    let secs = ts.sec as libc::time_t;
-    let mut tm: libc::tm = unsafe { mem::zeroed() };
-    // SAFETY: localtime_r writes into the provided tm struct.
-    let result = unsafe { libc::localtime_r(&secs, &mut tm) };
-    if result.is_null() {
-        return format!("{}.{}", ts.sec, ts.nsec);
-    }
-    let year = tm.tm_year + 1900;
-    let mon = tm.tm_mon + 1;
-    let mday = tm.tm_mday;
-    let hour = tm.tm_hour;
-    let min = tm.tm_min;
-    let sec = tm.tm_sec;
-    format!(
-        "{}.{} ({year:04}-{mon:02}-{mday:02} {hour:02}:{min:02}:{sec:02})",
-        ts.sec, ts.nsec
-    )
+fn fmt_timespec(ts: &Timespec) -> String {
+    format_timespec(ts.sec, ts.nsec)
 }
 
 fn escape_bytes(data: &[u8]) -> String {
@@ -193,7 +177,7 @@ fn print_payload(
                 ("mtime", &v.mtime),
                 ("otime", &v.otime),
             ] {
-                println!("\t\t{name} {}", format_timespec(ts));
+                println!("\t\t{name} {}", fmt_timespec(ts));
             }
         }
         ItemPayload::InodeRef(refs) => {
@@ -282,7 +266,7 @@ fn print_payload(
                 ("stime", &v.stime),
                 ("rtime", &v.rtime),
             ] {
-                println!("\t\t{name} {}", format_timespec(ts));
+                println!("\t\t{name} {}", fmt_timespec(ts));
             }
         }
         ItemPayload::RootRef(v) => {

@@ -26,6 +26,7 @@ uuid = { workspace = true }
 btrfs-uapi = { workspace = true }
 btrfs-disk = { workspace = true }
 btrfs-stream = { workspace = true, features = ["receive"] }
+chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
 
 [dev-dependencies]
 insta = "1"
