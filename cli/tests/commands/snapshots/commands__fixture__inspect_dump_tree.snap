@@ -641,35 +641,32 @@ leaf 31031296 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
 chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 	item 0 key (DEV_STATS PERSISTENT_ITEM 1) itemoff 16243 itemsize 40
+		persistent item objectid DEV_STATS offset 1
 		device stats
-		[0]	write_errs 0
-		[1]	read_errs 0
-		[2]	flush_errs 0
-		[3]	corruption_errs 0
-		[4]	generation_errs 0
-	item 1 key (ROOT_TREE DEV_EXTENT 13631488) itemoff 16195 itemsize 48
+		write_errs 0 read_errs 0 flush_errs 0 corruption_errs 0 generation 0
+	item 1 key (1 DEV_EXTENT 13631488) itemoff 16195 itemsize 48
 		dev extent chunk_tree 3
 		chunk_objectid 256 chunk_offset 13631488 length 8388608
 		chunk_tree_uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
-	item 2 key (ROOT_TREE DEV_EXTENT 22020096) itemoff 16147 itemsize 48
+	item 2 key (1 DEV_EXTENT 22020096) itemoff 16147 itemsize 48
 		dev extent chunk_tree 3
 		chunk_objectid 256 chunk_offset 22020096 length 8388608
 		chunk_tree_uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
-	item 3 key (ROOT_TREE DEV_EXTENT 30408704) itemoff 16099 itemsize 48
+	item 3 key (1 DEV_EXTENT 30408704) itemoff 16099 itemsize 48
 		dev extent chunk_tree 3
 		chunk_objectid 256 chunk_offset 22020096 length 8388608
 		chunk_tree_uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
-	item 4 key (ROOT_TREE DEV_EXTENT 38797312) itemoff 16051 itemsize 48
+	item 4 key (1 DEV_EXTENT 38797312) itemoff 16051 itemsize 48
 		dev extent chunk_tree 3
 		chunk_objectid 256 chunk_offset 30408704 length 33554432
 		chunk_tree_uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
-	item 5 key (ROOT_TREE DEV_EXTENT 72351744) itemoff 16003 itemsize 48
+	item 5 key (1 DEV_EXTENT 72351744) itemoff 16003 itemsize 48
 		dev extent chunk_tree 3
 		chunk_objectid 256 chunk_offset 30408704 length 33554432
 		chunk_tree_uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 fs tree key (FS_TREE ROOT_ITEM 0) 
-node 31096832 level 1 items 20 free space 15609 generation 10 owner FS_TREE
-leaf 31096832 flags 0x1(WRITTEN) backref revision 1
+node 31096832 level 1 items 20 free space 473 generation 10 owner FS_TREE
+node 31096832 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
 chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 	key (256 INODE_ITEM 0) block 31113216 gen 10
@@ -760,7 +757,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 15 key (257 DIR_ITEM 2081425920) itemoff 15426 itemsize 34
 		location key (262 INODE_ITEM 0) type DIR
 		transid 9 data_len 0 name_len 4
@@ -831,7 +828,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 32 key (258 EXTENT_DATA 0) itemoff 14219 itemsize 462
 		generation 9 type 0 (inline)
 		inline extent data size 441 ram_bytes 441 compression 0 (none)
@@ -849,11 +846,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 36 key (259 EXTENT_DATA 0) itemoff 13903 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13631488 nr 32768
 		extent data offset 0 nr 32768 ram 32768
+		extent compression 0 (none)
 	item 37 key (260 INODE_ITEM 0) itemoff 13743 itemsize 160
 		generation 9 transid 9 size 1990 nbytes 1990
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -868,7 +866,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 40 key (260 EXTENT_DATA 0) itemoff 11631 itemsize 2011
 		generation 9 type 0 (inline)
 		inline extent data size 1990 ram_bytes 1990 compression 0 (none)
@@ -886,7 +884,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 44 key (261 EXTENT_DATA 0) itemoff 9551 itemsize 1818
 		generation 9 type 0 (inline)
 		inline extent data size 1797 ram_bytes 1797 compression 0 (none)
@@ -904,7 +902,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 48 key (262 DIR_ITEM 877716045) itemoff 9259 itemsize 35
 		location key (292 INODE_ITEM 0) type DIR
 		transid 9 data_len 0 name_len 5
@@ -959,7 +957,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 61 key (263 DIR_ITEM 192821837) itemoff 8629 itemsize 39
 		location key (285 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 9
@@ -1178,11 +1176,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 38 key (264 EXTENT_DATA 0) itemoff 14609 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13664256 nr 16384
 		extent data offset 0 nr 16384 ram 16384
+		extent compression 0 (none)
 	item 39 key (265 INODE_ITEM 0) itemoff 14449 itemsize 160
 		generation 9 transid 9 size 10987 nbytes 12288
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1197,11 +1196,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 42 key (265 EXTENT_DATA 0) itemoff 14293 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13680640 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 43 key (266 INODE_ITEM 0) itemoff 14133 itemsize 160
 		generation 9 transid 9 size 569 nbytes 569
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1216,7 +1216,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 46 key (266 EXTENT_DATA 0) itemoff 13443 itemsize 590
 		generation 9 type 0 (inline)
 		inline extent data size 569 ram_bytes 569 compression 0 (none)
@@ -1234,7 +1234,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 50 key (267 EXTENT_DATA 0) itemoff 11278 itemsize 1904
 		generation 9 type 0 (inline)
 		inline extent data size 1883 ram_bytes 1883 compression 0 (none)
@@ -1252,7 +1252,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 54 key (268 DIR_ITEM 1476145803) itemoff 10980 itemsize 42
 		location key (270 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 12
@@ -1287,11 +1287,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 1 key (269 EXTENT_DATA 0) itemoff 16147 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13692928 nr 45056
 		extent data offset 0 nr 45056 ram 45056
+		extent compression 0 (none)
 	item 2 key (270 INODE_ITEM 0) itemoff 15987 itemsize 160
 		generation 9 transid 9 size 36277 nbytes 36864
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1306,11 +1307,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 5 key (270 EXTENT_DATA 0) itemoff 15829 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13737984 nr 36864
 		extent data offset 0 nr 36864 ram 36864
+		extent compression 0 (none)
 	item 6 key (271 INODE_ITEM 0) itemoff 15669 itemsize 160
 		generation 9 transid 9 size 1458 nbytes 1458
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1325,7 +1327,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 9 key (271 EXTENT_DATA 0) itemoff 14084 itemsize 1479
 		generation 9 type 0 (inline)
 		inline extent data size 1458 ram_bytes 1458 compression 0 (none)
@@ -1343,11 +1345,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 13 key (272 EXTENT_DATA 0) itemoff 13770 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13774848 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 14 key (273 INODE_ITEM 0) itemoff 13610 itemsize 160
 		generation 9 transid 9 size 2505 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1362,11 +1365,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 17 key (273 EXTENT_DATA 0) itemoff 13457 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13778944 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 18 key (274 INODE_ITEM 0) itemoff 13297 itemsize 160
 		generation 9 transid 9 size 5407 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1381,11 +1385,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 21 key (274 EXTENT_DATA 0) itemoff 13138 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13783040 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 22 key (275 INODE_ITEM 0) itemoff 12978 itemsize 160
 		generation 9 transid 9 size 10838 nbytes 12288
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1400,11 +1405,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 25 key (275 EXTENT_DATA 0) itemoff 12824 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13791232 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 26 key (276 INODE_ITEM 0) itemoff 12664 itemsize 160
 		generation 9 transid 9 size 6160 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1419,11 +1425,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 29 key (276 EXTENT_DATA 0) itemoff 12509 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13803520 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 30 key (277 INODE_ITEM 0) itemoff 12349 itemsize 160
 		generation 9 transid 9 size 2671 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1438,11 +1445,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 33 key (277 EXTENT_DATA 0) itemoff 12196 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13811712 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 34 key (278 INODE_ITEM 0) itemoff 12036 itemsize 160
 		generation 9 transid 9 size 13853 nbytes 16384
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1457,11 +1465,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 37 key (278 EXTENT_DATA 0) itemoff 11882 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13815808 nr 16384
 		extent data offset 0 nr 16384 ram 16384
+		extent compression 0 (none)
 	item 38 key (279 INODE_ITEM 0) itemoff 11722 itemsize 160
 		generation 9 transid 9 size 4247 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1476,11 +1485,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 41 key (279 EXTENT_DATA 0) itemoff 11566 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13832192 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 42 key (280 INODE_ITEM 0) itemoff 11406 itemsize 160
 		generation 9 transid 9 size 418 nbytes 418
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1495,7 +1505,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 45 key (280 EXTENT_DATA 0) itemoff 10868 itemsize 439
 		generation 9 type 0 (inline)
 		inline extent data size 418 ram_bytes 418 compression 0 (none)
@@ -1513,11 +1523,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 49 key (281 EXTENT_DATA 0) itemoff 10548 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13840384 nr 16384
 		extent data offset 0 nr 16384 ram 16384
+		extent compression 0 (none)
 	item 50 key (282 INODE_ITEM 0) itemoff 10388 itemsize 160
 		generation 9 transid 9 size 33517 nbytes 36864
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1532,11 +1543,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 53 key (282 EXTENT_DATA 0) itemoff 10230 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13856768 nr 36864
 		extent data offset 0 nr 36864 ram 36864
+		extent compression 0 (none)
 	item 54 key (283 INODE_ITEM 0) itemoff 10070 itemsize 160
 		generation 9 transid 9 size 10387 nbytes 12288
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1551,11 +1563,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 57 key (283 EXTENT_DATA 0) itemoff 9916 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13893632 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 58 key (284 INODE_ITEM 0) itemoff 9756 itemsize 160
 		generation 9 transid 9 size 15292 nbytes 16384
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1570,11 +1583,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 61 key (284 EXTENT_DATA 0) itemoff 9602 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13905920 nr 16384
 		extent data offset 0 nr 16384 ram 16384
+		extent compression 0 (none)
 	item 62 key (285 INODE_ITEM 0) itemoff 9442 itemsize 160
 		generation 9 transid 9 size 8481 nbytes 12288
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1589,11 +1603,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 65 key (285 EXTENT_DATA 0) itemoff 9287 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13922304 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 66 key (286 INODE_ITEM 0) itemoff 9127 itemsize 160
 		generation 9 transid 9 size 11796 nbytes 12288
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1608,11 +1623,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 69 key (286 EXTENT_DATA 0) itemoff 8972 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13934592 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 70 key (287 INODE_ITEM 0) itemoff 8812 itemsize 160
 		generation 9 transid 9 size 6338 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1627,11 +1643,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 73 key (287 EXTENT_DATA 0) itemoff 8658 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13946880 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 74 key (288 INODE_ITEM 0) itemoff 8498 itemsize 160
 		generation 9 transid 9 size 4375 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1646,11 +1663,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 77 key (288 EXTENT_DATA 0) itemoff 8343 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13955072 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 78 key (289 INODE_ITEM 0) itemoff 8183 itemsize 160
 		generation 9 transid 9 size 9852 nbytes 12288
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1665,11 +1683,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 81 key (289 EXTENT_DATA 0) itemoff 8027 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13963264 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 82 key (290 INODE_ITEM 0) itemoff 7867 itemsize 160
 		generation 9 transid 9 size 17591 nbytes 20480
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1684,11 +1703,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 85 key (290 EXTENT_DATA 0) itemoff 7712 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13975552 nr 20480
 		extent data offset 0 nr 20480 ram 20480
+		extent compression 0 (none)
 	item 86 key (291 INODE_ITEM 0) itemoff 7552 itemsize 160
 		generation 9 transid 9 size 547 nbytes 547
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1703,7 +1723,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 89 key (291 EXTENT_DATA 0) itemoff 6883 itemsize 568
 		generation 9 type 0 (inline)
 		inline extent data size 547 ram_bytes 547 compression 0 (none)
@@ -1721,7 +1741,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 93 key (292 DIR_ITEM 192821837) itemoff 6586 itemsize 39
 		location key (297 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 9
@@ -1904,11 +1924,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 138 key (293 EXTENT_DATA 0) itemoff 4646 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 13996032 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 139 key (294 INODE_ITEM 0) itemoff 4486 itemsize 160
 		generation 9 transid 9 size 497 nbytes 497
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1923,7 +1944,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 142 key (294 EXTENT_DATA 0) itemoff 3867 itemsize 518
 		generation 9 type 0 (inline)
 		inline extent data size 497 ram_bytes 497 compression 0 (none)
@@ -1945,11 +1966,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 1 key (295 EXTENT_DATA 0) itemoff 16147 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14008320 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 2 key (296 INODE_ITEM 0) itemoff 15987 itemsize 160
 		generation 9 transid 9 size 3472 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1964,11 +1986,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 5 key (296 EXTENT_DATA 0) itemoff 15833 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14020608 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 6 key (297 INODE_ITEM 0) itemoff 15673 itemsize 160
 		generation 9 transid 9 size 3558 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -1983,11 +2006,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 9 key (297 EXTENT_DATA 0) itemoff 15518 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14024704 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 10 key (298 INODE_ITEM 0) itemoff 15358 itemsize 160
 		generation 9 transid 9 size 2379 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2002,11 +2026,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 13 key (298 EXTENT_DATA 0) itemoff 15199 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14028800 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 14 key (299 INODE_ITEM 0) itemoff 15039 itemsize 160
 		generation 9 transid 9 size 4794 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2021,11 +2046,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 17 key (299 EXTENT_DATA 0) itemoff 14884 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14032896 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 18 key (300 INODE_ITEM 0) itemoff 14724 itemsize 160
 		generation 9 transid 9 size 3369 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2040,11 +2066,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 21 key (300 EXTENT_DATA 0) itemoff 14569 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14041088 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 22 key (301 INODE_ITEM 0) itemoff 14409 itemsize 160
 		generation 9 transid 9 size 1867 nbytes 1867
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2059,7 +2086,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 25 key (301 EXTENT_DATA 0) itemoff 12415 itemsize 1888
 		generation 9 type 0 (inline)
 		inline extent data size 1867 ram_bytes 1867 compression 0 (none)
@@ -2077,11 +2104,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 29 key (302 EXTENT_DATA 0) itemoff 12101 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14045184 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 30 key (303 INODE_ITEM 0) itemoff 11941 itemsize 160
 		generation 9 transid 9 size 2336 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2096,11 +2124,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 33 key (303 EXTENT_DATA 0) itemoff 11787 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14053376 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 34 key (304 INODE_ITEM 0) itemoff 11627 itemsize 160
 		generation 9 transid 9 size 1251 nbytes 1251
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2115,7 +2144,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 37 key (304 EXTENT_DATA 0) itemoff 10254 itemsize 1272
 		generation 9 type 0 (inline)
 		inline extent data size 1251 ram_bytes 1251 compression 0 (none)
@@ -2133,7 +2162,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 41 key (305 EXTENT_DATA 0) itemoff 8100 itemsize 1893
 		generation 9 type 0 (inline)
 		inline extent data size 1872 ram_bytes 1872 compression 0 (none)
@@ -2151,7 +2180,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 45 key (306 EXTENT_DATA 0) itemoff 7382 itemsize 453
 		generation 9 type 0 (inline)
 		inline extent data size 432 ram_bytes 432 compression 0 (none)
@@ -2169,11 +2198,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 49 key (307 EXTENT_DATA 0) itemoff 7068 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14057472 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 50 key (308 INODE_ITEM 0) itemoff 6908 itemsize 160
 		generation 9 transid 9 size 6004 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2188,11 +2218,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 53 key (308 EXTENT_DATA 0) itemoff 6748 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14061568 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 54 key (309 INODE_ITEM 0) itemoff 6588 itemsize 160
 		generation 9 transid 9 size 9445 nbytes 12288
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2207,11 +2238,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 57 key (309 EXTENT_DATA 0) itemoff 6430 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14069760 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 58 key (310 INODE_ITEM 0) itemoff 6270 itemsize 160
 		generation 9 transid 9 size 5282 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2226,11 +2258,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 61 key (310 EXTENT_DATA 0) itemoff 6114 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14082048 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 62 key (311 INODE_ITEM 0) itemoff 5954 itemsize 160
 		generation 9 transid 9 size 3136 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2245,11 +2278,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 65 key (311 EXTENT_DATA 0) itemoff 5800 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14090240 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 66 key (312 INODE_ITEM 0) itemoff 5640 itemsize 160
 		generation 9 transid 9 size 3018 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2264,11 +2298,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 69 key (312 EXTENT_DATA 0) itemoff 5485 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14094336 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 70 key (313 INODE_ITEM 0) itemoff 5325 itemsize 160
 		generation 9 transid 9 size 6064 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2283,11 +2318,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 73 key (313 EXTENT_DATA 0) itemoff 5170 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14098432 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 74 key (314 INODE_ITEM 0) itemoff 5010 itemsize 160
 		generation 9 transid 9 size 1562 nbytes 1562
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2302,7 +2338,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 77 key (314 EXTENT_DATA 0) itemoff 3325 itemsize 1583
 		generation 9 type 0 (inline)
 		inline extent data size 1562 ram_bytes 1562 compression 0 (none)
@@ -2320,7 +2356,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 81 key (315 EXTENT_DATA 0) itemoff 2340 itemsize 722
 		generation 9 type 0 (inline)
 		inline extent data size 701 ram_bytes 701 compression 0 (none)
@@ -2342,7 +2378,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 1 key (316 DIR_ITEM 1359719870) itemoff 16162 itemsize 38
 		location key (327 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 8
@@ -2389,7 +2425,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 12 key (317 DIR_ITEM 358225702) itemoff 15611 itemsize 33
 		location key (318 INODE_ITEM 0) type DIR
 		transid 9 data_len 0 name_len 3
@@ -2444,7 +2480,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 25 key (318 DIR_ITEM 171220093) itemoff 14979 itemsize 35
 		location key (319 INODE_ITEM 0) type DIR
 		transid 9 data_len 0 name_len 5
@@ -2483,7 +2519,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 34 key (319 DIR_ITEM 864165544) itemoff 14491 itemsize 37
 		location key (320 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 7
@@ -2506,7 +2542,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 39 key (320 EXTENT_DATA 0) itemoff 13374 itemsize 820
 		generation 9 type 0 (inline)
 		inline extent data size 799 ram_bytes 799 compression 0 (none)
@@ -2524,11 +2560,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 43 key (321 EXTENT_DATA 0) itemoff 13061 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14106624 nr 45056
 		extent data offset 0 nr 45056 ram 45056
+		extent compression 0 (none)
 	item 44 key (322 INODE_ITEM 0) itemoff 12901 itemsize 160
 		generation 9 transid 9 size 36277 nbytes 36864
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2543,11 +2580,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 47 key (322 EXTENT_DATA 0) itemoff 12743 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14151680 nr 36864
 		extent data offset 0 nr 36864 ram 36864
+		extent compression 0 (none)
 	item 48 key (323 INODE_ITEM 0) itemoff 12583 itemsize 160
 		generation 9 transid 9 size 452 nbytes 452
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2562,7 +2600,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 51 key (323 EXTENT_DATA 0) itemoff 12011 itemsize 473
 		generation 9 type 0 (inline)
 		inline extent data size 452 ram_bytes 452 compression 0 (none)
@@ -2580,7 +2618,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 55 key (324 EXTENT_DATA 0) itemoff 11642 itemsize 110
 		generation 9 type 0 (inline)
 		inline extent data size 89 ram_bytes 89 compression 0 (none)
@@ -2598,11 +2636,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 59 key (325 EXTENT_DATA 0) itemoff 11323 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14188544 nr 32768
 		extent data offset 0 nr 32768 ram 32768
+		extent compression 0 (none)
 	item 60 key (326 INODE_ITEM 0) itemoff 11163 itemsize 160
 		generation 9 transid 9 size 45525 nbytes 49152
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2617,11 +2656,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 63 key (326 EXTENT_DATA 0) itemoff 11008 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14221312 nr 49152
 		extent data offset 0 nr 49152 ram 49152
+		extent compression 0 (none)
 	item 64 key (327 INODE_ITEM 0) itemoff 10848 itemsize 160
 		generation 9 transid 9 size 787 nbytes 787
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -2636,7 +2676,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 67 key (327 EXTENT_DATA 0) itemoff 9939 itemsize 808
 		generation 9 type 0 (inline)
 		inline extent data size 787 ram_bytes 787 compression 0 (none)
@@ -2654,7 +2694,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 71 key (328 EXTENT_DATA 0) itemoff 9208 itemsize 469
 		generation 9 type 0 (inline)
 		inline extent data size 448 ram_bytes 448 compression 0 (none)
@@ -2672,7 +2712,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 75 key (329 EXTENT_DATA 0) itemoff 8359 itemsize 586
 		generation 9 type 0 (inline)
 		inline extent data size 565 ram_bytes 565 compression 0 (none)
@@ -2690,7 +2730,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 79 key (330 DIR_ITEM 877716045) itemoff 8068 itemsize 35
 		location key (437 INODE_ITEM 0) type DIR
 		transid 9 data_len 0 name_len 5
@@ -2737,7 +2777,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 90 key (331 DIR_ITEM 213233694) itemoff 7518 itemsize 35
 		location key (423 INODE_ITEM 0) type DIR
 		transid 9 data_len 0 name_len 5
@@ -2996,7 +3036,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 42 key (332 EXTENT_DATA 0) itemoff 14361 itemsize 164
 		generation 9 type 0 (inline)
 		inline extent data size 143 ram_bytes 143 compression 0 (none)
@@ -3014,7 +3054,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 46 key (333 EXTENT_DATA 0) itemoff 12304 itemsize 1794
 		generation 9 type 0 (inline)
 		inline extent data size 1773 ram_bytes 1773 compression 0 (none)
@@ -3032,7 +3072,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 50 key (334 DIR_ITEM 76983911) itemoff 12006 itemsize 35
 		location key (335 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 5
@@ -3127,7 +3167,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 73 key (335 EXTENT_DATA 0) itemoff 10010 itemsize 1001
 		generation 9 type 0 (inline)
 		inline extent data size 980 ram_bytes 980 compression 0 (none)
@@ -3145,11 +3185,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 77 key (336 EXTENT_DATA 0) itemoff 9699 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14270464 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 78 key (337 INODE_ITEM 0) itemoff 9539 itemsize 160
 		generation 9 transid 9 size 648 nbytes 648
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3164,7 +3205,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 81 key (337 EXTENT_DATA 0) itemoff 8770 itemsize 669
 		generation 9 type 0 (inline)
 		inline extent data size 648 ram_bytes 648 compression 0 (none)
@@ -3182,11 +3223,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 85 key (338 EXTENT_DATA 0) itemoff 8455 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14278656 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 86 key (339 INODE_ITEM 0) itemoff 8295 itemsize 160
 		generation 9 transid 9 size 3301 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3201,11 +3243,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 89 key (339 EXTENT_DATA 0) itemoff 8136 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14282752 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 90 key (340 INODE_ITEM 0) itemoff 7976 itemsize 160
 		generation 9 transid 9 size 1868 nbytes 1868
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3220,7 +3263,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 93 key (340 EXTENT_DATA 0) itemoff 5979 itemsize 1889
 		generation 9 type 0 (inline)
 		inline extent data size 1868 ram_bytes 1868 compression 0 (none)
@@ -3242,7 +3285,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 3 key (341 EXTENT_DATA 0) itemoff 14541 itemsize 1481
 		generation 9 type 0 (inline)
 		inline extent data size 1460 ram_bytes 1460 compression 0 (none)
@@ -3260,11 +3303,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 7 key (342 EXTENT_DATA 0) itemoff 14227 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14286848 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 8 key (343 INODE_ITEM 0) itemoff 14067 itemsize 160
 		generation 9 transid 9 size 3868 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3279,11 +3323,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 11 key (343 EXTENT_DATA 0) itemoff 13914 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14299136 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 12 key (344 INODE_ITEM 0) itemoff 13754 itemsize 160
 		generation 9 transid 9 size 3200 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3298,11 +3343,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 15 key (344 EXTENT_DATA 0) itemoff 13599 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14303232 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 16 key (345 INODE_ITEM 0) itemoff 13439 itemsize 160
 		generation 9 transid 9 size 4107 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3317,11 +3363,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 19 key (345 EXTENT_DATA 0) itemoff 13280 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14307328 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 20 key (346 INODE_ITEM 0) itemoff 13120 itemsize 160
 		generation 9 transid 9 size 3842 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3336,11 +3383,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 23 key (346 EXTENT_DATA 0) itemoff 12966 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14315520 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 24 key (347 INODE_ITEM 0) itemoff 12806 itemsize 160
 		generation 9 transid 9 size 92 nbytes 0
 		block group 0 mode 40755 links 1 uid 0 gid 0 rdev 0
@@ -3355,7 +3403,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 27 key (347 DIR_ITEM 440968595) itemoff 12671 itemsize 36
 		location key (348 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 6
@@ -3418,7 +3466,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 42 key (348 EXTENT_DATA 0) itemoff 9945 itemsize 2051
 		generation 9 type 0 (inline)
 		inline extent data size 2030 ram_bytes 2030 compression 0 (none)
@@ -3436,11 +3484,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 46 key (349 EXTENT_DATA 0) itemoff 9630 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14319616 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 47 key (350 INODE_ITEM 0) itemoff 9470 itemsize 160
 		generation 9 transid 9 size 2792 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3455,11 +3504,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 50 key (350 EXTENT_DATA 0) itemoff 9316 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14323712 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 51 key (351 INODE_ITEM 0) itemoff 9156 itemsize 160
 		generation 9 transid 9 size 3558 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3474,11 +3524,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 54 key (351 EXTENT_DATA 0) itemoff 9003 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14327808 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 55 key (352 INODE_ITEM 0) itemoff 8843 itemsize 160
 		generation 9 transid 9 size 1810 nbytes 1810
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3493,7 +3544,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 58 key (352 EXTENT_DATA 0) itemoff 6911 itemsize 1831
 		generation 9 type 0 (inline)
 		inline extent data size 1810 ram_bytes 1810 compression 0 (none)
@@ -3511,11 +3562,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 62 key (353 EXTENT_DATA 0) itemoff 6597 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14331904 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 63 key (354 INODE_ITEM 0) itemoff 6437 itemsize 160
 		generation 9 transid 9 size 1639 nbytes 1639
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3530,7 +3582,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 66 key (354 EXTENT_DATA 0) itemoff 4675 itemsize 1660
 		generation 9 type 0 (inline)
 		inline extent data size 1639 ram_bytes 1639 compression 0 (none)
@@ -3548,7 +3600,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 70 key (355 DIR_ITEM 378922261) itemoff 4374 itemsize 39
 		location key (356 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 9
@@ -3643,11 +3695,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 93 key (356 EXTENT_DATA 0) itemoff 3304 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14336000 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 94 key (357 INODE_ITEM 0) itemoff 3144 itemsize 160
 		generation 9 transid 9 size 3066 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3662,11 +3715,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 97 key (357 EXTENT_DATA 0) itemoff 2989 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14340096 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 98 key (358 INODE_ITEM 0) itemoff 2829 itemsize 160
 		generation 9 transid 9 size 2855 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3681,11 +3735,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 101 key (358 EXTENT_DATA 0) itemoff 2672 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14344192 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 leaf 30736384 items 90 free space 886 generation 9 owner FS_TREE
 leaf 30736384 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
@@ -3704,11 +3759,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 3 key (359 EXTENT_DATA 0) itemoff 15970 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14348288 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 4 key (360 INODE_ITEM 0) itemoff 15810 itemsize 160
 		generation 9 transid 9 size 3487 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3723,11 +3779,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 7 key (360 EXTENT_DATA 0) itemoff 15657 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14352384 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 8 key (361 INODE_ITEM 0) itemoff 15497 itemsize 160
 		generation 9 transid 9 size 1109 nbytes 1109
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3742,7 +3799,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 11 key (361 EXTENT_DATA 0) itemoff 14260 itemsize 1130
 		generation 9 type 0 (inline)
 		inline extent data size 1109 ram_bytes 1109 compression 0 (none)
@@ -3760,11 +3817,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 15 key (362 EXTENT_DATA 0) itemoff 13940 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14356480 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 16 key (363 INODE_ITEM 0) itemoff 13780 itemsize 160
 		generation 9 transid 9 size 668 nbytes 668
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3779,7 +3837,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 19 key (363 EXTENT_DATA 0) itemoff 12987 itemsize 689
 		generation 9 type 0 (inline)
 		inline extent data size 668 ram_bytes 668 compression 0 (none)
@@ -3797,7 +3855,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 23 key (364 EXTENT_DATA 0) itemoff 11717 itemsize 1010
 		generation 9 type 0 (inline)
 		inline extent data size 989 ram_bytes 989 compression 0 (none)
@@ -3815,11 +3873,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 27 key (365 EXTENT_DATA 0) itemoff 11403 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14360576 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 28 key (366 INODE_ITEM 0) itemoff 11243 itemsize 160
 		generation 9 transid 9 size 2551 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -3834,11 +3893,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 31 key (366 EXTENT_DATA 0) itemoff 11085 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14364672 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 32 key (367 INODE_ITEM 0) itemoff 10925 itemsize 160
 		generation 9 transid 9 size 288 nbytes 0
 		block group 0 mode 40755 links 1 uid 0 gid 0 rdev 0
@@ -3853,7 +3913,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 35 key (367 DIR_ITEM 1029915347) itemoff 10780 itemsize 45
 		location key (372 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 15
@@ -3948,7 +4008,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 58 key (368 EXTENT_DATA 0) itemoff 8871 itemsize 804
 		generation 9 type 0 (inline)
 		inline extent data size 783 ram_bytes 783 compression 0 (none)
@@ -3966,7 +4026,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 62 key (369 EXTENT_DATA 0) itemoff 7572 itemsize 1030
 		generation 9 type 0 (inline)
 		inline extent data size 1009 ram_bytes 1009 compression 0 (none)
@@ -3984,11 +4044,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 66 key (370 EXTENT_DATA 0) itemoff 7248 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14368768 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 67 key (371 INODE_ITEM 0) itemoff 7088 itemsize 160
 		generation 9 transid 9 size 884 nbytes 884
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4003,7 +4064,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 70 key (371 EXTENT_DATA 0) itemoff 6071 itemsize 905
 		generation 9 type 0 (inline)
 		inline extent data size 884 ram_bytes 884 compression 0 (none)
@@ -4021,7 +4082,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 74 key (372 EXTENT_DATA 0) itemoff 5353 itemsize 450
 		generation 9 type 0 (inline)
 		inline extent data size 429 ram_bytes 429 compression 0 (none)
@@ -4039,7 +4100,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 78 key (373 EXTENT_DATA 0) itemoff 4447 itemsize 641
 		generation 9 type 0 (inline)
 		inline extent data size 620 ram_bytes 620 compression 0 (none)
@@ -4057,7 +4118,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 82 key (374 EXTENT_DATA 0) itemoff 3724 itemsize 457
 		generation 9 type 0 (inline)
 		inline extent data size 436 ram_bytes 436 compression 0 (none)
@@ -4075,11 +4136,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 86 key (375 EXTENT_DATA 0) itemoff 3404 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14372864 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 87 key (376 INODE_ITEM 0) itemoff 3244 itemsize 160
 		generation 9 transid 9 size 1264 nbytes 1264
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4094,7 +4156,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 leaf 30752768 items 98 free space 44 generation 9 owner FS_TREE
 leaf 30752768 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
@@ -4116,11 +4178,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 4 key (377 EXTENT_DATA 0) itemoff 14679 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14385152 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 5 key (378 INODE_ITEM 0) itemoff 14519 itemsize 160
 		generation 9 transid 9 size 2484 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4135,11 +4198,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 8 key (378 EXTENT_DATA 0) itemoff 14363 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14389248 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 9 key (379 INODE_ITEM 0) itemoff 14203 itemsize 160
 		generation 9 transid 9 size 2179 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4154,11 +4218,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 12 key (379 EXTENT_DATA 0) itemoff 14049 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14393344 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 13 key (380 INODE_ITEM 0) itemoff 13889 itemsize 160
 		generation 9 transid 9 size 2217 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4173,11 +4238,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 16 key (380 EXTENT_DATA 0) itemoff 13733 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14397440 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 17 key (381 INODE_ITEM 0) itemoff 13573 itemsize 160
 		generation 9 transid 9 size 52 nbytes 0
 		block group 0 mode 40755 links 1 uid 0 gid 0 rdev 0
@@ -4192,7 +4258,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 20 key (381 DIR_ITEM 2801948525) itemoff 13435 itemsize 38
 		location key (384 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 8
@@ -4231,7 +4297,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 29 key (382 EXTENT_DATA 0) itemoff 11699 itemsize 1280
 		generation 9 type 0 (inline)
 		inline extent data size 1259 ram_bytes 1259 compression 0 (none)
@@ -4249,11 +4315,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 33 key (383 EXTENT_DATA 0) itemoff 11384 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14401536 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 34 key (384 INODE_ITEM 0) itemoff 11224 itemsize 160
 		generation 9 transid 9 size 4619 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4268,11 +4335,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 37 key (384 EXTENT_DATA 0) itemoff 11070 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14409728 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 38 key (385 INODE_ITEM 0) itemoff 10910 itemsize 160
 		generation 9 transid 9 size 322 nbytes 0
 		block group 0 mode 40755 links 1 uid 0 gid 0 rdev 0
@@ -4287,7 +4355,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 41 key (385 DIR_ITEM 97279706) itemoff 10765 itemsize 46
 		location key (387 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 16
@@ -4374,7 +4442,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 62 key (386 EXTENT_DATA 0) itemoff 9114 itemsize 566
 		generation 9 type 0 (inline)
 		inline extent data size 545 ram_bytes 545 compression 0 (none)
@@ -4392,7 +4460,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 66 key (387 EXTENT_DATA 0) itemoff 8303 itemsize 542
 		generation 9 type 0 (inline)
 		inline extent data size 521 ram_bytes 521 compression 0 (none)
@@ -4410,7 +4478,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 70 key (388 EXTENT_DATA 0) itemoff 7581 itemsize 451
 		generation 9 type 0 (inline)
 		inline extent data size 430 ram_bytes 430 compression 0 (none)
@@ -4428,7 +4496,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 74 key (389 EXTENT_DATA 0) itemoff 6926 itemsize 378
 		generation 9 type 0 (inline)
 		inline extent data size 357 ram_bytes 357 compression 0 (none)
@@ -4446,7 +4514,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 78 key (390 EXTENT_DATA 0) itemoff 6181 itemsize 474
 		generation 9 type 0 (inline)
 		inline extent data size 453 ram_bytes 453 compression 0 (none)
@@ -4464,7 +4532,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 82 key (391 EXTENT_DATA 0) itemoff 5458 itemsize 459
 		generation 9 type 0 (inline)
 		inline extent data size 438 ram_bytes 438 compression 0 (none)
@@ -4482,7 +4550,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 86 key (392 EXTENT_DATA 0) itemoff 4532 itemsize 653
 		generation 9 type 0 (inline)
 		inline extent data size 632 ram_bytes 632 compression 0 (none)
@@ -4500,7 +4568,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 90 key (393 EXTENT_DATA 0) itemoff 3510 itemsize 749
 		generation 9 type 0 (inline)
 		inline extent data size 728 ram_bytes 728 compression 0 (none)
@@ -4518,7 +4586,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 94 key (394 EXTENT_DATA 0) itemoff 2755 itemsize 484
 		generation 9 type 0 (inline)
 		inline extent data size 463 ram_bytes 463 compression 0 (none)
@@ -4536,7 +4604,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 leaf 30769152 items 101 free space 183 generation 9 owner FS_TREE
 leaf 30769152 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
@@ -4579,11 +4647,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 9 key (396 EXTENT_DATA 0) itemoff 15753 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14417920 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 10 key (397 INODE_ITEM 0) itemoff 15593 itemsize 160
 		generation 9 transid 9 size 3863 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4598,11 +4667,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 13 key (397 EXTENT_DATA 0) itemoff 15440 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14426112 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 14 key (398 INODE_ITEM 0) itemoff 15280 itemsize 160
 		generation 9 transid 9 size 7148 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4617,11 +4687,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 17 key (398 EXTENT_DATA 0) itemoff 15128 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14430208 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 18 key (399 INODE_ITEM 0) itemoff 14968 itemsize 160
 		generation 9 transid 9 size 74 nbytes 0
 		block group 0 mode 40755 links 1 uid 0 gid 0 rdev 0
@@ -4636,7 +4707,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 21 key (399 DIR_ITEM 414068742) itemoff 14831 itemsize 39
 		location key (403 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 9
@@ -4683,7 +4754,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 32 key (400 EXTENT_DATA 0) itemoff 13480 itemsize 813
 		generation 9 type 0 (inline)
 		inline extent data size 792 ram_bytes 792 compression 0 (none)
@@ -4701,11 +4772,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 36 key (401 EXTENT_DATA 0) itemoff 13165 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14438400 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 37 key (402 INODE_ITEM 0) itemoff 13005 itemsize 160
 		generation 9 transid 9 size 1078 nbytes 1078
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4720,7 +4792,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 40 key (402 EXTENT_DATA 0) itemoff 11804 itemsize 1099
 		generation 9 type 0 (inline)
 		inline extent data size 1078 ram_bytes 1078 compression 0 (none)
@@ -4738,11 +4810,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 44 key (403 EXTENT_DATA 0) itemoff 11489 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14442496 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 45 key (404 INODE_ITEM 0) itemoff 11329 itemsize 160
 		generation 9 transid 9 size 132 nbytes 0
 		block group 0 mode 40755 links 1 uid 0 gid 0 rdev 0
@@ -4757,7 +4830,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 48 key (404 DIR_ITEM 378922261) itemoff 11191 itemsize 39
 		location key (405 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 9
@@ -4828,7 +4901,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 65 key (405 EXTENT_DATA 0) itemoff 9102 itemsize 1314
 		generation 9 type 0 (inline)
 		inline extent data size 1293 ram_bytes 1293 compression 0 (none)
@@ -4846,7 +4919,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 69 key (406 EXTENT_DATA 0) itemoff 7792 itemsize 1043
 		generation 9 type 0 (inline)
 		inline extent data size 1022 ram_bytes 1022 compression 0 (none)
@@ -4864,7 +4937,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 73 key (407 EXTENT_DATA 0) itemoff 6214 itemsize 1315
 		generation 9 type 0 (inline)
 		inline extent data size 1294 ram_bytes 1294 compression 0 (none)
@@ -4882,11 +4955,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 77 key (408 EXTENT_DATA 0) itemoff 5899 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14446592 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 78 key (409 INODE_ITEM 0) itemoff 5739 itemsize 160
 		generation 9 transid 9 size 2357 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4901,11 +4975,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 81 key (409 EXTENT_DATA 0) itemoff 5584 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14450688 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 82 key (410 INODE_ITEM 0) itemoff 5424 itemsize 160
 		generation 9 transid 9 size 3056 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4920,11 +4995,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 85 key (410 EXTENT_DATA 0) itemoff 5270 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14454784 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 86 key (411 INODE_ITEM 0) itemoff 5110 itemsize 160
 		generation 9 transid 9 size 9129 nbytes 12288
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4939,11 +5015,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 89 key (411 EXTENT_DATA 0) itemoff 4957 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14458880 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 90 key (412 INODE_ITEM 0) itemoff 4797 itemsize 160
 		generation 9 transid 9 size 2508 nbytes 4096
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4958,11 +5035,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 93 key (412 EXTENT_DATA 0) itemoff 4642 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14471168 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 94 key (413 INODE_ITEM 0) itemoff 4482 itemsize 160
 		generation 9 transid 9 size 1388 nbytes 1388
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -4977,7 +5055,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 97 key (413 EXTENT_DATA 0) itemoff 2969 itemsize 1409
 		generation 9 type 0 (inline)
 		inline extent data size 1388 ram_bytes 1388 compression 0 (none)
@@ -4995,7 +5073,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 leaf 30785536 items 35 free space 5230 generation 9 owner FS_TREE
 leaf 30785536 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
@@ -5017,7 +5095,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 4 key (415 EXTENT_DATA 0) itemoff 13627 itemsize 1134
 		generation 9 type 0 (inline)
 		inline extent data size 1113 ram_bytes 1113 compression 0 (none)
@@ -5035,7 +5113,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 8 key (416 EXTENT_DATA 0) itemoff 11524 itemsize 1841
 		generation 9 type 0 (inline)
 		inline extent data size 1820 ram_bytes 1820 compression 0 (none)
@@ -5053,7 +5131,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 12 key (417 DIR_ITEM 10471538) itemoff 11225 itemsize 39
 		location key (420 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 9
@@ -5108,7 +5186,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 25 key (418 EXTENT_DATA 0) itemoff 9635 itemsize 982
 		generation 9 type 0 (inline)
 		inline extent data size 961 ram_bytes 961 compression 0 (none)
@@ -5126,7 +5204,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 29 key (419 EXTENT_DATA 0) itemoff 8395 itemsize 978
 		generation 9 type 0 (inline)
 		inline extent data size 957 ram_bytes 957 compression 0 (none)
@@ -5144,7 +5222,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 33 key (420 EXTENT_DATA 0) itemoff 6265 itemsize 1868
 		generation 9 type 0 (inline)
 		inline extent data size 1847 ram_bytes 1847 compression 0 (none)
@@ -5166,7 +5244,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 2 key (421 EXTENT_DATA 0) itemoff 14172 itemsize 2009
 		generation 9 type 0 (inline)
 		inline extent data size 1988 ram_bytes 1988 compression 0 (none)
@@ -5184,11 +5262,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 6 key (422 EXTENT_DATA 0) itemoff 13858 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14475264 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 7 key (423 INODE_ITEM 0) itemoff 13698 itemsize 160
 		generation 9 transid 9 size 86 nbytes 0
 		block group 0 mode 40755 links 1 uid 0 gid 0 rdev 0
@@ -5203,7 +5282,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 10 key (423 DIR_ITEM 10471538) itemoff 13561 itemsize 39
 		location key (426 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 9
@@ -5258,7 +5337,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 23 key (424 EXTENT_DATA 0) itemoff 10884 itemsize 2069
 		generation 9 type 0 (inline)
 		inline extent data size 2048 ram_bytes 2048 compression 0 (none)
@@ -5276,7 +5355,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 27 key (425 EXTENT_DATA 0) itemoff 9809 itemsize 813
 		generation 9 type 0 (inline)
 		inline extent data size 792 ram_bytes 792 compression 0 (none)
@@ -5294,7 +5373,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 31 key (426 EXTENT_DATA 0) itemoff 7614 itemsize 1933
 		generation 9 type 0 (inline)
 		inline extent data size 1912 ram_bytes 1912 compression 0 (none)
@@ -5312,11 +5391,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 35 key (427 EXTENT_DATA 0) itemoff 7299 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14483456 nr 4096
 		extent data offset 0 nr 4096 ram 4096
+		extent compression 0 (none)
 	item 36 key (428 INODE_ITEM 0) itemoff 7139 itemsize 160
 		generation 9 transid 9 size 4678 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -5331,11 +5411,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 39 key (428 EXTENT_DATA 0) itemoff 6985 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14487552 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 40 key (429 INODE_ITEM 0) itemoff 6825 itemsize 160
 		generation 9 transid 9 size 12367 nbytes 16384
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -5350,11 +5431,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 43 key (429 EXTENT_DATA 0) itemoff 6672 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14495744 nr 16384
 		extent data offset 0 nr 16384 ram 16384
+		extent compression 0 (none)
 	item 44 key (430 INODE_ITEM 0) itemoff 6512 itemsize 160
 		generation 9 transid 9 size 26 nbytes 0
 		block group 0 mode 40755 links 1 uid 0 gid 0 rdev 0
@@ -5369,7 +5451,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 47 key (430 DIR_ITEM 2352282796) itemoff 6376 itemsize 36
 		location key (431 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 6
@@ -5400,11 +5482,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 54 key (431 EXTENT_DATA 0) itemoff 5954 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14512128 nr 24576
 		extent data offset 0 nr 24576 ram 24576
+		extent compression 0 (none)
 	item 55 key (432 INODE_ITEM 0) itemoff 5794 itemsize 160
 		generation 9 transid 9 size 6431 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -5419,11 +5502,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 58 key (432 EXTENT_DATA 0) itemoff 5641 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14536704 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 59 key (433 INODE_ITEM 0) itemoff 5481 itemsize 160
 		generation 9 transid 9 size 6941 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -5438,11 +5522,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 62 key (433 EXTENT_DATA 0) itemoff 5328 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14544896 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 63 key (434 INODE_ITEM 0) itemoff 5168 itemsize 160
 		generation 9 transid 9 size 4214 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -5457,11 +5542,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 66 key (434 EXTENT_DATA 0) itemoff 5016 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14553088 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 67 key (435 INODE_ITEM 0) itemoff 4856 itemsize 160
 		generation 9 transid 9 size 4897 nbytes 8192
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -5476,11 +5562,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 70 key (435 EXTENT_DATA 0) itemoff 4700 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14561280 nr 8192
 		extent data offset 0 nr 8192 ram 8192
+		extent compression 0 (none)
 	item 71 key (436 INODE_ITEM 0) itemoff 4540 itemsize 160
 		generation 9 transid 9 size 560 nbytes 560
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -5495,7 +5582,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 74 key (436 EXTENT_DATA 0) itemoff 3857 itemsize 581
 		generation 9 type 0 (inline)
 		inline extent data size 560 ram_bytes 560 compression 0 (none)
@@ -5513,7 +5600,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 leaf 30801920 items 126 free space 5117 generation 9 owner FS_TREE
 leaf 30801920 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
@@ -5572,11 +5659,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 13 key (438 EXTENT_DATA 0) itemoff 15547 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14569472 nr 16384
 		extent data offset 0 nr 16384 ram 16384
+		extent compression 0 (none)
 	item 14 key (439 INODE_ITEM 0) itemoff 15387 itemsize 160
 		generation 9 transid 9 size 7496 nbytes 0
 		block group 0 mode 40755 links 1 uid 0 gid 0 rdev 0
@@ -5591,7 +5679,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 17 key (439 DIR_ITEM 120351565) itemoff 15218 itemsize 67
 		location key (535 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 37
@@ -6482,7 +6570,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 112 key (440 EXTENT_DATA 0) itemoff 8489 itemsize 493
 		generation 9 type 0 (inline)
 		inline extent data size 472 ram_bytes 472 compression 0 (none)
@@ -6500,7 +6588,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 116 key (441 EXTENT_DATA 0) itemoff 7717 itemsize 490
 		generation 9 type 0 (inline)
 		inline extent data size 469 ram_bytes 469 compression 0 (none)
@@ -6518,7 +6606,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 120 key (442 EXTENT_DATA 0) itemoff 6941 itemsize 493
 		generation 9 type 0 (inline)
 		inline extent data size 472 ram_bytes 472 compression 0 (none)
@@ -6536,7 +6624,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 124 key (443 EXTENT_DATA 0) itemoff 5893 itemsize 766
 		generation 9 type 0 (inline)
 		inline extent data size 745 ram_bytes 745 compression 0 (none)
@@ -6554,7 +6642,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 128 key (444 EXTENT_DATA 0) itemoff 5408 itemsize 190
 		generation 9 type 0 (inline)
 		inline extent data size 169 ram_bytes 169 compression 0 (none)
@@ -6572,7 +6660,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 132 key (445 EXTENT_DATA 0) itemoff 4259 itemsize 854
 		generation 9 type 0 (inline)
 		inline extent data size 833 ram_bytes 833 compression 0 (none)
@@ -6590,7 +6678,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 136 key (446 EXTENT_DATA 0) itemoff 3483 itemsize 493
 		generation 9 type 0 (inline)
 		inline extent data size 472 ram_bytes 472 compression 0 (none)
@@ -6612,7 +6700,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 3 key (447 EXTENT_DATA 0) itemoff 15425 itemsize 579
 		generation 9 type 0 (inline)
 		inline extent data size 558 ram_bytes 558 compression 0 (none)
@@ -6630,7 +6718,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 7 key (448 EXTENT_DATA 0) itemoff 14931 itemsize 201
 		generation 9 type 0 (inline)
 		inline extent data size 180 ram_bytes 180 compression 0 (none)
@@ -6648,7 +6736,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 11 key (449 EXTENT_DATA 0) itemoff 14152 itemsize 498
 		generation 9 type 0 (inline)
 		inline extent data size 477 ram_bytes 477 compression 0 (none)
@@ -6666,7 +6754,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 15 key (450 EXTENT_DATA 0) itemoff 13282 itemsize 588
 		generation 9 type 0 (inline)
 		inline extent data size 567 ram_bytes 567 compression 0 (none)
@@ -6684,7 +6772,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 19 key (451 EXTENT_DATA 0) itemoff 12495 itemsize 507
 		generation 9 type 0 (inline)
 		inline extent data size 486 ram_bytes 486 compression 0 (none)
@@ -6702,7 +6790,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 23 key (452 EXTENT_DATA 0) itemoff 11660 itemsize 554
 		generation 9 type 0 (inline)
 		inline extent data size 533 ram_bytes 533 compression 0 (none)
@@ -6720,7 +6808,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 27 key (453 EXTENT_DATA 0) itemoff 10812 itemsize 561
 		generation 9 type 0 (inline)
 		inline extent data size 540 ram_bytes 540 compression 0 (none)
@@ -6738,7 +6826,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 31 key (454 EXTENT_DATA 0) itemoff 9602 itemsize 924
 		generation 9 type 0 (inline)
 		inline extent data size 903 ram_bytes 903 compression 0 (none)
@@ -6756,7 +6844,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 35 key (455 EXTENT_DATA 0) itemoff 8257 itemsize 1050
 		generation 9 type 0 (inline)
 		inline extent data size 1029 ram_bytes 1029 compression 0 (none)
@@ -6774,7 +6862,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 39 key (456 EXTENT_DATA 0) itemoff 7482 itemsize 493
 		generation 9 type 0 (inline)
 		inline extent data size 472 ram_bytes 472 compression 0 (none)
@@ -6792,7 +6880,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 43 key (457 EXTENT_DATA 0) itemoff 6997 itemsize 190
 		generation 9 type 0 (inline)
 		inline extent data size 169 ram_bytes 169 compression 0 (none)
@@ -6810,7 +6898,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 47 key (458 EXTENT_DATA 0) itemoff 5753 itemsize 962
 		generation 9 type 0 (inline)
 		inline extent data size 941 ram_bytes 941 compression 0 (none)
@@ -6828,7 +6916,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 51 key (459 EXTENT_DATA 0) itemoff 4915 itemsize 549
 		generation 9 type 0 (inline)
 		inline extent data size 528 ram_bytes 528 compression 0 (none)
@@ -6846,7 +6934,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 55 key (460 EXTENT_DATA 0) itemoff 4004 itemsize 622
 		generation 9 type 0 (inline)
 		inline extent data size 601 ram_bytes 601 compression 0 (none)
@@ -6864,7 +6952,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 59 key (461 EXTENT_DATA 0) itemoff 3123 itemsize 591
 		generation 9 type 0 (inline)
 		inline extent data size 570 ram_bytes 570 compression 0 (none)
@@ -6882,7 +6970,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 63 key (462 EXTENT_DATA 0) itemoff 2216 itemsize 607
 		generation 9 type 0 (inline)
 		inline extent data size 586 ram_bytes 586 compression 0 (none)
@@ -6900,7 +6988,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 leaf 30851072 items 69 free space 69 generation 9 owner FS_TREE
 leaf 30851072 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
@@ -6922,7 +7010,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 4 key (464 EXTENT_DATA 0) itemoff 15162 itemsize 203
 		generation 9 type 0 (inline)
 		inline extent data size 182 ram_bytes 182 compression 0 (none)
@@ -6940,7 +7028,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 8 key (465 EXTENT_DATA 0) itemoff 14248 itemsize 630
 		generation 9 type 0 (inline)
 		inline extent data size 609 ram_bytes 609 compression 0 (none)
@@ -6958,7 +7046,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 12 key (466 EXTENT_DATA 0) itemoff 13391 itemsize 565
 		generation 9 type 0 (inline)
 		inline extent data size 544 ram_bytes 544 compression 0 (none)
@@ -6976,7 +7064,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 16 key (467 EXTENT_DATA 0) itemoff 12608 itemsize 499
 		generation 9 type 0 (inline)
 		inline extent data size 478 ram_bytes 478 compression 0 (none)
@@ -6994,7 +7082,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 20 key (468 EXTENT_DATA 0) itemoff 11327 itemsize 996
 		generation 9 type 0 (inline)
 		inline extent data size 975 ram_bytes 975 compression 0 (none)
@@ -7012,7 +7100,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 24 key (469 EXTENT_DATA 0) itemoff 10546 itemsize 500
 		generation 9 type 0 (inline)
 		inline extent data size 479 ram_bytes 479 compression 0 (none)
@@ -7030,7 +7118,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 28 key (470 EXTENT_DATA 0) itemoff 9763 itemsize 500
 		generation 9 type 0 (inline)
 		inline extent data size 479 ram_bytes 479 compression 0 (none)
@@ -7048,7 +7136,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 32 key (471 EXTENT_DATA 0) itemoff 8828 itemsize 648
 		generation 9 type 0 (inline)
 		inline extent data size 627 ram_bytes 627 compression 0 (none)
@@ -7066,7 +7154,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 36 key (472 EXTENT_DATA 0) itemoff 7870 itemsize 662
 		generation 9 type 0 (inline)
 		inline extent data size 641 ram_bytes 641 compression 0 (none)
@@ -7084,7 +7172,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 40 key (473 EXTENT_DATA 0) itemoff 7025 itemsize 555
 		generation 9 type 0 (inline)
 		inline extent data size 534 ram_bytes 534 compression 0 (none)
@@ -7102,7 +7190,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 44 key (474 EXTENT_DATA 0) itemoff 6505 itemsize 217
 		generation 9 type 0 (inline)
 		inline extent data size 196 ram_bytes 196 compression 0 (none)
@@ -7120,7 +7208,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 48 key (475 EXTENT_DATA 0) itemoff 5709 itemsize 508
 		generation 9 type 0 (inline)
 		inline extent data size 487 ram_bytes 487 compression 0 (none)
@@ -7138,7 +7226,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 52 key (476 EXTENT_DATA 0) itemoff 4734 itemsize 683
 		generation 9 type 0 (inline)
 		inline extent data size 662 ram_bytes 662 compression 0 (none)
@@ -7156,7 +7244,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 56 key (477 EXTENT_DATA 0) itemoff 3906 itemsize 539
 		generation 9 type 0 (inline)
 		inline extent data size 518 ram_bytes 518 compression 0 (none)
@@ -7174,7 +7262,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 60 key (478 EXTENT_DATA 0) itemoff 3118 itemsize 505
 		generation 9 type 0 (inline)
 		inline extent data size 484 ram_bytes 484 compression 0 (none)
@@ -7192,7 +7280,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 64 key (479 EXTENT_DATA 0) itemoff 2258 itemsize 567
 		generation 9 type 0 (inline)
 		inline extent data size 546 ram_bytes 546 compression 0 (none)
@@ -7210,7 +7298,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 68 key (480 EXTENT_DATA 0) itemoff 1794 itemsize 182
 		generation 9 type 0 (inline)
 		inline extent data size 161 ram_bytes 161 compression 0 (none)
@@ -7232,7 +7320,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 3 key (481 EXTENT_DATA 0) itemoff 15427 itemsize 575
 		generation 9 type 0 (inline)
 		inline extent data size 554 ram_bytes 554 compression 0 (none)
@@ -7250,7 +7338,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 7 key (482 EXTENT_DATA 0) itemoff 14504 itemsize 636
 		generation 9 type 0 (inline)
 		inline extent data size 615 ram_bytes 615 compression 0 (none)
@@ -7268,7 +7356,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 11 key (483 EXTENT_DATA 0) itemoff 13676 itemsize 546
 		generation 9 type 0 (inline)
 		inline extent data size 525 ram_bytes 525 compression 0 (none)
@@ -7286,7 +7374,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 15 key (484 EXTENT_DATA 0) itemoff 12733 itemsize 662
 		generation 9 type 0 (inline)
 		inline extent data size 641 ram_bytes 641 compression 0 (none)
@@ -7304,7 +7392,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 19 key (485 EXTENT_DATA 0) itemoff 12223 itemsize 215
 		generation 9 type 0 (inline)
 		inline extent data size 194 ram_bytes 194 compression 0 (none)
@@ -7322,7 +7410,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 23 key (486 EXTENT_DATA 0) itemoff 11289 itemsize 652
 		generation 9 type 0 (inline)
 		inline extent data size 631 ram_bytes 631 compression 0 (none)
@@ -7340,7 +7428,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 27 key (487 EXTENT_DATA 0) itemoff 10329 itemsize 668
 		generation 9 type 0 (inline)
 		inline extent data size 647 ram_bytes 647 compression 0 (none)
@@ -7358,7 +7446,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 31 key (488 EXTENT_DATA 0) itemoff 9540 itemsize 502
 		generation 9 type 0 (inline)
 		inline extent data size 481 ram_bytes 481 compression 0 (none)
@@ -7376,7 +7464,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 35 key (489 EXTENT_DATA 0) itemoff 8719 itemsize 539
 		generation 9 type 0 (inline)
 		inline extent data size 518 ram_bytes 518 compression 0 (none)
@@ -7394,7 +7482,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 39 key (490 EXTENT_DATA 0) itemoff 8223 itemsize 201
 		generation 9 type 0 (inline)
 		inline extent data size 180 ram_bytes 180 compression 0 (none)
@@ -7412,7 +7500,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 43 key (491 EXTENT_DATA 0) itemoff 7398 itemsize 542
 		generation 9 type 0 (inline)
 		inline extent data size 521 ram_bytes 521 compression 0 (none)
@@ -7430,7 +7518,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 47 key (492 EXTENT_DATA 0) itemoff 6355 itemsize 762
 		generation 9 type 0 (inline)
 		inline extent data size 741 ram_bytes 741 compression 0 (none)
@@ -7448,7 +7536,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 51 key (493 EXTENT_DATA 0) itemoff 5430 itemsize 639
 		generation 9 type 0 (inline)
 		inline extent data size 618 ram_bytes 618 compression 0 (none)
@@ -7466,7 +7554,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 55 key (494 EXTENT_DATA 0) itemoff 4496 itemsize 652
 		generation 9 type 0 (inline)
 		inline extent data size 631 ram_bytes 631 compression 0 (none)
@@ -7484,7 +7572,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 59 key (495 EXTENT_DATA 0) itemoff 3138 itemsize 1078
 		generation 9 type 0 (inline)
 		inline extent data size 1057 ram_bytes 1057 compression 0 (none)
@@ -7502,7 +7590,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 63 key (496 EXTENT_DATA 0) itemoff 1762 itemsize 1085
 		generation 9 type 0 (inline)
 		inline extent data size 1064 ram_bytes 1064 compression 0 (none)
@@ -7524,7 +7612,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 3 key (497 EXTENT_DATA 0) itemoff 15513 itemsize 488
 		generation 9 type 0 (inline)
 		inline extent data size 467 ram_bytes 467 compression 0 (none)
@@ -7542,7 +7630,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 7 key (498 EXTENT_DATA 0) itemoff 14712 itemsize 520
 		generation 9 type 0 (inline)
 		inline extent data size 499 ram_bytes 499 compression 0 (none)
@@ -7560,7 +7648,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 11 key (499 EXTENT_DATA 0) itemoff 13897 itemsize 527
 		generation 9 type 0 (inline)
 		inline extent data size 506 ram_bytes 506 compression 0 (none)
@@ -7578,7 +7666,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 15 key (500 EXTENT_DATA 0) itemoff 13021 itemsize 595
 		generation 9 type 0 (inline)
 		inline extent data size 574 ram_bytes 574 compression 0 (none)
@@ -7596,7 +7684,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 19 key (501 EXTENT_DATA 0) itemoff 12131 itemsize 602
 		generation 9 type 0 (inline)
 		inline extent data size 581 ram_bytes 581 compression 0 (none)
@@ -7614,7 +7702,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 23 key (502 EXTENT_DATA 0) itemoff 11326 itemsize 524
 		generation 9 type 0 (inline)
 		inline extent data size 503 ram_bytes 503 compression 0 (none)
@@ -7632,7 +7720,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 27 key (503 EXTENT_DATA 0) itemoff 10418 itemsize 626
 		generation 9 type 0 (inline)
 		inline extent data size 605 ram_bytes 605 compression 0 (none)
@@ -7650,7 +7738,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 31 key (504 EXTENT_DATA 0) itemoff 9559 itemsize 578
 		generation 9 type 0 (inline)
 		inline extent data size 557 ram_bytes 557 compression 0 (none)
@@ -7668,7 +7756,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 35 key (505 EXTENT_DATA 0) itemoff 8576 itemsize 697
 		generation 9 type 0 (inline)
 		inline extent data size 676 ram_bytes 676 compression 0 (none)
@@ -7686,7 +7774,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 39 key (506 EXTENT_DATA 0) itemoff 7793 itemsize 500
 		generation 9 type 0 (inline)
 		inline extent data size 479 ram_bytes 479 compression 0 (none)
@@ -7704,7 +7792,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 43 key (507 EXTENT_DATA 0) itemoff 6712 itemsize 799
 		generation 9 type 0 (inline)
 		inline extent data size 778 ram_bytes 778 compression 0 (none)
@@ -7722,7 +7810,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 47 key (508 EXTENT_DATA 0) itemoff 6195 itemsize 222
 		generation 9 type 0 (inline)
 		inline extent data size 201 ram_bytes 201 compression 0 (none)
@@ -7740,7 +7828,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 51 key (509 EXTENT_DATA 0) itemoff 5379 itemsize 533
 		generation 9 type 0 (inline)
 		inline extent data size 512 ram_bytes 512 compression 0 (none)
@@ -7758,7 +7846,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 55 key (510 EXTENT_DATA 0) itemoff 4613 itemsize 485
 		generation 9 type 0 (inline)
 		inline extent data size 464 ram_bytes 464 compression 0 (none)
@@ -7776,7 +7864,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 59 key (511 EXTENT_DATA 0) itemoff 3810 itemsize 522
 		generation 9 type 0 (inline)
 		inline extent data size 501 ram_bytes 501 compression 0 (none)
@@ -7794,7 +7882,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 63 key (512 EXTENT_DATA 0) itemoff 3011 itemsize 519
 		generation 9 type 0 (inline)
 		inline extent data size 498 ram_bytes 498 compression 0 (none)
@@ -7812,7 +7900,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 67 key (513 EXTENT_DATA 0) itemoff 2196 itemsize 526
 		generation 9 type 0 (inline)
 		inline extent data size 505 ram_bytes 505 compression 0 (none)
@@ -7830,7 +7918,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 leaf 30916608 items 69 free space 147 generation 9 owner FS_TREE
 leaf 30916608 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
@@ -7852,7 +7940,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 4 key (515 EXTENT_DATA 0) itemoff 14874 itemsize 610
 		generation 9 type 0 (inline)
 		inline extent data size 589 ram_bytes 589 compression 0 (none)
@@ -7870,7 +7958,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 8 key (516 EXTENT_DATA 0) itemoff 13908 itemsize 681
 		generation 9 type 0 (inline)
 		inline extent data size 660 ram_bytes 660 compression 0 (none)
@@ -7888,7 +7976,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 12 key (517 EXTENT_DATA 0) itemoff 13435 itemsize 185
 		generation 9 type 0 (inline)
 		inline extent data size 164 ram_bytes 164 compression 0 (none)
@@ -7906,7 +7994,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 16 key (518 EXTENT_DATA 0) itemoff 12530 itemsize 624
 		generation 9 type 0 (inline)
 		inline extent data size 603 ram_bytes 603 compression 0 (none)
@@ -7924,7 +8012,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 20 key (519 EXTENT_DATA 0) itemoff 11568 itemsize 681
 		generation 9 type 0 (inline)
 		inline extent data size 660 ram_bytes 660 compression 0 (none)
@@ -7942,7 +8030,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 24 key (520 EXTENT_DATA 0) itemoff 10718 itemsize 565
 		generation 9 type 0 (inline)
 		inline extent data size 544 ram_bytes 544 compression 0 (none)
@@ -7960,7 +8048,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 28 key (521 EXTENT_DATA 0) itemoff 10223 itemsize 197
 		generation 9 type 0 (inline)
 		inline extent data size 176 ram_bytes 176 compression 0 (none)
@@ -7978,7 +8066,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 32 key (522 EXTENT_DATA 0) itemoff 9373 itemsize 565
 		generation 9 type 0 (inline)
 		inline extent data size 544 ram_bytes 544 compression 0 (none)
@@ -7996,7 +8084,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 36 key (523 EXTENT_DATA 0) itemoff 8878 itemsize 197
 		generation 9 type 0 (inline)
 		inline extent data size 176 ram_bytes 176 compression 0 (none)
@@ -8014,7 +8102,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 40 key (524 EXTENT_DATA 0) itemoff 8074 itemsize 514
 		generation 9 type 0 (inline)
 		inline extent data size 493 ram_bytes 493 compression 0 (none)
@@ -8032,7 +8120,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 44 key (525 EXTENT_DATA 0) itemoff 6987 itemsize 804
 		generation 9 type 0 (inline)
 		inline extent data size 783 ram_bytes 783 compression 0 (none)
@@ -8050,7 +8138,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 48 key (526 EXTENT_DATA 0) itemoff 5882 itemsize 811
 		generation 9 type 0 (inline)
 		inline extent data size 790 ram_bytes 790 compression 0 (none)
@@ -8068,7 +8156,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 52 key (527 EXTENT_DATA 0) itemoff 4975 itemsize 617
 		generation 9 type 0 (inline)
 		inline extent data size 596 ram_bytes 596 compression 0 (none)
@@ -8086,7 +8174,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 56 key (528 EXTENT_DATA 0) itemoff 4183 itemsize 509
 		generation 9 type 0 (inline)
 		inline extent data size 488 ram_bytes 488 compression 0 (none)
@@ -8104,7 +8192,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 60 key (529 EXTENT_DATA 0) itemoff 3290 itemsize 606
 		generation 9 type 0 (inline)
 		inline extent data size 585 ram_bytes 585 compression 0 (none)
@@ -8122,7 +8210,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 64 key (530 EXTENT_DATA 0) itemoff 2781 itemsize 209
 		generation 9 type 0 (inline)
 		inline extent data size 188 ram_bytes 188 compression 0 (none)
@@ -8140,7 +8228,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 68 key (531 EXTENT_DATA 0) itemoff 1872 itemsize 613
 		generation 9 type 0 (inline)
 		inline extent data size 592 ram_bytes 592 compression 0 (none)
@@ -8162,7 +8250,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 3 key (532 EXTENT_DATA 0) itemoff 15838 itemsize 158
 		generation 9 type 0 (inline)
 		inline extent data size 137 ram_bytes 137 compression 0 (none)
@@ -8180,7 +8268,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 7 key (533 EXTENT_DATA 0) itemoff 15237 itemsize 312
 		generation 9 type 0 (inline)
 		inline extent data size 291 ram_bytes 291 compression 0 (none)
@@ -8198,7 +8286,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 11 key (534 EXTENT_DATA 0) itemoff 14572 itemsize 365
 		generation 9 type 0 (inline)
 		inline extent data size 344 ram_bytes 344 compression 0 (none)
@@ -8216,7 +8304,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 15 key (535 EXTENT_DATA 0) itemoff 13973 itemsize 309
 		generation 9 type 0 (inline)
 		inline extent data size 288 ram_bytes 288 compression 0 (none)
@@ -8234,7 +8322,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 19 key (536 EXTENT_DATA 0) itemoff 13531 itemsize 149
 		generation 9 type 0 (inline)
 		inline extent data size 128 ram_bytes 128 compression 0 (none)
@@ -8252,7 +8340,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 23 key (537 EXTENT_DATA 0) itemoff 12945 itemsize 294
 		generation 9 type 0 (inline)
 		inline extent data size 273 ram_bytes 273 compression 0 (none)
@@ -8270,7 +8358,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 27 key (538 EXTENT_DATA 0) itemoff 11850 itemsize 802
 		generation 9 type 0 (inline)
 		inline extent data size 781 ram_bytes 781 compression 0 (none)
@@ -8288,7 +8376,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 31 key (539 EXTENT_DATA 0) itemoff 10749 itemsize 805
 		generation 9 type 0 (inline)
 		inline extent data size 784 ram_bytes 784 compression 0 (none)
@@ -8306,7 +8394,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 35 key (540 EXTENT_DATA 0) itemoff 10308 itemsize 150
 		generation 9 type 0 (inline)
 		inline extent data size 129 ram_bytes 129 compression 0 (none)
@@ -8324,7 +8412,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 39 key (541 EXTENT_DATA 0) itemoff 9856 itemsize 160
 		generation 9 type 0 (inline)
 		inline extent data size 139 ram_bytes 139 compression 0 (none)
@@ -8342,7 +8430,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 43 key (542 EXTENT_DATA 0) itemoff 9365 itemsize 201
 		generation 9 type 0 (inline)
 		inline extent data size 180 ram_bytes 180 compression 0 (none)
@@ -8360,7 +8448,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 47 key (543 EXTENT_DATA 0) itemoff 8871 itemsize 206
 		generation 9 type 0 (inline)
 		inline extent data size 185 ram_bytes 185 compression 0 (none)
@@ -8378,7 +8466,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 51 key (544 EXTENT_DATA 0) itemoff 8196 itemsize 386
 		generation 9 type 0 (inline)
 		inline extent data size 365 ram_bytes 365 compression 0 (none)
@@ -8396,7 +8484,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 55 key (545 EXTENT_DATA 0) itemoff 7299 itemsize 608
 		generation 9 type 0 (inline)
 		inline extent data size 587 ram_bytes 587 compression 0 (none)
@@ -8414,7 +8502,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 59 key (546 EXTENT_DATA 0) itemoff 6840 itemsize 161
 		generation 9 type 0 (inline)
 		inline extent data size 140 ram_bytes 140 compression 0 (none)
@@ -8432,7 +8520,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 63 key (547 EXTENT_DATA 0) itemoff 6335 itemsize 214
 		generation 9 type 0 (inline)
 		inline extent data size 193 ram_bytes 193 compression 0 (none)
@@ -8450,7 +8538,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 67 key (548 EXTENT_DATA 0) itemoff 5544 itemsize 500
 		generation 9 type 0 (inline)
 		inline extent data size 479 ram_bytes 479 compression 0 (none)
@@ -8468,11 +8556,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 71 key (549 EXTENT_DATA 0) itemoff 5225 itemsize 53
 		generation 9 type 1 (regular)
 		extent data disk byte 14585856 nr 24576
 		extent data offset 0 nr 24576 ram 24576
+		extent compression 0 (none)
 	item 72 key (550 INODE_ITEM 0) itemoff 5065 itemsize 160
 		generation 9 transid 10 size 9383 nbytes 12288
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -8487,11 +8576,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 75 key (550 EXTENT_DATA 0) itemoff 4910 itemsize 53
 		generation 10 type 1 (regular)
 		extent data disk byte 14610432 nr 12288
 		extent data offset 0 nr 12288 ram 12288
+		extent compression 0 (none)
 	item 76 key (551 INODE_ITEM 0) itemoff 4750 itemsize 160
 		generation 9 transid 10 size 12889 nbytes 16384
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -8506,11 +8596,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 79 key (551 EXTENT_DATA 0) itemoff 4588 itemsize 53
 		generation 10 type 1 (regular)
 		extent data disk byte 14622720 nr 16384
 		extent data offset 0 nr 16384 ram 16384
+		extent compression 0 (none)
 	item 80 key (552 INODE_ITEM 0) itemoff 4428 itemsize 160
 		generation 9 transid 10 size 814 nbytes 814
 		block group 0 mode 100644 links 1 uid 0 gid 0 rdev 0
@@ -8525,7 +8616,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 83 key (552 EXTENT_DATA 0) itemoff 3490 itemsize 835
 		generation 10 type 0 (inline)
 		inline extent data size 814 ram_bytes 814 compression 0 (none)
@@ -8543,7 +8634,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 10 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 87 key (553 EXTENT_DATA 0) itemoff 3189 itemsize 36
 		generation 10 type 0 (inline)
 		inline extent data size 15 ram_bytes 15 compression 0 (none)
@@ -8553,29 +8644,29 @@ leaf 31145984 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
 chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 	item 0 key (EXTENT_CSUM EXTENT_CSUM 13631488) itemoff 16143 itemsize 140
-		range [13631488 13774848) length 143360
+		range start 13631488 end 13774848 length 143360
 	item 1 key (EXTENT_CSUM EXTENT_CSUM 13774848) itemoff 16027 itemsize 116
-		range [13774848 13893632) length 118784
+		range start 13774848 end 13893632 length 118784
 	item 2 key (EXTENT_CSUM EXTENT_CSUM 13893632) itemoff 15883 itemsize 144
-		range [13893632 14041088) length 147456
+		range start 13893632 end 14041088 length 147456
 	item 3 key (EXTENT_CSUM EXTENT_CSUM 14041088) itemoff 15843 itemsize 40
-		range [14041088 14082048) length 40960
+		range start 14041088 end 14082048 length 40960
 	item 4 key (EXTENT_CSUM EXTENT_CSUM 14082048) itemoff 15835 itemsize 8
-		range [14082048 14090240) length 8192
+		range start 14082048 end 14090240 length 8192
 	item 5 key (EXTENT_CSUM EXTENT_CSUM 14090240) itemoff 15707 itemsize 128
-		range [14090240 14221312) length 131072
+		range start 14090240 end 14221312 length 131072
 	item 6 key (EXTENT_CSUM EXTENT_CSUM 14221312) itemoff 15535 itemsize 172
-		range [14221312 14397440) length 176128
+		range start 14221312 end 14397440 length 176128
 	item 7 key (EXTENT_CSUM EXTENT_CSUM 14397440) itemoff 15475 itemsize 60
-		range [14397440 14458880) length 61440
+		range start 14397440 end 14458880 length 61440
 	item 8 key (EXTENT_CSUM EXTENT_CSUM 14458880) itemoff 15463 itemsize 12
-		range [14458880 14471168) length 12288
+		range start 14458880 end 14471168 length 12288
 	item 9 key (EXTENT_CSUM EXTENT_CSUM 14471168) itemoff 15447 itemsize 16
-		range [14471168 14487552) length 16384
+		range start 14471168 end 14487552 length 16384
 	item 10 key (EXTENT_CSUM EXTENT_CSUM 14487552) itemoff 15399 itemsize 48
-		range [14487552 14536704) length 49152
+		range start 14487552 end 14536704 length 49152
 	item 11 key (EXTENT_CSUM EXTENT_CSUM 14536704) itemoff 15283 itemsize 116
-		range [14536704 14655488) length 118784
+		range start 14536704 end 14655488 length 118784
 uuid tree key (UUID_TREE ROOT_ITEM 0) 
 leaf 31080448 items 4 free space 16151 generation 10 owner UUID_TREE
 leaf 31080448 flags 0x1(WRITTEN) backref revision 1
@@ -8595,17 +8686,17 @@ leaf 31178752 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
 chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 	item 0 key (13631488 FREE_SPACE_INFO 8388608) itemoff 16275 itemsize 8
-		extent count 1 flags 0
+		free space info extent count 1 flags 0
 	item 1 key (14655488 FREE_SPACE_EXTENT 7364608) itemoff 16275 itemsize 0
 		free space extent
 	item 2 key (22020096 FREE_SPACE_INFO 8388608) itemoff 16267 itemsize 8
-		extent count 2 flags 0
+		free space info extent count 2 flags 0
 	item 3 key (22020096 FREE_SPACE_EXTENT 16384) itemoff 16267 itemsize 0
 		free space extent
 	item 4 key (22052864 FREE_SPACE_EXTENT 8355840) itemoff 16267 itemsize 0
 		free space extent
 	item 5 key (30408704 FREE_SPACE_INFO 33554432) itemoff 16259 itemsize 8
-		extent count 6 flags 0
+		free space info extent count 6 flags 0
 	item 6 key (30408704 FREE_SPACE_EXTENT 98304) itemoff 16259 itemsize 0
 		free space extent
 	item 7 key (30523392 FREE_SPACE_EXTENT 32768) itemoff 16259 itemsize 0
@@ -8674,7 +8765,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 9 key (257 EXTENT_DATA 0) itemoff 15666 itemsize 33
 		generation 9 type 0 (inline)
 		inline extent data size 12 ram_bytes 12 compression 0 (none)
@@ -8692,7 +8783,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 13 key (258 DIR_ITEM 1243729159) itemoff 15369 itemsize 38
 		location key (259 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 8
@@ -8715,11 +8806,11 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 18 key (259 EXTENT_DATA 0) itemoff 15037 itemsize 33
 		generation 9 type 0 (inline)
 		inline extent data size 12 ram_bytes 12 compression 0 (none)
-file tree key (257 ROOT_ITEM 0) 
+file tree key (257 ROOT_ITEM 9) 
 leaf 31014912 items 19 free space 14562 generation 9 owner 257
 leaf 31014912 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef
@@ -8764,7 +8855,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 9 key (257 EXTENT_DATA 0) itemoff 15666 itemsize 33
 		generation 9 type 0 (inline)
 		inline extent data size 12 ram_bytes 12 compression 0 (none)
@@ -8782,7 +8873,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 13 key (258 DIR_ITEM 1243729159) itemoff 15369 itemsize 38
 		location key (259 INODE_ITEM 0) type FILE
 		transid 9 data_len 0 name_len 8
@@ -8805,7 +8896,7 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 9 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 18 key (259 EXTENT_DATA 0) itemoff 15037 itemsize 33
 		generation 9 type 0 (inline)
 		inline extent data size 12 ram_bytes 12 compression 0 (none)
@@ -8846,11 +8937,12 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		location key (0 UNKNOWN.0 0) type XATTR
 		transid 10 data_len 37 name_len 16
 		name: security.selinux
-		data unconfined_u:object_r:unlabeled_t:s0 
+		data unconfined_u:object_r:unlabeled_t:s0\000
 	item 7 key (257 EXTENT_DATA 0) itemoff 15718 itemsize 53
 		generation 10 type 1 (regular)
 		extent data disk byte 14639104 nr 16384
 		extent data offset 0 nr 16384 ram 16384
+		extent compression 0 (none)
 data reloc tree key (DATA_RELOC_TREE ROOT_ITEM 0) 
 leaf 30556160 items 2 free space 16061 generation 5 owner DATA_RELOC_TREE
 leaf 30556160 flags 0x1(WRITTEN) backref revision 1
@@ -8866,3 +8958,6 @@ chunk uuid 8d8e1e58-69e7-40aa-9687-711ff1adac9b
 		otime 1774481577.0 (2026-03-26 00:32:57)
 	item 1 key (256 INODE_REF 256) itemoff 16111 itemsize 12
 		index 0 namelen 2 name: ..
+total bytes 114294784
+bytes used 1564672
+uuid deadbeef-dead-beef-dead-beefdeadbeef

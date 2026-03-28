@@ -145,7 +145,9 @@ impl Runnable for DumpTreeCommand {
 
         // --uuid: print only UUID tree
         if self.uuid {
-            if let Some(&root) = tree_roots.get(&ObjectId::UuidTree.to_raw()) {
+            if let Some(&(root, _)) =
+                tree_roots.get(&ObjectId::UuidTree.to_raw())
+            {
                 reader::walk_tree(&mut reader, root, traversal, &mut print)?;
             } else {
                 bail!("UUID tree not found");
@@ -158,7 +160,7 @@ impl Runnable for DumpTreeCommand {
             for &tree_id in
                 &[ObjectId::ExtentTree.to_raw(), ObjectId::DevTree.to_raw()]
             {
-                if let Some(&root) = tree_roots.get(&tree_id) {
+                if let Some(&(root, _)) = tree_roots.get(&tree_id) {
                     let name = ObjectId::from_raw(tree_id);
                     println!("{name}:");
                     reader::walk_tree(
@@ -188,7 +190,9 @@ impl Runnable for DumpTreeCommand {
             )?;
             println!();
 
-            if let Some(&root) = tree_roots.get(&ObjectId::DevTree.to_raw()) {
+            if let Some(&(root, _)) =
+                tree_roots.get(&ObjectId::DevTree.to_raw())
+            {
                 println!("DEV_TREE:");
                 reader::walk_tree(&mut reader, root, traversal, &mut print)?;
                 println!();
@@ -205,12 +209,16 @@ impl Runnable for DumpTreeCommand {
         let mut sorted_roots: Vec<_> = tree_roots.iter().collect();
         sorted_roots.sort_by_key(|&(id, _)| *id);
 
-        for &(&tree_id, &root_bytenr) in &sorted_roots {
+        for &(&tree_id, &(root_bytenr, key_offset)) in &sorted_roots {
             let label = tree_label(tree_id);
             let oid = ObjectId::from_raw(tree_id);
-            println!("{label} key ({oid} ROOT_ITEM 0) ");
+            println!("{label} key ({oid} ROOT_ITEM {key_offset}) ");
             reader::walk_tree(&mut reader, root_bytenr, traversal, &mut print)?;
         }
+
+        println!("total bytes {}", sb.total_bytes);
+        println!("bytes used {}", sb.bytes_used);
+        println!("uuid {}", sb.fsid.as_hyphenated());
 
         Ok(())
     }
@@ -247,9 +255,8 @@ fn parse_tree_id(name: &str) -> Result<u64> {
 fn find_tree_root(
     tree_id: u64,
     sb: &Superblock,
-    tree_roots: &BTreeMap<u64, u64>,
+    tree_roots: &BTreeMap<u64, (u64, u64)>,
 ) -> Result<u64> {
-    // Special cases: root tree and chunk tree are in the superblock
     if tree_id == ObjectId::RootTree.to_raw() {
         return Ok(sb.root);
     }
@@ -260,13 +267,16 @@ fn find_tree_root(
         return Ok(sb.log_root);
     }
 
-    tree_roots.get(&tree_id).copied().ok_or_else(|| {
-        let name = ObjectId::from_raw(tree_id);
-        anyhow::anyhow!("tree {name} (id {tree_id}) not found")
-    })
+    tree_roots
+        .get(&tree_id)
+        .map(|&(bytenr, _)| bytenr)
+        .ok_or_else(|| {
+            let name = ObjectId::from_raw(tree_id);
+            anyhow::anyhow!("tree {name} (id {tree_id}) not found")
+        })
 }
 
-fn print_roots(sb: &Superblock, tree_roots: &BTreeMap<u64, u64>) {
+fn print_roots(sb: &Superblock, tree_roots: &BTreeMap<u64, (u64, u64)>) {
     println!("root tree bytenr {} level {}", sb.root, sb.root_level);
     println!(
         "chunk tree bytenr {} level {}",
@@ -278,7 +288,7 @@ fn print_roots(sb: &Superblock, tree_roots: &BTreeMap<u64, u64>) {
             sb.log_root, sb.log_root_level
         );
     }
-    for (&tree_id, &bytenr) in tree_roots {
+    for (&tree_id, &(bytenr, _)) in tree_roots {
         let name = ObjectId::from_raw(tree_id);
         println!("tree {name} (id {tree_id}) bytenr {bytenr}");
     }

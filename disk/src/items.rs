@@ -1088,7 +1088,7 @@ impl DevStats {
             "read_errs",
             "flush_errs",
             "corruption_errs",
-            "generation_errs",
+            "generation",
         ];
         let mut values = Vec::new();
         for (i, name) in stat_names.iter().enumerate() {

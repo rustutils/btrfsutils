@@ -362,6 +362,10 @@ impl ObjectId {
         {
             return "FIRST_CHUNK_TREE".to_string();
         }
+        // DEV_EXTENT objectids are device IDs, not tree IDs — print as numbers
+        if key_type == KeyType::DevExtent {
+            return raw.to_string();
+        }
         self.to_string()
     }
 

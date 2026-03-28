@@ -67,7 +67,7 @@ fn print_node_header(header: &Header, nodesize: u32, opts: &PrintOptions) {
     let key_ptr_size = mem::size_of::<raw::btrfs_key_ptr>() as u32;
     let header_size = mem::size_of::<raw::btrfs_header>() as u32;
     let max_ptrs = (nodesize - header_size) / key_ptr_size;
-    let free_space = (max_ptrs - header.nritems) * key_ptr_size;
+    let free_space = max_ptrs - header.nritems;
     let owner = ObjectId::from_raw(header.owner);
 
     println!(
@@ -79,7 +79,7 @@ fn print_node_header(header: &Header, nodesize: u32, opts: &PrintOptions) {
         header.generation,
         owner
     );
-    print_header_flags_line(header, opts);
+    print_header_flags_line("node", header, opts);
 }
 
 fn print_leaf_header(
@@ -104,14 +104,14 @@ fn print_leaf_header(
         "leaf {} items {} free space {} generation {} owner {}",
         header.bytenr, header.nritems, free_space, header.generation, owner
     );
-    print_header_flags_line(header, opts);
+    print_header_flags_line("leaf", header, opts);
 }
 
-fn print_header_flags_line(header: &Header, opts: &PrintOptions) {
+fn print_header_flags_line(label: &str, header: &Header, opts: &PrintOptions) {
     let flags = header.block_flags();
     let flag_names = format_header_flags(flags);
     print!(
-        "leaf {} flags 0x{:x}({}) backref revision {}",
+        "{label} {} flags 0x{:x}({}) backref revision {}",
         header.bytenr,
         flags,
         flag_names,
@@ -146,6 +146,20 @@ fn format_timespec(ts: &Timespec) -> String {
         "{}.{} ({year:04}-{mon:02}-{mday:02} {hour:02}:{min:02}:{sec:02})",
         ts.sec, ts.nsec
     )
+}
+
+fn escape_bytes(data: &[u8]) -> String {
+    let mut s = String::with_capacity(data.len());
+    for &b in data {
+        if b == 0 {
+            s.push_str("\\000");
+        } else if b.is_ascii_graphic() || b == b' ' {
+            s.push(b as char);
+        } else {
+            s.push_str(&format!("\\{b:03o}"));
+        }
+    }
+    s
 }
 
 fn name_or_hidden(data: &[u8], hide: bool) -> String {
@@ -221,10 +235,7 @@ fn print_payload(
                     if opts.hide_names {
                         println!("\t\tdata (hidden)");
                     } else {
-                        println!(
-                            "\t\tdata {}",
-                            String::from_utf8_lossy(&d.data)
-                        );
+                        println!("\t\tdata {}", escape_bytes(&d.data));
                     }
                 }
             }
@@ -324,13 +335,11 @@ fn print_payload(
                             v.ram_bytes
                         );
                     }
-                    if v.compression != items::CompressionType::None {
-                        println!(
-                            "\t\textent compression {} ({})",
-                            v.compression.to_raw(),
-                            v.compression.name()
-                        );
-                    }
+                    println!(
+                        "\t\textent compression {} ({})",
+                        v.compression.to_raw(),
+                        v.compression.name()
+                    );
                 }
             }
         }
@@ -343,7 +352,7 @@ fn print_payload(
             let start = key.offset;
             let sector_size = 4096u64;
             let end = start + count as u64 * sector_size;
-            print!("\t\trange [{start} {end}) length {}", end - start);
+            print!("\t\trange start {start} end {end} length {}", end - start);
             if opts.csum_items && !data.is_empty() {
                 print!(" csum");
                 let max_print = 8.min(count);
@@ -441,7 +450,10 @@ fn print_payload(
             );
         }
         ItemPayload::FreeSpaceInfo(v) => {
-            println!("\t\textent count {} flags {}", v.extent_count, v.flags);
+            println!(
+                "\t\tfree space info extent count {} flags {}",
+                v.extent_count, v.flags
+            );
         }
         ItemPayload::FreeSpaceExtent => println!("\t\tfree space extent"),
         ItemPayload::FreeSpaceBitmap => println!("\t\tfree space bitmap"),
@@ -534,10 +546,19 @@ fn print_payload(
         }
         ItemPayload::QgroupRelation => {}
         ItemPayload::DevStats(v) => {
+            println!(
+                "\t\tpersistent item objectid DEV_STATS offset {}",
+                key.offset
+            );
             println!("\t\tdevice stats");
+            print!("\t\t");
             for (i, (name, val)) in v.values.iter().enumerate() {
-                println!("\t\t[{i}]\t{name} {val}");
+                if i > 0 {
+                    print!(" ");
+                }
+                print!("{name} {val}");
             }
+            println!();
         }
         ItemPayload::BalanceItem { flags } => {
             println!("\t\tbalance status");

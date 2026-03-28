@@ -67,8 +67,8 @@ pub struct OpenFs<R> {
     pub reader: BlockReader<R>,
     /// Parsed superblock.
     pub superblock: Superblock,
-    /// Map of tree ID -> root block logical address, from the root tree.
-    pub tree_roots: BTreeMap<u64, u64>,
+    /// Map of tree ID -> (root block logical address, key offset), from the root tree.
+    pub tree_roots: BTreeMap<u64, (u64, u64)>,
 }
 
 /// Open a btrfs filesystem by bootstrapping from the superblock.
@@ -151,7 +151,7 @@ fn read_chunk_tree<R: Read + Seek>(
 fn read_root_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
-) -> io::Result<BTreeMap<u64, u64>> {
+) -> io::Result<BTreeMap<u64, (u64, u64)>> {
     let mut tree_roots = BTreeMap::new();
     collect_root_items(reader, root_logical, &mut tree_roots)?;
     Ok(tree_roots)
@@ -250,7 +250,7 @@ pub fn visit_block<R: Read + Seek>(
 fn collect_root_items<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     logical: u64,
-    tree_roots: &mut BTreeMap<u64, u64>,
+    tree_roots: &mut BTreeMap<u64, (u64, u64)>,
 ) -> io::Result<()> {
     let block = reader.read_tree_block(logical)?;
 
@@ -276,7 +276,8 @@ fn collect_root_items<R: Read + Seek>(
                 let bytenr =
                     read_le_u64(data, item_start + root_item_bytenr_offset);
                 if bytenr != 0 {
-                    tree_roots.insert(item.key.objectid, bytenr);
+                    tree_roots
+                        .insert(item.key.objectid, (bytenr, item.key.offset));
                 }
             }
         }
