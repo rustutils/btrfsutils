@@ -508,44 +508,29 @@ impl ReceiveContext {
         mode: u64,
         rdev: u64,
     ) -> Result<()> {
-        let full = self.full_path(path)?;
-        let c_path = path_to_cstring(&full)?;
-        let ret = unsafe {
-            nix::libc::mknod(
-                c_path.as_ptr(),
-                mode as nix::libc::mode_t,
-                rdev as nix::libc::dev_t,
-            )
-        };
-        if ret < 0 {
-            return Err(io::Error::last_os_error()).with_context(|| {
-                format!("mknod failed for '{}'", full.display())
-            });
-        }
-        Ok(())
+        self.do_mknod(path, mode as nix::libc::mode_t, rdev as nix::libc::dev_t)
     }
 
     fn process_mkfifo(&mut self, path: &str) -> Result<()> {
-        let full = self.full_path(path)?;
-        let c_path = path_to_cstring(&full)?;
-        let ret = unsafe { nix::libc::mkfifo(c_path.as_ptr(), 0o600) };
-        if ret < 0 {
-            return Err(io::Error::last_os_error()).with_context(|| {
-                format!("mkfifo failed for '{}'", full.display())
-            });
-        }
-        Ok(())
+        self.do_mknod(path, nix::libc::S_IFIFO | 0o600, 0)
     }
 
     fn process_mksock(&mut self, path: &str) -> Result<()> {
+        self.do_mknod(path, nix::libc::S_IFSOCK | 0o600, 0)
+    }
+
+    fn do_mknod(
+        &mut self,
+        path: &str,
+        mode: nix::libc::mode_t,
+        rdev: nix::libc::dev_t,
+    ) -> Result<()> {
         let full = self.full_path(path)?;
         let c_path = path_to_cstring(&full)?;
-        let ret = unsafe {
-            nix::libc::mknod(c_path.as_ptr(), nix::libc::S_IFSOCK | 0o600, 0)
-        };
+        let ret = unsafe { nix::libc::mknod(c_path.as_ptr(), mode, rdev) };
         if ret < 0 {
             return Err(io::Error::last_os_error()).with_context(|| {
-                format!("mksock failed for '{}'", full.display())
+                format!("mknod failed for '{}'", full.display())
             });
         }
         Ok(())
