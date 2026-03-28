@@ -24,6 +24,7 @@ pub enum TreeId {
     Fs,
     Csum,
     FreeSpace,
+    DataReloc,
 }
 
 impl TreeId {
@@ -37,11 +38,12 @@ impl TreeId {
             TreeId::Fs => raw::BTRFS_FS_TREE_OBJECTID as u64,
             TreeId::Csum => raw::BTRFS_CSUM_TREE_OBJECTID as u64,
             TreeId::FreeSpace => raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64,
+            TreeId::DataReloc => raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64,
         }
     }
 
     /// All tree blocks in the order they are laid out on disk.
-    pub const ALL: [TreeId; 7] = [
+    pub const ALL: [TreeId; 8] = [
         TreeId::Root,
         TreeId::Extent,
         TreeId::Chunk,
@@ -49,17 +51,19 @@ impl TreeId {
         TreeId::Fs,
         TreeId::Csum,
         TreeId::FreeSpace,
+        TreeId::DataReloc,
     ];
 
     /// Trees that get a ROOT_ITEM in the root tree.
     /// Excludes Root (can't reference itself) and Chunk (handled specially
     /// by the superblock's chunk_root pointer).
-    pub const ROOT_ITEM_TREES: [TreeId; 5] = [
+    pub const ROOT_ITEM_TREES: [TreeId; 6] = [
         TreeId::Extent,
         TreeId::Dev,
         TreeId::Fs,
         TreeId::Csum,
         TreeId::FreeSpace,
+        TreeId::DataReloc,
     ];
 }
 
@@ -99,11 +103,12 @@ mod tests {
         assert_eq!(layout.block_addr(TreeId::Fs), 0x100000 + 4 * 16384);
         assert_eq!(layout.block_addr(TreeId::Csum), 0x100000 + 5 * 16384);
         assert_eq!(layout.block_addr(TreeId::FreeSpace), 0x100000 + 6 * 16384);
+        assert_eq!(layout.block_addr(TreeId::DataReloc), 0x100000 + 7 * 16384);
     }
 
     #[test]
     fn total_used() {
         let layout = BlockLayout::new(16384);
-        assert_eq!(layout.total_used(), 7 * 16384);
+        assert_eq!(layout.total_used(), 8 * 16384);
     }
 }

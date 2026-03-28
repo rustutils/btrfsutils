@@ -97,7 +97,7 @@ pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
         bytenr: layout.block_addr(tree),
     };
 
-    // Build all 7 tree blocks.
+    // Build all 8 tree blocks.
     let root_tree = build_root_tree(cfg, &layout, &leaf_header)?;
     let extent_tree = build_extent_tree(cfg, &layout, &leaf_header)?;
     let chunk_tree = build_chunk_tree(cfg, &layout, &leaf_header)?;
@@ -105,6 +105,8 @@ pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
     let fs_tree = build_empty_tree(cfg.nodesize, &leaf_header(TreeId::Fs));
     let csum_tree = build_empty_tree(cfg.nodesize, &leaf_header(TreeId::Csum));
     let free_space_tree = build_free_space_tree(cfg, &layout, &leaf_header)?;
+    let data_reloc_tree =
+        build_empty_tree(cfg.nodesize, &leaf_header(TreeId::DataReloc));
 
     // Write tree blocks to disk.
     let trees = [
@@ -115,6 +117,7 @@ pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
         (TreeId::Fs, fs_tree),
         (TreeId::Csum, csum_tree),
         (TreeId::FreeSpace, free_space_tree),
+        (TreeId::DataReloc, data_reloc_tree),
     ];
 
     for (tree_id, mut block) in trees {
@@ -162,9 +165,6 @@ fn build_root_tree(
             is_fs_tree: tree == TreeId::Fs,
         })
         .collect();
-
-    // Note: the C code also creates a DATA_RELOC_TREE post-mkfs via
-    // transactions. We skip it for now — the kernel creates it on demand.
 
     entries.sort_by_key(|e| e.objectid);
 
