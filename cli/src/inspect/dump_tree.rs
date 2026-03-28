@@ -197,22 +197,42 @@ impl Runnable for DumpTreeCommand {
         }
 
         // Default: print all trees
+        println!("root tree");
         reader::walk_tree(&mut reader, sb.root, traversal, &mut print)?;
+        println!("chunk tree");
         reader::walk_tree(&mut reader, sb.chunk_root, traversal, &mut print)?;
 
         let mut sorted_roots: Vec<_> = tree_roots.iter().collect();
         sorted_roots.sort_by_key(|&(id, _)| *id);
 
-        for (_, root_bytenr) in &sorted_roots {
-            reader::walk_tree(
-                &mut reader,
-                **root_bytenr,
-                traversal,
-                &mut print,
-            )?;
+        for &(&tree_id, &root_bytenr) in &sorted_roots {
+            let label = tree_label(tree_id);
+            let oid = ObjectId::from_raw(tree_id);
+            println!("{label} key ({oid} ROOT_ITEM 0) ");
+            reader::walk_tree(&mut reader, root_bytenr, traversal, &mut print)?;
         }
 
         Ok(())
+    }
+}
+
+fn tree_label(tree_id: u64) -> &'static str {
+    match ObjectId::from_raw(tree_id) {
+        ObjectId::RootTree => "root tree",
+        ObjectId::ExtentTree => "extent tree",
+        ObjectId::ChunkTree => "chunk tree",
+        ObjectId::DevTree => "device tree",
+        ObjectId::FsTree => "fs tree",
+        ObjectId::CsumTree => "checksum tree",
+        ObjectId::QuotaTree => "quota tree",
+        ObjectId::UuidTree => "uuid tree",
+        ObjectId::FreeSpaceTree => "free space tree",
+        ObjectId::BlockGroupTree => "block group tree",
+        ObjectId::RaidStripeTree => "raid stripe tree",
+        ObjectId::RemapTree => "remap tree",
+        ObjectId::DataRelocTree => "data reloc tree",
+        ObjectId::TreeLog => "log tree",
+        _ => "file tree",
     }
 }
 

@@ -357,6 +357,11 @@ impl ObjectId {
         {
             return "DEV_STATS".to_string();
         }
+        if raw == raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64
+            && key_type == KeyType::ChunkItem
+        {
+            return "FIRST_CHUNK_TREE".to_string();
+        }
         self.to_string()
     }
 
@@ -414,14 +419,7 @@ impl fmt::Display for ObjectId {
             Self::CsumChange => write!(f, "CSUM_CHANGE"),
             Self::Multiple => write!(f, "MULTIPLE"),
             Self::FirstFree => write!(f, "256"),
-            Self::Id(v) => {
-                // -1 is a common sentinel
-                if *v == u64::MAX {
-                    write!(f, "-1")
-                } else {
-                    write!(f, "{v}")
-                }
-            }
+            Self::Id(v) => write!(f, "{v}"),
         }
     }
 }
@@ -489,9 +487,6 @@ fn format_key_type(key: &DiskKey) -> String {
 }
 
 fn format_key_offset(key: &DiskKey) -> String {
-    if key.offset == u64::MAX {
-        return "-1".to_string();
-    }
     match key.key_type {
         KeyType::QgroupRelation
         | KeyType::QgroupStatus
@@ -788,7 +783,7 @@ mod tests {
         assert_eq!(ObjectId::RootTree.to_string(), "ROOT_TREE");
         assert_eq!(ObjectId::FsTree.to_string(), "FS_TREE");
         assert_eq!(ObjectId::Id(256).to_string(), "256");
-        assert_eq!(ObjectId::Id(u64::MAX).to_string(), "-1");
+        assert_eq!(ObjectId::Id(u64::MAX).to_string(), "18446744073709551615");
     }
 
     #[test]
@@ -967,7 +962,10 @@ mod tests {
             key_type: KeyType::RootItem,
             offset: u64::MAX,
         };
-        assert_eq!(format_key(&key), "(FS_TREE ROOT_ITEM -1)");
+        assert_eq!(
+            format_key(&key),
+            "(FS_TREE ROOT_ITEM 18446744073709551615)"
+        );
     }
 
     #[test]

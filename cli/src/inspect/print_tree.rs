@@ -1,5 +1,5 @@
 use btrfs_disk::{
-    items::{self, FileExtentBody, InlineRef, ItemPayload},
+    items::{self, FileExtentBody, InlineRef, ItemPayload, Timespec},
     raw,
     tree::{Header, ObjectId, TreeBlock, format_header_flags, format_key},
 };
@@ -41,7 +41,7 @@ pub fn print_tree_block(block: &TreeBlock, nodesize: u32, opts: &PrintOptions) {
             items,
             data,
         } => {
-            print_leaf_header(header, nodesize, opts);
+            print_leaf_header(header, items, nodesize, opts);
             let header_size = mem::size_of::<raw::btrfs_header>();
             for (i, item) in items.iter().enumerate() {
                 println!(
@@ -82,12 +82,22 @@ fn print_node_header(header: &Header, nodesize: u32, opts: &PrintOptions) {
     print_header_flags_line(header, opts);
 }
 
-fn print_leaf_header(header: &Header, nodesize: u32, opts: &PrintOptions) {
+fn print_leaf_header(
+    header: &Header,
+    items: &[btrfs_disk::tree::Item],
+    nodesize: u32,
+    opts: &PrintOptions,
+) {
     let header_size = mem::size_of::<raw::btrfs_header>() as u32;
     let item_size = mem::size_of::<raw::btrfs_item>() as u32;
-    let items_array = header.nritems * item_size;
-    let data_area = nodesize - header_size;
-    let free_space = data_area.saturating_sub(items_array);
+    let items_array_end = header_size + header.nritems * item_size;
+    // The last item has the lowest offset (items grow down from the end).
+    // Free space = gap between end of item descriptors and start of item data.
+    let data_end = items
+        .last()
+        .map(|item| header_size + item.offset)
+        .unwrap_or(nodesize);
+    let free_space = data_end.saturating_sub(items_array_end);
     let owner = ObjectId::from_raw(header.owner);
 
     println!(
@@ -116,6 +126,26 @@ fn print_header_flags_line(header: &Header, opts: &PrintOptions) {
     println!();
     println!("fs uuid {}", header.fsid.as_hyphenated());
     println!("chunk uuid {}", header.chunk_tree_uuid.as_hyphenated());
+}
+
+fn format_timespec(ts: &Timespec) -> String {
+    let secs = ts.sec as nix::libc::time_t;
+    let mut tm: nix::libc::tm = unsafe { mem::zeroed() };
+    // SAFETY: localtime_r writes into the provided tm struct.
+    let result = unsafe { nix::libc::localtime_r(&secs, &mut tm) };
+    if result.is_null() {
+        return format!("{}.{}", ts.sec, ts.nsec);
+    }
+    let year = tm.tm_year + 1900;
+    let mon = tm.tm_mon + 1;
+    let mday = tm.tm_mday;
+    let hour = tm.tm_hour;
+    let min = tm.tm_min;
+    let sec = tm.tm_sec;
+    format!(
+        "{}.{} ({year:04}-{mon:02}-{mday:02} {hour:02}:{min:02}:{sec:02})",
+        ts.sec, ts.nsec
+    )
 }
 
 fn name_or_hidden(data: &[u8], hide: bool) -> String {
@@ -148,7 +178,7 @@ fn print_payload(
                 ("mtime", &v.mtime),
                 ("otime", &v.otime),
             ] {
-                println!("\t\t{name} {}.{} (unknown)", ts.sec, ts.nsec);
+                println!("\t\t{name} {}", format_timespec(ts));
             }
         }
         ItemPayload::InodeRef(refs) => {
@@ -240,13 +270,19 @@ fn print_payload(
                 ("stime", &v.stime),
                 ("rtime", &v.rtime),
             ] {
-                println!("\t\t{name} {}.{} (unknown)", ts.sec, ts.nsec);
+                println!("\t\t{name} {}", format_timespec(ts));
             }
         }
         ItemPayload::RootRef(v) => {
             let name = name_or_hidden(&v.name, opts.hide_names);
+            let label =
+                if key.key_type == btrfs_disk::tree::KeyType::RootBackref {
+                    "root backref"
+                } else {
+                    "root ref"
+                };
             println!(
-                "\t\troot ref key dirid {} sequence {} name {name}",
+                "\t\t{label} key dirid {} sequence {} name {name}",
                 v.dirid, v.sequence
             );
         }
@@ -339,35 +375,40 @@ fn print_payload(
                 println!("\t\ttree block skinny level {level}");
             }
             for iref in &v.inline_refs {
+                let prefix =
+                    format!("({} 0x{:x})", iref.raw_type(), iref.raw_offset());
                 match iref {
-                    InlineRef::TreeBlockBackref { root } => {
+                    InlineRef::TreeBlockBackref { root, .. } => {
                         println!(
-                            "\t\ttree block backref root {}",
+                            "\t\t{prefix} tree block backref root {}",
                             ObjectId::from_raw(*root)
                         );
                     }
-                    InlineRef::SharedBlockBackref { parent } => {
-                        println!("\t\tshared block backref parent {parent}");
+                    InlineRef::SharedBlockBackref { parent, .. } => {
+                        println!(
+                            "\t\t{prefix} shared block backref parent {parent}"
+                        );
                     }
                     InlineRef::ExtentDataBackref {
                         root,
                         objectid,
                         offset,
                         count,
+                        ..
                     } => {
                         println!(
-                            "\t\textent data backref root {} objectid {objectid} offset {offset} count {count}",
+                            "\t\t{prefix} extent data backref root {} objectid {objectid} offset {offset} count {count}",
                             ObjectId::from_raw(*root)
                         );
                     }
-                    InlineRef::SharedDataBackref { parent, count } => {
+                    InlineRef::SharedDataBackref { parent, count, .. } => {
                         println!(
-                            "\t\tshared data backref parent {parent} count {count}"
+                            "\t\t{prefix} shared data backref parent {parent} count {count}"
                         );
                     }
-                    InlineRef::ExtentOwnerRef { root } => {
+                    InlineRef::ExtentOwnerRef { root, .. } => {
                         println!(
-                            "\t\textent owner root {}",
+                            "\t\t{prefix} extent owner root {}",
                             ObjectId::from_raw(*root)
                         );
                     }
@@ -393,8 +434,10 @@ fn print_payload(
         }
         ItemPayload::BlockGroupItem(v) => {
             println!(
-                "\t\tblock group used {} chunk_objectid {} flags {:#x}",
-                v.used, v.chunk_objectid, v.flags
+                "\t\tblock group used {} chunk_objectid {} flags {}",
+                v.used,
+                v.chunk_objectid,
+                items::format_chunk_type(v.flags)
             );
         }
         ItemPayload::FreeSpaceInfo(v) => {
@@ -404,8 +447,11 @@ fn print_payload(
         ItemPayload::FreeSpaceBitmap => println!("\t\tfree space bitmap"),
         ItemPayload::ChunkItem(v) => {
             println!(
-                "\t\tlength {} owner {} stripe_len {} type {:#x}",
-                v.length, v.owner, v.stripe_len, v.chunk_type
+                "\t\tlength {} owner {} stripe_len {} type {}",
+                v.length,
+                v.owner,
+                v.stripe_len,
+                items::format_chunk_type(v.chunk_type)
             );
             println!(
                 "\t\tio_align {} io_width {} sector_size {}",

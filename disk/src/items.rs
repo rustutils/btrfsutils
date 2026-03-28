@@ -523,28 +523,86 @@ impl FileExtentItem {
     }
 }
 
+/// Raw CRC32C matching the kernel's crc32c() function: seed is passed
+/// through directly with no inversion on input or output.
+fn raw_crc32c(seed: u32, data: &[u8]) -> u32 {
+    // crc32c::crc32c_append(seed) computes: !crc32c_hw(!seed, data)
+    // We want: crc32c_hw(seed, data)
+    // So: !crc32c::crc32c_append(!seed, data)
+    !crc32c::crc32c_append(!seed, data)
+}
+
+/// Compute the hash used for EXTENT_DATA_REF keys, matching the kernel's
+/// `hash_extent_data_ref()`. Uses two independent CRC32C computations
+/// combined into a single u64.
+fn extent_data_ref_hash(root: u64, objectid: u64, offset: u64) -> u64 {
+    let high_crc = raw_crc32c(!0u32, &root.to_le_bytes());
+    let low_crc = raw_crc32c(!0u32, &objectid.to_le_bytes());
+    let low_crc = raw_crc32c(low_crc, &offset.to_le_bytes());
+    ((high_crc as u64) << 31) ^ (low_crc as u64)
+}
+
 /// Inline reference types found inside EXTENT_ITEM/METADATA_ITEM.
 #[derive(Debug, Clone)]
 pub enum InlineRef {
     TreeBlockBackref {
+        ref_offset: u64,
         root: u64,
     },
     SharedBlockBackref {
+        ref_offset: u64,
         parent: u64,
     },
     ExtentDataBackref {
+        ref_offset: u64,
         root: u64,
         objectid: u64,
         offset: u64,
         count: u32,
     },
     SharedDataBackref {
+        ref_offset: u64,
         parent: u64,
         count: u32,
     },
     ExtentOwnerRef {
+        ref_offset: u64,
         root: u64,
     },
+}
+
+impl InlineRef {
+    /// The raw type byte for this inline ref.
+    pub fn raw_type(&self) -> u8 {
+        match self {
+            Self::TreeBlockBackref { .. } => {
+                raw::BTRFS_TREE_BLOCK_REF_KEY as u8
+            }
+            Self::SharedBlockBackref { .. } => {
+                raw::BTRFS_SHARED_BLOCK_REF_KEY as u8
+            }
+            Self::ExtentDataBackref { .. } => {
+                raw::BTRFS_EXTENT_DATA_REF_KEY as u8
+            }
+            Self::SharedDataBackref { .. } => {
+                raw::BTRFS_SHARED_DATA_REF_KEY as u8
+            }
+            Self::ExtentOwnerRef { .. } => {
+                raw::BTRFS_EXTENT_OWNER_REF_KEY as u8
+            }
+        }
+    }
+
+    /// The offset value from the inline ref header.
+    pub fn raw_offset(&self) -> u64 {
+        match self {
+            Self::TreeBlockBackref { ref_offset, .. }
+            | Self::SharedBlockBackref { ref_offset, .. }
+            | Self::ExtentDataBackref { ref_offset, .. }
+            | Self::SharedDataBackref { ref_offset, .. }
+            | Self::ExtentOwnerRef { ref_offset, .. } => *ref_offset,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -626,28 +684,38 @@ impl ExtentItem {
 
             match ref_type as u32 {
                 raw::BTRFS_TREE_BLOCK_REF_KEY => {
-                    inline_refs
-                        .push(InlineRef::TreeBlockBackref { root: ref_offset });
+                    inline_refs.push(InlineRef::TreeBlockBackref {
+                        ref_offset,
+                        root: ref_offset,
+                    });
                 }
                 raw::BTRFS_SHARED_BLOCK_REF_KEY => {
                     inline_refs.push(InlineRef::SharedBlockBackref {
+                        ref_offset,
                         parent: ref_offset,
                     });
                 }
                 raw::BTRFS_EXTENT_DATA_REF_KEY => {
-                    let ref_start = offset - 8;
-                    if ref_start + 28 <= data.len() {
-                        let root = read_le_u64(data, ref_start);
-                        let oid = read_le_u64(data, ref_start + 8);
-                        let off = read_le_u64(data, ref_start + 16);
-                        let count = read_le_u32(data, ref_start + 24);
+                    // EXTENT_DATA_REF has no 8-byte offset field; the struct
+                    // starts directly after the type byte. Back up the 8 bytes
+                    // we speculatively consumed.
+                    let struct_start = offset - 8;
+                    if struct_start + 28 <= data.len() {
+                        let root = read_le_u64(data, struct_start);
+                        let oid = read_le_u64(data, struct_start + 8);
+                        let off = read_le_u64(data, struct_start + 16);
+                        let count = read_le_u32(data, struct_start + 24);
+                        // The C tool prints a CRC hash for the display offset;
+                        // compute it the same way: hash(root, objectid, offset).
+                        let hash = extent_data_ref_hash(root, oid, off);
                         inline_refs.push(InlineRef::ExtentDataBackref {
+                            ref_offset: hash,
                             root,
                             objectid: oid,
                             offset: off,
                             count,
                         });
-                        offset = ref_start + 28;
+                        offset = struct_start + 28;
                     } else {
                         break;
                     }
@@ -656,6 +724,7 @@ impl ExtentItem {
                     if offset + 4 <= data.len() {
                         let count = read_le_u32(data, offset);
                         inline_refs.push(InlineRef::SharedDataBackref {
+                            ref_offset,
                             parent: ref_offset,
                             count,
                         });
@@ -665,8 +734,10 @@ impl ExtentItem {
                     }
                 }
                 raw::BTRFS_EXTENT_OWNER_REF_KEY => {
-                    inline_refs
-                        .push(InlineRef::ExtentOwnerRef { root: ref_offset });
+                    inline_refs.push(InlineRef::ExtentOwnerRef {
+                        ref_offset,
+                        root: ref_offset,
+                    });
                 }
                 _ => break,
             }
@@ -739,6 +810,53 @@ impl BlockGroupItem {
             chunk_objectid: read_le_u64(data, 8),
             flags: read_le_u64(data, 16),
         })
+    }
+}
+
+/// Format a block group / chunk type flags value as a human-readable string.
+///
+/// The type field is split into a type part (DATA, SYSTEM, METADATA) and a
+/// profile part (RAID0, RAID1, DUP, single, etc.).
+pub fn format_chunk_type(flags: u64) -> String {
+    let mut type_names = Vec::new();
+    if flags & raw::BTRFS_BLOCK_GROUP_DATA as u64 != 0 {
+        type_names.push("DATA");
+    }
+    if flags & raw::BTRFS_BLOCK_GROUP_SYSTEM as u64 != 0 {
+        type_names.push("SYSTEM");
+    }
+    if flags & raw::BTRFS_BLOCK_GROUP_METADATA as u64 != 0 {
+        type_names.push("METADATA");
+    }
+
+    let profile = flags & raw::BTRFS_BLOCK_GROUP_PROFILE_MASK as u64;
+    let profile_name = if profile == 0 {
+        "single"
+    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID0 as u64 != 0 {
+        "RAID0"
+    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID1 as u64 != 0 {
+        "RAID1"
+    } else if profile & raw::BTRFS_BLOCK_GROUP_DUP as u64 != 0 {
+        "DUP"
+    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID10 as u64 != 0 {
+        "RAID10"
+    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID5 as u64 != 0 {
+        "RAID5"
+    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID6 as u64 != 0 {
+        "RAID6"
+    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID1C3 as u64 != 0 {
+        "RAID1C3"
+    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID1C4 as u64 != 0 {
+        "RAID1C4"
+    } else {
+        "unknown"
+    };
+
+    if type_names.is_empty() {
+        profile_name.to_string()
+    } else {
+        type_names.push(profile_name);
+        type_names.join("|")
     }
 }
 

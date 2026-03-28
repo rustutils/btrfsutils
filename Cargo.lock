@@ -122,6 +122,7 @@ name = "btrfs-disk"
 version = "0.3.0"
 dependencies = [
  "bindgen",
+ "crc32c",
  "uuid",
 ]
 
