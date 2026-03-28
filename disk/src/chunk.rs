@@ -1,4 +1,4 @@
-//! # Chunk: logical-to-physical address mapping for btrfs filesystems
+//! # Logical-to-physical address mapping for btrfs filesystems
 //!
 //! Btrfs maps logical addresses to physical device offsets through chunk items
 //! stored in the chunk tree. The superblock embeds a small subset of the chunk

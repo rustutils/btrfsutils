@@ -1,4 +1,4 @@
-//! # Utilities: shared parsing helpers for on-disk structures
+//! # Shared parsing helpers for on-disk structures
 //!
 //! Little-endian reader functions for extracting typed values from raw byte
 //! buffers at known offsets. Used throughout the disk crate to parse packed

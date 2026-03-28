@@ -1,4 +1,4 @@
-//! # Tree: parsing btrfs B-tree nodes and leaves from raw blocks
+//! # Parsing btrfs B-tree nodes and leaves from raw blocks
 //!
 //! A btrfs filesystem is organized as a collection of B-trees. Each tree is
 //! stored as a hierarchy of blocks (nodesize bytes each, typically 16 KiB).

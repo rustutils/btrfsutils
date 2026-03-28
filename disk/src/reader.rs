@@ -1,4 +1,4 @@
-//! # Reader: block device reader with logical-to-physical address resolution
+//! # Block device reader with logical-to-physical address resolution
 //!
 //! Provides `BlockReader` which reads btrfs tree blocks by logical address,
 //! resolving them through the chunk tree cache. Also provides `open_filesystem`

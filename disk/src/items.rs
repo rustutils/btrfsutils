@@ -1,4 +1,4 @@
-//! # Items: typed Rust structs for btrfs tree item payloads
+//! # Typed Rust structs for btrfs tree item payloads
 //!
 //! Each on-disk item type has a corresponding struct with a `parse` method
 //! that reads from a raw byte buffer using safe LE reader helpers. These

@@ -1,4 +1,4 @@
-//! # Superblock: reading and parsing the btrfs superblock from a block device
+//! # Reading and parsing the btrfs superblock from a block device
 //!
 //! The superblock is a 4096-byte structure stored at a fixed offset on disk
 //! (primary at 64 KiB, with mirrors at 64 MiB and 256 GiB). It contains
