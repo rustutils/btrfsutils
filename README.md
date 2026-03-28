@@ -42,6 +42,8 @@ Most commands that talk to the kernel require root privileges or `CAP_SYS_ADMIN`
 | `disk` | Platform-independent parsing of btrfs on-disk structures (superblocks, tree nodes, etc.) from block devices or image files. |
 | `stream` | Send stream parser and receive operations. Platform-independent parser with optional Linux-only receive support. |
 | `cli` | The command-line tool, built on top of `uapi`, `disk`, and `stream`. |
+| `mkfs` | Filesystem creation tool (`mkfs.btrfs`). Constructs on-disk B-tree nodes and writes them directly to block devices or image files. |
+| `mangen` | Man page generator. Uses `clap_mangen` to produce roff man pages for all commands. |
 | `docs` | Documentation, rendered with mdBook. |
 
 Not all commands from btrfs-progs are implemented yet. Run `btrfs help` to see
