@@ -102,11 +102,11 @@ pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
     let extent_tree = build_extent_tree(cfg, &layout, &leaf_header)?;
     let chunk_tree = build_chunk_tree(cfg, &layout, &leaf_header)?;
     let dev_tree = build_dev_tree(cfg, &layout, &leaf_header)?;
-    let fs_tree = build_empty_tree(cfg.nodesize, &leaf_header(TreeId::Fs));
+    let fs_tree = build_root_dir_tree(cfg, &leaf_header(TreeId::Fs))?;
     let csum_tree = build_empty_tree(cfg.nodesize, &leaf_header(TreeId::Csum));
     let free_space_tree = build_free_space_tree(cfg, &layout, &leaf_header)?;
     let data_reloc_tree =
-        build_empty_tree(cfg.nodesize, &leaf_header(TreeId::DataReloc));
+        build_root_dir_tree(cfg, &leaf_header(TreeId::DataReloc))?;
 
     // Write tree blocks to disk.
     let trees = [
@@ -375,6 +375,46 @@ fn build_dev_tree(
 
 fn build_empty_tree(nodesize: u32, header: &LeafHeader) -> Vec<u8> {
     LeafBuilder::new(nodesize, header).finish()
+}
+
+/// Build a tree with a root directory inode (objectid 256).
+///
+/// Used for FS_TREE and DATA_RELOC_TREE — the kernel requires both to
+/// have at least an inode item for the root directory.
+fn build_root_dir_tree(
+    cfg: &MkfsConfig,
+    header: &LeafHeader,
+) -> Result<Vec<u8>> {
+    let mut leaf = LeafBuilder::new(cfg.nodesize, header);
+    let generation = 1u64;
+
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // INODE_ITEM for objectid 256 (BTRFS_FIRST_FREE_OBJECTID)
+    let inode_key = Key::new(
+        raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+        raw::BTRFS_INODE_ITEM_KEY as u8,
+        0,
+    );
+    let inode_data =
+        items::inode_item_dir(generation, cfg.nodesize as u64, now);
+    leaf.push(inode_key, &inode_data)
+        .map_err(|e| anyhow::anyhow!("root dir tree: {e}"))?;
+
+    // INODE_REF for objectid 256, parent 256, name ".."
+    let ref_key = Key::new(
+        raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+        raw::BTRFS_INODE_REF_KEY as u8,
+        raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+    );
+    let ref_data = items::inode_ref(0, b"..");
+    leaf.push(ref_key, &ref_data)
+        .map_err(|e| anyhow::anyhow!("root dir tree: {e}"))?;
+
+    Ok(leaf.finish())
 }
 
 fn build_free_space_tree(

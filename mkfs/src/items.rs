@@ -193,6 +193,53 @@ pub fn free_space_info(extent_count: u32, flags: u32) -> Vec<u8> {
     buf
 }
 
+/// Serialize an INODE_ITEM for a root directory.
+///
+/// Creates a directory inode (mode 040755) with nlink=1 and the given
+/// generation and timestamps.
+pub fn inode_item_dir(generation: u64, nbytes: u64, now_sec: u64) -> Vec<u8> {
+    let size = mem::size_of::<raw::btrfs_inode_item>();
+    let mut buf = vec![0u8; size];
+
+    write_le_u64(&mut buf, 0, generation); // generation
+    // transid at 8: 0 (set by kernel on first write)
+    // size at 16: 0 (empty directory)
+    write_le_u64(&mut buf, 24, nbytes); // nbytes
+    // block_group at 32: 0
+    write_le_u32(&mut buf, 40, 1); // nlink
+    // uid at 44: 0
+    // gid at 48: 0
+    write_le_u32(&mut buf, 52, 0o40755); // mode = S_IFDIR | 0755
+    // rdev at 56: 0
+    // flags at 64: 0
+    // sequence at 72: 0
+
+    // Timestamps: atime, ctime, mtime, otime
+    let ts_off = mem::offset_of!(raw::btrfs_inode_item, atime);
+    let ts_size = mem::size_of::<raw::btrfs_timespec>();
+    for i in 0..4 {
+        write_le_u64(&mut buf, ts_off + i * ts_size, now_sec);
+        write_le_u32(&mut buf, ts_off + i * ts_size + 8, 0);
+    }
+
+    buf
+}
+
+/// Serialize an INODE_REF item.
+///
+/// Contains the directory entry index and the name of the entry
+/// pointing to this inode.
+pub fn inode_ref(index: u64, name: &[u8]) -> Vec<u8> {
+    let size = 8 + 2 + name.len(); // index(8) + name_len(2) + name
+    let mut buf = vec![0u8; size];
+
+    write_le_u64(&mut buf, 0, index);
+    write_le_u16(&mut buf, 8, name.len() as u16);
+    buf[10..10 + name.len()].copy_from_slice(name);
+
+    buf
+}
+
 /// Serialize a DiskKey into 17 bytes (for embedding in other items).
 pub fn disk_key(key: &Key) -> Vec<u8> {
     let mut buf = vec![0u8; 17];
