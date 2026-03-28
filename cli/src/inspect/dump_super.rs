@@ -1,3 +1,4 @@
+use super::print_super;
 use crate::{Format, Runnable};
 use anyhow::{Context, Result, bail};
 use btrfs_disk::superblock::{self, SUPER_MIRROR_MAX};
@@ -91,7 +92,7 @@ impl Runnable for DumpSuperCommand {
             println!(
                 "---------------------------------------------------------"
             );
-            superblock::print_superblock(&sb, self.full);
+            print_super::print_superblock(&sb, self.full);
         }
 
         Ok(())

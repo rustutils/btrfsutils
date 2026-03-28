@@ -9,6 +9,7 @@ mod list_chunks;
 mod logical_resolve;
 mod map_swapfile;
 mod min_dev_size;
+mod print_super;
 mod print_tree;
 mod rootid;
 mod subvolid_resolve;
