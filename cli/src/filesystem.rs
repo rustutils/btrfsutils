@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::SizeFormat};
 use anyhow::Result;
 use clap::{Args, Parser};
 
@@ -100,4 +100,34 @@ pub struct UnitMode {
     /// Show sizes in TiB, or TB with --si
     #[clap(long, overrides_with_all = ["raw", "human_readable", "iec", "si", "kbytes", "mbytes", "gbytes"])]
     pub tbytes: bool,
+}
+
+impl UnitMode {
+    /// Resolve the clap flags into a [`SizeFormat`].
+    pub fn resolve(&self) -> SizeFormat {
+        let si = self.si;
+        if self.raw {
+            SizeFormat::Raw
+        } else if self.kbytes {
+            SizeFormat::Fixed(if si { 1000 } else { 1024 })
+        } else if self.mbytes {
+            SizeFormat::Fixed(if si { 1_000_000 } else { 1024 * 1024 })
+        } else if self.gbytes {
+            SizeFormat::Fixed(if si {
+                1_000_000_000
+            } else {
+                1024 * 1024 * 1024
+            })
+        } else if self.tbytes {
+            SizeFormat::Fixed(if si {
+                1_000_000_000_000
+            } else {
+                1024u64.pow(4)
+            })
+        } else if si {
+            SizeFormat::HumanSi
+        } else {
+            SizeFormat::HumanIec
+        }
+    }
 }

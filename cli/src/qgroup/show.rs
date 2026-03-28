@@ -1,4 +1,7 @@
-use crate::{Format, Runnable, util::human_bytes};
+use crate::{
+    Format, Runnable,
+    util::{SizeFormat, fmt_size},
+};
 use anyhow::{Context, Result};
 use btrfs_uapi::quota::{
     QgroupInfo, QgroupLimitFlags, QgroupStatusFlags, qgroupid_level,
@@ -140,34 +143,16 @@ impl std::str::FromStr for SortKeys {
     }
 }
 
-fn fmt_size(
-    bytes: u64,
-    raw: bool,
-    fixed_divisor: Option<u64>,
-    _use_si: bool,
-) -> String {
-    if raw {
-        return bytes.to_string();
-    }
-    if let Some(div) = fixed_divisor {
-        // TODO: use_si should format with base-1000 units
-        return format!("{}", bytes / div);
-    }
-    human_bytes(bytes)
-}
-
 fn fmt_limit(
     bytes: u64,
     flags: QgroupLimitFlags,
     flag_bit: QgroupLimitFlags,
-    raw: bool,
-    fixed_divisor: Option<u64>,
-    use_si: bool,
+    mode: &SizeFormat,
 ) -> String {
     if bytes == u64::MAX || !flags.contains(flag_bit) {
         "none".to_string()
     } else {
-        fmt_size(bytes, raw, fixed_divisor, use_si)
+        fmt_size(bytes, mode)
     }
 }
 
@@ -211,23 +196,29 @@ impl Runnable for QgroupShowCommand {
         }
 
         // Determine display mode
-        let raw = self.raw;
-        let (fixed_divisor, use_si): (Option<u64>, bool) = if raw {
-            (None, false)
+        let si = self.si;
+        let mode = if self.raw {
+            SizeFormat::Raw
         } else if self.kbytes {
-            (Some(1024), false)
+            SizeFormat::Fixed(if si { 1000 } else { 1024 })
         } else if self.mbytes {
-            (Some(1024 * 1024), false)
+            SizeFormat::Fixed(if si { 1_000_000 } else { 1024 * 1024 })
         } else if self.gbytes {
-            (Some(1024 * 1024 * 1024), false)
+            SizeFormat::Fixed(if si {
+                1_000_000_000
+            } else {
+                1024 * 1024 * 1024
+            })
         } else if self.tbytes {
-            (Some(1024u64.pow(4)), false)
-        } else if self.si {
-            // SI: use 1000-based human formatting — fall through to human_bytes but note it
-            (None, true)
+            SizeFormat::Fixed(if si {
+                1_000_000_000_000
+            } else {
+                1024u64.pow(4)
+            })
+        } else if si {
+            SizeFormat::HumanSi
         } else {
-            // default: human readable IEC
-            (None, false)
+            SizeFormat::HumanIec
         };
 
         // Sort
@@ -277,8 +268,8 @@ impl Runnable for QgroupShowCommand {
 
         for q in &qgroups {
             let id_str = format_qgroupid(q.qgroupid);
-            let rfer_str = fmt_size(q.rfer, raw, fixed_divisor, use_si);
-            let excl_str = fmt_size(q.excl, raw, fixed_divisor, use_si);
+            let rfer_str = fmt_size(q.rfer, &mode);
+            let excl_str = fmt_size(q.excl, &mode);
 
             let mut line =
                 format!("{:<16} {:>12} {:>12}", id_str, rfer_str, excl_str);
@@ -288,9 +279,7 @@ impl Runnable for QgroupShowCommand {
                     q.max_rfer,
                     q.limit_flags,
                     QgroupLimitFlags::MAX_RFER,
-                    raw,
-                    fixed_divisor,
-                    use_si,
+                    &mode,
                 );
                 line.push_str(&format!(" {:>12}", s));
             }
@@ -300,9 +289,7 @@ impl Runnable for QgroupShowCommand {
                     q.max_excl,
                     q.limit_flags,
                     QgroupLimitFlags::MAX_EXCL,
-                    raw,
-                    fixed_divisor,
-                    use_si,
+                    &mode,
                 );
                 line.push_str(&format!(" {:>12}", s));
             }

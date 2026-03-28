@@ -10,6 +10,28 @@ use std::{
 };
 use uuid::Uuid;
 
+/// Resolved size display mode.
+pub enum SizeFormat {
+    /// Print raw byte count with no suffix.
+    Raw,
+    /// Human-readable with base 1024 (KiB, MiB, GiB, …).
+    HumanIec,
+    /// Human-readable with base 1000 (kB, MB, GB, …).
+    HumanSi,
+    /// Divide by a fixed power and print the integer result.
+    Fixed(u64),
+}
+
+/// Format a byte count according to the given [`SizeFormat`].
+pub fn fmt_size(bytes: u64, mode: &SizeFormat) -> String {
+    match mode {
+        SizeFormat::Raw => bytes.to_string(),
+        SizeFormat::HumanIec => human_bytes(bytes),
+        SizeFormat::HumanSi => human_bytes_si(bytes),
+        SizeFormat::Fixed(divisor) => format!("{}", bytes / divisor),
+    }
+}
+
 /// Format a byte count as a human-readable string using binary prefixes.
 pub fn human_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
@@ -17,6 +39,22 @@ pub fn human_bytes(bytes: u64) -> String {
     let mut unit = 0;
     while value >= 1024.0 && unit + 1 < UNITS.len() {
         value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes}B")
+    } else {
+        format!("{value:.2}{}", UNITS[unit])
+    }
+}
+
+/// Format a byte count as a human-readable string using SI (base-1000) prefixes.
+pub fn human_bytes_si(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "kB", "MB", "GB", "TB", "PB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1000.0 && unit + 1 < UNITS.len() {
+        value /= 1000.0;
         unit += 1;
     }
     if unit == 0 {

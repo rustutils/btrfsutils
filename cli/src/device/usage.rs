@@ -1,4 +1,7 @@
-use crate::{Format, Runnable, util::human_bytes};
+use crate::{
+    Format, Runnable,
+    util::{SizeFormat, fmt_size},
+};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     chunk::device_chunk_allocations, device::device_info_all,
@@ -56,38 +59,6 @@ pub struct DeviceUsageCommand {
     pub tbytes: bool,
 }
 
-/// Resolved unit mode: how to format byte counts.
-enum UnitMode {
-    Raw,
-    HumanIec,
-    HumanSi,
-    Fixed(u64),
-}
-
-fn fmt_size(bytes: u64, mode: &UnitMode) -> String {
-    match mode {
-        UnitMode::Raw => bytes.to_string(),
-        UnitMode::HumanIec => human_bytes(bytes),
-        UnitMode::HumanSi => human_bytes_si(bytes),
-        UnitMode::Fixed(divisor) => format!("{}", bytes / divisor),
-    }
-}
-
-fn human_bytes_si(bytes: u64) -> String {
-    const UNITS: &[&str] = &["B", "kB", "MB", "GB", "TB", "PB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1000.0 && unit + 1 < UNITS.len() {
-        value /= 1000.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes}B")
-    } else {
-        format!("{value:.2}{}", UNITS[unit])
-    }
-}
-
 /// Try to get the physical block device size.  Returns 0 on failure (e.g.
 /// device path is empty, inaccessible, or not a block device).
 fn physical_device_size(path: &str) -> u64 {
@@ -101,36 +72,37 @@ fn physical_device_size(path: &str) -> u64 {
 }
 
 impl DeviceUsageCommand {
-    fn unit_mode(&self) -> UnitMode {
+    fn size_format(&self) -> SizeFormat {
+        let si = self.si;
         if self.raw {
-            UnitMode::Raw
+            SizeFormat::Raw
         } else if self.kbytes {
-            UnitMode::Fixed(if self.si { 1000 } else { 1024 })
+            SizeFormat::Fixed(if si { 1000 } else { 1024 })
         } else if self.mbytes {
-            UnitMode::Fixed(if self.si { 1000 * 1000 } else { 1024 * 1024 })
+            SizeFormat::Fixed(if si { 1_000_000 } else { 1024 * 1024 })
         } else if self.gbytes {
-            UnitMode::Fixed(if self.si {
-                1000 * 1000 * 1000
+            SizeFormat::Fixed(if si {
+                1_000_000_000
             } else {
                 1024 * 1024 * 1024
             })
         } else if self.tbytes {
-            UnitMode::Fixed(if self.si {
-                1000u64.pow(4)
+            SizeFormat::Fixed(if si {
+                1_000_000_000_000
             } else {
                 1024u64.pow(4)
             })
-        } else if self.si || self.human_base1000 {
-            UnitMode::HumanSi
+        } else if si || self.human_base1000 {
+            SizeFormat::HumanSi
         } else {
-            UnitMode::HumanIec
+            SizeFormat::HumanIec
         }
     }
 }
 
 impl Runnable for DeviceUsageCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let mode = self.unit_mode();
+        let mode = self.size_format();
         for (i, path) in self.paths.iter().enumerate() {
             if i > 0 {
                 println!();
@@ -141,7 +113,7 @@ impl Runnable for DeviceUsageCommand {
     }
 }
 
-fn print_device_usage(path: &std::path::Path, mode: &UnitMode) -> Result<()> {
+fn print_device_usage(path: &std::path::Path, mode: &SizeFormat) -> Result<()> {
     let file = File::open(path)
         .with_context(|| format!("failed to open '{}'", path.display()))?;
     let fd = file.as_fd();
