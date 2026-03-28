@@ -1,6 +1,6 @@
 [workspace]
-members = ["uapi", "disk", "stream", "cli", "mangen"]
-default-members = ["uapi", "disk", "stream", "cli"]
+members = ["uapi", "disk", "stream", "cli", "mkfs", "mangen"]
+default-members = ["uapi", "disk", "stream", "cli", "mkfs"]
 resolver = "2"
 
 [workspace.package]
@@ -25,6 +25,7 @@ bindgen = "0.72.1"
 btrfs-uapi = { path = "uapi", version = "0.3.0" }
 btrfs-disk = { path = "disk", version = "0.3.0" }
 btrfs-stream = { path = "stream", version = "0.3.0" }
+btrfs-mkfs = { path = "mkfs", version = "0.3.0" }
 
 [profile.release]
 lto = true

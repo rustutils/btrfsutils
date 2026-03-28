@@ -1,0 +1,21 @@
+[package]
+name = "btrfs-mkfs"
+version.workspace = true
+edition.workspace = true
+description = "Create btrfs filesystems"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+categories = ["command-line-utilities", "filesystem"]
+keywords = ["btrfs", "filesystem", "mkfs", "linux", "storage"]
+
+[[bin]]
+name = "mkfs-btrfs"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+uuid = { workspace = true }
+btrfs-disk = { workspace = true }

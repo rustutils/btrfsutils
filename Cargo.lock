@@ -137,6 +137,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "btrfs-mkfs"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "btrfs-disk",
+ "clap",
+ "uuid",
+]
+
+[[package]]
 name = "btrfs-stream"
 version = "0.3.0"
 dependencies = [
