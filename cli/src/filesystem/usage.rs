@@ -1,5 +1,8 @@
 use super::UnitMode;
-use crate::{Format, Runnable, util::human_bytes};
+use crate::{
+    Format, Runnable,
+    util::{SizeFormat, fmt_size},
+};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     chunk::device_chunk_allocations,
@@ -84,17 +87,25 @@ fn has_multiple_profiles(spaces: &[SpaceInfo]) -> bool {
 
 impl Runnable for FilesystemUsageCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+        let mut mode = self.units.resolve();
+        if self.human_si {
+            mode = SizeFormat::HumanSi;
+        }
         for (i, path) in self.paths.iter().enumerate() {
             if i > 0 {
                 println!();
             }
-            print_usage(path, self.tabular)?;
+            print_usage(path, self.tabular, &mode)?;
         }
         Ok(())
     }
 }
 
-fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
+fn print_usage(
+    path: &std::path::Path,
+    _tabular: bool,
+    mode: &SizeFormat,
+) -> Result<()> {
     let file = File::open(path)
         .with_context(|| format!("failed to open '{}'", path.display()))?;
     let fd = file.as_fd();
@@ -201,33 +212,36 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
     let multiple = has_multiple_profiles(&spaces);
 
     println!("Overall:");
-    println!("    Device size:\t\t{:>10}", human_bytes(r_total_size));
+    println!("    Device size:\t\t{:>10}", fmt_size(r_total_size, mode));
     println!(
         "    Device allocated:\t\t{:>10}",
-        human_bytes(r_total_chunks)
+        fmt_size(r_total_chunks, mode)
     );
     println!(
         "    Device unallocated:\t\t{:>10}",
-        human_bytes(r_total_unused)
+        fmt_size(r_total_unused, mode)
     );
     println!(
         "    Device missing:\t\t{:>10}",
-        human_bytes(r_total_missing)
+        fmt_size(r_total_missing, mode)
     );
-    println!("    Device slack:\t\t{:>10}", human_bytes(0));
-    println!("    Used:\t\t\t{:>10}", human_bytes(r_total_used));
+    println!("    Device slack:\t\t{:>10}", fmt_size(0, mode));
+    println!("    Used:\t\t\t{:>10}", fmt_size(r_total_used, mode));
     println!(
         "    Free (estimated):\t\t{:>10}\t(min: {})",
-        human_bytes(free_estimated),
-        human_bytes(free_min)
+        fmt_size(free_estimated, mode),
+        fmt_size(free_min, mode)
     );
-    println!("    Free (statfs, df):\t\t{:>10}", human_bytes(free_statfs));
+    println!(
+        "    Free (statfs, df):\t\t{:>10}",
+        fmt_size(free_statfs, mode)
+    );
     println!("    Data ratio:\t\t\t{:>10.2}", data_ratio);
     println!("    Metadata ratio:\t\t{:>10.2}", meta_ratio);
     println!(
         "    Global reserve:\t\t{:>10}\t(used: {})",
-        human_bytes(l_global_reserve),
-        human_bytes(l_global_reserve_used)
+        fmt_size(l_global_reserve, mode),
+        fmt_size(l_global_reserve_used, mode)
     );
     println!(
         "    Multiple profiles:\t\t{:>10}",
@@ -254,8 +268,8 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
             "\n{},{}: Size:{}, Used:{} ({:.2}%)",
             s.flags.type_name(),
             s.flags.profile_name(),
-            human_bytes(s.total_bytes),
-            human_bytes(s.used_bytes),
+            fmt_size(s.total_bytes, mode),
+            fmt_size(s.used_bytes, mode),
             pct
         );
 
@@ -271,7 +285,7 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
                     .get(&alloc.devid)
                     .copied()
                     .unwrap_or("<unknown>");
-                println!("   {}\t\t{:>10}", path, human_bytes(alloc.bytes));
+                println!("   {}\t\t{:>10}", path, fmt_size(alloc.bytes, mode));
             }
         }
     }
@@ -279,7 +293,7 @@ fn print_usage(path: &std::path::Path, _tabular: bool) -> Result<()> {
     println!("\nUnallocated:");
     for dev in &devices {
         let unallocated = dev.total_bytes.saturating_sub(dev.bytes_used);
-        println!("   {}\t{:>10}", dev.path, human_bytes(unallocated));
+        println!("   {}\t{:>10}", dev.path, fmt_size(unallocated, mode));
     }
 
     Ok(())

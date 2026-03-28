@@ -13,7 +13,10 @@
 //! The output format and semantics match `btrfs-progs filesystem du`.
 
 use super::UnitMode;
-use crate::{Format, Runnable, util::human_bytes};
+use crate::{
+    Format, Runnable,
+    util::{SizeFormat, fmt_size},
+};
 use anyhow::{Context, Result};
 use btrfs_uapi::fiemap::file_extents;
 use clap::Parser;
@@ -47,21 +50,26 @@ pub struct FilesystemDuCommand {
 
 impl Runnable for FilesystemDuCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+        let mode = self.units.resolve();
         println!(
             "{:>10}  {:>10}  {:>10}  Filename",
             "Total", "Exclusive", "Set shared"
         );
 
         for path in &self.paths {
-            process_top_level(path, self.summarize).with_context(|| {
-                format!("cannot check space of '{}'", path.display())
-            })?;
+            process_top_level(path, self.summarize, &mode).with_context(
+                || format!("cannot check space of '{}'", path.display()),
+            )?;
         }
         Ok(())
     }
 }
 
-fn process_top_level(path: &Path, summarize: bool) -> Result<()> {
+fn process_top_level(
+    path: &Path,
+    summarize: bool,
+    mode: &SizeFormat,
+) -> Result<()> {
     let mut seen: HashSet<(u64, u64)> = HashSet::new();
     // Physical (start, end_exclusive) ranges of all shared extents in this subtree.
     let mut shared_ranges: Vec<(u64, u64)> = Vec::new();
@@ -80,7 +88,14 @@ fn process_top_level(path: &Path, summarize: bool) -> Result<()> {
         shared_ranges.extend_from_slice(&info.shared_extents);
         info.total_bytes
     } else if meta.is_dir() {
-        walk_dir(path, root_dev, &mut seen, &mut shared_ranges, summarize)?
+        walk_dir(
+            path,
+            root_dev,
+            &mut seen,
+            &mut shared_ranges,
+            summarize,
+            mode,
+        )?
     } else {
         0
     };
@@ -90,9 +105,9 @@ fn process_top_level(path: &Path, summarize: bool) -> Result<()> {
 
     println!(
         "{:>10}  {:>10}  {:>10}  {}",
-        human_bytes(total),
-        human_bytes(exclusive),
-        human_bytes(set_shared),
+        fmt_size(total, mode),
+        fmt_size(exclusive, mode),
+        fmt_size(set_shared, mode),
         path.display()
     );
 
@@ -112,6 +127,7 @@ fn walk_dir(
     seen: &mut HashSet<(u64, u64)>,
     shared_ranges: &mut Vec<(u64, u64)>,
     summarize: bool,
+    mode: &SizeFormat,
 ) -> Result<u64> {
     let mut dir_total: u64 = 0;
 
@@ -177,8 +193,8 @@ fn walk_dir(
                 let excl = info.total_bytes.saturating_sub(info.shared_bytes);
                 println!(
                     "{:>10}  {:>10}  {:>10}  {}",
-                    human_bytes(info.total_bytes),
-                    human_bytes(excl),
+                    fmt_size(info.total_bytes, mode),
+                    fmt_size(excl, mode),
                     "-",
                     entry_path.display()
                 );
@@ -193,6 +209,7 @@ fn walk_dir(
                 seen,
                 shared_ranges,
                 summarize,
+                mode,
             )?;
 
             if !summarize {
@@ -200,7 +217,7 @@ fn walk_dir(
                 // The set-shared total is only computed at the top level.
                 println!(
                     "{:>10}  {:>10}  {:>10}  {}",
-                    human_bytes(sub_total),
+                    fmt_size(sub_total, mode),
                     "-",
                     "-",
                     entry_path.display()

@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::human_bytes};
+use crate::{Format, Runnable, filesystem::UnitMode, util::fmt_size};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::device_info_all, filesystem::filesystem_info, scrub::scrub_progress,
@@ -14,8 +14,11 @@ pub struct ScrubStatusCommand {
     pub device: bool,
 
     /// Print full raw data instead of summary
-    #[clap(short = 'R')]
-    pub raw: bool,
+    #[clap(short = 'R', long = "raw-data")]
+    pub raw_data: bool,
+
+    #[clap(flatten)]
+    pub units: UnitMode,
 
     /// Path to a mounted btrfs filesystem or a device
     pub path: PathBuf,
@@ -23,6 +26,7 @@ pub struct ScrubStatusCommand {
 
 impl Runnable for ScrubStatusCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+        let mode = self.units.resolve();
         let file = File::open(&self.path).with_context(|| {
             format!("failed to open '{}'", self.path.display())
         })?;
@@ -60,7 +64,11 @@ impl Runnable for ScrubStatusCommand {
                     super::accumulate(&mut fs_totals, &progress);
                     if self.device {
                         super::print_device_progress(
-                            &progress, dev.devid, &dev.path, self.raw,
+                            &progress,
+                            dev.devid,
+                            &dev.path,
+                            self.raw_data,
+                            &mode,
                         );
                     }
                 }
@@ -70,12 +78,12 @@ impl Runnable for ScrubStatusCommand {
         if !any_running {
             println!("\tno scrub in progress");
         } else if !self.device {
-            if self.raw {
+            if self.raw_data {
                 super::print_raw_progress(&fs_totals, 0, "filesystem totals");
             } else {
                 println!(
                     "Bytes scrubbed:   {}",
-                    human_bytes(fs_totals.bytes_scrubbed())
+                    fmt_size(fs_totals.bytes_scrubbed(), &mode)
                 );
                 super::print_error_summary(&fs_totals);
             }

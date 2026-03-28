@@ -1,4 +1,7 @@
-use crate::{Format, Runnable, util::human_bytes};
+use crate::{
+    Format, Runnable,
+    util::{SizeFormat, fmt_size},
+};
 use anyhow::Result;
 use btrfs_uapi::scrub::ScrubProgress;
 use clap::Parser;
@@ -45,11 +48,11 @@ pub enum ScrubSubcommand {
 }
 
 /// Format a bytes-per-second limit for display; `0` means unlimited.
-fn format_limit(limit: u64) -> String {
+fn format_limit(limit: u64, mode: &SizeFormat) -> String {
     if limit == 0 {
         "unlimited".to_owned()
     } else {
-        format!("{}/s", human_bytes(limit))
+        format!("{}/s", fmt_size(limit, mode))
     }
 }
 
@@ -77,10 +80,15 @@ fn accumulate(dst: &mut ScrubProgress, src: &ScrubProgress) {
 }
 
 /// Print a single-device progress summary (default format).
-fn print_progress_summary(p: &ScrubProgress, devid: u64, path: &str) {
+fn print_progress_summary(
+    p: &ScrubProgress,
+    devid: u64,
+    path: &str,
+    mode: &SizeFormat,
+) {
     println!(
         "  devid {devid} ({path}): scrubbed {}",
-        human_bytes(p.bytes_scrubbed())
+        fmt_size(p.bytes_scrubbed(), mode)
     );
     print_error_summary(p);
 }
@@ -136,11 +144,17 @@ fn print_raw_progress(p: &ScrubProgress, devid: u64, path: &str) {
 }
 
 /// Print device progress in either raw or summary format.
-fn print_device_progress(p: &ScrubProgress, devid: u64, path: &str, raw: bool) {
+fn print_device_progress(
+    p: &ScrubProgress,
+    devid: u64,
+    path: &str,
+    raw: bool,
+    mode: &SizeFormat,
+) {
     if raw {
         print_raw_progress(p, devid, path);
     } else {
-        print_progress_summary(p, devid, path);
+        print_progress_summary(p, devid, path, mode);
     }
 }
 

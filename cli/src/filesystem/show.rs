@@ -1,4 +1,5 @@
-use crate::{Format, Runnable, util::human_bytes};
+use super::UnitMode;
+use crate::{Format, Runnable, util::fmt_size};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::device_info_all,
@@ -19,6 +20,9 @@ pub struct FilesystemShowCommand {
     #[clap(long, short)]
     pub mounted: bool,
 
+    #[clap(flatten)]
+    pub units: UnitMode,
+
     /// Path, UUID, device or label to show (shows all if omitted)
     pub filter: Option<String>,
 }
@@ -29,6 +33,7 @@ impl Runnable for FilesystemShowCommand {
             anyhow::bail!("--all-devices is not yet implemented");
         }
 
+        let mode = self.units.resolve();
         let mounts =
             parse_btrfs_mounts().context("failed to read /proc/self/mounts")?;
 
@@ -95,15 +100,15 @@ impl Runnable for FilesystemShowCommand {
             println!(
                 "\tTotal devices {} FS bytes used {}",
                 info.num_devices,
-                human_bytes(used_bytes)
+                fmt_size(used_bytes, &mode)
             );
 
             for dev in &devices {
                 println!(
                     "\tdevid {:4} size {} used {} path {}",
                     dev.devid,
-                    human_bytes(dev.total_bytes),
-                    human_bytes(dev.bytes_used),
+                    fmt_size(dev.total_bytes, &mode),
+                    fmt_size(dev.bytes_used, &mode),
                     dev.path,
                 );
             }

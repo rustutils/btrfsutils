@@ -14,6 +14,16 @@ Arguments {
         InspectCommand {
             subcommand: ListChunks(
                 ListChunksCommand {
+                    units: UnitMode {
+                        raw: false,
+                        human_readable: false,
+                        iec: false,
+                        si: false,
+                        kbytes: false,
+                        mbytes: false,
+                        gbytes: false,
+                        tbytes: false,
+                    },
                     path: "/mnt",
                 },
             ),

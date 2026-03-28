@@ -1,4 +1,6 @@
-use crate::{Format, Runnable, util::parse_size_with_suffix};
+use crate::{
+    Format, Runnable, filesystem::UnitMode, util::parse_size_with_suffix,
+};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::device_info_all, filesystem::filesystem_info, sysfs::SysfsBtrfs,
@@ -25,12 +27,16 @@ pub struct ScrubLimitCommand {
     #[clap(long, short, value_name = "SIZE", value_parser = parse_size_with_suffix, requires = "target")]
     pub limit: Option<u64>,
 
+    #[clap(flatten)]
+    pub units: UnitMode,
+
     /// Path to a mounted btrfs filesystem
     pub path: PathBuf,
 }
 
 impl Runnable for ScrubLimitCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+        let mode = self.units.resolve();
         let file = File::open(&self.path).with_context(|| {
             format!("failed to open '{}'", self.path.display())
         })?;
@@ -69,8 +75,8 @@ impl Runnable for ScrubLimitCommand {
             println!(
                 "Set scrub limit of devid {} from {} to {}",
                 dev.devid,
-                super::format_limit(old_limit),
-                super::format_limit(new_limit),
+                super::format_limit(old_limit, &mode),
+                super::format_limit(new_limit, &mode),
             );
             sysfs
                 .scrub_speed_max_set(dev.devid, new_limit)
@@ -95,8 +101,8 @@ impl Runnable for ScrubLimitCommand {
                 println!(
                     "Set scrub limit of devid {} from {} to {}",
                     dev.devid,
-                    super::format_limit(old_limit),
-                    super::format_limit(new_limit),
+                    super::format_limit(old_limit, &mode),
+                    super::format_limit(new_limit, &mode),
                 );
                 sysfs
                     .scrub_speed_max_set(dev.devid, new_limit)
@@ -123,7 +129,7 @@ impl Runnable for ScrubLimitCommand {
             .map(|d| {
                 sysfs
                     .scrub_speed_max_get(d.devid)
-                    .map(super::format_limit)
+                    .map(|v| super::format_limit(v, &mode))
                     .unwrap_or_else(|_| "-".to_owned())
             })
             .collect();

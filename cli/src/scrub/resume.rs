@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::SizeFormat};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::device_info_all, filesystem::filesystem_info, scrub::scrub_start,
@@ -68,6 +68,7 @@ impl Runnable for ScrubResumeCommand {
 
         println!("UUID: {}", fs.uuid.as_hyphenated());
 
+        let mode = SizeFormat::HumanIec;
         let mut fs_totals = btrfs_uapi::scrub::ScrubProgress::default();
 
         for dev in &devices {
@@ -78,7 +79,7 @@ impl Runnable for ScrubResumeCommand {
                     super::accumulate(&mut fs_totals, &progress);
                     if self.device {
                         super::print_device_progress(
-                            &progress, dev.devid, &dev.path, self.raw,
+                            &progress, dev.devid, &dev.path, self.raw, &mode,
                         );
                     }
                 }

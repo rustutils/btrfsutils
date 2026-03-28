@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::human_bytes};
+use crate::{Format, Runnable, filesystem::UnitMode, util::fmt_size};
 use anyhow::{Context, Result};
 use btrfs_uapi::{chunk::chunk_list, filesystem::filesystem_info};
 use clap::Parser;
@@ -40,6 +40,9 @@ use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 /// (used / length * 100), sourced from the extent tree.
 #[derive(Parser, Debug)]
 pub struct ListChunksCommand {
+    #[clap(flatten)]
+    pub units: UnitMode,
+
     /// Path to a file or directory on the btrfs filesystem
     path: PathBuf,
 }
@@ -59,6 +62,8 @@ struct Row {
 
 impl Runnable for ListChunksCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+        let mode = self.units.resolve();
+        let fmt = |bytes| fmt_size(bytes, &mode);
         let file = File::open(&self.path).with_context(|| {
             format!("failed to open '{}'", self.path.display())
         })?;
@@ -134,21 +139,15 @@ impl Runnable for ListChunksCommand {
         let pnum_w = col_w("PNumber", rows.iter().map(|r| digits(r.pnumber)));
         let type_w =
             col_w("Type/profile", rows.iter().map(|r| r.flags_str.len()));
-        let pstart_w = col_w(
-            "PStart",
-            rows.iter().map(|r| human_bytes(r.physical_start).len()),
-        );
+        let pstart_w =
+            col_w("PStart", rows.iter().map(|r| fmt(r.physical_start).len()));
         let length_w =
-            col_w("Length", rows.iter().map(|r| human_bytes(r.length).len()));
-        let pend_w = col_w(
-            "PEnd",
-            rows.iter().map(|r| human_bytes(r.physical_end).len()),
-        );
+            col_w("Length", rows.iter().map(|r| fmt(r.length).len()));
+        let pend_w =
+            col_w("PEnd", rows.iter().map(|r| fmt(r.physical_end).len()));
         let lnum_w = col_w("LNumber", rows.iter().map(|r| digits(r.lnumber)));
-        let lstart_w = col_w(
-            "LStart",
-            rows.iter().map(|r| human_bytes(r.logical_start).len()),
-        );
+        let lstart_w =
+            col_w("LStart", rows.iter().map(|r| fmt(r.logical_start).len()));
         let usage_w = "Usage%".len().max("100.00".len());
 
         // Header
@@ -177,11 +176,11 @@ impl Runnable for ListChunksCommand {
                 r.devid,
                 r.pnumber,
                 r.flags_str,
-                human_bytes(r.physical_start),
-                human_bytes(r.length),
-                human_bytes(r.physical_end),
+                fmt(r.physical_start),
+                fmt(r.length),
+                fmt(r.physical_end),
                 r.lnumber,
-                human_bytes(r.logical_start),
+                fmt(r.logical_start),
                 r.usage_pct,
             );
         }

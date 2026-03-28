@@ -23,5 +23,29 @@ Options:
   -l, --limit <SIZE>
           Set the throughput limit (e.g. 100m, 1g); 0 removes the limit
 
+      --raw
+          Show raw numbers in bytes
+
+      --human-readable
+          Show human-friendly numbers using base 1024 (default)
+
+      --iec
+          Use 1024 as a base (KiB, MiB, GiB, TiB)
+
+      --si
+          Use 1000 as a base (kB, MB, GB, TB)
+
+      --kbytes
+          Show sizes in KiB, or kB with --si
+
+      --mbytes
+          Show sizes in MiB, or MB with --si
+
+      --gbytes
+          Show sizes in GiB, or GB with --si
+
+      --tbytes
+          Show sizes in TiB, or TB with --si
+
   -h, --help
           Print help (see a summary with '-h')
