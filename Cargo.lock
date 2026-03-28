@@ -110,6 +110,7 @@ dependencies = [
  "clap",
  "env_logger",
  "insta",
+ "libc",
  "log",
  "nix",
  "regex-lite",

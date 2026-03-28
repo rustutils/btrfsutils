@@ -14,7 +14,12 @@ Arguments {
         ScrubCommand {
             subcommand: Resume(
                 ScrubResumeCommand {
+                    no_background: false,
+                    device: false,
                     readonly: false,
+                    raw: false,
+                    ioprio_class: None,
+                    ioprio_classdata: None,
                     path: "/mnt",
                 },
             ),

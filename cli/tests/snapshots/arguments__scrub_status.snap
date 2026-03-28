@@ -15,6 +15,7 @@ Arguments {
             subcommand: Status(
                 ScrubStatusCommand {
                     device: false,
+                    raw: false,
                     path: "/mnt",
                 },
             ),

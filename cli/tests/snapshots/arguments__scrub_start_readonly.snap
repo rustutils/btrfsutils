@@ -14,7 +14,14 @@ Arguments {
         ScrubCommand {
             subcommand: Start(
                 ScrubStartCommand {
+                    no_background: false,
+                    device: false,
                     readonly: true,
+                    raw: false,
+                    force: false,
+                    limit: None,
+                    ioprio_class: None,
+                    ioprio_classdata: None,
                     path: "/mnt",
                 },
             ),

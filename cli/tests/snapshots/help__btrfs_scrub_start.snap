@@ -14,8 +14,30 @@ Arguments:
           Path to a mounted btrfs filesystem or a device
 
 Options:
+  -B
+          Do not background (default behavior, accepted for compatibility)
+
+  -d, --device
+          Stats per device
+
   -r, --readonly
           Read-only mode: check for errors but do not attempt repairs
+
+  -R
+          Print full raw data instead of summary
+
+  -f, --force
+          Force starting new scrub even if a scrub is already running
+
+      --limit <SIZE>
+          Set the throughput limit for each device (0 for unlimited), restored
+          afterwards
+
+  -c <CLASS>
+          Set ioprio class (see ionice(1) manpage)
+
+  -n <CDATA>
+          Set ioprio classdata (see ionice(1) manpage)
 
   -h, --help
           Print help (see a summary with '-h')

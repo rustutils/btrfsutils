@@ -14,5 +14,8 @@ Options:
   -d, --device
           Show stats per device
 
+  -R
+          Print full raw data instead of summary
+
   -h, --help
           Print help

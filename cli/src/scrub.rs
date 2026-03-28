@@ -76,7 +76,7 @@ fn accumulate(dst: &mut ScrubProgress, src: &ScrubProgress) {
     dst.malloc_errors += src.malloc_errors;
 }
 
-/// Print a single-device progress summary.
+/// Print a single-device progress summary (default format).
 fn print_progress_summary(p: &ScrubProgress, devid: u64, path: &str) {
     println!(
         "  devid {devid} ({path}): scrubbed {}",
@@ -112,5 +112,51 @@ fn print_error_summary(p: &ScrubProgress) {
         println!("    Corrected:      {}", p.corrected_errors);
         println!("    Uncorrectable:  {}", p.uncorrectable_errors);
         println!("    Unverified:     {}", p.unverified_errors);
+    }
+}
+
+/// Print all raw progress fields for a single device.
+fn print_raw_progress(p: &ScrubProgress, devid: u64, path: &str) {
+    println!("  devid {devid} ({path}):");
+    println!("    data_extents_scrubbed: {}", p.data_extents_scrubbed);
+    println!("    tree_extents_scrubbed: {}", p.tree_extents_scrubbed);
+    println!("    data_bytes_scrubbed:   {}", p.data_bytes_scrubbed);
+    println!("    tree_bytes_scrubbed:   {}", p.tree_bytes_scrubbed);
+    println!("    read_errors:           {}", p.read_errors);
+    println!("    csum_errors:           {}", p.csum_errors);
+    println!("    verify_errors:         {}", p.verify_errors);
+    println!("    no_csum:               {}", p.no_csum);
+    println!("    csum_discards:         {}", p.csum_discards);
+    println!("    super_errors:          {}", p.super_errors);
+    println!("    malloc_errors:         {}", p.malloc_errors);
+    println!("    uncorrectable_errors:  {}", p.uncorrectable_errors);
+    println!("    unverified_errors:     {}", p.unverified_errors);
+    println!("    corrected_errors:      {}", p.corrected_errors);
+    println!("    last_physical:         {}", p.last_physical);
+}
+
+/// Print device progress in either raw or summary format.
+fn print_device_progress(p: &ScrubProgress, devid: u64, path: &str, raw: bool) {
+    if raw {
+        print_raw_progress(p, devid, path);
+    } else {
+        print_progress_summary(p, devid, path);
+    }
+}
+
+/// Set the IO scheduling priority for the current thread.
+///
+/// Class values: 1 = realtime, 2 = best-effort, 3 = idle.
+/// Classdata is the priority level within the class (0-7 for RT and BE).
+/// Failure is logged as a warning and ignored.
+fn set_ioprio(class: i32, classdata: i32) {
+    const IOPRIO_WHO_PROCESS: i32 = 1;
+    const IOPRIO_CLASS_SHIFT: i32 = 13;
+    let value = (class << IOPRIO_CLASS_SHIFT) | classdata;
+    let ret = unsafe {
+        libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, 0, value)
+    };
+    if ret < 0 {
+        eprintln!("WARNING: setting ioprio failed (ignored)");
     }
 }

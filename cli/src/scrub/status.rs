@@ -13,6 +13,10 @@ pub struct ScrubStatusCommand {
     #[clap(long, short)]
     pub device: bool,
 
+    /// Print full raw data instead of summary
+    #[clap(short = 'R')]
+    pub raw: bool,
+
     /// Path to a mounted btrfs filesystem or a device
     pub path: PathBuf,
 }
@@ -55,8 +59,8 @@ impl Runnable for ScrubStatusCommand {
                     any_running = true;
                     super::accumulate(&mut fs_totals, &progress);
                     if self.device {
-                        super::print_progress_summary(
-                            &progress, dev.devid, &dev.path,
+                        super::print_device_progress(
+                            &progress, dev.devid, &dev.path, self.raw,
                         );
                     }
                 }
@@ -66,12 +70,15 @@ impl Runnable for ScrubStatusCommand {
         if !any_running {
             println!("\tno scrub in progress");
         } else if !self.device {
-            // Show filesystem-level summary when not in per-device mode.
-            println!(
-                "Bytes scrubbed:   {}",
-                human_bytes(fs_totals.bytes_scrubbed())
-            );
-            super::print_error_summary(&fs_totals);
+            if self.raw {
+                super::print_raw_progress(&fs_totals, 0, "filesystem totals");
+            } else {
+                println!(
+                    "Bytes scrubbed:   {}",
+                    human_bytes(fs_totals.bytes_scrubbed())
+                );
+                super::print_error_summary(&fs_totals);
+            }
         }
 
         Ok(())
