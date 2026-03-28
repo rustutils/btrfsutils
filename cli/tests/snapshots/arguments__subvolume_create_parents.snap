@@ -4,7 +4,7 @@ expression: "parse(&[\"btrfs\", \"subvolume\", \"create\", \"-p\", \"/mnt/a/b/su
 ---
 Arguments {
     global: GlobalOptions {
-        verbose: false,
+        verbose: 0,
         quiet: false,
         dry_run: false,
         log: None,

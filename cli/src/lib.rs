@@ -10,7 +10,7 @@
 //! `CAP_SYS_ADMIN`.
 
 use anyhow::Result;
-use clap::{Parser, ValueEnum};
+use clap::{ArgAction, Parser, ValueEnum};
 
 mod balance;
 mod check;
@@ -76,9 +76,9 @@ const GLOBAL_OPTIONS: &str = "Global options";
 
 #[derive(Parser, Debug)]
 pub struct GlobalOptions {
-    /// Increase verbosity of the subcommand
-    #[clap(global = true, short, long, help_heading = GLOBAL_OPTIONS)]
-    pub verbose: bool,
+    /// Increase verbosity (repeat for more: -v, -vv, -vvv)
+    #[clap(global = true, short, long, action = ArgAction::Count, help_heading = GLOBAL_OPTIONS)]
+    pub verbose: u8,
 
     /// Print only errors
     #[clap(global = true, short, long, help_heading = GLOBAL_OPTIONS)]
@@ -145,7 +145,24 @@ impl Runnable for Command {
 
 impl Arguments {
     pub fn run(&self) -> Result<()> {
-        env_logger::init();
+        let level = if let Some(explicit) = self.global.log {
+            match explicit {
+                Level::Debug => log::LevelFilter::Debug,
+                Level::Info => log::LevelFilter::Info,
+                Level::Warn => log::LevelFilter::Warn,
+                Level::Error => log::LevelFilter::Error,
+            }
+        } else if self.global.quiet {
+            log::LevelFilter::Error
+        } else {
+            match self.global.verbose {
+                0 => log::LevelFilter::Warn,
+                1 => log::LevelFilter::Info,
+                2 => log::LevelFilter::Debug,
+                _ => log::LevelFilter::Trace,
+            }
+        };
+        env_logger::Builder::new().filter_level(level).init();
         self.command
             .run(self.global.format.unwrap_or_default(), self.global.dry_run)
     }

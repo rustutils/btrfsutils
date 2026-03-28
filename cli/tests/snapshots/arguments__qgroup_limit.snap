@@ -4,7 +4,7 @@ expression: "parse(&[\"btrfs\", \"qgroup\", \"limit\", \"1G\", \"0/256\", \"/mnt
 ---
 Arguments {
     global: GlobalOptions {
-        verbose: false,
+        verbose: 0,
         quiet: false,
         dry_run: false,
         log: None,

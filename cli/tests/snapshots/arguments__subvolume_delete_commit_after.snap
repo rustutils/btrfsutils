@@ -4,7 +4,7 @@ expression: "parse(&[\"btrfs\", \"subvolume\", \"delete\", \"-c\", \"/mnt/subvol
 ---
 Arguments {
     global: GlobalOptions {
-        verbose: false,
+        verbose: 0,
         quiet: false,
         dry_run: false,
         log: None,
@@ -18,7 +18,7 @@ Arguments {
                     commit_each: false,
                     subvolid: None,
                     recursive: false,
-                    verbose: false,
+                    verbose: 0,
                     paths: [
                         "/mnt/subvol",
                     ],

@@ -4,7 +4,7 @@ expression: "parse(&[\"btrfs\", \"subvolume\", \"delete\", \"-i\", \"256\", \"/m
 ---
 Arguments {
     global: GlobalOptions {
-        verbose: false,
+        verbose: 0,
         quiet: false,
         dry_run: false,
         log: None,
@@ -20,7 +20,7 @@ Arguments {
                         256,
                     ),
                     recursive: false,
-                    verbose: false,
+                    verbose: 0,
                     paths: [
                         "/mnt",
                     ],

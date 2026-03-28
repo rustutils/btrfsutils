@@ -40,8 +40,8 @@ Options:
           Print version
 
 Global options:
-  -v, --verbose
-          Increase verbosity of the subcommand
+  -v, --verbose...
+          Increase verbosity (repeat for more: -v, -vv, -vvv)
 
   -q, --quiet
           Print only errors

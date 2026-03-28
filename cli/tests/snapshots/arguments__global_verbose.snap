@@ -4,7 +4,7 @@ expression: "parse(&[\"btrfs\", \"-v\", \"filesystem\", \"df\", \"/mnt\"])"
 ---
 Arguments {
     global: GlobalOptions {
-        verbose: true,
+        verbose: 1,
         quiet: false,
         dry_run: false,
         log: None,

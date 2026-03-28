@@ -17,8 +17,8 @@ const HEADING_RANGE: &str = "Range";
 #[derive(Parser, Debug)]
 pub struct FilesystemDefragCommand {
     /// Be verbose, print file names as they are defragmented
-    #[clap(long, short)]
-    pub verbose: bool,
+    #[clap(long, short, action = clap::ArgAction::Count)]
+    pub verbose: u8,
 
     /// Defragment files in subdirectories recursively
     #[clap(long, short)]
@@ -120,7 +120,7 @@ impl FilesystemDefragCommand {
         path: &std::path::Path,
         args: &DefragRangeArgs,
     ) -> Result<()> {
-        if self.verbose {
+        if self.verbose > 0 {
             println!("{}", path.display());
         }
         let file = File::open(path)

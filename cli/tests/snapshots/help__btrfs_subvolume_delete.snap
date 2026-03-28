@@ -34,7 +34,7 @@ Options:
           is not atomic and may need root to delete subvolumes not accessible by
           the user
 
-  -v, --verbose
+  -v, --verbose...
           Be verbose, print subvolume names as they are deleted
 
   -h, --help

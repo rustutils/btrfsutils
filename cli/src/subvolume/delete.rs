@@ -42,8 +42,8 @@ pub struct SubvolumeDeleteCommand {
     pub recursive: bool,
 
     /// Be verbose, print subvolume names as they are deleted
-    #[clap(short = 'v', long)]
-    pub verbose: bool,
+    #[clap(short = 'v', long, action = clap::ArgAction::Count)]
+    pub verbose: u8,
 
     /// Subvolume paths to delete, or (with --subvolid) the filesystem path
     #[clap(required = true)]
@@ -123,7 +123,7 @@ impl SubvolumeDeleteCommand {
                 self.delete_children(path)?;
             }
 
-            if self.verbose {
+            if self.verbose > 0 {
                 println!("Delete subvolume '{}'", path.display());
             }
 
@@ -131,7 +131,7 @@ impl SubvolumeDeleteCommand {
                 format!("failed to delete '{}'", path.display())
             })?;
 
-            if !self.verbose {
+            if self.verbose == 0 {
                 println!("Delete subvolume '{}'", path.display());
             }
 
@@ -165,7 +165,7 @@ impl SubvolumeDeleteCommand {
             })?;
             let fd = file.as_fd();
 
-            if self.verbose {
+            if self.verbose > 0 {
                 println!("Delete subvolume (subvolid={subvolid})");
             }
 
@@ -176,7 +176,7 @@ impl SubvolumeDeleteCommand {
                 )
             })?;
 
-            if !self.verbose {
+            if self.verbose == 0 {
                 println!("Delete subvolume (subvolid={subvolid})");
             }
 
@@ -233,7 +233,7 @@ impl SubvolumeDeleteCommand {
         children.reverse();
 
         for child_id in children {
-            if self.verbose {
+            if self.verbose > 0 {
                 // Try to find the name for verbose output.
                 if let Some(item) = all.iter().find(|i| i.root_id == child_id) {
                     if !item.name.is_empty() {

@@ -4,7 +4,7 @@ expression: "parse(&[\"btrfs\", \"filesystem\", \"defragment\", \"-czstd\", \"/m
 ---
 Arguments {
     global: GlobalOptions {
-        verbose: false,
+        verbose: 0,
         quiet: false,
         dry_run: false,
         log: None,
@@ -14,7 +14,7 @@ Arguments {
         FilesystemCommand {
             subcommand: Defragment(
                 FilesystemDefragCommand {
-                    verbose: false,
+                    verbose: 0,
                     recursive: false,
                     flush: false,
                     compress: Some(
