@@ -41,7 +41,8 @@
               (craneLib.filterCargoSources path type)
               || builtins.match ".*\\.(h|c)$" base != null
               || builtins.match ".*\\.snap$" base != null
-              || builtins.match ".*\\.snap\\.new$" base != null;
+              || builtins.match ".*\\.snap\\.new$" base != null
+              || builtins.match ".*\\.img\\.gz$" base != null;
           };
 
           commonArgs = {
@@ -52,6 +53,7 @@
             nativeBuildInputs = [
               pkgs.llvmPackages.libclang
               pkgs.clang
+              pkgs.gzip
               pkgs.installShellFiles
             ];
 

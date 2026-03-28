@@ -14,10 +14,15 @@ fn btrfs_bin() -> String {
     env!("CARGO_BIN_EXE_btrfs").to_string()
 }
 
+/// Fixed timezone used for snapshot tests that include formatted timestamps.
+/// Ensures output is deterministic regardless of the host's local timezone.
+const SNAPSHOT_TZ: &str = "CET-1";
+
 /// Run `btrfs <args>` and return (stdout, stderr, exit_code).
 fn btrfs(args: &[&str]) -> (String, String, i32) {
     let output = Command::new(btrfs_bin())
         .args(args)
+        .env("TZ", SNAPSHOT_TZ)
         .output()
         .expect("failed to run btrfs binary");
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
