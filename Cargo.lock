@@ -101,7 +101,7 @@ checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
 
 [[package]]
 name = "btrfs-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "btrfs-disk",
@@ -120,7 +120,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-disk"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bindgen",
  "crc32c",
@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-mangen"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "btrfs-cli",
  "clap",
@@ -138,7 +138,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-mkfs"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "btrfs-disk",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-stream"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "btrfs-uapi",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-uapi"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "bindgen",
  "bitflags",
