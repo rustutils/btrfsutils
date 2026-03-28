@@ -19,6 +19,7 @@ use crate::{
     },
     space::BlockGroupFlags,
     tree_search::{SearchKey, tree_search},
+    util::{read_le_u16, read_le_u64},
 };
 use std::os::unix::io::BorrowedFd;
 
@@ -273,14 +274,6 @@ fn accumulate(
     }
 }
 
-fn read_le_u64(buf: &[u8], off: usize) -> u64 {
-    u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
-}
-
-fn read_le_u16(buf: &[u8], off: usize) -> u16 {
-    u16::from_le_bytes(buf[off..off + 2].try_into().unwrap())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,20 +304,6 @@ mod tests {
                 .copy_from_slice(&offset.to_le_bytes());
         }
         buf
-    }
-
-    // --- read_le_u64 / read_le_u16 ---
-
-    #[test]
-    fn read_le_u64_basic() {
-        let buf = 0x0102030405060708u64.to_le_bytes();
-        assert_eq!(read_le_u64(&buf, 0), 0x0102030405060708);
-    }
-
-    #[test]
-    fn read_le_u16_basic() {
-        let buf = 0x0102u16.to_le_bytes();
-        assert_eq!(read_le_u16(&buf, 0), 0x0102);
     }
 
     // --- parse_chunk ---

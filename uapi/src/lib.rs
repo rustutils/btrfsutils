@@ -55,4 +55,4 @@ pub mod space;
 pub mod subvolume;
 pub mod sysfs;
 pub mod tree_search;
-pub(crate) mod util;
+pub mod util;

@@ -27,6 +27,7 @@ use crate::{
         btrfs_ioctl_vol_args_v2,
     },
     tree_search::{SearchKey, tree_search},
+    util::read_le_u64,
 };
 use nix::{errno::Errno, libc::c_char};
 use std::{
@@ -504,8 +505,4 @@ fn adjust_min_size(
         // Chunk allocation may require a new system chunk (up to 32 MiB).
         *min_size += SZ_32M;
     }
-}
-
-fn read_le_u64(buf: &[u8], off: usize) -> u64 {
-    u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
 }

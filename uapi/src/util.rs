@@ -1,5 +1,20 @@
 //! # Shared utilities for the uapi crate
 
+/// Read a little-endian `u64` from `buf` at byte offset `off`.
+pub fn read_le_u64(buf: &[u8], off: usize) -> u64 {
+    u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
+}
+
+/// Read a little-endian `u32` from `buf` at byte offset `off`.
+pub fn read_le_u32(buf: &[u8], off: usize) -> u32 {
+    u32::from_le_bytes(buf[off..off + 4].try_into().unwrap())
+}
+
+/// Read a little-endian `u16` from `buf` at byte offset `off`.
+pub fn read_le_u16(buf: &[u8], off: usize) -> u16 {
+    u16::from_le_bytes(buf[off..off + 2].try_into().unwrap())
+}
+
 /// Return the size in bytes of a single field within a struct.
 ///
 /// This is the field-level counterpart of `std::mem::size_of::<T>()`.
@@ -40,6 +55,7 @@ macro_rules! field_size {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::raw::{
         btrfs_dev_extent, btrfs_qgroup_info_item, btrfs_qgroup_limit_item,
         btrfs_qgroup_status_item, btrfs_root_item, btrfs_stripe,
@@ -62,5 +78,29 @@ mod tests {
 
         // Stripe dev_uuid is [u8; 16].
         assert_eq!(field_size!(btrfs_stripe, dev_uuid), 16);
+    }
+
+    #[test]
+    fn read_le_u64_basic() {
+        let buf = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        assert_eq!(read_le_u64(&buf, 0), 0x0807060504030201);
+    }
+
+    #[test]
+    fn read_le_u64_at_offset() {
+        let buf = [0xFF, 0xFF, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        assert_eq!(read_le_u64(&buf, 2), 1);
+    }
+
+    #[test]
+    fn read_le_u32_basic() {
+        let buf = [0x78, 0x56, 0x34, 0x12];
+        assert_eq!(read_le_u32(&buf, 0), 0x12345678);
+    }
+
+    #[test]
+    fn read_le_u16_basic() {
+        let buf = [0x02, 0x01];
+        assert_eq!(read_le_u16(&buf, 0), 0x0102);
     }
 }

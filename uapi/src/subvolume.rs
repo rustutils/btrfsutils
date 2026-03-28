@@ -25,6 +25,7 @@ use crate::{
         btrfs_root_item, btrfs_timespec,
     },
     tree_search::{SearchKey, tree_search},
+    util::{read_le_u32, read_le_u64},
 };
 use bitflags::bitflags;
 use nix::libc::c_char;
@@ -683,40 +684,41 @@ fn parse_root_item(root_id: u64, data: &[u8]) -> Option<SubvolumeListItem> {
         return None;
     }
 
-    let generation = rle64(data, offset_of!(btrfs_root_item, generation));
-    let flags_raw = rle64(data, offset_of!(btrfs_root_item, flags));
+    let generation = read_le_u64(data, offset_of!(btrfs_root_item, generation));
+    let flags_raw = read_le_u64(data, offset_of!(btrfs_root_item, flags));
     let flags = SubvolumeFlags::from_bits_truncate(flags_raw);
 
     // Extended fields exist only in non-legacy items.
     let otime_nsec =
         offset_of!(btrfs_root_item, otime) + offset_of!(btrfs_timespec, nsec);
-    let (uuid, parent_uuid, received_uuid, otransid, otime) =
-        if data.len() >= otime_nsec + field_size!(btrfs_timespec, nsec) {
-            let off_uuid = offset_of!(btrfs_root_item, uuid);
-            let off_parent = offset_of!(btrfs_root_item, parent_uuid);
-            let off_received = offset_of!(btrfs_root_item, received_uuid);
-            let uuid_size = field_size!(btrfs_root_item, uuid);
-            let uuid = Uuid::from_bytes(
-                data[off_uuid..off_uuid + uuid_size].try_into().unwrap(),
-            );
-            let parent_uuid = Uuid::from_bytes(
-                data[off_parent..off_parent + uuid_size].try_into().unwrap(),
-            );
-            let received_uuid = Uuid::from_bytes(
-                data[off_received..off_received + uuid_size]
-                    .try_into()
-                    .unwrap(),
-            );
-            let otransid = rle64(data, offset_of!(btrfs_root_item, otransid));
-            let otime_sec = offset_of!(btrfs_root_item, otime);
-            let otime = timespec_to_system_time(
-                rle64(data, otime_sec),
-                rle32(data, otime_nsec),
-            );
-            (uuid, parent_uuid, received_uuid, otransid, otime)
-        } else {
-            (Uuid::nil(), Uuid::nil(), Uuid::nil(), 0, UNIX_EPOCH)
-        };
+    let (uuid, parent_uuid, received_uuid, otransid, otime) = if data.len()
+        >= otime_nsec + field_size!(btrfs_timespec, nsec)
+    {
+        let off_uuid = offset_of!(btrfs_root_item, uuid);
+        let off_parent = offset_of!(btrfs_root_item, parent_uuid);
+        let off_received = offset_of!(btrfs_root_item, received_uuid);
+        let uuid_size = field_size!(btrfs_root_item, uuid);
+        let uuid = Uuid::from_bytes(
+            data[off_uuid..off_uuid + uuid_size].try_into().unwrap(),
+        );
+        let parent_uuid = Uuid::from_bytes(
+            data[off_parent..off_parent + uuid_size].try_into().unwrap(),
+        );
+        let received_uuid = Uuid::from_bytes(
+            data[off_received..off_received + uuid_size]
+                .try_into()
+                .unwrap(),
+        );
+        let otransid = read_le_u64(data, offset_of!(btrfs_root_item, otransid));
+        let otime_sec = offset_of!(btrfs_root_item, otime);
+        let otime = timespec_to_system_time(
+            read_le_u64(data, otime_sec),
+            read_le_u32(data, otime_nsec),
+        );
+        (uuid, parent_uuid, received_uuid, otransid, otime)
+    } else {
+        (Uuid::nil(), Uuid::nil(), Uuid::nil(), 0, UNIX_EPOCH)
+    };
 
     Some(SubvolumeListItem {
         root_id,
@@ -743,7 +745,7 @@ fn parse_root_ref(data: &[u8]) -> Option<(u64, String)> {
     if data.len() < header_size {
         return None;
     }
-    let dir_id = rle64(data, offset_of!(btrfs_root_ref, dirid));
+    let dir_id = read_le_u64(data, offset_of!(btrfs_root_ref, dirid));
     let name_off = offset_of!(btrfs_root_ref, name_len);
     let name_len =
         u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
@@ -754,16 +756,6 @@ fn parse_root_ref(data: &[u8]) -> Option<(u64, String)> {
         String::from_utf8_lossy(&data[header_size..header_size + name_len])
             .into_owned();
     Some((dir_id, name))
-}
-
-#[inline]
-fn rle64(buf: &[u8], off: usize) -> u64 {
-    u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
-}
-
-#[inline]
-fn rle32(buf: &[u8], off: usize) -> u32 {
-    u32::from_le_bytes(buf[off..off + 4].try_into().unwrap())
 }
 
 /// Convert an on-disk `btrfs_timespec` (LE sec + LE nsec, packed) to
@@ -904,30 +896,6 @@ mod tests {
             otime: UNIX_EPOCH,
             name: String::new(),
         }
-    }
-
-    #[test]
-    fn rle64_reads_little_endian() {
-        let buf = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
-        assert_eq!(rle64(&buf, 0), 0x0807060504030201);
-    }
-
-    #[test]
-    fn rle64_at_offset() {
-        let buf = [0xFF, 0xFF, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
-        assert_eq!(rle64(&buf, 2), 1);
-    }
-
-    #[test]
-    fn rle32_reads_little_endian() {
-        let buf = [0x78, 0x56, 0x34, 0x12];
-        assert_eq!(rle32(&buf, 0), 0x12345678);
-    }
-
-    #[test]
-    fn rle32_at_offset() {
-        let buf = [0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
-        assert_eq!(rle32(&buf, 2), 1);
     }
 
     #[test]

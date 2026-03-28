@@ -10,6 +10,7 @@ use btrfs_uapi::{
     },
     subvolume::subvolume_info,
     tree_search::{SearchKey, tree_search},
+    util::read_le_u64,
 };
 use clap::Parser;
 use std::{fs::File, mem, os::unix::io::AsFd, path::PathBuf};
@@ -25,10 +26,6 @@ pub struct SubvolumeFindNewCommand {
 
     /// Only show files modified at or after this generation number
     last_gen: u64,
-}
-
-fn rle64(buf: &[u8], off: usize) -> u64 {
-    u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
 }
 
 impl Runnable for SubvolumeFindNewCommand {
@@ -70,7 +67,7 @@ impl Runnable for SubvolumeFindNewCommand {
                 return Ok(());
             }
 
-            let found_gen = rle64(data, gen_off);
+            let found_gen = read_le_u64(data, gen_off);
             if found_gen < self.last_gen {
                 return Ok(());
             }
@@ -90,16 +87,16 @@ impl Runnable for SubvolumeFindNewCommand {
                         return Ok(());
                     }
                     (
-                        rle64(data, disk_bytenr_off),
-                        rle64(data, offset_off),
-                        rle64(data, num_bytes_off),
+                        read_le_u64(data, disk_bytenr_off),
+                        read_le_u64(data, offset_off),
+                        read_le_u64(data, num_bytes_off),
                     )
                 } else if extent_type == BTRFS_FILE_EXTENT_INLINE as u8 {
                     let ram_bytes_off = mem::offset_of!(btrfs_file_extent_item, ram_bytes);
                     if data.len() < ram_bytes_off + 8 {
                         return Ok(());
                     }
-                    (0, 0, rle64(data, ram_bytes_off))
+                    (0, 0, read_le_u64(data, ram_bytes_off))
                 } else {
                     return Ok(());
                 };

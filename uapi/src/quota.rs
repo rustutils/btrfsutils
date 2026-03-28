@@ -36,6 +36,7 @@ use crate::{
         btrfs_qgroup_status_item,
     },
     tree_search::{SearchKey, tree_search},
+    util::read_le_u64,
 };
 use bitflags::bitflags;
 use nix::errno::Errno;
@@ -241,17 +242,12 @@ impl QgroupEntryBuilder {
     }
 }
 
-#[inline]
-fn rle64(buf: &[u8], off: usize) -> u64 {
-    u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
-}
-
 fn parse_status_flags(data: &[u8]) -> Option<u64> {
     let off = offset_of!(btrfs_qgroup_status_item, flags);
     if data.len() < off + field_size!(btrfs_qgroup_status_item, flags) {
         return None;
     }
-    Some(rle64(data, off))
+    Some(read_le_u64(data, off))
 }
 
 fn parse_info(builder: &mut QgroupEntryBuilder, data: &[u8]) {
@@ -260,12 +256,12 @@ fn parse_info(builder: &mut QgroupEntryBuilder, data: &[u8]) {
     }
 
     builder.has_info = true;
-    builder.rfer = rle64(data, offset_of!(btrfs_qgroup_info_item, rfer));
+    builder.rfer = read_le_u64(data, offset_of!(btrfs_qgroup_info_item, rfer));
     builder.rfer_cmpr =
-        rle64(data, offset_of!(btrfs_qgroup_info_item, rfer_cmpr));
-    builder.excl = rle64(data, offset_of!(btrfs_qgroup_info_item, excl));
+        read_le_u64(data, offset_of!(btrfs_qgroup_info_item, rfer_cmpr));
+    builder.excl = read_le_u64(data, offset_of!(btrfs_qgroup_info_item, excl));
     builder.excl_cmpr =
-        rle64(data, offset_of!(btrfs_qgroup_info_item, excl_cmpr));
+        read_le_u64(data, offset_of!(btrfs_qgroup_info_item, excl_cmpr));
 }
 
 fn parse_limit(builder: &mut QgroupEntryBuilder, data: &[u8]) {
@@ -277,11 +273,11 @@ fn parse_limit(builder: &mut QgroupEntryBuilder, data: &[u8]) {
 
     builder.has_limit = true;
     builder.limit_flags =
-        rle64(data, offset_of!(btrfs_qgroup_limit_item, flags));
+        read_le_u64(data, offset_of!(btrfs_qgroup_limit_item, flags));
     builder.max_rfer =
-        rle64(data, offset_of!(btrfs_qgroup_limit_item, max_rfer));
+        read_le_u64(data, offset_of!(btrfs_qgroup_limit_item, max_rfer));
     builder.max_excl =
-        rle64(data, offset_of!(btrfs_qgroup_limit_item, max_excl));
+        read_le_u64(data, offset_of!(btrfs_qgroup_limit_item, max_excl));
 }
 
 /// Create a new qgroup with the given `qgroupid` on the filesystem referred
