@@ -1,16 +1,7 @@
 use anyhow::{Result, bail};
+use btrfs_mkfs::{args::Arguments, mkfs};
 use clap::Parser;
 use uuid::Uuid;
-
-mod args;
-pub mod items;
-pub mod layout;
-pub mod mkfs;
-pub mod superblock;
-pub mod tree;
-pub mod write;
-
-use args::Arguments;
 
 fn main() -> Result<()> {
     let args = Arguments::parse();

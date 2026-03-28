@@ -10,6 +10,10 @@ readme = "README.md"
 categories = ["command-line-utilities", "filesystem"]
 keywords = ["btrfs", "filesystem", "mkfs", "linux", "storage"]
 
+[lib]
+name = "btrfs_mkfs"
+path = "src/lib.rs"
+
 [[bin]]
 name = "mkfs-btrfs"
 path = "src/main.rs"

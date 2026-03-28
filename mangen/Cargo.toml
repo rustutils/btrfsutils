@@ -10,5 +10,6 @@ path = "src/main.rs"
 
 [dependencies]
 btrfs-cli = { path = "../cli" }
+btrfs-mkfs = { path = "../mkfs" }
 clap = { workspace = true }
 clap_mangen = "0.2"
