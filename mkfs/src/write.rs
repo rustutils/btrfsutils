@@ -9,13 +9,15 @@ use std::{io, mem, os::unix::io::AsRawFd};
 /// Size of the checksum field at the start of every tree block and superblock.
 const CSUM_SIZE: usize = raw::BTRFS_CSUM_SIZE as usize;
 
-/// Compute a raw CRC32C checksum (init=0, no final XOR).
+/// Compute a standard CRC32C checksum (init=0xFFFFFFFF, xorout=0xFFFFFFFF).
 ///
-/// This matches the btrfs kernel convention: `crc32c(0, buf, len)` with no
-/// inversion. The `crc32c` crate computes standard ISO 3309 CRC32C
-/// (init=0xFFFFFFFF, xorout=0xFFFFFFFF), so we undo the inversions.
-fn raw_crc32c(data: &[u8]) -> u32 {
-    !crc32c::crc32c_append(!0, data)
+/// This is what btrfs uses for tree block and superblock checksums.
+/// The `crc32c` crate's `crc32c()` function computes exactly this.
+///
+/// Note: the send stream uses a *different* convention (raw CRC32C with
+/// init=0, no inversion), but that's handled in the stream crate.
+fn crc32c(data: &[u8]) -> u32 {
+    crc32c::crc32c(data)
 }
 
 /// Compute and fill the checksum for a tree block (or superblock).
@@ -24,7 +26,7 @@ fn raw_crc32c(data: &[u8]) -> u32 {
 /// (the first 4 bytes of the 32-byte csum field; remaining bytes stay zero).
 pub fn fill_csum(buf: &mut [u8]) {
     assert!(buf.len() > CSUM_SIZE);
-    let crc = raw_crc32c(&buf[CSUM_SIZE..]);
+    let crc = crc32c(&buf[CSUM_SIZE..]);
     buf[..4].copy_from_slice(&crc.to_le_bytes());
 }
 
@@ -71,30 +73,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn raw_crc32c_empty() {
-        // Raw CRC32C (init=0, no inversion) of empty data is 0.
-        assert_eq!(raw_crc32c(b""), 0);
-    }
-
-    #[test]
-    fn raw_crc32c_differs_from_standard() {
+    fn crc32c_known_value() {
         // Standard CRC32C of "123456789" is 0xE3069283.
-        // Raw CRC32C (no init/final inversion) gives a different value.
-        let raw = raw_crc32c(b"123456789");
-        let standard = crc32c::crc32c(b"123456789");
-        assert_eq!(standard, 0xE3069283);
-        assert_ne!(raw, standard);
+        assert_eq!(crc32c(b"123456789"), 0xE3069283);
     }
 
     #[test]
-    fn raw_crc32c_consistent() {
-        // Same input always gives the same output.
-        let a = raw_crc32c(b"btrfs mkfs test data");
-        let b = raw_crc32c(b"btrfs mkfs test data");
-        assert_eq!(a, b);
-        // Different input gives different output.
-        let c = raw_crc32c(b"btrfs mkfs test datb");
-        assert_ne!(a, c);
+    fn crc32c_empty() {
+        assert_eq!(crc32c(b""), 0);
     }
 
     #[test]
@@ -107,7 +93,7 @@ mod tests {
         fill_csum(&mut buf);
 
         // First 4 bytes should be the LE CRC32C of buf[32..64]
-        let expected = raw_crc32c(&buf[CSUM_SIZE..]);
+        let expected = crc32c(&buf[CSUM_SIZE..]);
         let stored = u32::from_le_bytes(buf[..4].try_into().unwrap());
         assert_eq!(stored, expected);
 

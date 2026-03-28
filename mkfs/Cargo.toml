@@ -21,3 +21,4 @@ uuid = { workspace = true }
 btrfs-disk = { workspace = true }
 crc32c = { workspace = true }
 libc = { workspace = true }
+nix = { workspace = true }
