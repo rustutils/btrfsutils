@@ -1,8 +1,8 @@
 //! # Layout: block address assignment for mkfs tree blocks
 //!
-//! Assigns logical byte addresses to the initial set of tree blocks within
-//! the system chunk. All blocks are laid out sequentially starting at the
-//! system group offset (1 MiB).
+//! The chunk tree block lives in the system chunk (at SYSTEM_GROUP_OFFSET).
+//! All other tree blocks (root, extent, dev, fs, csum, free-space, data-reloc)
+//! live in the metadata chunk and are written with DUP (two physical copies).
 
 use btrfs_disk::raw;
 
@@ -67,25 +67,54 @@ impl TreeId {
     ];
 }
 
+/// The 7 trees that live in the metadata chunk (everything except Chunk).
+pub const NON_CHUNK_TREES: [TreeId; 7] = [
+    TreeId::Root,
+    TreeId::Extent,
+    TreeId::Dev,
+    TreeId::Fs,
+    TreeId::Csum,
+    TreeId::FreeSpace,
+    TreeId::DataReloc,
+];
+
 /// Computed block layout for all mkfs tree blocks.
+///
+/// The chunk tree block is placed at SYSTEM_GROUP_OFFSET (in the system
+/// chunk). The remaining 7 trees are placed sequentially starting at the
+/// metadata chunk's logical address.
 pub struct BlockLayout {
     nodesize: u32,
+    meta_logical: u64,
 }
 
 impl BlockLayout {
-    pub fn new(nodesize: u32) -> Self {
-        Self { nodesize }
+    pub fn new(nodesize: u32, meta_logical: u64) -> Self {
+        Self {
+            nodesize,
+            meta_logical,
+        }
     }
 
     /// Logical byte address of the given tree block.
     pub fn block_addr(&self, tree: TreeId) -> u64 {
-        let index = TreeId::ALL.iter().position(|&t| t == tree).unwrap();
-        SYSTEM_GROUP_OFFSET + (index as u64) * u64::from(self.nodesize)
+        if tree == TreeId::Chunk {
+            SYSTEM_GROUP_OFFSET
+        } else {
+            let index =
+                NON_CHUNK_TREES.iter().position(|&t| t == tree).unwrap();
+            self.meta_logical + (index as u64) * u64::from(self.nodesize)
+        }
     }
 
-    /// Total bytes used by all tree blocks.
-    pub fn total_used(&self) -> u64 {
-        TreeId::ALL.len() as u64 * u64::from(self.nodesize)
+    /// Bytes used in the system chunk (just the chunk tree block).
+    pub fn system_used(&self) -> u64 {
+        u64::from(self.nodesize)
+    }
+
+    /// Bytes used in the metadata chunk (7 tree blocks).
+    pub fn metadata_used(&self) -> u64 {
+        NON_CHUNK_TREES.len() as u64 * u64::from(self.nodesize)
     }
 }
 
@@ -93,8 +122,8 @@ impl BlockLayout {
 /// From kernel-shared/volumes.h: BTRFS_STRIPE_LEN
 pub const STRIPE_LEN: u64 = 64 * 1024;
 
-/// Physical offset where non-system chunks start (after system group).
-const CHUNK_START: u64 = SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
+/// Physical and logical offset where non-system chunks start (after system group).
+pub const CHUNK_START: u64 = SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
 
 /// Computed layout for metadata (DUP) and data (SINGLE) block groups.
 pub struct ChunkLayout {
@@ -163,6 +192,31 @@ impl ChunkLayout {
     pub fn dev_bytes_used(&self) -> u64 {
         SYSTEM_GROUP_SIZE + 2 * self.meta_size + self.data_size
     }
+
+    /// Map a logical address to its physical write locations.
+    ///
+    /// System chunk: logical == physical (SINGLE).
+    /// Metadata chunk: two physical copies (DUP).
+    /// Data chunk: logical maps to one physical location (SINGLE).
+    pub fn logical_to_physical(&self, logical: u64) -> Vec<u64> {
+        let sys_range =
+            SYSTEM_GROUP_OFFSET..SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
+        let meta_range = self.meta_logical..self.meta_logical + self.meta_size;
+        let data_range = self.data_logical..self.data_logical + self.data_size;
+
+        if sys_range.contains(&logical) {
+            // System chunk: logical == physical
+            vec![logical]
+        } else if meta_range.contains(&logical) {
+            let off = logical - self.meta_logical;
+            vec![self.meta_phys_0 + off, self.meta_phys_1 + off]
+        } else if data_range.contains(&logical) {
+            let off = logical - self.data_logical;
+            vec![self.data_phys + off]
+        } else {
+            panic!("logical address {logical:#x} not in any chunk")
+        }
+    }
 }
 
 #[cfg(test)]
@@ -170,22 +224,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn block_addresses_sequential() {
-        let layout = BlockLayout::new(16384);
-        assert_eq!(layout.block_addr(TreeId::Root), 0x100000);
-        assert_eq!(layout.block_addr(TreeId::Extent), 0x100000 + 16384);
-        assert_eq!(layout.block_addr(TreeId::Chunk), 0x100000 + 2 * 16384);
-        assert_eq!(layout.block_addr(TreeId::Dev), 0x100000 + 3 * 16384);
-        assert_eq!(layout.block_addr(TreeId::Fs), 0x100000 + 4 * 16384);
-        assert_eq!(layout.block_addr(TreeId::Csum), 0x100000 + 5 * 16384);
-        assert_eq!(layout.block_addr(TreeId::FreeSpace), 0x100000 + 6 * 16384);
-        assert_eq!(layout.block_addr(TreeId::DataReloc), 0x100000 + 7 * 16384);
+    fn block_addresses() {
+        // With a 256 MiB device, meta_logical = CHUNK_START = 5 MiB
+        let meta_logical = CHUNK_START;
+        let layout = BlockLayout::new(16384, meta_logical);
+
+        // Chunk tree is in the system chunk at SYSTEM_GROUP_OFFSET
+        assert_eq!(layout.block_addr(TreeId::Chunk), SYSTEM_GROUP_OFFSET);
+
+        // Other 7 trees are sequential in the metadata chunk
+        assert_eq!(layout.block_addr(TreeId::Root), meta_logical);
+        assert_eq!(layout.block_addr(TreeId::Extent), meta_logical + 16384);
+        assert_eq!(layout.block_addr(TreeId::Dev), meta_logical + 2 * 16384);
+        assert_eq!(layout.block_addr(TreeId::Fs), meta_logical + 3 * 16384);
+        assert_eq!(layout.block_addr(TreeId::Csum), meta_logical + 4 * 16384);
+        assert_eq!(
+            layout.block_addr(TreeId::FreeSpace),
+            meta_logical + 5 * 16384
+        );
+        assert_eq!(
+            layout.block_addr(TreeId::DataReloc),
+            meta_logical + 6 * 16384
+        );
     }
 
     #[test]
-    fn total_used() {
-        let layout = BlockLayout::new(16384);
-        assert_eq!(layout.total_used(), 8 * 16384);
+    fn system_and_metadata_used() {
+        let layout = BlockLayout::new(16384, CHUNK_START);
+        assert_eq!(layout.system_used(), 16384);
+        assert_eq!(layout.metadata_used(), 7 * 16384);
     }
 
     #[test]
