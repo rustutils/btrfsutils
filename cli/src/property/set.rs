@@ -1,5 +1,5 @@
 use super::{PropertyObjectType, detect_object_types};
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::open_path};
 use anyhow::{Context, Result, anyhow, bail};
 use btrfs_uapi::{
     filesystem::label_set,
@@ -36,9 +36,7 @@ pub struct PropertySetCommand {
 
 impl Runnable for PropertySetCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.object).with_context(|| {
-            format!("failed to open '{}'", self.object.display())
-        })?;
+        let file = open_path(&self.object)?;
 
         // Detect object type if not specified
         let detected_types = detect_object_types(&self.object);

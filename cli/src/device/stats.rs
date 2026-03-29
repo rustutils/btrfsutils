@@ -1,11 +1,11 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::{DeviceStats, device_info_all, device_stats},
     filesystem::filesystem_info,
 };
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Show device I/O error statistics for all devices of a filesystem
 ///
@@ -30,9 +30,7 @@ pub struct DeviceStatsCommand {
 
 impl Runnable for DeviceStatsCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
         let fd = file.as_fd();
 
         let fs = filesystem_info(fd).with_context(|| {

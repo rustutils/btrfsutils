@@ -1,6 +1,6 @@
 use crate::{
     Format, Runnable,
-    util::{SizeFormat, fmt_size},
+    util::{SizeFormat, fmt_size, open_path},
 };
 use anyhow::{Context, Result};
 use btrfs_uapi::quota::{
@@ -8,7 +8,7 @@ use btrfs_uapi::quota::{
     qgroupid_subvolid,
 };
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 const HEADING_COLUMN_SELECTION: &str = "Column selection";
 const HEADING_FILTERING: &str = "Filtering";
@@ -170,9 +170,7 @@ impl Runnable for QgroupShowCommand {
         let _ = self.filter_all;
         let _ = self.filter_direct;
 
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
         let fd = file.as_fd();
 
         if self.sync {

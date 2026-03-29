@@ -1,12 +1,10 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use btrfs_uapi::subvolume::{
     SubvolumeFlags, SubvolumeListItem, subvolume_list,
 };
 use clap::Parser;
-use std::{
-    cmp::Ordering, fs::File, os::unix::io::AsFd, path::PathBuf, str::FromStr,
-};
+use std::{cmp::Ordering, os::unix::io::AsFd, path::PathBuf, str::FromStr};
 
 const HEADING_PATH_FILTERING: &str = "Path filtering";
 const HEADING_FIELD_SELECTION: &str = "Field selection";
@@ -98,9 +96,7 @@ pub struct SubvolumeListCommand {
 
 impl Runnable for SubvolumeListCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
 
         let mut items = subvolume_list(file.as_fd()).with_context(|| {
             format!("failed to list subvolumes for '{}'", self.path.display())

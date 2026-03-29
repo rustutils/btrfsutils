@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     filesystem::sync,
@@ -13,7 +13,7 @@ use btrfs_uapi::{
     util::read_le_u64,
 };
 use clap::Parser;
-use std::{fs::File, mem, os::unix::io::AsFd, path::PathBuf};
+use std::{mem, os::unix::io::AsFd, path::PathBuf};
 
 /// List the recently modified files in a subvolume
 ///
@@ -30,9 +30,7 @@ pub struct SubvolumeFindNewCommand {
 
 impl Runnable for SubvolumeFindNewCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
 
         // Sync first so we see the latest data.
         sync(file.as_fd()).with_context(|| {

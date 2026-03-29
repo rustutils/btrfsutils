@@ -1,12 +1,12 @@
 use crate::{
     Format, Runnable,
-    util::{parse_qgroupid, parse_size_with_suffix},
+    util::{open_path, parse_qgroupid, parse_size_with_suffix},
 };
 use anyhow::{Context, Result};
 use btrfs_uapi::quota::QgroupLimitFlags;
 use clap::Parser;
 use nix::errno::Errno;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// A size limit that is either a byte count or "none" to remove the limit.
 #[derive(Debug, Clone)]
@@ -85,9 +85,7 @@ impl Runnable for QgroupLimitCommand {
             max_rfer = size;
         }
 
-        let file = File::open(&fs_path).with_context(|| {
-            format!("failed to open '{}'", fs_path.display())
-        })?;
+        let file = open_path(&fs_path)?;
 
         match btrfs_uapi::quota::qgroup_limit(
             file.as_fd(),

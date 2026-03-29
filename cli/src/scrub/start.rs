@@ -1,6 +1,6 @@
 use crate::{
     Format, Runnable,
-    util::{SizeFormat, parse_size_with_suffix},
+    util::{SizeFormat, open_path, parse_size_with_suffix},
 };
 use anyhow::{Context, Result, bail};
 use btrfs_uapi::{
@@ -10,7 +10,7 @@ use btrfs_uapi::{
     sysfs::SysfsBtrfs,
 };
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Start a new scrub on the filesystem or a device.
 ///
@@ -57,9 +57,7 @@ pub struct ScrubStartCommand {
 
 impl Runnable for ScrubStartCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
         let fd = file.as_fd();
 
         let fs = filesystem_info(fd).with_context(|| {

@@ -1,12 +1,14 @@
 use crate::{
-    Format, Runnable, filesystem::UnitMode, util::parse_size_with_suffix,
+    Format, Runnable,
+    filesystem::UnitMode,
+    util::{open_path, parse_size_with_suffix},
 };
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::device_info_all, filesystem::filesystem_info, sysfs::SysfsBtrfs,
 };
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Show or set the per-device scrub throughput limit
 ///
@@ -37,9 +39,7 @@ pub struct ScrubLimitCommand {
 impl Runnable for ScrubLimitCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         let mode = self.units.resolve();
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
         let fd = file.as_fd();
 
         let fs = filesystem_info(fd).with_context(|| {

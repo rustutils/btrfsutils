@@ -1,9 +1,9 @@
-use crate::{Format, Runnable};
-use anyhow::{Context, Result, anyhow};
+use crate::{Format, Runnable, util::open_path};
+use anyhow::{Result, anyhow};
 use btrfs_uapi::inode::subvolid_resolve;
 use clap::Parser;
 use nix::errno::Errno;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Resolve the path of a subvolume given its ID
 #[derive(Parser, Debug)]
@@ -17,9 +17,7 @@ pub struct SubvolidResolveCommand {
 
 impl Runnable for SubvolidResolveCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
         let fd = file.as_fd();
 
         let resolved_path =

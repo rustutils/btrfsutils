@@ -1,10 +1,14 @@
-use crate::{Format, Runnable, filesystem::UnitMode, util::fmt_size};
+use crate::{
+    Format, Runnable,
+    filesystem::UnitMode,
+    util::{fmt_size, open_path},
+};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::device_info_all, filesystem::filesystem_info, scrub::scrub_progress,
 };
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Show the status of a running or finished scrub
 #[derive(Parser, Debug)]
@@ -27,9 +31,7 @@ pub struct ScrubStatusCommand {
 impl Runnable for ScrubStatusCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         let mode = self.units.resolve();
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
         let fd = file.as_fd();
 
         let fs = filesystem_info(fd).with_context(|| {

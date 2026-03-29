@@ -1,10 +1,8 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use btrfs_uapi::subvolume::{subvolume_info_by_id, subvolume_list};
 use clap::Parser;
-use std::{
-    fs::File, os::unix::io::AsFd, path::PathBuf, thread, time::Duration,
-};
+use std::{os::unix::io::AsFd, path::PathBuf, thread, time::Duration};
 
 /// Wait until given subvolume(s) are completely removed from the filesystem
 ///
@@ -27,9 +25,7 @@ pub struct SubvolumeSyncCommand {
 
 impl Runnable for SubvolumeSyncCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
 
         let interval = Duration::from_secs(self.sleep.unwrap_or(1));
 

@@ -1,9 +1,12 @@
-use crate::{Format, Runnable, util::parse_qgroupid};
+use crate::{
+    Format, Runnable,
+    util::{open_path, parse_qgroupid},
+};
 use anyhow::{Context, Result, bail};
 use btrfs_uapi::quota::qgroupid_level;
 use clap::Parser;
 use nix::errno::Errno;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Assign a qgroup as the child of another qgroup
 #[derive(Parser, Debug)]
@@ -35,9 +38,7 @@ impl Runnable for QgroupAssignCommand {
             );
         }
 
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
         let fd = file.as_fd();
 
         let needs_rescan = match btrfs_uapi::quota::qgroup_assign(fd, src, dst)

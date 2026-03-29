@@ -1,5 +1,5 @@
 use super::print_tree::{self, PrintOptions};
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::open_path};
 use anyhow::{Context, Result, bail};
 use btrfs_disk::{
     reader::{self, Traversal},
@@ -7,7 +7,7 @@ use btrfs_disk::{
     tree::{ObjectId, TreeBlock},
 };
 use clap::Parser;
-use std::{collections::BTreeMap, fs::File, path::PathBuf};
+use std::{collections::BTreeMap, path::PathBuf};
 
 /// Dump tree blocks from a btrfs device or image file.
 ///
@@ -79,9 +79,7 @@ pub struct DumpTreeCommand {
 
 impl Runnable for DumpTreeCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
 
         let open = reader::open_filesystem(file).with_context(|| {
             format!(

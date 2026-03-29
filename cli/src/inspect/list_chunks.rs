@@ -1,8 +1,12 @@
-use crate::{Format, Runnable, filesystem::UnitMode, util::fmt_size};
+use crate::{
+    Format, Runnable,
+    filesystem::UnitMode,
+    util::{fmt_size, open_path},
+};
 use anyhow::{Context, Result};
 use btrfs_uapi::{chunk::chunk_list, filesystem::filesystem_info};
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// List all chunks in the filesystem, one row per stripe
 ///
@@ -64,9 +68,7 @@ impl Runnable for ListChunksCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         let mode = self.units.resolve();
         let fmt = |bytes| fmt_size(bytes, &mode);
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
         let fd = file.as_fd();
 
         let fs = filesystem_info(fd).with_context(|| {

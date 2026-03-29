@@ -10,6 +10,12 @@ use std::{
 };
 use uuid::Uuid;
 
+/// Open a path and return the `File`, with a contextual error message on failure.
+pub fn open_path(path: &Path) -> Result<File> {
+    File::open(path)
+        .with_context(|| format!("failed to open '{}'", path.display()))
+}
+
 /// Resolved size display mode.
 pub enum SizeFormat {
     /// Print raw byte count with no suffix.

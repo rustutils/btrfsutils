@@ -1,4 +1,7 @@
-use crate::{Format, Runnable, util::check_device_for_overwrite};
+use crate::{
+    Format, Runnable,
+    util::{check_device_for_overwrite, open_path},
+};
 use anyhow::{Context, Result, bail};
 use btrfs_uapi::{
     filesystem::filesystem_info,
@@ -7,12 +10,7 @@ use btrfs_uapi::{
 };
 use clap::Parser;
 use std::{
-    ffi::CString,
-    fs::{self, File},
-    os::unix::io::AsFd,
-    path::PathBuf,
-    thread,
-    time::Duration,
+    ffi::CString, fs, os::unix::io::AsFd, path::PathBuf, thread, time::Duration,
 };
 
 /// Replace a device in the filesystem.
@@ -57,9 +55,7 @@ impl Runnable for ReplaceStartCommand {
         // Validate the target device before opening the filesystem.
         check_device_for_overwrite(&self.target, self.force)?;
 
-        let file = File::open(&self.mount_point).with_context(|| {
-            format!("failed to open '{}'", self.mount_point.display())
-        })?;
+        let file = open_path(&self.mount_point)?;
         let fd = file.as_fd();
 
         // If --enqueue is set, wait for any running exclusive operation to finish.

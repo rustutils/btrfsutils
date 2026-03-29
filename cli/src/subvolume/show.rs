@@ -1,6 +1,6 @@
 use crate::{
     Format, Runnable,
-    util::{ParsedUuid, format_time},
+    util::{ParsedUuid, format_time, open_path},
 };
 use anyhow::{Context, Result};
 use btrfs_uapi::{
@@ -8,7 +8,7 @@ use btrfs_uapi::{
     subvolume::{subvolume_info, subvolume_info_by_id},
 };
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Show detailed information about a subvolume
 ///
@@ -33,9 +33,7 @@ pub struct SubvolumeShowCommand {
 
 impl Runnable for SubvolumeShowCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
 
         let info = if let Some(rootid) = self.rootid {
             subvolume_info_by_id(file.as_fd(), rootid).with_context(|| {

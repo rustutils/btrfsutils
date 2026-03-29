@@ -1,7 +1,10 @@
-use crate::{Format, Runnable, util::human_bytes};
+use crate::{
+    Format, Runnable,
+    util::{human_bytes, open_path},
+};
 use anyhow::{Context, Result};
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Print the minimum size a device can be shrunk to.
 ///
@@ -20,9 +23,7 @@ pub struct MinDevSizeCommand {
 
 impl Runnable for MinDevSizeCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
 
         let size = btrfs_uapi::device::device_min_size(
             file.as_fd(),

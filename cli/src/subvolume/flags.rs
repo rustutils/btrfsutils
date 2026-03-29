@@ -1,10 +1,10 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use btrfs_uapi::subvolume::{
     SubvolumeFlags, subvolume_flags_get, subvolume_flags_set,
 };
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Wrapper around SubvolumeFlags that implements FromStr for clap parsing.
 #[derive(Debug, Clone, Copy)]
@@ -31,9 +31,7 @@ pub struct SubvolumeGetFlagsCommand {
 
 impl Runnable for SubvolumeGetFlagsCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
 
         let flags = subvolume_flags_get(file.as_fd()).with_context(|| {
             format!("failed to get flags for '{}'", self.path.display())
@@ -57,9 +55,7 @@ pub struct SubvolumeSetFlagsCommand {
 
 impl Runnable for SubvolumeSetFlagsCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
 
         subvolume_flags_set(file.as_fd(), self.flags.0).with_context(|| {
             format!("failed to set flags on '{}'", self.path.display())

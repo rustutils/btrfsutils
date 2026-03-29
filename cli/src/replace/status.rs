@@ -1,10 +1,12 @@
-use crate::{Format, Runnable, util::format_time_short};
+use crate::{
+    Format, Runnable,
+    util::{format_time_short, open_path},
+};
 use anyhow::{Context, Result};
 use btrfs_uapi::replace::{ReplaceState, replace_status};
 use clap::Parser;
 use std::{
-    fs::File, io::Write, os::unix::io::AsFd, path::PathBuf, thread,
-    time::Duration,
+    io::Write, os::unix::io::AsFd, path::PathBuf, thread, time::Duration,
 };
 
 /// Print status of a running device replace operation.
@@ -24,9 +26,7 @@ pub struct ReplaceStatusCommand {
 
 impl Runnable for ReplaceStatusCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        let file = File::open(&self.mount_point).with_context(|| {
-            format!("failed to open '{}'", self.mount_point.display())
-        })?;
+        let file = open_path(&self.mount_point)?;
         let fd = file.as_fd();
 
         loop {

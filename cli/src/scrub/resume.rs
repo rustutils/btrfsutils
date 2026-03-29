@@ -1,10 +1,13 @@
-use crate::{Format, Runnable, util::SizeFormat};
+use crate::{
+    Format, Runnable,
+    util::{SizeFormat, open_path},
+};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::device_info_all, filesystem::filesystem_info, scrub::scrub_start,
 };
 use clap::Parser;
-use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Resume a previously cancelled or interrupted scrub
 ///
@@ -44,9 +47,7 @@ impl Runnable for ScrubResumeCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         // Resume uses the same ioctl as start; the kernel tracks where it left
         // off via the scrub state on disk.
-        let file = File::open(&self.path).with_context(|| {
-            format!("failed to open '{}'", self.path.display())
-        })?;
+        let file = open_path(&self.path)?;
         let fd = file.as_fd();
 
         let fs = filesystem_info(fd).with_context(|| {
