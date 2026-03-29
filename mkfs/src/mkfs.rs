@@ -11,7 +11,7 @@ use crate::{
     },
     superblock::SuperblockBuilder,
     tree::{Key, LeafBuilder, LeafHeader},
-    write::{self, SUPER_INFO_OFFSET},
+    write,
 };
 use anyhow::{Context, Result, bail};
 use btrfs_disk::raw;
@@ -296,14 +296,23 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         }
     }
 
-    // Build and write per-device superblocks.
+    // Build and write per-device superblocks at all mirror locations.
     for dev in &cfg.devices {
         let superblock = build_superblock(cfg, &layout, &chunks, dev)?;
         let file_idx = (dev.devid - 1) as usize;
-        write::pwrite_all(&files[file_idx], &superblock, SUPER_INFO_OFFSET)
-            .with_context(|| {
-                format!("failed to write superblock to device {}", dev.devid)
-            })?;
+        for mirror in 0..btrfs_disk::superblock::SUPER_MIRROR_MAX {
+            let offset = btrfs_disk::superblock::super_mirror_offset(mirror);
+            if offset + write::SUPER_INFO_SIZE as u64 > dev.total_bytes {
+                break;
+            }
+            write::pwrite_all(&files[file_idx], &superblock, offset)
+                .with_context(|| {
+                    format!(
+                        "failed to write superblock mirror {mirror} to device {}",
+                        dev.devid
+                    )
+                })?;
+        }
     }
 
     for file in &files {
@@ -902,7 +911,7 @@ fn build_superblock(
     };
 
     let mut sb = SuperblockBuilder::new();
-    sb.set_bytenr(SUPER_INFO_OFFSET)
+    sb.set_bytenr(write::SUPER_INFO_OFFSET)
         .set_magic()
         .set_fsid(&cfg.fs_uuid)
         .set_generation(generation)

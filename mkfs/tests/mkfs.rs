@@ -344,6 +344,26 @@ fn mkfs_raid1_total_bytes_is_sum() {
     assert_eq!(sb1.total_bytes, 2 * per_dev);
 }
 
+#[test]
+fn mkfs_writes_super_mirror_1() {
+    // MIN_SIZE (256 MiB) > 64 MiB, so mirror 1 should be written.
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
+
+    let mut file = std::fs::File::open(image.path()).unwrap();
+
+    // Mirror 0 at 64 KiB
+    let sb0 = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    assert!(sb0.magic_is_valid());
+
+    // Mirror 1 at 64 MiB
+    let sb1 = btrfs_disk::superblock::read_superblock(&mut file, 1).unwrap();
+    assert!(sb1.magic_is_valid());
+    assert_eq!(sb0.fsid, sb1.fsid);
+    assert_eq!(sb0.generation, sb1.generation);
+}
+
 // --- Deterministic image snapshot tests ---
 //
 // Create filesystem images with fixed UUIDs and timestamps, compress them,
