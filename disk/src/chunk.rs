@@ -5,7 +5,7 @@
 //! tree (the system chunk array) to bootstrap access to the full chunk tree.
 //!
 //! This module provides a `ChunkTreeCache` that resolves logical addresses to
-//! physical offsets, seeded from the sys_chunk_array and then populated from
+//! physical offsets, seeded from the `sys_chunk_array` and then populated from
 //! the full chunk tree.
 
 use crate::{
@@ -37,7 +37,7 @@ pub struct ChunkMapping {
 
 /// Cache of chunk tree mappings for resolving logical to physical addresses.
 ///
-/// Keyed by logical start address. Uses a BTreeMap for efficient range lookups.
+/// Keyed by logical start address. Uses a `BTreeMap` for efficient range lookups.
 #[derive(Debug, Default)]
 pub struct ChunkTreeCache {
     inner: BTreeMap<u64, ChunkMapping>,
@@ -81,7 +81,7 @@ impl ChunkTreeCache {
     }
 }
 
-/// Parse a chunk item (btrfs_chunk + stripes) from a raw byte buffer.
+/// Parse a chunk item (`btrfs_chunk` + stripes) from a raw byte buffer.
 ///
 /// Returns the chunk mapping and the total number of bytes consumed.
 /// `logical` is the logical start address from the key's offset field.
@@ -130,9 +130,9 @@ pub fn parse_chunk_item(
     Some((mapping, total_size))
 }
 
-/// Seed a `ChunkTreeCache` from the superblock's sys_chunk_array.
+/// Seed a `ChunkTreeCache` from the superblock's `sys_chunk_array`.
 ///
-/// The sys_chunk_array contains a subset of chunk items needed to bootstrap
+/// The `sys_chunk_array` contains a subset of chunk items needed to bootstrap
 /// access to the full chunk tree (system profile chunks).
 pub fn seed_from_sys_chunk_array(array: &[u8], size: u32) -> ChunkTreeCache {
     let array = &array[..size as usize];

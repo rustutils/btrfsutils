@@ -75,7 +75,7 @@ pub struct OpenFs<R> {
 ///
 /// This performs the full bootstrap sequence:
 /// 1. Read the superblock (mirror 0)
-/// 2. Seed the chunk cache from the sys_chunk_array
+/// 2. Seed the chunk cache from the `sys_chunk_array`
 /// 3. Read the full chunk tree to complete the cache
 /// 4. Read the root tree to collect all tree root pointers
 pub fn open_filesystem<R: Read + Seek>(reader: R) -> io::Result<OpenFs<R>> {
@@ -147,7 +147,7 @@ fn read_chunk_tree<R: Read + Seek>(
 
 /// Read the root tree to collect all tree root pointers.
 ///
-/// Returns a map of tree_id (objectid) -> root block logical address.
+/// Returns a map of `tree_id` (objectid) -> root block logical address.
 fn read_root_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,

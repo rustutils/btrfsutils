@@ -791,11 +791,11 @@ impl ReceiveContext {
         let c_path = path_to_cstring(&full)?;
         let times = [
             nix::libc::timespec {
-                tv_sec: atime.sec as nix::libc::time_t,
+                tv_sec: atime.sec as i64,
                 tv_nsec: atime.nsec as nix::libc::c_long,
             },
             nix::libc::timespec {
-                tv_sec: mtime.sec as nix::libc::time_t,
+                tv_sec: mtime.sec as i64,
                 tv_nsec: mtime.nsec as nix::libc::c_long,
             },
         ];

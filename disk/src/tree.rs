@@ -54,9 +54,9 @@ pub enum KeyType {
     QgroupInfo,
     QgroupLimit,
     QgroupRelation,
-    /// BTRFS_BALANCE_ITEM_KEY and BTRFS_TEMPORARY_ITEM_KEY share value 248
+    /// `BTRFS_BALANCE_ITEM_KEY` and `BTRFS_TEMPORARY_ITEM_KEY` share value 248
     TemporaryItem,
-    /// BTRFS_DEV_STATS_KEY and BTRFS_PERSISTENT_ITEM_KEY share value 249
+    /// `BTRFS_DEV_STATS_KEY` and `BTRFS_PERSISTENT_ITEM_KEY` share value 249
     PersistentItem,
     DevReplace,
     UuidKeySubvol,
@@ -117,6 +117,9 @@ impl KeyType {
     }
 
     /// Return the raw u8 key type value.
+    // All btrfs key type constants are defined to fit in u8 (they're the
+    // on-disk key type field); the u32 bindgen type is wider than necessary.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn to_raw(self) -> u8 {
         match self {
             Self::InodeItem => raw::BTRFS_INODE_ITEM_KEY as u8,
@@ -255,6 +258,10 @@ pub enum ObjectId {
 
 impl ObjectId {
     /// Convert a raw 64-bit objectid to an `ObjectId` variant.
+    // Negative objectid constants (e.g. BTRFS_BALANCE_OBJECTID = -4) are i32
+    // in bindgen output; casting them to u64 intentionally produces the kernel's
+    // two's-complement representation (e.g. 0xFFFFFFFF_FFFFFFFC).
+    #[allow(clippy::cast_sign_loss, clippy::cast_lossless)]
     pub fn from_raw(value: u64) -> Self {
         // Positive well-known objectids (bindgen produces u32 for these)
         match value {
@@ -306,6 +313,7 @@ impl ObjectId {
     }
 
     /// Return the raw u64 objectid value.
+    #[allow(clippy::cast_sign_loss, clippy::cast_lossless)]
     pub fn to_raw(self) -> u64 {
         match self {
             Self::RootTree => raw::BTRFS_ROOT_TREE_OBJECTID as u64,
@@ -344,6 +352,7 @@ impl ObjectId {
     /// For example, objectid 1 is `ROOT_TREE` in general but `DEV_ITEMS`
     /// when used with `DEV_ITEM_KEY`, and `0` is `DEV_STATS` when used
     /// with `PERSISTENT_ITEM_KEY`.
+    #[allow(clippy::cast_lossless)]
     pub fn display_with_type(self, key_type: KeyType) -> String {
         let raw = self.to_raw();
         // Special disambiguations from the C reference print_objectid()
@@ -369,7 +378,7 @@ impl ObjectId {
         self.to_string()
     }
 
-    /// Parse a tree name string (for CLI `-t` flag) into an ObjectId.
+    /// Parse a tree name string (for CLI `-t` flag) into an `ObjectId`.
     pub fn from_tree_name(name: &str) -> Option<Self> {
         match name.to_lowercase().as_str() {
             "root" => Some(Self::RootTree),
@@ -453,7 +462,7 @@ impl DiskKey {
 /// Special formatting rules:
 /// - Qgroup keys: objectid and offset are formatted as `LEVEL/SUBVOLID`
 /// - UUID keys: objectid is formatted as `0x<16-char-hex>`
-/// - Offset of u64::MAX is formatted as `-1`
+/// - Offset of `u64::MAX` is formatted as `-1`
 pub fn format_key(key: &DiskKey) -> String {
     let objectid_str = format_key_objectid(key);
     let type_str = format_key_type(key);
@@ -480,6 +489,7 @@ fn format_key_objectid(key: &DiskKey) -> String {
     }
 }
 
+#[allow(clippy::cast_sign_loss)]
 fn format_key_type(key: &DiskKey) -> String {
     // Special case: type 0 with FREE_SPACE objectid means UNTYPED
     if key.key_type == KeyType::Unknown(0)
@@ -555,7 +565,7 @@ impl Header {
     /// Return the flags with the backref revision bits masked out.
     pub fn block_flags(&self) -> u64 {
         self.flags
-            & !((raw::BTRFS_BACKREF_REV_MAX as u64 - 1)
+            & !((u64::from(raw::BTRFS_BACKREF_REV_MAX) - 1)
                 << raw::BTRFS_BACKREF_REV_SHIFT)
     }
 }
@@ -563,14 +573,14 @@ impl Header {
 /// Format header flags as a human-readable string (e.g. "WRITTEN|RELOC").
 pub fn format_header_flags(flags: u64) -> String {
     let mut names = Vec::new();
-    if flags & raw::BTRFS_HEADER_FLAG_WRITTEN as u64 != 0 {
+    if flags & u64::from(raw::BTRFS_HEADER_FLAG_WRITTEN) != 0 {
         names.push("WRITTEN");
     }
-    if flags & raw::BTRFS_HEADER_FLAG_RELOC as u64 != 0 {
+    if flags & u64::from(raw::BTRFS_HEADER_FLAG_RELOC) != 0 {
         names.push("RELOC");
     }
-    let known = raw::BTRFS_HEADER_FLAG_WRITTEN as u64
-        | raw::BTRFS_HEADER_FLAG_RELOC as u64;
+    let known = u64::from(raw::BTRFS_HEADER_FLAG_WRITTEN)
+        | u64::from(raw::BTRFS_HEADER_FLAG_RELOC);
     let unknown = flags & !known;
     if unknown != 0 {
         names.push("UNKNOWN");

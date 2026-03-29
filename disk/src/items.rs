@@ -82,7 +82,7 @@ pub enum FileExtentType {
 
 impl FileExtentType {
     pub fn from_raw(v: u8) -> Self {
-        match v as u32 {
+        match u32::from(v) {
             raw::BTRFS_FILE_EXTENT_INLINE => Self::Inline,
             raw::BTRFS_FILE_EXTENT_REG => Self::Regular,
             raw::BTRFS_FILE_EXTENT_PREALLOC => Self::Prealloc,
@@ -99,6 +99,7 @@ impl FileExtentType {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     pub fn to_raw(self) -> u8 {
         match self {
             Self::Inline => raw::BTRFS_FILE_EXTENT_INLINE as u8,
@@ -126,7 +127,7 @@ pub enum FileType {
 
 impl FileType {
     pub fn from_raw(v: u8) -> Self {
-        match v as u32 {
+        match u32::from(v) {
             raw::BTRFS_FT_UNKNOWN => Self::Unknown,
             raw::BTRFS_FT_REG_FILE => Self::RegFile,
             raw::BTRFS_FT_DIR => Self::Dir,
@@ -142,7 +143,7 @@ impl FileType {
 
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Unknown => "UNKNOWN",
+            Self::Unknown | Self::Other(_) => "UNKNOWN",
             Self::RegFile => "FILE",
             Self::Dir => "DIR",
             Self::Chrdev => "CHRDEV",
@@ -151,7 +152,6 @@ impl FileType {
             Self::Sock => "SOCK",
             Self::Symlink => "SYMLINK",
             Self::Xattr => "XATTR",
-            Self::Other(_) => "UNKNOWN",
         }
     }
 }
@@ -433,7 +433,7 @@ impl RootItem {
     }
 
     pub fn is_rdonly(&self) -> bool {
-        self.flags & raw::BTRFS_ROOT_SUBVOL_RDONLY as u64 != 0
+        self.flags & u64::from(raw::BTRFS_ROOT_SUBVOL_RDONLY) != 0
     }
 }
 
@@ -523,7 +523,7 @@ impl FileExtentItem {
     }
 }
 
-/// Raw CRC32C matching the kernel's crc32c() function: seed is passed
+/// Raw CRC32C matching the kernel's `crc32c()` function: seed is passed
 /// through directly with no inversion on input or output.
 fn raw_crc32c(seed: u32, data: &[u8]) -> u32 {
     // crc32c::crc32c_append(seed) computes: !crc32c_hw(!seed, data)
@@ -532,17 +532,17 @@ fn raw_crc32c(seed: u32, data: &[u8]) -> u32 {
     !crc32c::crc32c_append(!seed, data)
 }
 
-/// Compute the hash used for EXTENT_DATA_REF keys, matching the kernel's
+/// Compute the hash used for `EXTENT_DATA_REF` keys, matching the kernel's
 /// `hash_extent_data_ref()`. Uses two independent CRC32C computations
 /// combined into a single u64.
 fn extent_data_ref_hash(root: u64, objectid: u64, offset: u64) -> u64 {
     let high_crc = raw_crc32c(!0u32, &root.to_le_bytes());
     let low_crc = raw_crc32c(!0u32, &objectid.to_le_bytes());
     let low_crc = raw_crc32c(low_crc, &offset.to_le_bytes());
-    ((high_crc as u64) << 31) ^ (low_crc as u64)
+    (u64::from(high_crc) << 31) ^ u64::from(low_crc)
 }
 
-/// Inline reference types found inside EXTENT_ITEM/METADATA_ITEM.
+/// Inline reference types found inside `EXTENT_ITEM`/`METADATA_ITEM`.
 #[derive(Debug, Clone)]
 pub enum InlineRef {
     TreeBlockBackref {
@@ -573,6 +573,7 @@ pub enum InlineRef {
 
 impl InlineRef {
     /// The raw type byte for this inline ref.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn raw_type(&self) -> u8 {
         match self {
             Self::TreeBlockBackref { .. } => {
@@ -618,11 +619,11 @@ pub struct ExtentItem {
 
 impl ExtentItem {
     pub fn is_data(&self) -> bool {
-        self.flags & raw::BTRFS_EXTENT_FLAG_DATA as u64 != 0
+        self.flags & u64::from(raw::BTRFS_EXTENT_FLAG_DATA) != 0
     }
 
     pub fn is_tree_block(&self) -> bool {
-        self.flags & raw::BTRFS_EXTENT_FLAG_TREE_BLOCK as u64 != 0
+        self.flags & u64::from(raw::BTRFS_EXTENT_FLAG_TREE_BLOCK) != 0
     }
 
     pub fn flag_names(&self) -> String {
@@ -652,7 +653,7 @@ impl ExtentItem {
 
         let mut offset = mem::size_of::<raw::btrfs_extent_item>();
         let is_tree_block =
-            flags & raw::BTRFS_EXTENT_FLAG_TREE_BLOCK as u64 != 0;
+            flags & u64::from(raw::BTRFS_EXTENT_FLAG_TREE_BLOCK) != 0;
 
         let mut tree_block_key = None;
         let mut tree_block_level = None;
@@ -682,7 +683,7 @@ impl ExtentItem {
             };
             offset += 1 + 8;
 
-            match ref_type as u32 {
+            match u32::from(ref_type) {
                 raw::BTRFS_TREE_BLOCK_REF_KEY => {
                     inline_refs.push(InlineRef::TreeBlockBackref {
                         ref_offset,
@@ -819,34 +820,34 @@ impl BlockGroupItem {
 /// profile part (RAID0, RAID1, DUP, single, etc.).
 pub fn format_chunk_type(flags: u64) -> String {
     let mut type_names = Vec::new();
-    if flags & raw::BTRFS_BLOCK_GROUP_DATA as u64 != 0 {
+    if flags & u64::from(raw::BTRFS_BLOCK_GROUP_DATA) != 0 {
         type_names.push("DATA");
     }
-    if flags & raw::BTRFS_BLOCK_GROUP_SYSTEM as u64 != 0 {
+    if flags & u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM) != 0 {
         type_names.push("SYSTEM");
     }
-    if flags & raw::BTRFS_BLOCK_GROUP_METADATA as u64 != 0 {
+    if flags & u64::from(raw::BTRFS_BLOCK_GROUP_METADATA) != 0 {
         type_names.push("METADATA");
     }
 
-    let profile = flags & raw::BTRFS_BLOCK_GROUP_PROFILE_MASK as u64;
+    let profile = flags & u64::from(raw::BTRFS_BLOCK_GROUP_PROFILE_MASK);
     let profile_name = if profile == 0 {
         "single"
-    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID0 as u64 != 0 {
+    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID0) != 0 {
         "RAID0"
-    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID1 as u64 != 0 {
+    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID1) != 0 {
         "RAID1"
-    } else if profile & raw::BTRFS_BLOCK_GROUP_DUP as u64 != 0 {
+    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_DUP) != 0 {
         "DUP"
-    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID10 as u64 != 0 {
+    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID10) != 0 {
         "RAID10"
-    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID5 as u64 != 0 {
+    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID5) != 0 {
         "RAID5"
-    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID6 as u64 != 0 {
+    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID6) != 0 {
         "RAID6"
-    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID1C3 as u64 != 0 {
+    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID1C3) != 0 {
         "RAID1C3"
-    } else if profile & raw::BTRFS_BLOCK_GROUP_RAID1C4 as u64 != 0 {
+    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID1C4) != 0 {
         "RAID1C4"
     } else {
         "unknown"
@@ -1220,6 +1221,7 @@ impl RaidStripeItem {
 }
 
 /// Parse an item's raw data into a typed payload based on its key type.
+#[allow(clippy::too_many_lines)]
 pub fn parse_item_payload(key: &DiskKey, data: &[u8]) -> ItemPayload {
     use crate::tree::KeyType;
 
@@ -1320,7 +1322,7 @@ pub fn parse_item_payload(key: &DiskKey, data: &[u8]) -> ItemPayload {
         },
         KeyType::QgroupRelation => ItemPayload::QgroupRelation,
         KeyType::PersistentItem => {
-            if key.objectid == raw::BTRFS_DEV_STATS_OBJECTID as u64 {
+            if key.objectid == u64::from(raw::BTRFS_DEV_STATS_OBJECTID) {
                 ItemPayload::DevStats(DevStats::parse(data))
             } else {
                 ItemPayload::Unknown(data.to_vec())

@@ -13,19 +13,19 @@ use std::{
 use uuid::Uuid;
 
 /// Size of a superblock on disk (4096 bytes).
-/// From kernel-shared/ctree.h: BTRFS_SUPER_INFO_SIZE
+/// From kernel-shared/ctree.h: `BTRFS_SUPER_INFO_SIZE`
 const SUPER_INFO_SIZE: usize = 4096;
 
 /// Byte offset of the primary superblock on disk (64 KiB).
-/// From kernel-shared/ctree.h: BTRFS_SUPER_INFO_OFFSET
+/// From kernel-shared/ctree.h: `BTRFS_SUPER_INFO_OFFSET`
 const SUPER_INFO_OFFSET: u64 = 65536;
 
 /// Maximum number of superblock mirrors (3: primary + 2 copies).
-/// From kernel-shared/disk-io.h: BTRFS_SUPER_MIRROR_MAX
+/// From kernel-shared/disk-io.h: `BTRFS_SUPER_MIRROR_MAX`
 pub const SUPER_MIRROR_MAX: u32 = 3;
 
 /// Shift used to compute mirror offsets.
-/// From kernel-shared/disk-io.h: BTRFS_SUPER_MIRROR_SHIFT
+/// From kernel-shared/disk-io.h: `BTRFS_SUPER_MIRROR_SHIFT`
 const SUPER_MIRROR_SHIFT: u32 = 12;
 
 /// Compute the byte offset of the superblock mirror at `index`.
@@ -52,7 +52,7 @@ pub enum CsumType {
 
 impl CsumType {
     fn from_raw(val: u16) -> CsumType {
-        match val as u32 {
+        match u32::from(val) {
             raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 => CsumType::Crc32,
             raw::btrfs_csum_type_BTRFS_CSUM_TYPE_XXHASH => CsumType::Xxhash,
             raw::btrfs_csum_type_BTRFS_CSUM_TYPE_SHA256 => CsumType::Sha256,
@@ -62,12 +62,14 @@ impl CsumType {
     }
 
     /// Size in bytes of checksums for this algorithm.
+    // Unknown falls back to 32 (BTRFS_CSUM_SIZE); same value as Sha256/Blake2
+    // but for a different reason — suppress the match_same_arms lint.
+    #[allow(clippy::match_same_arms)]
     pub fn size(&self) -> usize {
         match self {
             CsumType::Crc32 => 4,
             CsumType::Xxhash => 8,
-            CsumType::Sha256 => 32,
-            CsumType::Blake2 => 32,
+            CsumType::Sha256 | CsumType::Blake2 => 32,
             CsumType::Unknown(_) => 32, // BTRFS_CSUM_SIZE
         }
     }
@@ -176,9 +178,10 @@ impl Superblock {
         self.magic == raw::BTRFS_MAGIC
     }
 
-    /// Whether the METADATA_UUID incompat flag is set.
+    /// Whether the `METADATA_UUID` incompat flag is set.
     pub fn has_metadata_uuid(&self) -> bool {
-        self.incompat_flags & raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID as u64
+        self.incompat_flags
+            & u64::from(raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID)
             != 0
     }
 }
@@ -197,7 +200,7 @@ fn read_raw_superblock(
     // and all-zeroes is a valid bit pattern. We just read into a byte buffer
     // so alignment is not an issue for the copy.
     let sb: raw::btrfs_super_block =
-        unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const _) };
+        unsafe { std::ptr::read_unaligned(buf.as_ptr().cast()) };
     Ok(sb)
 }
 
@@ -288,7 +291,7 @@ fn parse_label(raw_label: &[std::os::raw::c_char; 256]) -> String {
     let bytes: Vec<u8> = raw_label
         .iter()
         .take_while(|&&c| c != 0)
-        .map(|&c| c as u8)
+        .map(|&c| c.cast_unsigned())
         .collect();
     String::from_utf8_lossy(&bytes).into_owned()
 }
