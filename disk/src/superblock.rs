@@ -341,10 +341,47 @@ pub fn read_superblock(
 pub fn read_superblock_bytes(
     reader: &mut (impl Read + Seek),
 ) -> io::Result<[u8; SUPER_INFO_SIZE]> {
-    reader.seek(SeekFrom::Start(SUPER_INFO_OFFSET))?;
+    read_superblock_bytes_at(reader, SUPER_INFO_OFFSET)
+}
+
+/// Read the raw 4096-byte superblock at an explicit byte offset.
+pub fn read_superblock_bytes_at(
+    reader: &mut (impl Read + Seek),
+    offset: u64,
+) -> io::Result<[u8; SUPER_INFO_SIZE]> {
+    reader.seek(SeekFrom::Start(offset))?;
     let mut buf = [0u8; SUPER_INFO_SIZE];
     reader.read_exact(&mut buf)?;
     Ok(buf)
+}
+
+/// Return `true` if the superblock buffer has valid magic and a matching CRC32C checksum.
+///
+/// Only CRC32C (`csum_type` == 0) is validated; other checksum types always return `false`.
+pub fn superblock_is_valid(buf: &[u8; SUPER_INFO_SIZE]) -> bool {
+    let magic_off = mem::offset_of!(raw::btrfs_super_block, magic);
+    let magic = u64::from_le_bytes(
+        buf[magic_off..magic_off + 8].try_into().unwrap(),
+    );
+    if magic != raw::BTRFS_MAGIC {
+        return false;
+    }
+    let csum_type_off = mem::offset_of!(raw::btrfs_super_block, csum_type);
+    let csum_type = u16::from_le_bytes(
+        buf[csum_type_off..csum_type_off + 2].try_into().unwrap(),
+    );
+    if u32::from(csum_type) != raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 {
+        return false;
+    }
+    let expected = u32::from_le_bytes(buf[0..4].try_into().unwrap());
+    let actual = raw_crc32c(0, &buf[32..]);
+    expected == actual
+}
+
+/// Extract the generation field from a raw superblock byte buffer.
+pub fn superblock_generation(buf: &[u8; SUPER_INFO_SIZE]) -> u64 {
+    let off = mem::offset_of!(raw::btrfs_super_block, generation);
+    u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
 }
 
 /// Recompute the CRC32C checksum of a superblock byte buffer in place.
@@ -564,5 +601,90 @@ mod tests {
         let buf = vec![0u8; 100]; // way too short for mirror 0
         let mut cursor = Cursor::new(buf);
         assert!(read_superblock(&mut cursor, 0).is_err());
+    }
+
+    // --- superblock_is_valid / superblock_generation ---
+
+    fn make_valid_crc32c_buf() -> [u8; SUPER_INFO_SIZE] {
+        let mut buf = [0u8; SUPER_INFO_SIZE];
+        // Set magic.
+        let magic_off = mem::offset_of!(raw::btrfs_super_block, magic);
+        buf[magic_off..magic_off + 8]
+            .copy_from_slice(&raw::BTRFS_MAGIC.to_le_bytes());
+        // csum_type is already 0 (CRC32C).
+        // Set generation = 99.
+        let gen_off = mem::offset_of!(raw::btrfs_super_block, generation);
+        buf[gen_off..gen_off + 8].copy_from_slice(&99u64.to_le_bytes());
+        // Compute and store checksum.
+        csum_superblock(&mut buf).unwrap();
+        buf
+    }
+
+    #[test]
+    fn superblock_is_valid_good() {
+        let buf = make_valid_crc32c_buf();
+        assert!(superblock_is_valid(&buf));
+    }
+
+    #[test]
+    fn superblock_is_valid_bad_magic() {
+        let mut buf = make_valid_crc32c_buf();
+        let magic_off = mem::offset_of!(raw::btrfs_super_block, magic);
+        buf[magic_off] ^= 0xff; // corrupt magic
+        assert!(!superblock_is_valid(&buf));
+    }
+
+    #[test]
+    fn superblock_is_valid_bad_csum() {
+        let mut buf = make_valid_crc32c_buf();
+        buf[0] ^= 0xff; // corrupt checksum
+        assert!(!superblock_is_valid(&buf));
+    }
+
+    #[test]
+    fn superblock_generation_reads_field() {
+        let buf = make_valid_crc32c_buf();
+        assert_eq!(superblock_generation(&buf), 99);
+    }
+
+    #[test]
+    fn write_superblock_all_mirrors_updates_bytenr() {
+        let buf = make_valid_crc32c_buf();
+        // Device large enough for all 3 mirrors (256 GiB + 4096).
+        // Use only primary + secondary (64 MiB + 4096) to keep test fast.
+        let device_size = 64 * 1024 * 1024 + SUPER_INFO_SIZE;
+        let mut device = vec![0u8; device_size];
+        {
+            let mut cursor = std::io::Cursor::new(&mut device);
+            write_superblock_all_mirrors(&mut cursor, &buf).unwrap();
+        }
+        // Primary mirror (offset 64 KiB): bytenr should be 65536.
+        let bytenr_off = mem::offset_of!(raw::btrfs_super_block, bytenr);
+        let primary_bytenr = u64::from_le_bytes(
+            device[SUPER_INFO_OFFSET as usize + bytenr_off
+                ..SUPER_INFO_OFFSET as usize + bytenr_off + 8]
+                .try_into()
+                .unwrap(),
+        );
+        assert_eq!(primary_bytenr, SUPER_INFO_OFFSET);
+        // Secondary mirror (offset 64 MiB): bytenr should be 64 MiB.
+        let mirror1_off = super_mirror_offset(1) as usize;
+        let mirror1_bytenr = u64::from_le_bytes(
+            device[mirror1_off + bytenr_off..mirror1_off + bytenr_off + 8]
+                .try_into()
+                .unwrap(),
+        );
+        assert_eq!(mirror1_bytenr, super_mirror_offset(1));
+        // Both mirrors should be valid after the write.
+        let primary_buf: [u8; SUPER_INFO_SIZE] = device
+            [SUPER_INFO_OFFSET as usize..SUPER_INFO_OFFSET as usize + SUPER_INFO_SIZE]
+            .try_into()
+            .unwrap();
+        assert!(superblock_is_valid(&primary_buf));
+        let mirror1_buf: [u8; SUPER_INFO_SIZE] =
+            device[mirror1_off..mirror1_off + SUPER_INFO_SIZE]
+                .try_into()
+                .unwrap();
+        assert!(superblock_is_valid(&mirror1_buf));
     }
 }
