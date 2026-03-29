@@ -4,12 +4,25 @@ expression: text
 ---
 Print statistics about trees in a btrfs filesystem
 
-Usage: tree-stats <PATH>
+Reads the filesystem image or block device directly (no mount required). By
+default prints statistics for the root, extent, checksum, and fs trees. Use -t
+to restrict to a single tree.
+
+When the filesystem is mounted the numbers may be slightly inaccurate due to
+concurrent modifications.
+
+Usage: tree-stats [OPTIONS] <DEVICE>
 
 Arguments:
-  <PATH>
-          Path to a file or directory on the btrfs filesystem
+  <DEVICE>
+          Path to a btrfs block device or image file
 
 Options:
+  -b, --raw
+          Print sizes in raw bytes instead of human-readable form
+
+  -t, --tree <TREE>
+          Only print stats for the given tree (name or numeric ID)
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')

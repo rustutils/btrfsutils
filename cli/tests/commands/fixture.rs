@@ -503,6 +503,46 @@ fn inspect_dump_tree() {
     );
 }
 
+// ── inspect-internal tree-stats (no privileges needed) ──────────────
+
+fn redact_timing(output: &str) -> String {
+    let re = regex_lite::Regex::new(r"Total read time: \d+ s \d+ us").unwrap();
+    re.replace_all(output, "Total read time: <REDACTED>")
+        .into_owned()
+}
+
+#[test]
+fn inspect_tree_stats() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    snap!(
+        "btrfs inspect-internal tree-stats -b <IMG>",
+        redact_timing(&btrfs_ok(&[
+            "inspect-internal",
+            "tree-stats",
+            "-b",
+            img_str
+        ]))
+    );
+}
+
+#[test]
+fn inspect_tree_stats_single_tree() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    snap!(
+        "btrfs inspect-internal tree-stats -b -t fs <IMG>",
+        redact_timing(&btrfs_ok(&[
+            "inspect-internal",
+            "tree-stats",
+            "-b",
+            "-t",
+            "fs",
+            img_str
+        ]))
+    );
+}
+
 // ── quota ────────────────────────────────────────────────────────────
 
 #[test]

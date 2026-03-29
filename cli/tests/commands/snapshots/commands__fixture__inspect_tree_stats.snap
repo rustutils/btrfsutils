@@ -1,0 +1,70 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs inspect-internal tree-stats -b <IMG>
+expression: "redact_timing(&btrfs_ok(&[\"inspect-internal\", \"tree-stats\", \"-b\", img_str]))"
+---
+Calculating size of root tree
+	Total size: 16384
+		Inline data: 0
+	Total seeks: 0
+		Forward seeks: 0
+		Backward seeks: 0
+		Avg seek len: 0
+	Total clusters: 1
+		Avg cluster size: 0
+		Min cluster size: 0
+		Max cluster size: 16384
+	Total disk spread: 0
+	Total read time: <REDACTED>
+	Levels: 1
+	Total nodes: 1
+		On level 0:        1
+Calculating size of extent tree
+	Total size: 16384
+		Inline data: 0
+	Total seeks: 0
+		Forward seeks: 0
+		Backward seeks: 0
+		Avg seek len: 0
+	Total clusters: 1
+		Avg cluster size: 0
+		Min cluster size: 0
+		Max cluster size: 16384
+	Total disk spread: 0
+	Total read time: <REDACTED>
+	Levels: 1
+	Total nodes: 1
+		On level 0:        1
+Calculating size of csum tree
+	Total size: 16384
+		Inline data: 0
+	Total seeks: 0
+		Forward seeks: 0
+		Backward seeks: 0
+		Avg seek len: 0
+	Total clusters: 1
+		Avg cluster size: 0
+		Min cluster size: 0
+		Max cluster size: 16384
+	Total disk spread: 0
+	Total read time: <REDACTED>
+	Levels: 1
+	Total nodes: 1
+		On level 0:        1
+Calculating size of fs tree
+	Total size: 344064
+		Inline data: 124774
+	Total seeks: 10
+		Forward seeks: 6
+		Backward seeks: 4
+		Avg seek len: 117964
+	Total clusters: 4
+		Avg cluster size: 57344
+		Min cluster size: 32768
+		Max cluster size: 114688
+	Total disk spread: 622592
+	Total read time: <REDACTED>
+	Levels: 2
+	Total nodes: 21
+		On level 0:       20
+		On level 1:        1  (avg fanout 20)

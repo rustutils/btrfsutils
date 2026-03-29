@@ -4,6 +4,12 @@ expression: text
 ---
 Recover bad superblocks from good copies
 
+Reads all superblock mirrors and validates their checksums and magic. If any
+mirrors are corrupted, the best valid copy (highest generation) is written back
+to all mirrors.
+
+The device must not be mounted.
+
 Usage: super-recover [OPTIONS] <DEVICE>
 
 Arguments:
@@ -15,4 +21,4 @@ Options:
           Assume an answer of 'yes' to all questions
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')

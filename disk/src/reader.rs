@@ -249,6 +249,176 @@ pub fn block_visit<R: Read + Seek>(
     }
 }
 
+/// Statistics collected by walking all blocks of a single B-tree.
+#[derive(Debug, Clone)]
+pub struct TreeStats {
+    /// Total number of tree blocks (nodes and leaves).
+    pub total_nodes: u64,
+    /// Total bytes occupied by tree blocks (`total_nodes × nodesize`).
+    pub total_bytes: u64,
+    /// Total bytes of inline file data (non-zero only when `find_inline` is true).
+    pub total_inline: u64,
+    /// Number of non-contiguous jumps between sibling block addresses.
+    pub total_seeks: u64,
+    /// Seeks where the next sibling is at a higher address.
+    pub forward_seeks: u64,
+    /// Seeks where the next sibling is at a lower address.
+    pub backward_seeks: u64,
+    /// Sum of all seek distances in bytes.
+    pub total_seek_len: u64,
+    /// Largest single seek distance in bytes.
+    pub max_seek_len: u64,
+    /// Number of contiguous block runs (clusters) counted between seeks.
+    pub total_clusters: u64,
+    /// Sum of all cluster sizes in bytes.
+    pub total_cluster_size: u64,
+    /// Smallest cluster size in bytes (`u64::MAX` if no seeks occurred).
+    pub min_cluster_size: u64,
+    /// Largest cluster size in bytes (initialised to `nodesize`).
+    pub max_cluster_size: u64,
+    /// Lowest block bytenr seen during the walk.
+    pub lowest_bytenr: u64,
+    /// Highest block bytenr seen during the walk.
+    pub highest_bytenr: u64,
+    /// Number of blocks at each level: index 0 = leaves, higher = internal.
+    pub node_counts: Vec<u64>,
+    /// Tree height (number of levels, root level + 1).
+    pub levels: u8,
+}
+
+/// Walk `root_logical` collecting [`TreeStats`].
+///
+/// When `find_inline` is true the walk also counts inline extent data bytes
+/// (relevant for subvolume / FS trees which contain `EXTENT_DATA` items).
+pub fn tree_stats_collect<R: Read + Seek>(
+    reader: &mut BlockReader<R>,
+    root_logical: u64,
+    find_inline: bool,
+) -> io::Result<TreeStats> {
+    let root_block = reader.read_tree_block(root_logical)?;
+    let nodesize = reader.nodesize() as u64;
+    let root_level = root_block.header().level;
+    let root_bytenr = root_block.header().bytenr;
+
+    let mut stats = TreeStats {
+        total_nodes: 0,
+        total_bytes: 0,
+        total_inline: 0,
+        total_seeks: 0,
+        forward_seeks: 0,
+        backward_seeks: 0,
+        total_seek_len: 0,
+        max_seek_len: 0,
+        total_clusters: 0,
+        total_cluster_size: 0,
+        min_cluster_size: u64::MAX,
+        max_cluster_size: nodesize,
+        lowest_bytenr: root_bytenr,
+        highest_bytenr: root_bytenr,
+        node_counts: vec![0u64; root_level as usize + 1],
+        levels: root_level + 1,
+    };
+
+    walk_stats(reader, root_block, &mut stats, find_inline, nodesize)?;
+    Ok(stats)
+}
+
+/// Recursively walk a tree block, accumulating stats.
+fn walk_stats<R: Read + Seek>(
+    reader: &mut BlockReader<R>,
+    block: TreeBlock,
+    stats: &mut TreeStats,
+    find_inline: bool,
+    nodesize: u64,
+) -> io::Result<()> {
+    let level = block.header().level;
+    let bytenr = block.header().bytenr;
+
+    stats.total_nodes += 1;
+    stats.total_bytes += nodesize;
+    if (level as usize) < stats.node_counts.len() {
+        stats.node_counts[level as usize] += 1;
+    }
+    if bytenr < stats.lowest_bytenr {
+        stats.lowest_bytenr = bytenr;
+    }
+    if bytenr > stats.highest_bytenr {
+        stats.highest_bytenr = bytenr;
+    }
+
+    match block {
+        TreeBlock::Leaf { items, data, .. } => {
+            if find_inline {
+                let type_off =
+                    mem::offset_of!(raw::btrfs_file_extent_item, type_);
+                let inline_hdr_size =
+                    mem::offset_of!(raw::btrfs_file_extent_item, disk_bytenr);
+                let header_size = mem::size_of::<raw::btrfs_header>();
+                for item in &items {
+                    if item.key.key_type != KeyType::ExtentData {
+                        continue;
+                    }
+                    let start = header_size + item.offset as usize;
+                    if start + type_off >= data.len() {
+                        continue;
+                    }
+                    // BTRFS_FILE_EXTENT_INLINE == 0
+                    if data[start + type_off] == 0
+                        && item.size as usize > inline_hdr_size
+                    {
+                        stats.total_inline +=
+                            item.size as u64 - inline_hdr_size as u64;
+                    }
+                }
+            }
+        }
+        TreeBlock::Node { ptrs, .. } => {
+            let mut last_block = bytenr;
+            let mut cluster_size = nodesize;
+
+            for ptr in ptrs {
+                let child = reader.read_tree_block(ptr.blockptr)?;
+                walk_stats(reader, child, stats, find_inline, nodesize)?;
+
+                let cur = ptr.blockptr;
+                if last_block + nodesize != cur {
+                    let distance = if last_block + nodesize < cur {
+                        cur - (last_block + nodesize)
+                    } else {
+                        (last_block + nodesize) - cur
+                    };
+                    stats.total_seeks += 1;
+                    stats.total_seek_len += distance;
+                    if distance > stats.max_seek_len {
+                        stats.max_seek_len = distance;
+                    }
+                    if cur > last_block + nodesize {
+                        stats.forward_seeks += 1;
+                    } else {
+                        stats.backward_seeks += 1;
+                    }
+                    if cluster_size != nodesize {
+                        stats.total_clusters += 1;
+                        stats.total_cluster_size += cluster_size;
+                        if cluster_size < stats.min_cluster_size {
+                            stats.min_cluster_size = cluster_size;
+                        }
+                        if cluster_size > stats.max_cluster_size {
+                            stats.max_cluster_size = cluster_size;
+                        }
+                    }
+                    cluster_size = nodesize;
+                } else {
+                    cluster_size += nodesize;
+                }
+                last_block = cur;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn collect_root_items<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     logical: u64,
