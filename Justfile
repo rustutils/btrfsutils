@@ -70,10 +70,12 @@ gen:
 # run code formatter
 format:
     cargo +nightly fmt --all
+    taplo fmt
 
 # run static linters
 check:
     cargo +nightly fmt --all --check
+    taplo check
     RUSTDOCFLAGS="-Dwarnings" cargo doc --no-deps
     cargo clippy -- -Dwarnings
     cargo check --target x86_64-unknown-linux-gnu

@@ -98,6 +98,20 @@
           inherit btrfs;
         });
 
+      checks = forAllSystems (system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+        in
+        {
+          taplo = pkgs.runCommand "taplo-check" {
+            nativeBuildInputs = [ pkgs.taplo ];
+          } ''
+            cd ${self}
+            taplo check
+            touch $out
+          '';
+        });
+
       devShells = forAllSystems (system:
         let
           pkgs = import nixpkgs {
@@ -139,6 +153,7 @@
               pkgs.jq
               pkgs.cargo-insta
               pkgs.cargo-llvm-cov
+              pkgs.taplo
             ];
 
             env = {

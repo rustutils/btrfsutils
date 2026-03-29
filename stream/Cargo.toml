@@ -33,4 +33,11 @@ name = "receive"
 required-features = ["receive"]
 
 [features]
-receive = ["dep:anyhow", "dep:btrfs-uapi", "dep:nix", "dep:flate2", "dep:zstd", "dep:lzo1x"]
+receive = [
+  "dep:anyhow",
+  "dep:btrfs-uapi",
+  "dep:nix",
+  "dep:flate2",
+  "dep:zstd",
+  "dep:lzo1x",
+]
