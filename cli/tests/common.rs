@@ -339,15 +339,22 @@ pub fn cached_fixture_image() -> PathBuf {
         });
         let gz_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/commands/fixture.img.gz");
+        // Decompress to a temp file, then rename atomically to avoid
+        // races when multiple tests check cached.exists() concurrently.
+        let tmp = cache_dir.join("test-fs.img.tmp");
         let status = Command::new("gunzip")
             .args(["-k", "-c"])
             .arg(&gz_path)
-            .stdout(File::create(&cached).unwrap_or_else(|e| {
-                panic!("failed to create {}: {e}", cached.display())
+            .stdout(File::create(&tmp).unwrap_or_else(|e| {
+                panic!("failed to create {}: {e}", tmp.display())
             }))
             .status()
             .expect("failed to run gunzip");
         assert!(status.success(), "gunzip failed");
+        // Atomic rename — other threads will either see the old state
+        // (no file) and also decompress (harmless), or see the final
+        // complete file.
+        let _ = fs::rename(&tmp, &cached);
     }
 
     cached
