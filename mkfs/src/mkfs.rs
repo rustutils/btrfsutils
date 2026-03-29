@@ -7,7 +7,7 @@ use crate::{
     items,
     layout::{
         BlockLayout, ChunkLayout, SYSTEM_GROUP_OFFSET, SYSTEM_GROUP_SIZE,
-        TreeId,
+        StripeInfo, TreeId,
     },
     superblock::SuperblockBuilder,
     tree::{Key, LeafBuilder, LeafHeader},
@@ -193,7 +193,8 @@ impl MkfsConfig {
 
 /// Create a btrfs filesystem on one or more devices.
 pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
-    let chunks = ChunkLayout::new(cfg.total_bytes());
+    let chunks =
+        ChunkLayout::new(cfg.total_bytes(), cfg.primary_device().dev_uuid);
     if chunks.is_none() {
         bail!(
             "device too small: {} bytes, need at least {} bytes",
@@ -494,15 +495,19 @@ fn build_chunk_tree(
     leaf.push(dev_key, &dev_data)
         .map_err(|e| anyhow::anyhow!("chunk tree: {e}"))?;
 
-    // CHUNK_ITEM for the system chunk
-    let sys_chunk_data = items::chunk_item_single(
+    // CHUNK_ITEM for the system chunk (bootstrap: uses sectorsize for io_align)
+    let dev1 = cfg.primary_device();
+    let sys_stripe = StripeInfo {
+        devid: dev1.devid,
+        offset: SYSTEM_GROUP_OFFSET,
+        dev_uuid: dev1.dev_uuid,
+    };
+    let sys_chunk_data = items::chunk_item_bootstrap(
         SYSTEM_GROUP_SIZE,
         raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
         raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
         cfg.sectorsize,
-        1,
-        SYSTEM_GROUP_OFFSET,
-        &cfg.primary_device().dev_uuid,
+        &sys_stripe,
     );
     let sys_chunk_key = Key::new(
         raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
@@ -512,17 +517,16 @@ fn build_chunk_tree(
     leaf.push(sys_chunk_key, &sys_chunk_data)
         .map_err(|e| anyhow::anyhow!("chunk tree: {e}"))?;
 
-    // CHUNK_ITEM for metadata DUP
-    let meta_chunk_data = items::chunk_item_dup(
+    // CHUNK_ITEM for metadata chunk
+    let meta_chunk_data = items::chunk_item(
         chunks.meta_size,
         raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
         raw::BTRFS_BLOCK_GROUP_METADATA as u64
-            | raw::BTRFS_BLOCK_GROUP_DUP as u64,
+            | cfg.metadata_profile.block_group_flag(),
+        crate::layout::STRIPE_LEN as u32,
+        crate::layout::STRIPE_LEN as u32,
         cfg.sectorsize,
-        1,
-        chunks.meta_phys_0,
-        chunks.meta_phys_1,
-        &cfg.primary_device().dev_uuid,
+        &chunks.meta_stripes,
     );
     let meta_chunk_key = Key::new(
         raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
@@ -532,15 +536,16 @@ fn build_chunk_tree(
     leaf.push(meta_chunk_key, &meta_chunk_data)
         .map_err(|e| anyhow::anyhow!("chunk tree: {e}"))?;
 
-    // CHUNK_ITEM for data SINGLE
-    let data_chunk_data = items::chunk_item_non_bootstrap_single(
+    // CHUNK_ITEM for data chunk
+    let data_chunk_data = items::chunk_item(
         chunks.data_size,
         raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
-        raw::BTRFS_BLOCK_GROUP_DATA as u64,
+        raw::BTRFS_BLOCK_GROUP_DATA as u64
+            | cfg.data_profile.block_group_flag(),
+        crate::layout::STRIPE_LEN as u32,
+        crate::layout::STRIPE_LEN as u32,
         cfg.sectorsize,
-        1,
-        chunks.data_phys,
-        &cfg.primary_device().dev_uuid,
+        &chunks.data_stripes,
     );
     let data_chunk_key = Key::new(
         raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
@@ -592,7 +597,11 @@ fn build_dev_tree(
         &cfg.chunk_tree_uuid,
     );
     leaf.push(
-        Key::new(1, raw::BTRFS_DEV_EXTENT_KEY as u8, chunks.meta_phys_0),
+        Key::new(
+            1,
+            raw::BTRFS_DEV_EXTENT_KEY as u8,
+            chunks.meta_stripes[0].offset,
+        ),
         &meta_ext_0,
     )
     .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
@@ -606,7 +615,11 @@ fn build_dev_tree(
         &cfg.chunk_tree_uuid,
     );
     leaf.push(
-        Key::new(1, raw::BTRFS_DEV_EXTENT_KEY as u8, chunks.meta_phys_1),
+        Key::new(
+            1,
+            raw::BTRFS_DEV_EXTENT_KEY as u8,
+            chunks.meta_stripes[1].offset,
+        ),
         &meta_ext_1,
     )
     .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
@@ -620,7 +633,11 @@ fn build_dev_tree(
         &cfg.chunk_tree_uuid,
     );
     leaf.push(
-        Key::new(1, raw::BTRFS_DEV_EXTENT_KEY as u8, chunks.data_phys),
+        Key::new(
+            1,
+            raw::BTRFS_DEV_EXTENT_KEY as u8,
+            chunks.data_stripes[0].offset,
+        ),
         &data_ext,
     )
     .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
@@ -822,14 +839,17 @@ fn build_superblock(
         raw::BTRFS_CHUNK_ITEM_KEY as u8,
         SYSTEM_GROUP_OFFSET,
     );
-    let chunk_data = items::chunk_item_single(
+    let dev1 = cfg.primary_device();
+    let chunk_data = items::chunk_item_bootstrap(
         SYSTEM_GROUP_SIZE,
         raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
         raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
         cfg.sectorsize,
-        1,
-        SYSTEM_GROUP_OFFSET,
-        &cfg.primary_device().dev_uuid,
+        &StripeInfo {
+            devid: dev1.devid,
+            offset: SYSTEM_GROUP_OFFSET,
+            dev_uuid: dev1.dev_uuid,
+        },
     );
     let mut sys_chunk_array = items::disk_key(&chunk_key);
     sys_chunk_array.extend_from_slice(&chunk_data);

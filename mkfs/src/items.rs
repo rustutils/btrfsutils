@@ -150,120 +150,68 @@ pub fn dev_item(
     buf
 }
 
-/// Serialize a CHUNK_ITEM with one stripe.
-pub fn chunk_item_single(
-    length: u64,
-    owner: u64,
-    chunk_type: u64,
-    sector_size: u32,
-    stripe_devid: u64,
-    stripe_offset: u64,
-    stripe_dev_uuid: &Uuid,
-) -> Vec<u8> {
-    let base_size = mem::offset_of!(raw::btrfs_chunk, stripe);
-    let stripe_size = mem::size_of::<raw::btrfs_stripe>();
-    let size = base_size + stripe_size;
-    let mut buf = vec![0u8; size];
+use crate::layout::StripeInfo;
 
-    /// 64 KiB — default stripe length for btrfs chunks.
-    /// From kernel-shared/volumes.h: BTRFS_STRIPE_LEN
-    const STRIPE_LEN: u64 = 64 * 1024;
-
-    write_le_u64(&mut buf, 0, length);
-    write_le_u64(&mut buf, 8, owner);
-    write_le_u64(&mut buf, 16, STRIPE_LEN);
-    write_le_u64(&mut buf, 24, chunk_type);
-    write_le_u32(&mut buf, 32, sector_size); // io_align
-    write_le_u32(&mut buf, 36, sector_size); // io_width
-    write_le_u32(&mut buf, 40, sector_size); // sector_size
-    write_le_u16(&mut buf, 44, 1); // num_stripes
-    write_le_u16(&mut buf, 46, 0); // sub_stripes
-
-    // Stripe 0
-    write_le_u64(&mut buf, base_size, stripe_devid);
-    write_le_u64(&mut buf, base_size + 8, stripe_offset);
-    write_uuid(&mut buf, base_size + 16, stripe_dev_uuid);
-
-    buf
-}
-
-/// Serialize a CHUNK_ITEM with one stripe, using STRIPE_LEN for io_align/io_width.
+/// Serialize a CHUNK_ITEM with the given stripes.
 ///
-/// This is for non-bootstrap chunks (metadata, data) where the C reference
-/// uses STRIPE_LEN (64K) rather than sectorsize for io_align and io_width.
-pub fn chunk_item_non_bootstrap_single(
+/// For non-bootstrap chunks, `io_align` and `io_width` should be
+/// `STRIPE_LEN` (64K). The bootstrap system chunk uses `sector_size`
+/// instead (see `chunk_item_bootstrap`).
+pub fn chunk_item(
     length: u64,
     owner: u64,
     chunk_type: u64,
+    io_align: u32,
+    io_width: u32,
     sector_size: u32,
-    stripe_devid: u64,
-    stripe_offset: u64,
-    stripe_dev_uuid: &Uuid,
+    stripes: &[StripeInfo],
 ) -> Vec<u8> {
     let base_size = mem::offset_of!(raw::btrfs_chunk, stripe);
-    let stripe_size = mem::size_of::<raw::btrfs_stripe>();
-    let size = base_size + stripe_size;
+    let stripe_entry_size = mem::size_of::<raw::btrfs_stripe>();
+    let size = base_size + stripes.len() * stripe_entry_size;
     let mut buf = vec![0u8; size];
 
     write_le_u64(&mut buf, 0, length);
     write_le_u64(&mut buf, 8, owner);
     write_le_u64(&mut buf, 16, crate::layout::STRIPE_LEN);
     write_le_u64(&mut buf, 24, chunk_type);
-    write_le_u32(&mut buf, 32, crate::layout::STRIPE_LEN as u32); // io_align
-    write_le_u32(&mut buf, 36, crate::layout::STRIPE_LEN as u32); // io_width
-    write_le_u32(&mut buf, 40, sector_size); // sector_size
-    write_le_u16(&mut buf, 44, 1); // num_stripes
+    write_le_u32(&mut buf, 32, io_align);
+    write_le_u32(&mut buf, 36, io_width);
+    write_le_u32(&mut buf, 40, sector_size);
+    write_le_u16(&mut buf, 44, stripes.len() as u16);
     write_le_u16(&mut buf, 46, 0); // sub_stripes
 
-    // Stripe 0
-    write_le_u64(&mut buf, base_size, stripe_devid);
-    write_le_u64(&mut buf, base_size + 8, stripe_offset);
-    write_uuid(&mut buf, base_size + 16, stripe_dev_uuid);
+    for (i, stripe) in stripes.iter().enumerate() {
+        let off = base_size + i * stripe_entry_size;
+        write_le_u64(&mut buf, off, stripe.devid);
+        write_le_u64(&mut buf, off + 8, stripe.offset);
+        write_uuid(&mut buf, off + 16, &stripe.dev_uuid);
+    }
 
     buf
 }
 
-/// Serialize a CHUNK_ITEM with 2 stripes (DUP profile).
-///
-/// Uses STRIPE_LEN (64K) for io_align and io_width.
-#[allow(clippy::too_many_arguments)]
-pub fn chunk_item_dup(
+/// Serialize the bootstrap system CHUNK_ITEM (uses sectorsize for io_align/io_width).
+pub fn chunk_item_bootstrap(
     length: u64,
     owner: u64,
     chunk_type: u64,
     sector_size: u32,
-    stripe_devid: u64,
-    stripe_offset_0: u64,
-    stripe_offset_1: u64,
-    stripe_dev_uuid: &Uuid,
+    stripe: &StripeInfo,
 ) -> Vec<u8> {
-    let base_size = mem::offset_of!(raw::btrfs_chunk, stripe);
-    let stripe_size = mem::size_of::<raw::btrfs_stripe>();
-    let size = base_size + 2 * stripe_size;
-    let mut buf = vec![0u8; size];
-
-    write_le_u64(&mut buf, 0, length);
-    write_le_u64(&mut buf, 8, owner);
-    write_le_u64(&mut buf, 16, crate::layout::STRIPE_LEN);
-    write_le_u64(&mut buf, 24, chunk_type);
-    write_le_u32(&mut buf, 32, crate::layout::STRIPE_LEN as u32); // io_align
-    write_le_u32(&mut buf, 36, crate::layout::STRIPE_LEN as u32); // io_width
-    write_le_u32(&mut buf, 40, sector_size); // sector_size
-    write_le_u16(&mut buf, 44, 2); // num_stripes
-    write_le_u16(&mut buf, 46, 0); // sub_stripes
-
-    // Stripe 0
-    write_le_u64(&mut buf, base_size, stripe_devid);
-    write_le_u64(&mut buf, base_size + 8, stripe_offset_0);
-    write_uuid(&mut buf, base_size + 16, stripe_dev_uuid);
-
-    // Stripe 1
-    let s1 = base_size + stripe_size;
-    write_le_u64(&mut buf, s1, stripe_devid);
-    write_le_u64(&mut buf, s1 + 8, stripe_offset_1);
-    write_uuid(&mut buf, s1 + 16, stripe_dev_uuid);
-
-    buf
+    chunk_item(
+        length,
+        owner,
+        chunk_type,
+        sector_size,
+        sector_size,
+        sector_size,
+        &[StripeInfo {
+            devid: stripe.devid,
+            offset: stripe.offset,
+            dev_uuid: stripe.dev_uuid,
+        }],
+    )
 }
 
 /// Serialize a DEV_EXTENT.
@@ -397,14 +345,17 @@ mod tests {
     fn roundtrip_chunk_item() {
         let uuid =
             Uuid::parse_str("deadbeef-dead-beef-dead-beefdeadbeef").unwrap();
-        let data = chunk_item_single(
+        let stripe = StripeInfo {
+            devid: 1,
+            offset: 0x100000,
+            dev_uuid: uuid,
+        };
+        let data = chunk_item_bootstrap(
             4 * 1024 * 1024,
             raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
             raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
             4096,
-            1,
-            0x100000,
-            &uuid,
+            &stripe,
         );
         let parsed = items::ChunkItem::parse(&data).unwrap();
         assert_eq!(parsed.length, 4 * 1024 * 1024);
@@ -493,16 +444,27 @@ mod tests {
     fn roundtrip_chunk_item_dup() {
         let uuid =
             Uuid::parse_str("deadbeef-dead-beef-dead-beefdeadbeef").unwrap();
-        let data = chunk_item_dup(
+        let stripes = [
+            StripeInfo {
+                devid: 1,
+                offset: 5 * 1024 * 1024,
+                dev_uuid: uuid,
+            },
+            StripeInfo {
+                devid: 1,
+                offset: 5 * 1024 * 1024 + 32 * 1024 * 1024,
+                dev_uuid: uuid,
+            },
+        ];
+        let data = chunk_item(
             32 * 1024 * 1024,
             raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
             raw::BTRFS_BLOCK_GROUP_METADATA as u64
                 | raw::BTRFS_BLOCK_GROUP_DUP as u64,
+            crate::layout::STRIPE_LEN as u32,
+            crate::layout::STRIPE_LEN as u32,
             4096,
-            1,
-            5 * 1024 * 1024,
-            5 * 1024 * 1024 + 32 * 1024 * 1024,
-            &uuid,
+            &stripes,
         );
         let parsed = items::ChunkItem::parse(&data).unwrap();
         assert_eq!(parsed.length, 32 * 1024 * 1024);
@@ -523,14 +485,19 @@ mod tests {
     fn roundtrip_chunk_item_non_bootstrap_single() {
         let uuid =
             Uuid::parse_str("deadbeef-dead-beef-dead-beefdeadbeef").unwrap();
-        let data = chunk_item_non_bootstrap_single(
+        let stripes = [StripeInfo {
+            devid: 1,
+            offset: 69 * 1024 * 1024,
+            dev_uuid: uuid,
+        }];
+        let data = chunk_item(
             64 * 1024 * 1024,
             raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
             raw::BTRFS_BLOCK_GROUP_DATA as u64,
+            crate::layout::STRIPE_LEN as u32,
+            crate::layout::STRIPE_LEN as u32,
             4096,
-            1,
-            69 * 1024 * 1024,
-            &uuid,
+            &stripes,
         );
         let parsed = items::ChunkItem::parse(&data).unwrap();
         assert_eq!(parsed.length, 64 * 1024 * 1024);

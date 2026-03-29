@@ -135,25 +135,30 @@ impl BlockLayout {
 /// From kernel-shared/volumes.h: BTRFS_STRIPE_LEN
 pub const STRIPE_LEN: u64 = 64 * 1024;
 
+/// A physical stripe location in a chunk.
+pub struct StripeInfo {
+    pub devid: u64,
+    pub offset: u64,
+    pub dev_uuid: uuid::Uuid,
+}
+
 /// Physical and logical offset where non-system chunks start (after system group).
 pub const CHUNK_START: u64 = SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
 
-/// Computed layout for metadata (DUP) and data (SINGLE) block groups.
+/// Computed layout for metadata and data block groups.
 pub struct ChunkLayout {
     /// Logical address of the metadata chunk.
     pub meta_logical: u64,
     /// Logical size of the metadata chunk (one stripe).
     pub meta_size: u64,
-    /// Physical offset of DUP stripe 0.
-    pub meta_phys_0: u64,
-    /// Physical offset of DUP stripe 1.
-    pub meta_phys_1: u64,
+    /// Physical stripes for the metadata chunk.
+    pub meta_stripes: Vec<StripeInfo>,
     /// Logical address of the data chunk.
     pub data_logical: u64,
-    /// Logical and physical size of the data chunk (SINGLE).
+    /// Logical and physical size of the data chunk.
     pub data_size: u64,
-    /// Physical offset of the data chunk.
-    pub data_phys: u64,
+    /// Physical stripes for the data chunk.
+    pub data_stripes: Vec<StripeInfo>,
 }
 
 impl ChunkLayout {
@@ -161,7 +166,7 @@ impl ChunkLayout {
     ///
     /// Returns `None` if the device is too small to fit even the minimum
     /// metadata DUP (2 x 32 MiB) plus minimum data SINGLE (64 MiB).
-    pub fn new(total_bytes: u64) -> Option<Self> {
+    pub fn new(total_bytes: u64, dev_uuid: uuid::Uuid) -> Option<Self> {
         // Meta stripe size: min(256 MiB, total/10), minimum 32 MiB, round down to STRIPE_LEN.
         let meta_size =
             (total_bytes / 10).clamp(32 * 1024 * 1024, 256 * 1024 * 1024);
@@ -173,14 +178,28 @@ impl ChunkLayout {
         let data_size = data_size / STRIPE_LEN * STRIPE_LEN;
 
         // DUP: two physical stripes, sequential after system group.
-        let meta_phys_0 = CHUNK_START;
-        let meta_phys_1 = CHUNK_START + meta_size;
+        let meta_stripes = vec![
+            StripeInfo {
+                devid: 1,
+                offset: CHUNK_START,
+                dev_uuid,
+            },
+            StripeInfo {
+                devid: 1,
+                offset: CHUNK_START + meta_size,
+                dev_uuid,
+            },
+        ];
 
         // Data starts after both DUP stripes.
-        let data_phys = CHUNK_START + 2 * meta_size;
+        let data_stripes = vec![StripeInfo {
+            devid: 1,
+            offset: CHUNK_START + 2 * meta_size,
+            dev_uuid,
+        }];
 
         // Validate everything fits.
-        if data_phys + data_size > total_bytes {
+        if CHUNK_START + 2 * meta_size + data_size > total_bytes {
             return None;
         }
 
@@ -193,17 +212,18 @@ impl ChunkLayout {
         Some(ChunkLayout {
             meta_logical,
             meta_size,
-            meta_phys_0,
-            meta_phys_1,
+            meta_stripes,
             data_logical,
             data_size,
-            data_phys,
+            data_stripes,
         })
     }
 
     /// Total physical bytes used by all chunks (system + metadata DUP + data).
     pub fn dev_bytes_used(&self) -> u64 {
-        SYSTEM_GROUP_SIZE + 2 * self.meta_size + self.data_size
+        SYSTEM_GROUP_SIZE
+            + (self.meta_stripes.len() as u64 * self.meta_size)
+            + (self.data_stripes.len() as u64 * self.data_size)
     }
 
     /// Map a logical address to its physical write locations.
@@ -222,10 +242,10 @@ impl ChunkLayout {
             vec![logical]
         } else if meta_range.contains(&logical) {
             let off = logical - self.meta_logical;
-            vec![self.meta_phys_0 + off, self.meta_phys_1 + off]
+            self.meta_stripes.iter().map(|s| s.offset + off).collect()
         } else if data_range.contains(&logical) {
             let off = logical - self.data_logical;
-            vec![self.data_phys + off]
+            self.data_stripes.iter().map(|s| s.offset + off).collect()
         } else {
             panic!("logical address {logical:#x} not in any chunk")
         }
@@ -269,15 +289,21 @@ mod tests {
         assert_eq!(layout.metadata_used(true), 8 * 16384);
     }
 
+    fn test_uuid() -> uuid::Uuid {
+        uuid::Uuid::parse_str("deadbeef-dead-beef-dead-beefdeadbeef").unwrap()
+    }
+
     #[test]
     fn chunk_layout_256m() {
         // 256 MiB device: meta = min(256M, 25.6M) -> 32M (minimum), data = min(1G, 25.6M) -> 64M
-        let cl = ChunkLayout::new(256 * 1024 * 1024).unwrap();
+        let cl = ChunkLayout::new(256 * 1024 * 1024, test_uuid()).unwrap();
         assert_eq!(cl.meta_size, 32 * 1024 * 1024);
         assert_eq!(cl.data_size, 64 * 1024 * 1024);
-        assert_eq!(cl.meta_phys_0, CHUNK_START);
-        assert_eq!(cl.meta_phys_1, CHUNK_START + 32 * 1024 * 1024);
-        assert_eq!(cl.data_phys, CHUNK_START + 64 * 1024 * 1024);
+        assert_eq!(cl.meta_stripes.len(), 2);
+        assert_eq!(cl.meta_stripes[0].offset, CHUNK_START);
+        assert_eq!(cl.meta_stripes[1].offset, CHUNK_START + 32 * 1024 * 1024);
+        assert_eq!(cl.data_stripes.len(), 1);
+        assert_eq!(cl.data_stripes[0].offset, CHUNK_START + 64 * 1024 * 1024);
         assert_eq!(cl.meta_logical, CHUNK_START);
         assert_eq!(cl.data_logical, CHUNK_START + 32 * 1024 * 1024);
     }
@@ -285,7 +311,7 @@ mod tests {
     #[test]
     fn chunk_layout_1g() {
         // 1 GiB: meta = min(256M, 102.4M) -> 102M (rounded), data = min(1G, 102.4M) -> 102M
-        let cl = ChunkLayout::new(1024 * 1024 * 1024).unwrap();
+        let cl = ChunkLayout::new(1024 * 1024 * 1024, test_uuid()).unwrap();
         let expected_stripe =
             (1024 * 1024 * 1024 / 10) / STRIPE_LEN * STRIPE_LEN;
         assert_eq!(cl.meta_size, expected_stripe);
@@ -295,7 +321,8 @@ mod tests {
     #[test]
     fn chunk_layout_10g() {
         // 10 GiB: meta = min(256M, 1G) -> 256M, data = min(1G, 1G) -> 1G
-        let cl = ChunkLayout::new(10 * 1024 * 1024 * 1024).unwrap();
+        let cl =
+            ChunkLayout::new(10 * 1024 * 1024 * 1024, test_uuid()).unwrap();
         assert_eq!(cl.meta_size, 256 * 1024 * 1024);
         assert_eq!(cl.data_size, 1024 * 1024 * 1024);
     }
@@ -303,12 +330,12 @@ mod tests {
     #[test]
     fn chunk_layout_too_small() {
         // 100 MiB: needs 5M + 2*32M + 64M = 133M, doesn't fit
-        assert!(ChunkLayout::new(100 * 1024 * 1024).is_none());
+        assert!(ChunkLayout::new(100 * 1024 * 1024, test_uuid()).is_none());
     }
 
     #[test]
     fn chunk_layout_dev_bytes_used() {
-        let cl = ChunkLayout::new(256 * 1024 * 1024).unwrap();
+        let cl = ChunkLayout::new(256 * 1024 * 1024, test_uuid()).unwrap();
         // system(4M) + 2*meta(32M) + data(64M) = 132M
         assert_eq!(
             cl.dev_bytes_used(),
