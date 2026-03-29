@@ -1000,6 +1000,8 @@ fn decompress(
 /// - For each sector:
 ///   - 4 bytes LE: compressed segment length
 ///   - N bytes: LZO1X compressed data
+///   - Padding to the next sector boundary (if the remaining space in
+///     the current sector is less than 4 bytes for the next header)
 fn decompress_lzo(
     data: &[u8],
     output_len: usize,
@@ -1020,7 +1022,17 @@ fn decompress_lzo(
     let mut pos = 4; // skip the 4-byte total length header
 
     while pos < total_len && out.len() < output_len {
-        if pos + 4 > data.len() {
+        // Skip to the next sector boundary if the remaining space in the
+        // current sector is too small for a segment header (4 bytes).
+        let sector_remaining = sector_size - (pos % sector_size);
+        if sector_remaining < 4 {
+            if total_len - pos <= sector_remaining {
+                break;
+            }
+            pos += sector_remaining;
+        }
+
+        if pos + 4 > total_len {
             bail!("LZO segment header truncated at offset {pos}");
         }
         let seg_len =
@@ -1042,8 +1054,6 @@ fn decompress_lzo(
         out.extend_from_slice(&segment_out);
 
         pos += seg_len;
-        // Segments are padded to 4-byte alignment.
-        pos = (pos + 3) & !3;
     }
 
     if out.len() < output_len {
