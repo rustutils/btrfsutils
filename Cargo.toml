@@ -32,6 +32,13 @@ btrfs-disk = { path = "disk", version = "0.4.0" }
 btrfs-stream = { path = "stream", version = "0.4.0" }
 btrfs-mkfs = { path = "mkfs", version = "0.4.0" }
 
+# Optimize compression libraries in dev/test builds so gzip snapshot
+# tests don't take forever.
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+
 [profile.release]
 lto = true
 codegen-units = 1
