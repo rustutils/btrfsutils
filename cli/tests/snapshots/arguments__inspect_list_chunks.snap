@@ -24,6 +24,7 @@ Arguments {
                         gbytes: false,
                         tbytes: false,
                     },
+                    sort: None,
                     path: "/mnt",
                 },
             ),

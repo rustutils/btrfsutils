@@ -68,5 +68,10 @@ Options:
       --tbytes
           Show sizes in TiB, or TB with --si
 
+      --sort <KEYS>
+          Sort output by the given columns (comma-separated). Prepend - for
+          descending order. Keys: devid, pstart, lstart, usage, length, type,
+          profile. Default: devid,pstart
+
   -h, --help
           Print help (see a summary with '-h')

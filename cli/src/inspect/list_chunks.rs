@@ -3,10 +3,10 @@ use crate::{
     filesystem::UnitMode,
     util::{fmt_size, open_path},
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use btrfs_uapi::{chunk::chunk_list, filesystem::filesystem_info};
 use clap::Parser;
-use std::{os::unix::io::AsFd, path::PathBuf};
+use std::{cmp::Ordering, os::unix::io::AsFd, path::PathBuf};
 
 /// List all chunks in the filesystem, one row per stripe
 ///
@@ -46,6 +46,13 @@ use std::{os::unix::io::AsFd, path::PathBuf};
 pub struct ListChunksCommand {
     #[clap(flatten)]
     pub units: UnitMode,
+
+    /// Sort output by the given columns (comma-separated).
+    /// Prepend - for descending order.
+    /// Keys: devid, pstart, lstart, usage, length, type, profile.
+    /// Default: devid,pstart.
+    #[clap(long, value_name = "KEYS")]
+    pub sort: Option<String>,
 
     /// Path to a file or directory on the btrfs filesystem
     path: PathBuf,
@@ -136,6 +143,13 @@ impl Runnable for ListChunksCommand {
                 usage_pct,
             });
         }
+
+        // Apply user-specified sort if given.
+        if let Some(ref sort_str) = self.sort {
+            let specs = parse_sort_specs(sort_str)?;
+            rows.sort_by(|a, b| compare_rows(a, b, &specs));
+        }
+
         // Compute column widths.
         let devid_w = col_w("Devid", rows.iter().map(|r| digits(r.devid)));
         let pnum_w = col_w("PNumber", rows.iter().map(|r| digits(r.pnumber)));
@@ -189,6 +203,103 @@ impl Runnable for ListChunksCommand {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SortKey {
+    Devid,
+    PStart,
+    LStart,
+    Usage,
+    Length,
+    Type,
+    Profile,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SortSpec {
+    key: SortKey,
+    descending: bool,
+}
+
+fn parse_sort_specs(input: &str) -> Result<Vec<SortSpec>> {
+    let mut specs = Vec::new();
+    for token in input.split(',') {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        let (descending, name) = if let Some(rest) = token.strip_prefix('-') {
+            (true, rest)
+        } else if let Some(rest) = token.strip_prefix('+') {
+            (false, rest)
+        } else {
+            (false, token)
+        };
+        let key = match name {
+            "devid" => SortKey::Devid,
+            "pstart" => SortKey::PStart,
+            "lstart" => SortKey::LStart,
+            "usage" => SortKey::Usage,
+            "length" => SortKey::Length,
+            "type" => SortKey::Type,
+            "profile" => SortKey::Profile,
+            _ => bail!("unknown sort key: '{name}'"),
+        };
+        specs.push(SortSpec { key, descending });
+    }
+    Ok(specs)
+}
+
+fn type_ord(flags: &str) -> u8 {
+    if flags.starts_with("data/") {
+        0
+    } else if flags.starts_with("metadata/") {
+        1
+    } else if flags.starts_with("system/") {
+        2
+    } else {
+        3
+    }
+}
+
+fn profile_ord(flags: &str) -> u8 {
+    let profile = flags.rsplit('/').next().unwrap_or("");
+    match profile {
+        "single" => 0,
+        "dup" => 1,
+        "raid0" => 2,
+        "raid1" => 3,
+        "raid1c3" => 4,
+        "raid1c4" => 5,
+        "raid10" => 6,
+        "raid5" => 7,
+        "raid6" => 8,
+        _ => 9,
+    }
+}
+
+fn compare_rows(a: &Row, b: &Row, specs: &[SortSpec]) -> Ordering {
+    for spec in specs {
+        let ord = match spec.key {
+            SortKey::Devid => a.devid.cmp(&b.devid),
+            SortKey::PStart => a.physical_start.cmp(&b.physical_start),
+            SortKey::LStart => a.logical_start.cmp(&b.logical_start),
+            SortKey::Usage => a.usage_pct.total_cmp(&b.usage_pct),
+            SortKey::Length => a.length.cmp(&b.length),
+            SortKey::Type => {
+                type_ord(&a.flags_str).cmp(&type_ord(&b.flags_str))
+            }
+            SortKey::Profile => {
+                profile_ord(&a.flags_str).cmp(&profile_ord(&b.flags_str))
+            }
+        };
+        let ord = if spec.descending { ord.reverse() } else { ord };
+        if ord != Ordering::Equal {
+            return ord;
+        }
+    }
+    Ordering::Equal
 }
 
 /// Format `BlockGroupFlags` as `"<type>/<profile>"`, e.g. `"data/single"`.
