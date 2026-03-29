@@ -83,5 +83,16 @@ just coverage
 
 ## License
 
-This project is licensed under the GNU General Public License v2.0. See
-[LICENSE.md](LICENSE.md) for the full text.
+The library crates (`btrfs-uapi`, `btrfs-disk`, `btrfs-stream`) are original
+work that implement parsers for on-disk data structures, shims around kernel
+syscalls, and parsers for the send stream wire protocol. They are licensed
+under either of [Apache License, Version 2.0](uapi/LICENSE-APACHE) or
+[MIT license](uapi/LICENSE-MIT) at your option.
+
+The application crates (`btrfs-cli`, `btrfs-mkfs`) are inspired by the
+[btrfs-progs](https://github.com/kdave/btrfs-progs) C implementation and are
+licensed under the [GNU General Public License v2.0](LICENSE.md).
+
+Note: the kernel UAPI header files included in the repository for bindgen
+code generation are licensed separately under GPL-2.0 with the Linux syscall
+note exception, which permits their use by non-GPL userspace programs.

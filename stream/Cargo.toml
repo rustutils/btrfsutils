@@ -2,7 +2,7 @@
 name = "btrfs-stream"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT OR Apache-2.0"
 repository.workspace = true
 homepage.workspace = true
 description = "Btrfs send stream parser and receive operations"

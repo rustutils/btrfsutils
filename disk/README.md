@@ -48,3 +48,9 @@ key type round-trips, and LE reader/writer helpers.
 ```sh
 cargo test -p btrfs-disk
 ```
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.
+

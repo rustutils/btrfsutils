@@ -52,3 +52,8 @@ cargo test -p btrfs-uapi
 # Run integration tests (requires root)
 just test
 ```
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.

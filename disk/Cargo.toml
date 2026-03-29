@@ -2,7 +2,7 @@
 name = "btrfs-disk"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT OR Apache-2.0"
 repository.workspace = true
 homepage.workspace = true
 description = "Platform-independent parsing and writing of btrfs on-disk structures"
