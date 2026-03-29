@@ -76,6 +76,8 @@ check:
     cargo +nightly fmt --all --check
     RUSTDOCFLAGS="-Dwarnings" cargo doc --no-deps
     cargo clippy -- -Dwarnings
+    cargo check --target x86_64-unknown-linux-gnu
+    cargo check --target x86_64-unknown-linux-musl
 
 alias fmt := format
 alias lint := check
