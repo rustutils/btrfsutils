@@ -1,6 +1,10 @@
 use anyhow::{Result, bail};
-use btrfs_mkfs::{args::Arguments, mkfs};
+use btrfs_mkfs::{
+    args::{Arguments, ChecksumArg},
+    mkfs,
+};
 use clap::Parser;
+use std::os::unix::fs::FileTypeExt;
 use uuid::Uuid;
 
 fn main() -> Result<()> {
@@ -28,6 +32,16 @@ fn main() -> Result<()> {
         bail!("invalid sectorsize {sectorsize}: must be a power of 2 >= 4096");
     }
 
+    // Validate checksum algorithm.
+    if let Some(csum) = args.checksum
+        && csum != ChecksumArg::Crc32c
+    {
+        bail!(
+            "checksum algorithm '{}' is not yet supported; only crc32c is available",
+            csum
+        );
+    }
+
     // Validate label.
     if let Some(ref label) = args.label
         && label.len() >= 256
@@ -42,12 +56,42 @@ fn main() -> Result<()> {
         mkfs::device_size(path)?
     };
 
+    // Minimum size check.
+    let min_size = mkfs::minimum_device_size(nodesize);
+    if total_bytes < min_size {
+        bail!(
+            "device too small: {} bytes, need at least {} bytes ({} MiB)",
+            total_bytes,
+            min_size,
+            min_size / (1024 * 1024)
+        );
+    }
+
+    // Device safety checks (block devices only).
+    let metadata = std::fs::metadata(path)
+        .ok()
+        .filter(|m| m.file_type().is_block_device());
+    if metadata.is_some() {
+        if mkfs::is_device_mounted(path)? {
+            bail!(
+                "'{}' is mounted; refusing to format a mounted device",
+                path.display()
+            );
+        }
+        if !args.force && mkfs::has_btrfs_superblock(path) {
+            bail!(
+                "'{}' already contains a btrfs filesystem; use -f to force",
+                path.display()
+            );
+        }
+    }
+
     // Generate or parse UUIDs.
     let fs_uuid = args.filesystem_uuid.unwrap_or_else(Uuid::new_v4);
     let dev_uuid = args.device_uuid.unwrap_or_else(Uuid::new_v4);
     let chunk_tree_uuid = Uuid::new_v4();
 
-    let cfg = mkfs::MkfsConfig {
+    let mut cfg = mkfs::MkfsConfig {
         nodesize,
         sectorsize,
         total_bytes,
@@ -58,6 +102,9 @@ fn main() -> Result<()> {
         incompat_flags: mkfs::MkfsConfig::default_incompat_flags(),
         compat_ro_flags: mkfs::MkfsConfig::default_compat_ro_flags(),
     };
+
+    // Apply user-specified feature flags.
+    cfg.apply_features(&args.features)?;
 
     if !args.quiet {
         eprintln!("Creating btrfs filesystem on {}", path.display());
@@ -73,6 +120,17 @@ fn main() -> Result<()> {
             human_size(cfg.total_bytes),
             cfg.total_bytes
         );
+    }
+
+    // TRIM the device before writing (unless -K).
+    if metadata.is_some() && !args.nodiscard {
+        if !args.quiet {
+            eprintln!("Performing full device TRIM...");
+        }
+        if let Err(e) = mkfs::discard_device(path, total_bytes) {
+            // TRIM failure is non-fatal (device may not support it).
+            eprintln!("WARNING: discard failed: {e:#}");
+        }
     }
 
     mkfs::make_btrfs(path, &cfg)?;

@@ -51,6 +51,99 @@ impl MkfsConfig {
         // in a future phase.
     }
 
+    /// Apply user-specified feature flags on top of defaults.
+    pub fn apply_features(
+        &mut self,
+        features: &[crate::args::FeatureArg],
+    ) -> Result<()> {
+        use crate::args::Feature;
+
+        for f in features {
+            if f.feature == Feature::ListAll {
+                eprintln!(
+                    "Default features:   extref skinny-metadata no-holes free-space-tree"
+                );
+                eprintln!(
+                    "Available features: mixed-bg extref raid56 skinny-metadata no-holes"
+                );
+                eprintln!(
+                    "                    free-space-tree block-group-tree"
+                );
+                std::process::exit(0);
+            }
+
+            let (incompat_bit, compat_ro_bit): (Option<u64>, Option<u64>) =
+                match f.feature {
+                    Feature::MixedBg => (
+                        Some(raw::BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS as u64),
+                        None,
+                    ),
+                    Feature::Extref => (
+                        Some(
+                            raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF as u64,
+                        ),
+                        None,
+                    ),
+                    Feature::Raid56 => (
+                        Some(raw::BTRFS_FEATURE_INCOMPAT_RAID56 as u64),
+                        None,
+                    ),
+                    Feature::SkinnyMetadata => (
+                        Some(
+                            raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64,
+                        ),
+                        None,
+                    ),
+                    Feature::NoHoles => (
+                        Some(raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES as u64),
+                        None,
+                    ),
+                    Feature::FreeSpaceTree => (
+                        None,
+                        Some(
+                            raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64
+                                | raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID
+                                    as u64,
+                        ),
+                    ),
+                    Feature::BlockGroupTree => (
+                        None,
+                        Some(
+                            raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE
+                                as u64,
+                        ),
+                    ),
+                    Feature::Zoned
+                    | Feature::Quota
+                    | Feature::Squota
+                    | Feature::RaidStripeTree => {
+                        bail!(
+                            "feature '{}' is not yet supported by mkfs",
+                            f.feature
+                        );
+                    }
+                    Feature::ListAll => unreachable!(),
+                };
+
+            if f.enabled {
+                if let Some(bit) = incompat_bit {
+                    self.incompat_flags |= bit;
+                }
+                if let Some(bit) = compat_ro_bit {
+                    self.compat_ro_flags |= bit;
+                }
+            } else {
+                if let Some(bit) = incompat_bit {
+                    self.incompat_flags &= !bit;
+                }
+                if let Some(bit) = compat_ro_bit {
+                    self.compat_ro_flags &= !bit;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn skinny_metadata(&self) -> bool {
         self.incompat_flags & raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64
             != 0
@@ -528,6 +621,9 @@ fn build_superblock(cfg: &MkfsConfig, layout: &BlockLayout) -> Result<Vec<u8>> {
 // From linux/fs.h: #define BLKGETSIZE64 _IOR(0x12, 114, size_t)
 nix::ioctl_read!(blk_getsize64, 0x12, 114, u64);
 
+// From linux/fs.h: #define BLKDISCARD _IO(0x12, 119)
+nix::ioctl_write_ptr!(blk_discard, 0x12, 119, [u64; 2]);
+
 /// Get the size of a device or file in bytes.
 pub fn device_size(path: &Path) -> Result<u64> {
     let metadata = std::fs::metadata(path)
@@ -550,4 +646,49 @@ pub fn device_size(path: &Path) -> Result<u64> {
     } else {
         Ok(metadata.len())
     }
+}
+
+/// Check if the device already contains a btrfs filesystem.
+pub fn has_btrfs_superblock(path: &Path) -> bool {
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    match btrfs_disk::superblock::read_superblock(&mut file, 0) {
+        Ok(sb) => sb.magic_is_valid(),
+        Err(_) => false,
+    }
+}
+
+/// Check if a device is currently mounted (appears in /proc/mounts).
+pub fn is_device_mounted(path: &Path) -> Result<bool> {
+    let canonical = std::fs::canonicalize(path)
+        .with_context(|| format!("cannot resolve path '{}'", path.display()))?;
+    let canonical_str = canonical.to_string_lossy();
+    let contents = std::fs::read_to_string("/proc/mounts")
+        .context("failed to read /proc/mounts")?;
+    Ok(contents
+        .lines()
+        .any(|line| line.split_whitespace().next() == Some(&*canonical_str)))
+}
+
+/// Issue BLKDISCARD (TRIM) on the entire device.
+pub fn discard_device(path: &Path, size: u64) -> Result<()> {
+    let file =
+        OpenOptions::new().write(true).open(path).with_context(|| {
+            format!("failed to open '{}' for discard", path.display())
+        })?;
+    let range: [u64; 2] = [0, size];
+    unsafe {
+        blk_discard(std::os::unix::io::AsRawFd::as_raw_fd(&file), &range)
+    }
+    .with_context(|| format!("BLKDISCARD failed on {}", path.display()))?;
+    Ok(())
+}
+
+/// Minimum filesystem size: system group offset + system group size.
+pub fn minimum_device_size(nodesize: u32) -> u64 {
+    // Must fit the superblock (at 64K), the system group (at 1M, 4M long),
+    // and all tree blocks within the system group.
+    let _ = nodesize;
+    SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE
 }
