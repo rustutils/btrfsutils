@@ -17,7 +17,12 @@ use uuid::Uuid;
 /// A root item describes a tree root: its block address, generation, and
 /// metadata. The item starts with an embedded inode_item (for the root
 /// directory inode), followed by the tree-specific fields.
-pub fn root_item(generation: u64, bytenr: u64, root_dirid: u64) -> Vec<u8> {
+pub fn root_item(
+    generation: u64,
+    bytenr: u64,
+    root_dirid: u64,
+    nodesize: u32,
+) -> Vec<u8> {
     let size = mem::size_of::<raw::btrfs_root_item>();
     let mut buf = vec![0u8; size];
     let inode_size = mem::size_of::<raw::btrfs_inode_item>();
@@ -31,7 +36,9 @@ pub fn root_item(generation: u64, bytenr: u64, root_dirid: u64) -> Vec<u8> {
     write_le_u64(&mut buf, inode_size, generation);
     write_le_u64(&mut buf, inode_size + 8, root_dirid);
     write_le_u64(&mut buf, inode_size + 16, bytenr);
-    // byte_limit, bytes_used, last_snapshot, flags, refs: all zero
+    // byte_limit at inode_size + 24: 0
+    write_le_u64(&mut buf, inode_size + 32, nodesize as u64); // bytes_used
+    // last_snapshot, flags: zero
     write_le_u32(&mut buf, inode_size + 56, 1); // refs = 1
 
     // drop_progress key (17 bytes) at inode_size + 60: zero
@@ -50,11 +57,16 @@ pub fn root_item(generation: u64, bytenr: u64, root_dirid: u64) -> Vec<u8> {
 /// The chunk tree root item is special: it stores the chunk tree generation
 /// in its `generation` field and sets the `bytenr` to the chunk tree block.
 /// Same structure as a normal root item otherwise.
-pub fn chunk_tree_root_item(generation: u64, bytenr: u64) -> Vec<u8> {
+pub fn chunk_tree_root_item(
+    generation: u64,
+    bytenr: u64,
+    nodesize: u32,
+) -> Vec<u8> {
     root_item(
         generation,
         bytenr,
         raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        nodesize,
     )
 }
 
@@ -421,8 +433,12 @@ mod tests {
 
     #[test]
     fn roundtrip_root_item() {
-        let data =
-            root_item(1, 0x100000, raw::BTRFS_FIRST_FREE_OBJECTID as u64);
+        let data = root_item(
+            1,
+            0x100000,
+            raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+            16384,
+        );
         let parsed = items::RootItem::parse(&data).unwrap();
         assert_eq!(parsed.generation, 1);
         assert_eq!(parsed.bytenr, 0x100000);
