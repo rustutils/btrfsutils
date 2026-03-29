@@ -25,6 +25,7 @@ pub enum TreeId {
     Csum,
     FreeSpace,
     DataReloc,
+    BlockGroup,
 }
 
 impl TreeId {
@@ -39,6 +40,7 @@ impl TreeId {
             TreeId::Csum => raw::BTRFS_CSUM_TREE_OBJECTID as u64,
             TreeId::FreeSpace => raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64,
             TreeId::DataReloc => raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64,
+            TreeId::BlockGroup => raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64,
         }
     }
 
@@ -100,6 +102,11 @@ impl BlockLayout {
     pub fn block_addr(&self, tree: TreeId) -> u64 {
         if tree == TreeId::Chunk {
             SYSTEM_GROUP_OFFSET
+        } else if tree == TreeId::BlockGroup {
+            // Block-group tree is the 8th tree in the metadata chunk,
+            // after the 7 base trees.
+            self.meta_logical
+                + (NON_CHUNK_TREES.len() as u64) * u64::from(self.nodesize)
         } else {
             let index =
                 NON_CHUNK_TREES.iter().position(|&t| t == tree).unwrap();
@@ -112,9 +119,15 @@ impl BlockLayout {
         u64::from(self.nodesize)
     }
 
-    /// Bytes used in the metadata chunk (7 tree blocks).
-    pub fn metadata_used(&self) -> u64 {
-        NON_CHUNK_TREES.len() as u64 * u64::from(self.nodesize)
+    /// Bytes used in the metadata chunk by the base trees (7 tree blocks).
+    /// When block-group-tree is enabled, add nodesize for the extra tree.
+    pub fn metadata_used(&self, has_block_group_tree: bool) -> u64 {
+        let count = if has_block_group_tree {
+            NON_CHUNK_TREES.len() as u64 + 1
+        } else {
+            NON_CHUNK_TREES.len() as u64
+        };
+        count * u64::from(self.nodesize)
     }
 }
 
@@ -252,7 +265,8 @@ mod tests {
     fn system_and_metadata_used() {
         let layout = BlockLayout::new(16384, CHUNK_START);
         assert_eq!(layout.system_used(), 16384);
-        assert_eq!(layout.metadata_used(), 7 * 16384);
+        assert_eq!(layout.metadata_used(false), 7 * 16384);
+        assert_eq!(layout.metadata_used(true), 8 * 16384);
     }
 
     #[test]

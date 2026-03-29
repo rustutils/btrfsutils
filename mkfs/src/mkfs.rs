@@ -194,7 +194,7 @@ pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
         bytenr: layout.block_addr(tree),
     };
 
-    // Build all 8 tree blocks.
+    // Build tree blocks.
     let root_tree = build_root_tree(cfg, &layout, &leaf_header)?;
     let extent_tree = build_extent_tree(cfg, &layout, &chunks, &leaf_header)?;
     let chunk_tree = build_chunk_tree(cfg, &layout, &chunks, &leaf_header)?;
@@ -206,8 +206,7 @@ pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
     let data_reloc_tree =
         build_root_dir_tree(cfg, &leaf_header(TreeId::DataReloc))?;
 
-    // Write tree blocks to disk.
-    let trees = [
+    let mut trees: Vec<(TreeId, Vec<u8>)> = vec![
         (TreeId::Root, root_tree),
         (TreeId::Extent, extent_tree),
         (TreeId::Chunk, chunk_tree),
@@ -218,6 +217,13 @@ pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
         (TreeId::DataReloc, data_reloc_tree),
     ];
 
+    if cfg.has_block_group_tree() {
+        let bg_tree =
+            build_block_group_tree(cfg, &layout, &chunks, &leaf_header)?;
+        trees.push((TreeId::BlockGroup, bg_tree));
+    }
+
+    // Write tree blocks to disk.
     for (tree_id, mut block) in trees {
         write::fill_csum(&mut block);
         let logical = layout.block_addr(tree_id);
@@ -265,6 +271,14 @@ fn build_root_tree(
             is_fs_tree: tree == TreeId::Fs,
         })
         .collect();
+
+    if cfg.has_block_group_tree() {
+        entries.push(RootEntry {
+            objectid: TreeId::BlockGroup.objectid(),
+            bytenr: layout.block_addr(TreeId::BlockGroup),
+            is_fs_tree: false,
+        });
+    }
 
     entries.sort_by_key(|e| e.objectid);
 
@@ -338,7 +352,12 @@ fn build_extent_tree(
     let mut extent_items: Vec<(Key, Vec<u8>)> = Vec::new();
 
     // For each tree block: METADATA_ITEM with inline TREE_BLOCK_REF
-    for &tree in &TreeId::ALL {
+    let mut all_trees: Vec<TreeId> = TreeId::ALL.to_vec();
+    if cfg.has_block_group_tree() {
+        all_trees.push(TreeId::BlockGroup);
+    }
+
+    for &tree in &all_trees {
         let addr = layout.block_addr(tree);
 
         let item_type = if skinny {
@@ -376,7 +395,7 @@ fn build_extent_tree(
                 chunks.meta_size,
             ),
             items::block_group_item(
-                layout.metadata_used(),
+                layout.metadata_used(cfg.has_block_group_tree()),
                 raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
                 raw::BTRFS_BLOCK_GROUP_METADATA as u64
                     | raw::BTRFS_BLOCK_GROUP_DUP as u64,
@@ -650,8 +669,10 @@ fn build_free_space_tree(
         .map_err(|e| anyhow::anyhow!("free space tree: {e}"))?;
 
     // Metadata block group: free space after the 7 tree blocks
-    let meta_free_start = chunks.meta_logical + layout.metadata_used();
-    let meta_free_length = chunks.meta_size - layout.metadata_used();
+    let meta_free_start =
+        chunks.meta_logical + layout.metadata_used(cfg.has_block_group_tree());
+    let meta_free_length =
+        chunks.meta_size - layout.metadata_used(cfg.has_block_group_tree());
 
     let meta_info_key = Key::new(
         chunks.meta_logical,
@@ -685,6 +706,64 @@ fn build_free_space_tree(
     );
     leaf.push_empty(data_extent_key)
         .map_err(|e| anyhow::anyhow!("free space tree: {e}"))?;
+
+    Ok(leaf.finish())
+}
+
+fn build_block_group_tree(
+    cfg: &MkfsConfig,
+    layout: &BlockLayout,
+    chunks: &ChunkLayout,
+    leaf_header: &dyn Fn(TreeId) -> LeafHeader,
+) -> Result<Vec<u8>> {
+    let mut leaf =
+        LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::BlockGroup));
+
+    // System block group
+    leaf.push(
+        Key::new(
+            SYSTEM_GROUP_OFFSET,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            SYSTEM_GROUP_SIZE,
+        ),
+        &items::block_group_item(
+            layout.system_used(),
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+        ),
+    )
+    .map_err(|e| anyhow::anyhow!("block group tree: {e}"))?;
+
+    // Metadata block group (DUP)
+    leaf.push(
+        Key::new(
+            chunks.meta_logical,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            chunks.meta_size,
+        ),
+        &items::block_group_item(
+            layout.metadata_used(cfg.has_block_group_tree()),
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_BLOCK_GROUP_METADATA as u64
+                | raw::BTRFS_BLOCK_GROUP_DUP as u64,
+        ),
+    )
+    .map_err(|e| anyhow::anyhow!("block group tree: {e}"))?;
+
+    // Data block group (SINGLE)
+    leaf.push(
+        Key::new(
+            chunks.data_logical,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            chunks.data_size,
+        ),
+        &items::block_group_item(
+            0,
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_BLOCK_GROUP_DATA as u64,
+        ),
+    )
+    .map_err(|e| anyhow::anyhow!("block group tree: {e}"))?;
 
     Ok(leaf.finish())
 }
@@ -740,7 +819,10 @@ fn build_superblock(
         .set_chunk_root(layout.block_addr(TreeId::Chunk))
         .set_chunk_root_generation(generation)
         .set_total_bytes(cfg.total_bytes)
-        .set_bytes_used(layout.system_used() + layout.metadata_used())
+        .set_bytes_used(
+            layout.system_used()
+                + layout.metadata_used(cfg.has_block_group_tree()),
+        )
         .set_root_dir_objectid(raw::BTRFS_FIRST_FREE_OBJECTID as u64)
         .set_num_devices(1)
         .set_sectorsize(cfg.sectorsize)
