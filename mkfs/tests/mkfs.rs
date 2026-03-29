@@ -340,3 +340,170 @@ fn mkfs_raid1_total_bytes_is_sum() {
     let sb1 = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
     assert_eq!(sb1.total_bytes, 2 * per_dev);
 }
+
+// --- Privileged integration tests (mount) ---
+//
+// These require root and loopback device support. Marked #[ignore].
+
+use std::process::Command;
+
+fn run(cmd: &str, args: &[&str]) {
+    let output = Command::new(cmd).args(args).output().unwrap_or_else(|e| {
+        panic!("failed to run {cmd}: {e}");
+    });
+    assert!(
+        output.status.success(),
+        "{cmd} {:?} failed:\n{}",
+        args,
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+struct LoopDev {
+    path: PathBuf,
+}
+
+impl LoopDev {
+    fn attach(file: &std::path::Path) -> Self {
+        let output = Command::new("losetup")
+            .args(["--find", "--show", &file.to_string_lossy()])
+            .output()
+            .expect("failed to run losetup");
+        assert!(output.status.success(), "losetup failed");
+        Self {
+            path: PathBuf::from(
+                String::from_utf8(output.stdout).unwrap().trim(),
+            ),
+        }
+    }
+}
+
+impl Drop for LoopDev {
+    fn drop(&mut self) {
+        let _ = Command::new("losetup")
+            .args(["-d", &self.path.to_string_lossy()])
+            .status();
+    }
+}
+
+struct MountPoint {
+    dir: tempfile::TempDir,
+    _loop_dev: LoopDev,
+}
+
+impl MountPoint {
+    fn mount(loop_dev: LoopDev) -> Self {
+        let dir = tempfile::TempDir::new().unwrap();
+        run(
+            "mount",
+            &[
+                "-t",
+                "btrfs",
+                &loop_dev.path.to_string_lossy(),
+                &dir.path().to_string_lossy(),
+            ],
+        );
+        Self {
+            dir,
+            _loop_dev: loop_dev,
+        }
+    }
+
+    fn path(&self) -> &std::path::Path {
+        self.dir.path()
+    }
+}
+
+impl Drop for MountPoint {
+    fn drop(&mut self) {
+        let _ = Command::new("umount").arg(self.dir.path()).status();
+    }
+}
+
+/// Create an image, format it, attach a loop device, mount, verify accessible.
+fn make_mount_verify(cfg: &mut MkfsConfig) {
+    // Create image files for all devices.
+    let images: Vec<_> = cfg
+        .devices
+        .iter()
+        .map(|dev| create_image(dev.total_bytes))
+        .collect();
+    for (i, img) in images.iter().enumerate() {
+        cfg.devices[i].path = img.path().to_path_buf();
+    }
+
+    mkfs::make_btrfs(cfg).unwrap();
+
+    // Mount the first device and verify it's accessible.
+    let loop_dev = LoopDev::attach(images[0].path());
+    let mount = MountPoint::mount(loop_dev);
+
+    // Verify we can list the root directory.
+    let entries: Vec<_> = std::fs::read_dir(mount.path()).unwrap().collect();
+    // Empty filesystem: should have no entries (or just the default subvol).
+    let _ = entries;
+
+    // Verify we can write a file.
+    let test_file = mount.path().join("hello.txt");
+    std::fs::write(&test_file, b"btrfs works!").unwrap();
+    assert_eq!(std::fs::read_to_string(&test_file).unwrap(), "btrfs works!");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_single_device_crc32c() {
+    let mut cfg = test_config(MIN_SIZE);
+    make_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_single_device_xxhash() {
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.csum_type = ChecksumType::Xxhash64;
+    make_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_single_device_sha256() {
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.csum_type = ChecksumType::Sha256;
+    make_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_single_device_blake2() {
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.csum_type = ChecksumType::Blake2b;
+    make_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_single_device_no_block_group_tree() {
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.apply_features(&[FeatureArg {
+        feature: Feature::BlockGroupTree,
+        enabled: false,
+    }])
+    .unwrap();
+    make_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_single_device_nodesize_64k() {
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.nodesize = 65536;
+    make_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_single_device_with_label() {
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.label = Some("integration-test".to_string());
+    make_mount_verify(&mut cfg);
+}
