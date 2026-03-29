@@ -15,7 +15,7 @@ name = "btrfs_mkfs"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mkfs-btrfs"
+name = "btrfs-mkfs"
 path = "src/main.rs"
 
 [dev-dependencies]

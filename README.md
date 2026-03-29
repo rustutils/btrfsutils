@@ -1,6 +1,8 @@
 # btrfs-progrs
 
-An alternative implementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs) command-line tool, written in Rust.
+An implementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs) 
+utilities for creating, managing and inspecting btrfs filesystems, written
+in Rust.
 
 ## Status
 
@@ -16,6 +18,13 @@ cargo build --release
 ```
 
 The resulting binary is `target/release/btrfs`.
+
+You can also build this project using Nix. The output includes the `btrfs`
+binary, the `mkfs.btrfs` binary, and compressed man pages.
+
+```
+nix build
+```
 
 ## Usage
 
@@ -39,28 +48,34 @@ Most commands that talk to the kernel require root privileges or `CAP_SYS_ADMIN`
 | Folder | Description |
 |-------|-------------|
 | `uapi` | Safe Rust wrappers around btrfs kernel ioctls, sysfs, and procfs. Linux-only. |
-| `disk` | Platform-independent parsing of btrfs on-disk structures (superblocks, tree nodes, etc.) from block devices or image files. |
+| `disk` | Platform-independent parsing and serialization of btrfs on-disk structures. Used by `cli` for dump-super/dump-tree and by `mkfs` for filesystem creation. |
 | `stream` | Send stream parser and receive operations. Platform-independent parser with optional Linux-only receive support. |
 | `cli` | The command-line tool, built on top of `uapi`, `disk`, and `stream`. |
 | `mkfs` | Filesystem creation tool (`mkfs.btrfs`). Constructs on-disk B-tree nodes and writes them directly to block devices or image files. |
 | `mangen` | Man page generator. Uses `clap_mangen` to produce roff man pages for all commands. |
 | `docs` | Documentation, rendered with mdBook. |
 
-Not all commands from btrfs-progs are implemented yet. Run `btrfs help` to see
-what is available.
-
 ## Testing
 
-Integration tests require root privileges and recent Linux kernel. They work by
-creating file-backed btrfs filesystems, mounting them, and testing the operations
-in there. To run them, use the justfile target (assuming you have `just` installed):
+To run unit tests (this will not run any tests that require superuser
+privileges):
+
+```
+cargo test
+```
+
+For the integration tests, due to the fact that they interact with the kernel
+and will test privileged operations (many tests create and mount a file-backed
+btrfs filesystem), they require superuser privileges. Because running `sudo cargo test` is generally a bad idea, this repository has a wrapper that will build
+tests (as your user), and then run only integration tests with `sudo`. This
+is the recommended way to run the entire test suite.
 
 ```
 just test
 ```
 
 You can generate a coverage report as well, assuming you have `cargo-llvm-cov`
-installed.
+installed. This uses the same functionality as the `just test`.
 
 ```
 just coverage
@@ -68,5 +83,5 @@ just coverage
 
 ## License
 
-This project is licensed under the GNU General Public License v2.0. See [LICENSE.md](LICENSE.md)
-for the full text.
+This project is licensed under the GNU General Public License v2.0. See
+[LICENSE.md](LICENSE.md) for the full text.

@@ -2,7 +2,7 @@
 name = "btrfs-cli"
 version.workspace = true
 edition.workspace = true
-description = "User-space command-line tool for managing Btrfs filesystems"
+description = "User-space command-line tool for inspecting and managing Btrfs filesystems"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
