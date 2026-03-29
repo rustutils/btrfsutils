@@ -18,7 +18,6 @@ Arguments {
                     commit_each: false,
                     subvolid: None,
                     recursive: false,
-                    verbose: 0,
                     paths: [
                         "/mnt/subvol",
                     ],

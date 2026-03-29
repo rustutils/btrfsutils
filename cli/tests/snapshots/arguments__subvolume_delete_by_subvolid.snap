@@ -20,7 +20,6 @@ Arguments {
                         256,
                     ),
                     recursive: false,
-                    verbose: 0,
                     paths: [
                         "/mnt",
                     ],

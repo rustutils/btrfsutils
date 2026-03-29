@@ -41,10 +41,6 @@ pub struct SubvolumeDeleteCommand {
     #[clap(short = 'R', long, conflicts_with = "subvolid")]
     pub recursive: bool,
 
-    /// Be verbose, print subvolume names as they are deleted
-    #[clap(short = 'v', long, action = clap::ArgAction::Count)]
-    pub verbose: u8,
-
     /// Subvolume paths to delete, or (with --subvolid) the filesystem path
     #[clap(required = true)]
     pub paths: Vec<PathBuf>,
@@ -123,17 +119,13 @@ impl SubvolumeDeleteCommand {
                 self.delete_children(path)?;
             }
 
-            if self.verbose > 0 {
-                println!("Delete subvolume '{}'", path.display());
-            }
+            log::info!("Delete subvolume '{}'", path.display());
 
             subvolume_delete(fd, &cname).with_context(|| {
                 format!("failed to delete '{}'", path.display())
             })?;
 
-            if self.verbose == 0 {
-                println!("Delete subvolume '{}'", path.display());
-            }
+            println!("Delete subvolume '{}'", path.display());
 
             if self.commit_each {
                 wait_for_commit(fd).with_context(|| {
@@ -165,9 +157,7 @@ impl SubvolumeDeleteCommand {
             })?;
             let fd = file.as_fd();
 
-            if self.verbose > 0 {
-                println!("Delete subvolume (subvolid={subvolid})");
-            }
+            log::info!("Delete subvolume (subvolid={subvolid})");
 
             subvolume_delete_by_id(fd, subvolid).with_context(|| {
                 format!(
@@ -176,9 +166,7 @@ impl SubvolumeDeleteCommand {
                 )
             })?;
 
-            if self.verbose == 0 {
-                println!("Delete subvolume (subvolid={subvolid})");
-            }
+            println!("Delete subvolume (subvolid={subvolid})");
 
             if self.commit_each {
                 wait_for_commit(fd).with_context(|| {
@@ -233,18 +221,15 @@ impl SubvolumeDeleteCommand {
         children.reverse();
 
         for child_id in children {
-            if self.verbose > 0 {
-                // Try to find the name for verbose output.
-                if let Some(item) = all.iter().find(|i| i.root_id == child_id) {
-                    if !item.name.is_empty() {
-                        println!(
-                            "Delete subvolume '{}/{}'",
-                            path.display(),
-                            item.name
-                        );
-                    } else {
-                        println!("Delete subvolume (subvolid={child_id})");
-                    }
+            if let Some(item) = all.iter().find(|i| i.root_id == child_id) {
+                if !item.name.is_empty() {
+                    log::info!(
+                        "Delete subvolume '{}/{}'",
+                        path.display(),
+                        item.name
+                    );
+                } else {
+                    log::info!("Delete subvolume (subvolid={child_id})");
                 }
             }
 

@@ -11,9 +11,6 @@ Arguments:
           One or more files or directories to defragment
 
 Options:
-  -v, --verbose...
-          Be verbose, print file names as they are defragmented
-
   -r, --recursive
           Defragment files in subdirectories recursively
 

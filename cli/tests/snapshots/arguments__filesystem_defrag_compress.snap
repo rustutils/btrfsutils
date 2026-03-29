@@ -14,7 +14,6 @@ Arguments {
         FilesystemCommand {
             subcommand: Defragment(
                 FilesystemDefragCommand {
-                    verbose: 0,
                     recursive: false,
                     flush: false,
                     compress: Some(

@@ -18,7 +18,6 @@ Arguments {
                     commit_each: true,
                     subvolid: None,
                     recursive: false,
-                    verbose: 0,
                     paths: [
                         "/mnt/subvol1",
                         "/mnt/subvol2",

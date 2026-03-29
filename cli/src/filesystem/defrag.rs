@@ -16,10 +16,6 @@ const HEADING_RANGE: &str = "Range";
 /// Defragment files or directories on a btrfs filesystem
 #[derive(Parser, Debug)]
 pub struct FilesystemDefragCommand {
-    /// Be verbose, print file names as they are defragmented
-    #[clap(long, short, action = clap::ArgAction::Count)]
-    pub verbose: u8,
-
     /// Defragment files in subdirectories recursively
     #[clap(long, short)]
     pub recursive: bool,
@@ -120,9 +116,7 @@ impl FilesystemDefragCommand {
         path: &std::path::Path,
         args: &DefragRangeArgs,
     ) -> Result<()> {
-        if self.verbose > 0 {
-            println!("{}", path.display());
-        }
+        log::info!("{}", path.display());
         let file = File::open(path)
             .with_context(|| format!("failed to open '{}'", path.display()))?;
 
