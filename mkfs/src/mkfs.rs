@@ -77,8 +77,7 @@ impl MkfsConfig {
     pub fn default_compat_ro_flags() -> u64 {
         raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64
             | raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID as u64
-        // block-group-tree requires a separate tree block; will be added
-        // in a future phase.
+            | raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE as u64
     }
 
     /// Apply user-specified feature flags on top of defaults.
