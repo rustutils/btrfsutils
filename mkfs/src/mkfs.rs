@@ -87,13 +87,14 @@ impl MkfsConfig {
             | raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES as u64
     }
 
+    /// Default compat_ro feature flags (free-space-tree + block-group-tree).
     pub fn default_compat_ro_flags() -> u64 {
         raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64
             | raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID as u64
             | raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE as u64
     }
 
-    /// Apply user-specified feature flags on top of defaults.
+    /// Apply user-specified feature flags (`-O` arguments) on top of defaults.
     pub fn apply_features(
         &mut self,
         features: &[crate::args::FeatureArg],
@@ -186,17 +187,20 @@ impl MkfsConfig {
         Ok(())
     }
 
+    /// Whether the skinny-metadata incompat feature is enabled.
     pub fn skinny_metadata(&self) -> bool {
         self.incompat_flags & raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64
             != 0
     }
 
+    /// Whether the free-space-tree compat_ro feature is enabled.
     pub fn has_free_space_tree(&self) -> bool {
         self.compat_ro_flags
             & raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64
             != 0
     }
 
+    /// Whether the block-group-tree compat_ro feature is enabled.
     pub fn has_block_group_tree(&self) -> bool {
         self.compat_ro_flags
             & raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE as u64

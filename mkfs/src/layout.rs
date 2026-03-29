@@ -92,6 +92,7 @@ pub struct BlockLayout {
 }
 
 impl BlockLayout {
+    /// Create a layout with the given nodesize and metadata chunk logical address.
     pub fn new(nodesize: u32, meta_logical: u64) -> Self {
         Self {
             nodesize,
