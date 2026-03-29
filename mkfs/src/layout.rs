@@ -216,7 +216,7 @@ impl ChunkLayout {
             }
             Profile::Raid1 | Profile::Raid1c3 | Profile::Raid1c4 => {
                 // One stripe per device, up to the profile's stripe count.
-                let n = metadata_profile.num_stripes() as usize;
+                let n = metadata_profile.num_stripes(devices.len()) as usize;
                 if devices.len() < n {
                     return None;
                 }
@@ -273,8 +273,11 @@ impl ChunkLayout {
                     },
                 ]
             }
-            Profile::Raid1 | Profile::Raid1c3 | Profile::Raid1c4 => {
-                let n = data_profile.num_stripes() as usize;
+            Profile::Raid1
+            | Profile::Raid1c3
+            | Profile::Raid1c4
+            | Profile::Raid0 => {
+                let n = data_profile.num_stripes(devices.len()) as usize;
                 if devices.len() < n {
                     return None;
                 }

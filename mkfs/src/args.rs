@@ -244,19 +244,21 @@ impl Profile {
         }
     }
 
-    /// Number of physical stripes for this profile.
-    pub fn num_stripes(self) -> u16 {
+    /// Number of physical stripes for this profile with `n_devices` devices.
+    ///
+    /// For mirror-based profiles (DUP, RAID1, RAID1C3, RAID1C4) this is
+    /// fixed. For striping profiles (RAID0) it equals the device count.
+    pub fn num_stripes(self, n_devices: usize) -> u16 {
         match self {
             Profile::Single => 1,
             Profile::Dup | Profile::Raid1 => 2,
             Profile::Raid1c3 => 3,
             Profile::Raid1c4 => 4,
-            // RAID0/5/6/10 stripe count depends on device count; not
-            // supported yet — these are here for completeness.
-            Profile::Raid0
-            | Profile::Raid5
-            | Profile::Raid6
-            | Profile::Raid10 => 2,
+            Profile::Raid0 => n_devices as u16,
+            // RAID5/6/10 not yet supported.
+            Profile::Raid5 | Profile::Raid6 | Profile::Raid10 => {
+                n_devices as u16
+            }
         }
     }
 

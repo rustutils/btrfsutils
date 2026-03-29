@@ -364,6 +364,20 @@ fn mkfs_writes_super_mirror_1() {
     assert_eq!(sb0.generation, sb1.generation);
 }
 
+#[test]
+fn mkfs_raid0_data_two_devices() {
+    let img1 = create_image(MIN_SIZE);
+    let img2 = create_image(MIN_SIZE);
+    let mut cfg = test_config_two_devices(MIN_SIZE);
+    cfg.data_profile = Profile::Raid0;
+    make_btrfs_two_devices(&img1, &img2, &mut cfg);
+
+    let mut f1 = std::fs::File::open(img1.path()).unwrap();
+    let sb = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.num_devices, 2);
+}
+
 // --- Deterministic image snapshot tests ---
 //
 // Create filesystem images with fixed UUIDs and timestamps, compress them,
