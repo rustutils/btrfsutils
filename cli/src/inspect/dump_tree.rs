@@ -81,7 +81,7 @@ impl Runnable for DumpTreeCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         let file = open_path(&self.path)?;
 
-        let open = reader::open_filesystem(file).with_context(|| {
+        let open = reader::filesystem_open(file).with_context(|| {
             format!(
                 "failed to open btrfs filesystem on '{}'",
                 self.path.display()
@@ -113,7 +113,7 @@ impl Runnable for DumpTreeCommand {
         // --block: print specific blocks
         if !self.block.is_empty() {
             for &logical in &self.block {
-                reader::visit_block(
+                reader::block_visit(
                     &mut reader,
                     logical,
                     self.follow,
@@ -128,7 +128,7 @@ impl Runnable for DumpTreeCommand {
         if let Some(ref tree_name) = self.tree {
             let tree_id = parse_tree_id(tree_name)?;
             let root_bytenr = find_tree_root(tree_id, sb, tree_roots)?;
-            reader::walk_tree(&mut reader, root_bytenr, traversal, &mut print)?;
+            reader::tree_walk(&mut reader, root_bytenr, traversal, &mut print)?;
             return Ok(());
         }
 
@@ -146,7 +146,7 @@ impl Runnable for DumpTreeCommand {
             if let Some(&(root, _)) =
                 tree_roots.get(&ObjectId::UuidTree.to_raw())
             {
-                reader::walk_tree(&mut reader, root, traversal, &mut print)?;
+                reader::tree_walk(&mut reader, root, traversal, &mut print)?;
             } else {
                 bail!("UUID tree not found");
             }
@@ -161,7 +161,7 @@ impl Runnable for DumpTreeCommand {
                 if let Some(&(root, _)) = tree_roots.get(&tree_id) {
                     let name = ObjectId::from_raw(tree_id);
                     println!("{name}:");
-                    reader::walk_tree(
+                    reader::tree_walk(
                         &mut reader,
                         root,
                         traversal,
@@ -176,11 +176,11 @@ impl Runnable for DumpTreeCommand {
         // --device: root tree, chunk tree, device tree
         if self.device {
             println!("ROOT_TREE:");
-            reader::walk_tree(&mut reader, sb.root, traversal, &mut print)?;
+            reader::tree_walk(&mut reader, sb.root, traversal, &mut print)?;
             println!();
 
             println!("CHUNK_TREE:");
-            reader::walk_tree(
+            reader::tree_walk(
                 &mut reader,
                 sb.chunk_root,
                 traversal,
@@ -192,7 +192,7 @@ impl Runnable for DumpTreeCommand {
                 tree_roots.get(&ObjectId::DevTree.to_raw())
             {
                 println!("DEV_TREE:");
-                reader::walk_tree(&mut reader, root, traversal, &mut print)?;
+                reader::tree_walk(&mut reader, root, traversal, &mut print)?;
                 println!();
             }
             return Ok(());
@@ -200,9 +200,9 @@ impl Runnable for DumpTreeCommand {
 
         // Default: print all trees
         println!("root tree");
-        reader::walk_tree(&mut reader, sb.root, traversal, &mut print)?;
+        reader::tree_walk(&mut reader, sb.root, traversal, &mut print)?;
         println!("chunk tree");
-        reader::walk_tree(&mut reader, sb.chunk_root, traversal, &mut print)?;
+        reader::tree_walk(&mut reader, sb.chunk_root, traversal, &mut print)?;
 
         let mut sorted_roots: Vec<_> = tree_roots.iter().collect();
         sorted_roots.sort_by_key(|&(id, _)| *id);
@@ -211,7 +211,7 @@ impl Runnable for DumpTreeCommand {
             let label = tree_label(tree_id);
             let oid = ObjectId::from_raw(tree_id);
             println!("{label} key ({oid} ROOT_ITEM {key_offset}) ");
-            reader::walk_tree(&mut reader, root_bytenr, traversal, &mut print)?;
+            reader::tree_walk(&mut reader, root_bytenr, traversal, &mut print)?;
         }
 
         println!("total bytes {}", sb.total_bytes);

@@ -1,6 +1,6 @@
 use btrfs_disk::{
     raw,
-    superblock::{CsumType, Superblock},
+    superblock::{ChecksumType, Superblock},
 };
 use std::mem;
 use uuid::Uuid;
@@ -336,13 +336,21 @@ fn format_magic(magic: u64) -> String {
         .collect()
 }
 
-fn csum_type_raw(ct: CsumType) -> u16 {
+fn csum_type_raw(ct: ChecksumType) -> u16 {
     match ct {
-        CsumType::Crc32 => raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 as u16,
-        CsumType::Xxhash => raw::btrfs_csum_type_BTRFS_CSUM_TYPE_XXHASH as u16,
-        CsumType::Sha256 => raw::btrfs_csum_type_BTRFS_CSUM_TYPE_SHA256 as u16,
-        CsumType::Blake2 => raw::btrfs_csum_type_BTRFS_CSUM_TYPE_BLAKE2 as u16,
-        CsumType::Unknown(v) => v,
+        ChecksumType::Crc32 => {
+            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 as u16
+        }
+        ChecksumType::Xxhash => {
+            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_XXHASH as u16
+        }
+        ChecksumType::Sha256 => {
+            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_SHA256 as u16
+        }
+        ChecksumType::Blake2 => {
+            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_BLAKE2 as u16
+        }
+        ChecksumType::Unknown(v) => v,
     }
 }
 

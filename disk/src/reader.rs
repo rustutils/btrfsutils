@@ -1,7 +1,7 @@
 //! # Block device reader with logical-to-physical address resolution
 //!
 //! Provides `BlockReader` which reads btrfs tree blocks by logical address,
-//! resolving them through the chunk tree cache. Also provides `open_filesystem`
+//! resolving them through the chunk tree cache. Also provides `filesystem_open`
 //! which bootstraps a complete `BlockReader` from a raw block device or image.
 
 use crate::{
@@ -62,7 +62,7 @@ impl<R: Read + Seek> BlockReader<R> {
 }
 
 /// Result of opening a btrfs filesystem from a block device or image.
-pub struct OpenFs<R> {
+pub struct OpenFilesystem<R> {
     /// Block reader with fully populated chunk cache.
     pub reader: BlockReader<R>,
     /// Parsed superblock.
@@ -78,7 +78,9 @@ pub struct OpenFs<R> {
 /// 2. Seed the chunk cache from the `sys_chunk_array`
 /// 3. Read the full chunk tree to complete the cache
 /// 4. Read the root tree to collect all tree root pointers
-pub fn open_filesystem<R: Read + Seek>(reader: R) -> io::Result<OpenFs<R>> {
+pub fn filesystem_open<R: Read + Seek>(
+    reader: R,
+) -> io::Result<OpenFilesystem<R>> {
     let mut reader = reader;
 
     // Step 1: read the superblock
@@ -102,7 +104,7 @@ pub fn open_filesystem<R: Read + Seek>(reader: R) -> io::Result<OpenFs<R>> {
     // Step 4: read the root tree to collect tree roots
     let tree_roots = read_root_tree(&mut block_reader, sb.root)?;
 
-    Ok(OpenFs {
+    Ok(OpenFilesystem {
         reader: block_reader,
         superblock: sb,
         tree_roots,
@@ -167,19 +169,19 @@ pub enum Traversal {
 }
 
 /// Walk a tree starting at `root_logical`, calling `visitor` for each block.
-pub fn walk_tree<R: Read + Seek>(
+pub fn tree_walk<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
     traversal: Traversal,
     visitor: &mut dyn FnMut(&TreeBlock),
 ) -> io::Result<()> {
     match traversal {
-        Traversal::Bfs => walk_tree_bfs(reader, root_logical, visitor),
-        Traversal::Dfs => walk_tree_dfs(reader, root_logical, visitor),
+        Traversal::Bfs => tree_walk_bfs(reader, root_logical, visitor),
+        Traversal::Dfs => tree_walk_dfs(reader, root_logical, visitor),
     }
 }
 
-fn walk_tree_dfs<R: Read + Seek>(
+fn tree_walk_dfs<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     logical: u64,
     visitor: &mut dyn FnMut(&TreeBlock),
@@ -189,14 +191,14 @@ fn walk_tree_dfs<R: Read + Seek>(
 
     if let TreeBlock::Node { ptrs, .. } = &block {
         for ptr in ptrs {
-            walk_tree_dfs(reader, ptr.blockptr, visitor)?;
+            tree_walk_dfs(reader, ptr.blockptr, visitor)?;
         }
     }
 
     Ok(())
 }
 
-fn walk_tree_bfs<R: Read + Seek>(
+fn tree_walk_bfs<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
     visitor: &mut dyn FnMut(&TreeBlock),
@@ -231,7 +233,7 @@ fn walk_tree_bfs<R: Read + Seek>(
 }
 
 /// Read a single block and call `visitor` (and optionally walk children with `follow`).
-pub fn visit_block<R: Read + Seek>(
+pub fn block_visit<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     logical: u64,
     follow: bool,
@@ -239,7 +241,7 @@ pub fn visit_block<R: Read + Seek>(
     visitor: &mut dyn FnMut(&TreeBlock),
 ) -> io::Result<()> {
     if follow {
-        walk_tree(reader, logical, traversal, visitor)
+        tree_walk(reader, logical, traversal, visitor)
     } else {
         let block = reader.read_tree_block(logical)?;
         visitor(&block);

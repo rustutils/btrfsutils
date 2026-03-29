@@ -46,8 +46,8 @@ pub enum KeyType {
     FreeSpaceInfo,
     FreeSpaceExtent,
     FreeSpaceBitmap,
-    DevExtent,
-    DevItem,
+    DeviceExtent,
+    DeviceItem,
     ChunkItem,
     RaidStripe,
     QgroupStatus,
@@ -58,7 +58,7 @@ pub enum KeyType {
     TemporaryItem,
     /// `BTRFS_DEV_STATS_KEY` and `BTRFS_PERSISTENT_ITEM_KEY` share value 249
     PersistentItem,
-    DevReplace,
+    DeviceReplace,
     UuidKeySubvol,
     UuidKeyReceivedSubvol,
     StringItem,
@@ -96,8 +96,8 @@ impl KeyType {
             raw::BTRFS_FREE_SPACE_INFO_KEY => Self::FreeSpaceInfo,
             raw::BTRFS_FREE_SPACE_EXTENT_KEY => Self::FreeSpaceExtent,
             raw::BTRFS_FREE_SPACE_BITMAP_KEY => Self::FreeSpaceBitmap,
-            raw::BTRFS_DEV_EXTENT_KEY => Self::DevExtent,
-            raw::BTRFS_DEV_ITEM_KEY => Self::DevItem,
+            raw::BTRFS_DEV_EXTENT_KEY => Self::DeviceExtent,
+            raw::BTRFS_DEV_ITEM_KEY => Self::DeviceItem,
             raw::BTRFS_CHUNK_ITEM_KEY => Self::ChunkItem,
             raw::BTRFS_RAID_STRIPE_KEY => Self::RaidStripe,
             raw::BTRFS_QGROUP_STATUS_KEY => Self::QgroupStatus,
@@ -108,7 +108,7 @@ impl KeyType {
             raw::BTRFS_TEMPORARY_ITEM_KEY => Self::TemporaryItem,
             // 249 = BTRFS_DEV_STATS_KEY = BTRFS_PERSISTENT_ITEM_KEY
             raw::BTRFS_PERSISTENT_ITEM_KEY => Self::PersistentItem,
-            raw::BTRFS_DEV_REPLACE_KEY => Self::DevReplace,
+            raw::BTRFS_DEV_REPLACE_KEY => Self::DeviceReplace,
             raw::BTRFS_UUID_KEY_SUBVOL => Self::UuidKeySubvol,
             raw::BTRFS_UUID_KEY_RECEIVED_SUBVOL => Self::UuidKeyReceivedSubvol,
             raw::BTRFS_STRING_ITEM_KEY => Self::StringItem,
@@ -149,8 +149,8 @@ impl KeyType {
             Self::FreeSpaceInfo => raw::BTRFS_FREE_SPACE_INFO_KEY as u8,
             Self::FreeSpaceExtent => raw::BTRFS_FREE_SPACE_EXTENT_KEY as u8,
             Self::FreeSpaceBitmap => raw::BTRFS_FREE_SPACE_BITMAP_KEY as u8,
-            Self::DevExtent => raw::BTRFS_DEV_EXTENT_KEY as u8,
-            Self::DevItem => raw::BTRFS_DEV_ITEM_KEY as u8,
+            Self::DeviceExtent => raw::BTRFS_DEV_EXTENT_KEY as u8,
+            Self::DeviceItem => raw::BTRFS_DEV_ITEM_KEY as u8,
             Self::ChunkItem => raw::BTRFS_CHUNK_ITEM_KEY as u8,
             Self::RaidStripe => raw::BTRFS_RAID_STRIPE_KEY as u8,
             Self::QgroupStatus => raw::BTRFS_QGROUP_STATUS_KEY as u8,
@@ -159,7 +159,7 @@ impl KeyType {
             Self::QgroupRelation => raw::BTRFS_QGROUP_RELATION_KEY as u8,
             Self::TemporaryItem => raw::BTRFS_TEMPORARY_ITEM_KEY as u8,
             Self::PersistentItem => raw::BTRFS_PERSISTENT_ITEM_KEY as u8,
-            Self::DevReplace => raw::BTRFS_DEV_REPLACE_KEY as u8,
+            Self::DeviceReplace => raw::BTRFS_DEV_REPLACE_KEY as u8,
             Self::UuidKeySubvol => raw::BTRFS_UUID_KEY_SUBVOL as u8,
             Self::UuidKeyReceivedSubvol => {
                 raw::BTRFS_UUID_KEY_RECEIVED_SUBVOL as u8
@@ -200,8 +200,8 @@ impl fmt::Display for KeyType {
             Self::FreeSpaceInfo => write!(f, "FREE_SPACE_INFO"),
             Self::FreeSpaceExtent => write!(f, "FREE_SPACE_EXTENT"),
             Self::FreeSpaceBitmap => write!(f, "FREE_SPACE_BITMAP"),
-            Self::DevExtent => write!(f, "DEV_EXTENT"),
-            Self::DevItem => write!(f, "DEV_ITEM"),
+            Self::DeviceExtent => write!(f, "DEV_EXTENT"),
+            Self::DeviceItem => write!(f, "DEV_ITEM"),
             Self::ChunkItem => write!(f, "CHUNK_ITEM"),
             Self::RaidStripe => write!(f, "RAID_STRIPE"),
             Self::QgroupStatus => write!(f, "QGROUP_STATUS"),
@@ -210,7 +210,7 @@ impl fmt::Display for KeyType {
             Self::QgroupRelation => write!(f, "QGROUP_RELATION"),
             Self::TemporaryItem => write!(f, "TEMPORARY_ITEM"),
             Self::PersistentItem => write!(f, "PERSISTENT_ITEM"),
-            Self::DevReplace => write!(f, "DEV_REPLACE"),
+            Self::DeviceReplace => write!(f, "DEV_REPLACE"),
             Self::UuidKeySubvol => write!(f, "UUID_KEY_SUBVOL"),
             Self::UuidKeyReceivedSubvol => {
                 write!(f, "UUID_KEY_RECEIVED_SUBVOL")
@@ -238,7 +238,7 @@ pub enum ObjectId {
     BlockGroupTree,
     RaidStripeTree,
     RemapTree,
-    DevStats,
+    DeviceStats,
     Balance,
     Orphan,
     TreeLog,
@@ -329,7 +329,7 @@ impl ObjectId {
             Self::BlockGroupTree => raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64,
             Self::RaidStripeTree => raw::BTRFS_RAID_STRIPE_TREE_OBJECTID as u64,
             Self::RemapTree => raw::BTRFS_REMAP_TREE_OBJECTID as u64,
-            Self::DevStats => raw::BTRFS_DEV_STATS_OBJECTID as u64,
+            Self::DeviceStats => raw::BTRFS_DEV_STATS_OBJECTID as u64,
             Self::Balance => raw::BTRFS_BALANCE_OBJECTID as u64,
             Self::Orphan => raw::BTRFS_ORPHAN_OBJECTID as u64,
             Self::TreeLog => raw::BTRFS_TREE_LOG_OBJECTID as u64,
@@ -357,7 +357,7 @@ impl ObjectId {
         let raw = self.to_raw();
         // Special disambiguations from the C reference print_objectid()
         if raw == raw::BTRFS_DEV_ITEMS_OBJECTID as u64
-            && key_type == KeyType::DevItem
+            && key_type == KeyType::DeviceItem
         {
             return "DEV_ITEMS".to_string();
         }
@@ -372,7 +372,7 @@ impl ObjectId {
             return "FIRST_CHUNK_TREE".to_string();
         }
         // DEV_EXTENT objectids are device IDs, not tree IDs — print as numbers
-        if key_type == KeyType::DevExtent {
+        if key_type == KeyType::DeviceExtent {
             return raw.to_string();
         }
         self.to_string()
@@ -419,7 +419,7 @@ impl fmt::Display for ObjectId {
             Self::BlockGroupTree => write!(f, "BLOCK_GROUP_TREE"),
             Self::RaidStripeTree => write!(f, "RAID_STRIPE_TREE"),
             Self::RemapTree => write!(f, "REMAP_TREE"),
-            Self::DevStats => write!(f, "DEV_STATS"),
+            Self::DeviceStats => write!(f, "DEV_STATS"),
             Self::Balance => write!(f, "BALANCE"),
             Self::Orphan => write!(f, "ORPHAN"),
             Self::TreeLog => write!(f, "TREE_LOG"),
@@ -813,10 +813,10 @@ mod tests {
 
     #[test]
     fn objectid_display_with_type() {
-        // objectid 1 is normally ROOT_TREE but DEV_ITEMS with DevItem key
+        // objectid 1 is normally ROOT_TREE but DEV_ITEMS with DeviceItem key
         let oid = ObjectId::from_raw(1);
         assert_eq!(oid.display_with_type(KeyType::RootItem), "ROOT_TREE");
-        assert_eq!(oid.display_with_type(KeyType::DevItem), "DEV_ITEMS");
+        assert_eq!(oid.display_with_type(KeyType::DeviceItem), "DEV_ITEMS");
     }
 
     #[test]
@@ -1027,7 +1027,7 @@ mod tests {
     fn format_key_dev_items() {
         let key = DiskKey {
             objectid: 1,
-            key_type: KeyType::DevItem,
+            key_type: KeyType::DeviceItem,
             offset: 1,
         };
         assert_eq!(format_key(&key), "(DEV_ITEMS DEV_ITEM 1)");

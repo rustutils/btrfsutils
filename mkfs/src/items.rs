@@ -330,7 +330,7 @@ mod tests {
         let fsid =
             Uuid::parse_str("cafebabe-cafe-babe-cafe-babecafebabe").unwrap();
         let data = dev_item(1, 1_000_000_000, 4_000_000, 4096, &uuid, &fsid);
-        let parsed = items::DevItem::parse(&data).unwrap();
+        let parsed = items::DeviceItem::parse(&data).unwrap();
         assert_eq!(parsed.devid, 1);
         assert_eq!(parsed.total_bytes, 1_000_000_000);
         assert_eq!(parsed.bytes_used, 4_000_000);
@@ -379,7 +379,7 @@ mod tests {
             4 * 1024 * 1024,
             &uuid,
         );
-        let parsed = items::DevExtent::parse(&data).unwrap();
+        let parsed = items::DeviceExtent::parse(&data).unwrap();
         assert_eq!(parsed.chunk_tree, raw::BTRFS_CHUNK_TREE_OBJECTID as u64);
         assert_eq!(
             parsed.chunk_objectid,

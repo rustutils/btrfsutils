@@ -463,7 +463,7 @@ fn print_payload(
                 println!("\t\t\tdev_uuid {}", s.dev_uuid.as_hyphenated());
             }
         }
-        ItemPayload::DevItem(v) => {
+        ItemPayload::DeviceItem(v) => {
             println!(
                 "\t\tdevid {} total_bytes {} bytes_used {}",
                 v.devid, v.total_bytes, v.bytes_used
@@ -483,7 +483,7 @@ fn print_payload(
             println!("\t\tuuid {}", v.uuid.as_hyphenated());
             println!("\t\tfsid {}", v.fsid.as_hyphenated());
         }
-        ItemPayload::DevExtent(v) => {
+        ItemPayload::DeviceExtent(v) => {
             println!("\t\tdev extent chunk_tree {}", v.chunk_tree);
             println!(
                 "\t\tchunk_objectid {} chunk_offset {} length {}",
@@ -527,7 +527,7 @@ fn print_payload(
             );
         }
         ItemPayload::QgroupRelation => {}
-        ItemPayload::DevStats(v) => {
+        ItemPayload::DeviceStats(v) => {
             println!(
                 "\t\tpersistent item objectid DEV_STATS offset {}",
                 key.offset
@@ -546,7 +546,7 @@ fn print_payload(
             println!("\t\tbalance status");
             println!("\t\t\tflags 0x{flags:x}");
         }
-        ItemPayload::DevReplace(v) => {
+        ItemPayload::DeviceReplace(v) => {
             println!("\t\tsource devid {}", v.src_devid);
             println!(
                 "\t\tcursor_left {} cursor_right {}",

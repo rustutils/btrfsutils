@@ -1033,7 +1033,7 @@ impl ChunkItem {
 }
 
 #[derive(Debug, Clone)]
-pub struct DevItem {
+pub struct DeviceItem {
     pub devid: u64,
     pub total_bytes: u64,
     pub bytes_used: u64,
@@ -1050,7 +1050,7 @@ pub struct DevItem {
     pub fsid: Uuid,
 }
 
-impl DevItem {
+impl DeviceItem {
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_dev_item>() {
             return None;
@@ -1075,7 +1075,7 @@ impl DevItem {
 }
 
 #[derive(Debug, Clone)]
-pub struct DevExtent {
+pub struct DeviceExtent {
     pub chunk_tree: u64,
     pub chunk_objectid: u64,
     pub chunk_offset: u64,
@@ -1083,7 +1083,7 @@ pub struct DevExtent {
     pub chunk_tree_uuid: Uuid,
 }
 
-impl DevExtent {
+impl DeviceExtent {
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_dev_extent>() {
             return None;
@@ -1210,11 +1210,11 @@ impl QgroupLimit {
 }
 
 #[derive(Debug, Clone)]
-pub struct DevStats {
+pub struct DeviceStats {
     pub values: Vec<(String, u64)>,
 }
 
-impl DevStats {
+impl DeviceStats {
     pub fn parse(data: &[u8]) -> Self {
         let stat_names = [
             "write_errs",
@@ -1230,7 +1230,7 @@ impl DevStats {
                 values.push((name.to_string(), read_le_u64(data, off)));
             }
         }
-        DevStats { values }
+        DeviceStats { values }
     }
 }
 
@@ -1274,15 +1274,15 @@ pub enum ItemPayload {
     FreeSpaceExtent,
     FreeSpaceBitmap,
     ChunkItem(ChunkItem),
-    DevItem(DevItem),
-    DevExtent(DevExtent),
+    DeviceItem(DeviceItem),
+    DeviceExtent(DeviceExtent),
     QgroupStatus(QgroupStatus),
     QgroupInfo(QgroupInfo),
     QgroupLimit(QgroupLimit),
     QgroupRelation,
-    DevStats(DevStats),
+    DeviceStats(DeviceStats),
     BalanceItem { flags: u64 },
-    DevReplace(DevReplaceItem),
+    DeviceReplace(DeviceReplaceItem),
     UuidItem(UuidItem),
     StringItem(Vec<u8>),
     RaidStripe(RaidStripeItem),
@@ -1290,7 +1290,7 @@ pub enum ItemPayload {
 }
 
 #[derive(Debug, Clone)]
-pub struct DevReplaceItem {
+pub struct DeviceReplaceItem {
     pub src_devid: u64,
     pub cursor_left: u64,
     pub cursor_right: u64,
@@ -1302,7 +1302,7 @@ pub struct DevReplaceItem {
     pub num_uncorrectable_read_errors: u64,
 }
 
-impl DevReplaceItem {
+impl DeviceReplaceItem {
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 80 {
             return None;
@@ -1432,12 +1432,12 @@ pub fn parse_item_payload(key: &DiskKey, data: &[u8]) -> ItemPayload {
             Some(v) => ItemPayload::ChunkItem(v),
             None => ItemPayload::Unknown(data.to_vec()),
         },
-        KeyType::DevItem => match DevItem::parse(data) {
-            Some(v) => ItemPayload::DevItem(v),
+        KeyType::DeviceItem => match DeviceItem::parse(data) {
+            Some(v) => ItemPayload::DeviceItem(v),
             None => ItemPayload::Unknown(data.to_vec()),
         },
-        KeyType::DevExtent => match DevExtent::parse(data) {
-            Some(v) => ItemPayload::DevExtent(v),
+        KeyType::DeviceExtent => match DeviceExtent::parse(data) {
+            Some(v) => ItemPayload::DeviceExtent(v),
             None => ItemPayload::Unknown(data.to_vec()),
         },
         KeyType::QgroupStatus => match QgroupStatus::parse(data) {
@@ -1455,7 +1455,7 @@ pub fn parse_item_payload(key: &DiskKey, data: &[u8]) -> ItemPayload {
         KeyType::QgroupRelation => ItemPayload::QgroupRelation,
         KeyType::PersistentItem => {
             if key.objectid == u64::from(raw::BTRFS_DEV_STATS_OBJECTID) {
-                ItemPayload::DevStats(DevStats::parse(data))
+                ItemPayload::DeviceStats(DeviceStats::parse(data))
             } else {
                 ItemPayload::Unknown(data.to_vec())
             }
@@ -1471,8 +1471,8 @@ pub fn parse_item_payload(key: &DiskKey, data: &[u8]) -> ItemPayload {
                 ItemPayload::Unknown(data.to_vec())
             }
         }
-        KeyType::DevReplace => match DevReplaceItem::parse(data) {
-            Some(v) => ItemPayload::DevReplace(v),
+        KeyType::DeviceReplace => match DeviceReplaceItem::parse(data) {
+            Some(v) => ItemPayload::DeviceReplace(v),
             None => ItemPayload::Unknown(data.to_vec()),
         },
         KeyType::UuidKeySubvol | KeyType::UuidKeyReceivedSubvol => {
@@ -1611,7 +1611,7 @@ mod tests {
         buf[24..32].copy_from_slice(&0x40000u64.to_le_bytes()); // length
         // chunk_tree_uuid at offset 32
         buf[32..48].copy_from_slice(&[0xAB; 16]);
-        let de = DevExtent::parse(&buf).unwrap();
+        let de = DeviceExtent::parse(&buf).unwrap();
         assert_eq!(de.chunk_tree, 3);
         assert_eq!(de.chunk_objectid, 256);
         assert_eq!(de.chunk_offset, 0x10000);
@@ -1622,7 +1622,7 @@ mod tests {
     #[test]
     fn dev_extent_too_short() {
         let size = mem::size_of::<raw::btrfs_dev_extent>();
-        assert!(DevExtent::parse(&vec![0u8; size - 1]).is_none());
+        assert!(DeviceExtent::parse(&vec![0u8; size - 1]).is_none());
     }
 
     #[test]
@@ -1743,7 +1743,7 @@ mod tests {
         buf[48..56].copy_from_slice(&1700000100u64.to_le_bytes()); // time_stopped
         buf[56..64].copy_from_slice(&3u64.to_le_bytes()); // num_write_errors
         buf[64..72].copy_from_slice(&5u64.to_le_bytes()); // num_uncorrectable_read_errors
-        let dri = DevReplaceItem::parse(&buf).unwrap();
+        let dri = DeviceReplaceItem::parse(&buf).unwrap();
         assert_eq!(dri.src_devid, 1);
         assert_eq!(dri.cursor_left, 0x1000);
         assert_eq!(dri.cursor_right, 0x2000);
@@ -1756,7 +1756,7 @@ mod tests {
 
     #[test]
     fn dev_replace_item_too_short() {
-        assert!(DevReplaceItem::parse(&[0; 79]).is_none());
+        assert!(DeviceReplaceItem::parse(&[0; 79]).is_none());
     }
 
     #[test]
@@ -1919,7 +1919,7 @@ mod tests {
         buf.extend_from_slice(&3u64.to_le_bytes()); // flush_errs
         buf.extend_from_slice(&4u64.to_le_bytes()); // corruption_errs
         buf.extend_from_slice(&5u64.to_le_bytes()); // generation
-        let ds = DevStats::parse(&buf);
+        let ds = DeviceStats::parse(&buf);
         assert_eq!(ds.values.len(), 5);
         assert_eq!(ds.values[0], ("write_errs".to_string(), 1));
         assert_eq!(ds.values[1], ("read_errs".to_string(), 2));
@@ -1934,7 +1934,7 @@ mod tests {
         let mut buf = Vec::new();
         buf.extend_from_slice(&10u64.to_le_bytes());
         buf.extend_from_slice(&20u64.to_le_bytes());
-        let ds = DevStats::parse(&buf);
+        let ds = DeviceStats::parse(&buf);
         assert_eq!(ds.values.len(), 2);
         assert_eq!(ds.values[0].1, 10);
         assert_eq!(ds.values[1].1, 20);

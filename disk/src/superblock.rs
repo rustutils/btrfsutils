@@ -5,7 +5,7 @@
 //! the root pointers and metadata needed to bootstrap access to the rest
 //! of the filesystem.
 
-use crate::raw;
+use crate::{items::DeviceItem, raw};
 use std::{
     fmt,
     io::{self, Read, Seek, SeekFrom},
@@ -42,7 +42,7 @@ pub fn super_mirror_offset(index: u32) -> u64 {
 
 /// Checksum algorithm used by the filesystem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CsumType {
+pub enum ChecksumType {
     Crc32,
     Xxhash,
     Sha256,
@@ -50,14 +50,14 @@ pub enum CsumType {
     Unknown(u16),
 }
 
-impl CsumType {
-    fn from_raw(val: u16) -> CsumType {
+impl ChecksumType {
+    fn from_raw(val: u16) -> ChecksumType {
         match u32::from(val) {
-            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 => CsumType::Crc32,
-            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_XXHASH => CsumType::Xxhash,
-            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_SHA256 => CsumType::Sha256,
-            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_BLAKE2 => CsumType::Blake2,
-            _ => CsumType::Unknown(val),
+            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 => ChecksumType::Crc32,
+            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_XXHASH => ChecksumType::Xxhash,
+            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_SHA256 => ChecksumType::Sha256,
+            raw::btrfs_csum_type_BTRFS_CSUM_TYPE_BLAKE2 => ChecksumType::Blake2,
+            _ => ChecksumType::Unknown(val),
         }
     }
 
@@ -67,43 +67,24 @@ impl CsumType {
     #[allow(clippy::match_same_arms)]
     pub fn size(&self) -> usize {
         match self {
-            CsumType::Crc32 => 4,
-            CsumType::Xxhash => 8,
-            CsumType::Sha256 | CsumType::Blake2 => 32,
-            CsumType::Unknown(_) => 32, // BTRFS_CSUM_SIZE
+            ChecksumType::Crc32 => 4,
+            ChecksumType::Xxhash => 8,
+            ChecksumType::Sha256 | ChecksumType::Blake2 => 32,
+            ChecksumType::Unknown(_) => 32, // BTRFS_CSUM_SIZE
         }
     }
 }
 
-impl fmt::Display for CsumType {
+impl fmt::Display for ChecksumType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CsumType::Crc32 => write!(f, "crc32c"),
-            CsumType::Xxhash => write!(f, "xxhash64"),
-            CsumType::Sha256 => write!(f, "sha256"),
-            CsumType::Blake2 => write!(f, "blake2"),
-            CsumType::Unknown(v) => write!(f, "unknown ({v})"),
+            ChecksumType::Crc32 => write!(f, "crc32c"),
+            ChecksumType::Xxhash => write!(f, "xxhash64"),
+            ChecksumType::Sha256 => write!(f, "sha256"),
+            ChecksumType::Blake2 => write!(f, "blake2"),
+            ChecksumType::Unknown(v) => write!(f, "unknown ({v})"),
         }
     }
-}
-
-/// Embedded device information from the superblock.
-#[derive(Debug, Clone)]
-pub struct DevItem {
-    pub devid: u64,
-    pub total_bytes: u64,
-    pub bytes_used: u64,
-    pub io_align: u32,
-    pub io_width: u32,
-    pub sector_size: u32,
-    pub dev_type: u64,
-    pub generation: u64,
-    pub start_offset: u64,
-    pub dev_group: u32,
-    pub seek_speed: u8,
-    pub bandwidth: u8,
-    pub uuid: Uuid,
-    pub fsid: Uuid,
 }
 
 /// A single backup root entry.
@@ -158,11 +139,11 @@ pub struct Superblock {
     pub compat_flags: u64,
     pub compat_ro_flags: u64,
     pub incompat_flags: u64,
-    pub csum_type: CsumType,
+    pub csum_type: ChecksumType,
     pub root_level: u8,
     pub chunk_root_level: u8,
     pub log_root_level: u8,
-    pub dev_item: DevItem,
+    pub dev_item: DeviceItem,
     pub label: String,
     pub cache_generation: u64,
     pub uuid_tree_generation: u64,
@@ -226,7 +207,7 @@ macro_rules! le16 {
     }};
 }
 
-fn parse_dev_item(d: &raw::btrfs_dev_item) -> DevItem {
+fn parse_dev_item(d: &raw::btrfs_dev_item) -> DeviceItem {
     // Copy all fields to locals first — the struct is packed.
     let devid = le64!(d.devid);
     let total_bytes = le64!(d.total_bytes);
@@ -243,7 +224,7 @@ fn parse_dev_item(d: &raw::btrfs_dev_item) -> DevItem {
     let uuid = Uuid::from_bytes(d.uuid);
     let fsid = Uuid::from_bytes(d.fsid);
 
-    DevItem {
+    DeviceItem {
         devid,
         total_bytes,
         bytes_used,
@@ -324,7 +305,7 @@ fn parse_superblock(sb: &raw::btrfs_super_block) -> Superblock {
         compat_flags: le64!(sb.compat_flags),
         compat_ro_flags: le64!(sb.compat_ro_flags),
         incompat_flags: le64!(sb.incompat_flags),
-        csum_type: CsumType::from_raw(le16!(sb.csum_type)),
+        csum_type: ChecksumType::from_raw(le16!(sb.csum_type)),
         root_level: sb.root_level,
         chunk_root_level: sb.chunk_root_level,
         log_root_level: sb.log_root_level,
@@ -377,57 +358,57 @@ mod tests {
         assert_eq!(super_mirror_offset(2), 256 * 1024 * 1024 * 1024);
     }
 
-    // --- CsumType ---
+    // --- ChecksumType ---
 
     #[test]
     fn csum_type_from_raw_known() {
         assert_eq!(
-            CsumType::from_raw(
+            ChecksumType::from_raw(
                 raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 as u16
             ),
-            CsumType::Crc32
+            ChecksumType::Crc32
         );
         assert_eq!(
-            CsumType::from_raw(
+            ChecksumType::from_raw(
                 raw::btrfs_csum_type_BTRFS_CSUM_TYPE_XXHASH as u16
             ),
-            CsumType::Xxhash
+            ChecksumType::Xxhash
         );
         assert_eq!(
-            CsumType::from_raw(
+            ChecksumType::from_raw(
                 raw::btrfs_csum_type_BTRFS_CSUM_TYPE_SHA256 as u16
             ),
-            CsumType::Sha256
+            ChecksumType::Sha256
         );
         assert_eq!(
-            CsumType::from_raw(
+            ChecksumType::from_raw(
                 raw::btrfs_csum_type_BTRFS_CSUM_TYPE_BLAKE2 as u16
             ),
-            CsumType::Blake2
+            ChecksumType::Blake2
         );
     }
 
     #[test]
     fn csum_type_from_raw_unknown() {
-        assert_eq!(CsumType::from_raw(99), CsumType::Unknown(99));
+        assert_eq!(ChecksumType::from_raw(99), ChecksumType::Unknown(99));
     }
 
     #[test]
     fn csum_type_size() {
-        assert_eq!(CsumType::Crc32.size(), 4);
-        assert_eq!(CsumType::Xxhash.size(), 8);
-        assert_eq!(CsumType::Sha256.size(), 32);
-        assert_eq!(CsumType::Blake2.size(), 32);
-        assert_eq!(CsumType::Unknown(99).size(), 32);
+        assert_eq!(ChecksumType::Crc32.size(), 4);
+        assert_eq!(ChecksumType::Xxhash.size(), 8);
+        assert_eq!(ChecksumType::Sha256.size(), 32);
+        assert_eq!(ChecksumType::Blake2.size(), 32);
+        assert_eq!(ChecksumType::Unknown(99).size(), 32);
     }
 
     #[test]
     fn csum_type_display() {
-        assert_eq!(format!("{}", CsumType::Crc32), "crc32c");
-        assert_eq!(format!("{}", CsumType::Xxhash), "xxhash64");
-        assert_eq!(format!("{}", CsumType::Sha256), "sha256");
-        assert_eq!(format!("{}", CsumType::Blake2), "blake2");
-        assert_eq!(format!("{}", CsumType::Unknown(99)), "unknown (99)");
+        assert_eq!(format!("{}", ChecksumType::Crc32), "crc32c");
+        assert_eq!(format!("{}", ChecksumType::Xxhash), "xxhash64");
+        assert_eq!(format!("{}", ChecksumType::Sha256), "sha256");
+        assert_eq!(format!("{}", ChecksumType::Blake2), "blake2");
+        assert_eq!(format!("{}", ChecksumType::Unknown(99)), "unknown (99)");
     }
 
     // --- parse_label ---
