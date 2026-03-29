@@ -4,8 +4,13 @@ expression: text
 ---
 Create /dev/btrfs-control
 
+The btrfs control device is a character device (major 10, minor 234) used by the
+btrfs kernel module for management operations. This command creates it if it is
+missing, for example after a minimal system installation or when udev is not
+running.
+
 Usage: create-control-device
 
 Options:
   -h, --help
-          Print help
+          Print help (see a summary with '-h')

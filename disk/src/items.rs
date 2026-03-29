@@ -8,7 +8,7 @@
 use crate::{
     raw,
     tree::{DiskKey, ObjectId},
-    util::{read_le_u16, read_le_u32, read_le_u64, read_uuid},
+    util::{raw_crc32c, read_le_u16, read_le_u32, read_le_u64, read_uuid},
 };
 use std::{fmt, mem};
 use uuid::Uuid;
@@ -669,15 +669,6 @@ impl FileExtentItem {
             body,
         })
     }
-}
-
-/// Raw CRC32C matching the kernel's `crc32c()` function: seed is passed
-/// through directly with no inversion on input or output.
-fn raw_crc32c(seed: u32, data: &[u8]) -> u32 {
-    // crc32c::crc32c_append(seed) computes: !crc32c_hw(!seed, data)
-    // We want: crc32c_hw(seed, data)
-    // So: !crc32c::crc32c_append(!seed, data)
-    !crc32c::crc32c_append(!seed, data)
 }
 
 /// Compute the hash used for `EXTENT_DATA_REF` keys, matching the kernel's

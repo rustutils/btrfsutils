@@ -16,6 +16,32 @@ pub fn open_path(path: &Path) -> Result<File> {
         .with_context(|| format!("failed to open '{}'", path.display()))
 }
 
+/// Return `true` if `device` appears as a source in `/proc/mounts`.
+///
+/// Compares canonical paths so symlinks in `/dev/disk/by-*` are handled
+/// correctly. Returns `false` if `/proc/mounts` cannot be read or if the
+/// canonical path of `device` cannot be resolved.
+pub fn is_mounted(device: &Path) -> bool {
+    let Ok(canon) = fs::canonicalize(device) else {
+        return false;
+    };
+    let Ok(f) = File::open("/proc/mounts") else {
+        return false;
+    };
+    let reader = std::io::BufReader::new(f);
+    for line in reader.lines().map_while(|l| l.ok()) {
+        let mut fields = line.split_whitespace();
+        if let Some(src) = fields.next() {
+            if let Ok(src_canon) = fs::canonicalize(src) {
+                if src_canon == canon {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Resolved size display mode.
 pub enum SizeFormat {
     /// Print raw byte count with no suffix.

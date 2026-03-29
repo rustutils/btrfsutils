@@ -4,6 +4,13 @@ expression: text
 ---
 Clear the tree log (usable if it's corrupted and prevents mount)
 
+The log tree is used for fsync durability. If it becomes corrupted it can
+prevent the filesystem from mounting. Clearing it forces a full fsync of all
+previously synced data on the next mount. No data is lost — only the durability
+guarantee of uncommitted fsyncs.
+
+The device must not be mounted.
+
 Usage: zero-log <DEVICE>
 
 Arguments:
@@ -12,4 +19,4 @@ Arguments:
 
 Options:
   -h, --help
-          Print help
+          Print help (see a summary with '-h')

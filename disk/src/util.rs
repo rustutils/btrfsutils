@@ -46,6 +46,18 @@ pub fn write_uuid(buf: &mut [u8], off: usize, uuid: &Uuid) {
     buf[off..off + 16].copy_from_slice(uuid.as_bytes());
 }
 
+/// Raw CRC32C matching the kernel's `crc32c()` function.
+///
+/// The seed is passed through directly with no inversion on input or output,
+/// unlike the standard ISO 3309 CRC32C which inverts both. Use this when
+/// computing btrfs on-disk checksums.
+pub fn raw_crc32c(seed: u32, data: &[u8]) -> u32 {
+    // crc32c::crc32c_append(seed) computes: !crc32c_hw(!seed, data)
+    // We want: crc32c_hw(seed, data)
+    // So: !crc32c::crc32c_append(!seed, data)
+    !crc32c::crc32c_append(!seed, data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

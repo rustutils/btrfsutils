@@ -5,10 +5,11 @@
 //! the root pointers and metadata needed to bootstrap access to the rest
 //! of the filesystem.
 
-use crate::{items::DeviceItem, raw};
+use crate::{items::DeviceItem, raw, util::raw_crc32c};
 use std::{
     fmt,
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
+    mem,
 };
 use uuid::Uuid;
 
@@ -334,6 +335,66 @@ pub fn read_superblock(
     let offset = super_mirror_offset(mirror);
     let raw = read_raw_superblock(reader, offset)?;
     Ok(parse_superblock(&raw))
+}
+
+/// Read the raw 4096-byte superblock from the primary mirror into a byte buffer.
+pub fn read_superblock_bytes(
+    reader: &mut (impl Read + Seek),
+) -> io::Result<[u8; SUPER_INFO_SIZE]> {
+    reader.seek(SeekFrom::Start(SUPER_INFO_OFFSET))?;
+    let mut buf = [0u8; SUPER_INFO_SIZE];
+    reader.read_exact(&mut buf)?;
+    Ok(buf)
+}
+
+/// Recompute the CRC32C checksum of a superblock byte buffer in place.
+///
+/// Stores the 4-byte LE checksum at bytes 0..4, computed over bytes 32..4096.
+/// Only CRC32C (`csum_type` == 0) is supported; returns an error for other
+/// checksum types.
+pub fn csum_superblock(buf: &mut [u8; SUPER_INFO_SIZE]) -> io::Result<()> {
+    let csum_type_off = mem::offset_of!(raw::btrfs_super_block, csum_type);
+    let csum_type = u16::from_le_bytes(
+        buf[csum_type_off..csum_type_off + 2].try_into().unwrap(),
+    );
+    if u32::from(csum_type)
+        != raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!("unsupported checksum type {csum_type}"),
+        ));
+    }
+    let csum = raw_crc32c(0, &buf[32..]);
+    buf[0..4].copy_from_slice(&csum.to_le_bytes());
+    buf[4..32].fill(0);
+    Ok(())
+}
+
+/// Write a superblock buffer to all mirrors that fit within the device.
+///
+/// Updates the `bytenr` field per mirror before writing, then recomputes the
+/// checksum. Queries the device size via `Seek::seek(End(0))`.
+pub fn write_superblock_all_mirrors(
+    file: &mut (impl Read + Write + Seek),
+    buf: &[u8; SUPER_INFO_SIZE],
+) -> io::Result<()> {
+    let device_size = file.seek(SeekFrom::End(0))?;
+    let bytenr_off = mem::offset_of!(raw::btrfs_super_block, bytenr);
+
+    for i in 0..SUPER_MIRROR_MAX {
+        let offset = super_mirror_offset(i);
+        if offset + SUPER_INFO_SIZE as u64 > device_size {
+            break;
+        }
+        let mut mirror_buf = *buf;
+        mirror_buf[bytenr_off..bytenr_off + 8]
+            .copy_from_slice(&offset.to_le_bytes());
+        csum_superblock(&mut mirror_buf)?;
+        file.seek(SeekFrom::Start(offset))?;
+        file.write_all(&mirror_buf)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
