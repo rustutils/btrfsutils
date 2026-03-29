@@ -28,6 +28,34 @@ fn test_config(total_bytes: u64) -> MkfsConfig {
     }
 }
 
+fn test_config_two_devices(per_device_bytes: u64) -> MkfsConfig {
+    MkfsConfig {
+        nodesize: 16384,
+        sectorsize: 4096,
+        devices: vec![
+            DeviceInfo {
+                devid: 1,
+                path: PathBuf::new(),
+                total_bytes: per_device_bytes,
+                dev_uuid: Uuid::from_bytes([0xAB; 16]),
+            },
+            DeviceInfo {
+                devid: 2,
+                path: PathBuf::new(),
+                total_bytes: per_device_bytes,
+                dev_uuid: Uuid::from_bytes([0xBC; 16]),
+            },
+        ],
+        label: None,
+        fs_uuid: Uuid::from_bytes([0xDE; 16]),
+        chunk_tree_uuid: Uuid::from_bytes([0xCD; 16]),
+        incompat_flags: MkfsConfig::default_incompat_flags(),
+        compat_ro_flags: MkfsConfig::default_compat_ro_flags(),
+        data_profile: Profile::Single,
+        metadata_profile: Profile::Raid1,
+    }
+}
+
 /// Minimum valid image size: system (5 MiB) + metadata DUP (2*32 MiB) + data (64 MiB) = 133 MiB.
 /// Use 256 MiB for comfortable headroom.
 const MIN_SIZE: u64 = 256 * 1024 * 1024;
@@ -44,6 +72,16 @@ fn make_btrfs_on_err(
 ) -> anyhow::Error {
     cfg.devices[0].path = image.path().to_path_buf();
     mkfs::make_btrfs(cfg).unwrap_err()
+}
+
+fn make_btrfs_two_devices(
+    img1: &tempfile::NamedTempFile,
+    img2: &tempfile::NamedTempFile,
+    cfg: &mut MkfsConfig,
+) {
+    cfg.devices[0].path = img1.path().to_path_buf();
+    cfg.devices[1].path = img2.path().to_path_buf();
+    mkfs::make_btrfs(cfg).unwrap();
 }
 
 fn create_image(size: u64) -> tempfile::NamedTempFile {
@@ -228,4 +266,74 @@ fn mkfs_with_different_nodesize() {
     let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
     assert_eq!(sb.nodesize, 65536);
     assert!(sb.magic_is_valid());
+}
+
+#[test]
+fn mkfs_raid1_two_devices_valid_superblocks() {
+    let per_dev = MIN_SIZE;
+    let img1 = create_image(per_dev);
+    let img2 = create_image(per_dev);
+    let mut cfg = test_config_two_devices(per_dev);
+    make_btrfs_two_devices(&img1, &img2, &mut cfg);
+
+    // Both devices should have valid superblocks.
+    let mut f1 = std::fs::File::open(img1.path()).unwrap();
+    let sb1 = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
+    assert!(sb1.magic_is_valid());
+
+    let mut f2 = std::fs::File::open(img2.path()).unwrap();
+    let sb2 = btrfs_disk::superblock::read_superblock(&mut f2, 0).unwrap();
+    assert!(sb2.magic_is_valid());
+}
+
+#[test]
+fn mkfs_raid1_superblocks_share_uuid() {
+    let per_dev = MIN_SIZE;
+    let img1 = create_image(per_dev);
+    let img2 = create_image(per_dev);
+    let mut cfg = test_config_two_devices(per_dev);
+    make_btrfs_two_devices(&img1, &img2, &mut cfg);
+
+    let mut f1 = std::fs::File::open(img1.path()).unwrap();
+    let sb1 = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
+    let mut f2 = std::fs::File::open(img2.path()).unwrap();
+    let sb2 = btrfs_disk::superblock::read_superblock(&mut f2, 0).unwrap();
+
+    // Same filesystem UUID.
+    assert_eq!(sb1.fsid, sb2.fsid);
+    assert_eq!(sb1.fsid, cfg.fs_uuid);
+}
+
+#[test]
+fn mkfs_raid1_superblocks_different_dev_items() {
+    let per_dev = MIN_SIZE;
+    let img1 = create_image(per_dev);
+    let img2 = create_image(per_dev);
+    let mut cfg = test_config_two_devices(per_dev);
+    make_btrfs_two_devices(&img1, &img2, &mut cfg);
+
+    let mut f1 = std::fs::File::open(img1.path()).unwrap();
+    let sb1 = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
+    let mut f2 = std::fs::File::open(img2.path()).unwrap();
+    let sb2 = btrfs_disk::superblock::read_superblock(&mut f2, 0).unwrap();
+
+    // Each superblock should embed its own device's dev_item.
+    assert_eq!(sb1.dev_item.devid, 1);
+    assert_eq!(sb2.dev_item.devid, 2);
+    // Both report num_devices = 2.
+    assert_eq!(sb1.num_devices, 2);
+    assert_eq!(sb2.num_devices, 2);
+}
+
+#[test]
+fn mkfs_raid1_total_bytes_is_sum() {
+    let per_dev = MIN_SIZE;
+    let img1 = create_image(per_dev);
+    let img2 = create_image(per_dev);
+    let mut cfg = test_config_two_devices(per_dev);
+    make_btrfs_two_devices(&img1, &img2, &mut cfg);
+
+    let mut f1 = std::fs::File::open(img1.path()).unwrap();
+    let sb1 = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
+    assert_eq!(sb1.total_bytes, 2 * per_dev);
 }

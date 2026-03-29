@@ -6,8 +6,8 @@
 use crate::{
     items,
     layout::{
-        BlockLayout, ChunkLayout, SYSTEM_GROUP_OFFSET, SYSTEM_GROUP_SIZE,
-        StripeInfo, TreeId,
+        BlockLayout, ChunkDevice, ChunkLayout, SYSTEM_GROUP_OFFSET,
+        SYSTEM_GROUP_SIZE, StripeInfo, TreeId,
     },
     superblock::SuperblockBuilder,
     tree::{Key, LeafBuilder, LeafHeader},
@@ -193,8 +193,17 @@ impl MkfsConfig {
 
 /// Create a btrfs filesystem on one or more devices.
 pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
+    let chunk_devs: Vec<ChunkDevice> = cfg
+        .devices
+        .iter()
+        .map(|d| ChunkDevice {
+            devid: d.devid,
+            total_bytes: d.total_bytes,
+            dev_uuid: d.dev_uuid,
+        })
+        .collect();
     let chunks =
-        ChunkLayout::new(cfg.total_bytes(), cfg.primary_device().dev_uuid);
+        ChunkLayout::new(&chunk_devs, cfg.metadata_profile, cfg.data_profile);
     if chunks.is_none() {
         bail!(
             "device too small: {} bytes, need at least {} bytes",
@@ -259,24 +268,29 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         trees.push((TreeId::BlockGroup, bg_tree));
     }
 
-    // Write tree blocks to disk.
-    // TODO: when ChunkLayout returns (devid, phys), route writes to the
-    // correct device file. For now all writes go to device 1.
+    // Write tree blocks to disk, routing each stripe to the correct device.
     for (tree_id, mut block) in trees {
         write::fill_csum(&mut block);
         let logical = layout.block_addr(tree_id);
-        for phys in chunks.logical_to_physical(logical) {
-            write::pwrite_all(&files[0], &block, phys).with_context(|| {
-                format!("failed to write {tree_id:?} tree block")
-            })?;
+        for (devid, phys) in chunks.logical_to_physical(logical) {
+            let file_idx = (devid - 1) as usize;
+            write::pwrite_all(&files[file_idx], &block, phys)
+                .with_context(|| {
+                    format!(
+                        "failed to write {tree_id:?} tree block to device {devid}"
+                    )
+                })?;
         }
     }
 
-    // Build and write superblock to all devices.
-    let superblock = build_superblock(cfg, &layout, &chunks)?;
-    for file in &files {
-        write::pwrite_all(file, &superblock, SUPER_INFO_OFFSET)
-            .context("failed to write superblock")?;
+    // Build and write per-device superblocks.
+    for dev in &cfg.devices {
+        let superblock = build_superblock(cfg, &layout, &chunks, dev)?;
+        let file_idx = (dev.devid - 1) as usize;
+        write::pwrite_all(&files[file_idx], &superblock, SUPER_INFO_OFFSET)
+            .with_context(|| {
+                format!("failed to write superblock to device {}", dev.devid)
+            })?;
     }
 
     for file in &files {
@@ -429,7 +443,7 @@ fn build_extent_tree(
             ),
         ));
 
-        // Metadata block group (DUP)
+        // Metadata block group
         extent_items.push((
             Key::new(
                 chunks.meta_logical,
@@ -440,11 +454,11 @@ fn build_extent_tree(
                 layout.metadata_used(cfg.has_block_group_tree()),
                 raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
                 raw::BTRFS_BLOCK_GROUP_METADATA as u64
-                    | raw::BTRFS_BLOCK_GROUP_DUP as u64,
+                    | cfg.metadata_profile.block_group_flag(),
             ),
         ));
 
-        // Data block group (SINGLE)
+        // Data block group
         extent_items.push((
             Key::new(
                 chunks.data_logical,
@@ -454,7 +468,8 @@ fn build_extent_tree(
             items::block_group_item(
                 0,
                 raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-                raw::BTRFS_BLOCK_GROUP_DATA as u64,
+                raw::BTRFS_BLOCK_GROUP_DATA as u64
+                    | cfg.data_profile.block_group_flag(),
             ),
         ));
     }
@@ -478,22 +493,24 @@ fn build_chunk_tree(
 ) -> Result<Vec<u8>> {
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Chunk));
 
-    // DEV_ITEM for device 1 (bytes_used includes all chunks)
-    let dev_data = items::dev_item(
-        1,
-        cfg.total_bytes(),
-        chunks.dev_bytes_used(),
-        cfg.sectorsize,
-        &cfg.primary_device().dev_uuid,
-        &cfg.fs_uuid,
-    );
-    let dev_key = Key::new(
-        raw::BTRFS_DEV_ITEMS_OBJECTID as u64,
-        raw::BTRFS_DEV_ITEM_KEY as u8,
-        1,
-    );
-    leaf.push(dev_key, &dev_data)
-        .map_err(|e| anyhow::anyhow!("chunk tree: {e}"))?;
+    // DEV_ITEM for each device (sorted by devid via insertion order)
+    for dev in &cfg.devices {
+        let dev_data = items::dev_item(
+            dev.devid,
+            dev.total_bytes,
+            chunks.dev_bytes_used_for(dev.devid),
+            cfg.sectorsize,
+            &dev.dev_uuid,
+            &cfg.fs_uuid,
+        );
+        let dev_key = Key::new(
+            raw::BTRFS_DEV_ITEMS_OBJECTID as u64,
+            raw::BTRFS_DEV_ITEM_KEY as u8,
+            dev.devid,
+        );
+        leaf.push(dev_key, &dev_data)
+            .map_err(|e| anyhow::anyhow!("chunk tree: {e}"))?;
+    }
 
     // CHUNK_ITEM for the system chunk (bootstrap: uses sectorsize for io_align)
     let dev1 = cfg.primary_device();
@@ -565,16 +582,22 @@ fn build_dev_tree(
 ) -> Result<Vec<u8>> {
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Dev));
 
-    // DEV_STATS (PERSISTENT_ITEM) for device 1 -- all zeros
-    let stats_key = Key::new(
-        raw::BTRFS_DEV_STATS_OBJECTID as u64,
-        raw::BTRFS_PERSISTENT_ITEM_KEY as u8,
-        1,
-    );
-    leaf.push(stats_key, &items::dev_stats_zeroed())
-        .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
+    // Collect all items, then sort by key before pushing. Items span
+    // multiple devids and offsets, so we must sort to satisfy btrfs's
+    // sorted-key requirement.
+    let mut dev_items: Vec<(Key, Vec<u8>)> = Vec::new();
 
-    // DEV_EXTENT for the system chunk
+    // DEV_STATS (PERSISTENT_ITEM) for each device
+    for dev in &cfg.devices {
+        let stats_key = Key::new(
+            raw::BTRFS_DEV_STATS_OBJECTID as u64,
+            raw::BTRFS_PERSISTENT_ITEM_KEY as u8,
+            dev.devid,
+        );
+        dev_items.push((stats_key, items::dev_stats_zeroed()));
+    }
+
+    // DEV_EXTENT for the system chunk (always device 1)
     let sys_extent = items::dev_extent(
         raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
         raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
@@ -582,65 +605,56 @@ fn build_dev_tree(
         SYSTEM_GROUP_SIZE,
         &cfg.chunk_tree_uuid,
     );
-    leaf.push(
+    dev_items.push((
         Key::new(1, raw::BTRFS_DEV_EXTENT_KEY as u8, SYSTEM_GROUP_OFFSET),
-        &sys_extent,
-    )
-    .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
+        sys_extent,
+    ));
 
-    // DEV_EXTENT for metadata DUP stripe 0
-    let meta_ext_0 = items::dev_extent(
-        raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
-        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-        chunks.meta_logical,
-        chunks.meta_size,
-        &cfg.chunk_tree_uuid,
-    );
-    leaf.push(
-        Key::new(
-            1,
-            raw::BTRFS_DEV_EXTENT_KEY as u8,
-            chunks.meta_stripes[0].offset,
-        ),
-        &meta_ext_0,
-    )
-    .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
+    // DEV_EXTENT for each metadata stripe
+    for stripe in &chunks.meta_stripes {
+        let ext = items::dev_extent(
+            raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            chunks.meta_logical,
+            chunks.meta_size,
+            &cfg.chunk_tree_uuid,
+        );
+        dev_items.push((
+            Key::new(
+                stripe.devid,
+                raw::BTRFS_DEV_EXTENT_KEY as u8,
+                stripe.offset,
+            ),
+            ext,
+        ));
+    }
 
-    // DEV_EXTENT for metadata DUP stripe 1
-    let meta_ext_1 = items::dev_extent(
-        raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
-        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-        chunks.meta_logical,
-        chunks.meta_size,
-        &cfg.chunk_tree_uuid,
-    );
-    leaf.push(
-        Key::new(
-            1,
-            raw::BTRFS_DEV_EXTENT_KEY as u8,
-            chunks.meta_stripes[1].offset,
-        ),
-        &meta_ext_1,
-    )
-    .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
+    // DEV_EXTENT for each data stripe
+    for stripe in &chunks.data_stripes {
+        let ext = items::dev_extent(
+            raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            chunks.data_logical,
+            chunks.data_size,
+            &cfg.chunk_tree_uuid,
+        );
+        dev_items.push((
+            Key::new(
+                stripe.devid,
+                raw::BTRFS_DEV_EXTENT_KEY as u8,
+                stripe.offset,
+            ),
+            ext,
+        ));
+    }
 
-    // DEV_EXTENT for data SINGLE
-    let data_ext = items::dev_extent(
-        raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
-        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-        chunks.data_logical,
-        chunks.data_size,
-        &cfg.chunk_tree_uuid,
-    );
-    leaf.push(
-        Key::new(
-            1,
-            raw::BTRFS_DEV_EXTENT_KEY as u8,
-            chunks.data_stripes[0].offset,
-        ),
-        &data_ext,
-    )
-    .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
+    // Sort by key and push in order.
+    dev_items.sort_by_key(|(k, _)| *k);
+
+    for (key, data) in &dev_items {
+        leaf.push(*key, data)
+            .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
+    }
 
     Ok(leaf.finish())
 }
@@ -792,7 +806,7 @@ fn build_block_group_tree(
     )
     .map_err(|e| anyhow::anyhow!("block group tree: {e}"))?;
 
-    // Metadata block group (DUP)
+    // Metadata block group
     leaf.push(
         Key::new(
             chunks.meta_logical,
@@ -803,12 +817,12 @@ fn build_block_group_tree(
             layout.metadata_used(cfg.has_block_group_tree()),
             raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
             raw::BTRFS_BLOCK_GROUP_METADATA as u64
-                | raw::BTRFS_BLOCK_GROUP_DUP as u64,
+                | cfg.metadata_profile.block_group_flag(),
         ),
     )
     .map_err(|e| anyhow::anyhow!("block group tree: {e}"))?;
 
-    // Data block group (SINGLE)
+    // Data block group
     leaf.push(
         Key::new(
             chunks.data_logical,
@@ -818,7 +832,8 @@ fn build_block_group_tree(
         &items::block_group_item(
             0,
             raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_DATA as u64,
+            raw::BTRFS_BLOCK_GROUP_DATA as u64
+                | cfg.data_profile.block_group_flag(),
         ),
     )
     .map_err(|e| anyhow::anyhow!("block group tree: {e}"))?;
@@ -830,6 +845,7 @@ fn build_superblock(
     cfg: &MkfsConfig,
     layout: &BlockLayout,
     chunks: &ChunkLayout,
+    dev: &DeviceInfo,
 ) -> Result<Vec<u8>> {
     let generation = 1u64;
 
@@ -854,13 +870,13 @@ fn build_superblock(
     let mut sys_chunk_array = items::disk_key(&chunk_key);
     sys_chunk_array.extend_from_slice(&chunk_data);
 
-    // Build the dev_item for the superblock.
+    // Build the dev_item for this device's superblock.
     let dev_item_bytes = items::dev_item(
-        1,
-        cfg.total_bytes(),
-        chunks.dev_bytes_used(),
+        dev.devid,
+        dev.total_bytes,
+        chunks.dev_bytes_used_for(dev.devid),
         cfg.sectorsize,
-        &cfg.primary_device().dev_uuid,
+        &dev.dev_uuid,
         &cfg.fs_uuid,
     );
 

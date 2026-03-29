@@ -4,6 +4,7 @@
 //! All other tree blocks (root, extent, dev, fs, csum, free-space, data-reloc)
 //! live in the metadata chunk and are written with DUP (two physical copies).
 
+use crate::args::Profile;
 use btrfs_disk::raw;
 
 /// Byte offset where the system block group starts (1 MiB).
@@ -161,51 +162,161 @@ pub struct ChunkLayout {
     pub data_stripes: Vec<StripeInfo>,
 }
 
+/// Device info needed for chunk layout computation.
+/// Avoids a circular dependency on `crate::mkfs::DeviceInfo`.
+pub struct ChunkDevice {
+    pub devid: u64,
+    pub total_bytes: u64,
+    pub dev_uuid: uuid::Uuid,
+}
+
 impl ChunkLayout {
-    /// Compute metadata and data chunk placement for the given device size.
+    /// Compute metadata and data chunk placement for the given devices.
     ///
-    /// Returns `None` if the device is too small to fit even the minimum
-    /// metadata DUP (2 x 32 MiB) plus minimum data SINGLE (64 MiB).
-    pub fn new(total_bytes: u64, dev_uuid: uuid::Uuid) -> Option<Self> {
-        // Meta stripe size: min(256 MiB, total/10), minimum 32 MiB, round down to STRIPE_LEN.
+    /// For DUP metadata (single device): two stripes on device 1.
+    /// For RAID1 metadata (multi-device): one stripe on each of the first
+    /// two devices.
+    /// For SINGLE data: one stripe on device 1.
+    ///
+    /// Returns `None` if the devices are too small.
+    pub fn new(
+        devices: &[ChunkDevice],
+        metadata_profile: Profile,
+        data_profile: Profile,
+    ) -> Option<Self> {
+        assert!(!devices.is_empty());
+        let total_bytes: u64 = devices.iter().map(|d| d.total_bytes).sum();
+
+        // Meta stripe size: clamp(total/10, 32M, 256M), round down to STRIPE_LEN.
         let meta_size =
             (total_bytes / 10).clamp(32 * 1024 * 1024, 256 * 1024 * 1024);
         let meta_size = meta_size / STRIPE_LEN * STRIPE_LEN;
 
-        // Data size: min(1 GiB, total/10), minimum 64 MiB, round down to STRIPE_LEN.
+        // Data size: clamp(total/10, 64M, 1G), round down to STRIPE_LEN.
         let data_size =
             (total_bytes / 10).clamp(64 * 1024 * 1024, 1024 * 1024 * 1024);
         let data_size = data_size / STRIPE_LEN * STRIPE_LEN;
 
-        // DUP: two physical stripes, sequential after system group.
-        let meta_stripes = vec![
-            StripeInfo {
-                devid: 1,
-                offset: CHUNK_START,
-                dev_uuid,
-            },
-            StripeInfo {
-                devid: 1,
-                offset: CHUNK_START + meta_size,
-                dev_uuid,
-            },
-        ];
+        // Build metadata stripes based on profile.
+        let meta_stripes = match metadata_profile {
+            Profile::Dup => {
+                // Two stripes on device 1, sequential after system group.
+                vec![
+                    StripeInfo {
+                        devid: devices[0].devid,
+                        offset: CHUNK_START,
+                        dev_uuid: devices[0].dev_uuid,
+                    },
+                    StripeInfo {
+                        devid: devices[0].devid,
+                        offset: CHUNK_START + meta_size,
+                        dev_uuid: devices[0].dev_uuid,
+                    },
+                ]
+            }
+            Profile::Raid1 => {
+                // One stripe on device 1 at CHUNK_START, one on device 2
+                // at CHUNK_START.
+                vec![
+                    StripeInfo {
+                        devid: devices[0].devid,
+                        offset: CHUNK_START,
+                        dev_uuid: devices[0].dev_uuid,
+                    },
+                    StripeInfo {
+                        devid: devices[1].devid,
+                        offset: CHUNK_START,
+                        dev_uuid: devices[1].dev_uuid,
+                    },
+                ]
+            }
+            Profile::Single => {
+                vec![StripeInfo {
+                    devid: devices[0].devid,
+                    offset: CHUNK_START,
+                    dev_uuid: devices[0].dev_uuid,
+                }]
+            }
+            _ => {
+                // Other profiles not yet supported for metadata.
+                return None;
+            }
+        };
 
-        // Data starts after both DUP stripes.
-        let data_stripes = vec![StripeInfo {
-            devid: 1,
-            offset: CHUNK_START + 2 * meta_size,
-            dev_uuid,
-        }];
+        // Data starts after the last metadata stripe on device 1.
+        // Compute the highest physical end on device 1 from meta stripes.
+        let dev1_meta_end = meta_stripes
+            .iter()
+            .filter(|s| s.devid == devices[0].devid)
+            .map(|s| s.offset + meta_size)
+            .max()
+            .unwrap_or(CHUNK_START);
 
-        // Validate everything fits.
-        if CHUNK_START + 2 * meta_size + data_size > total_bytes {
-            return None;
+        // Build data stripes based on profile.
+        let data_stripes = match data_profile {
+            Profile::Single => {
+                vec![StripeInfo {
+                    devid: devices[0].devid,
+                    offset: dev1_meta_end,
+                    dev_uuid: devices[0].dev_uuid,
+                }]
+            }
+            Profile::Dup => {
+                vec![
+                    StripeInfo {
+                        devid: devices[0].devid,
+                        offset: dev1_meta_end,
+                        dev_uuid: devices[0].dev_uuid,
+                    },
+                    StripeInfo {
+                        devid: devices[0].devid,
+                        offset: dev1_meta_end + data_size,
+                        dev_uuid: devices[0].dev_uuid,
+                    },
+                ]
+            }
+            Profile::Raid1 => {
+                // Data RAID1: one stripe on each device.
+                let dev2_meta_end = meta_stripes
+                    .iter()
+                    .filter(|s| s.devid == devices[1].devid)
+                    .map(|s| s.offset + meta_size)
+                    .max()
+                    .unwrap_or(CHUNK_START);
+                vec![
+                    StripeInfo {
+                        devid: devices[0].devid,
+                        offset: dev1_meta_end,
+                        dev_uuid: devices[0].dev_uuid,
+                    },
+                    StripeInfo {
+                        devid: devices[1].devid,
+                        offset: dev2_meta_end,
+                        dev_uuid: devices[1].dev_uuid,
+                    },
+                ]
+            }
+            _ => {
+                return None;
+            }
+        };
+
+        // Validate everything fits on each device.
+        for dev in devices {
+            let used = Self::compute_dev_physical_end(
+                dev.devid,
+                &meta_stripes,
+                meta_size,
+                &data_stripes,
+                data_size,
+            );
+            if used > dev.total_bytes {
+                return None;
+            }
         }
 
         // Logical addresses: metadata follows system group logically,
-        // data follows metadata. These must not overlap with the system
-        // group logical range [SYSTEM_GROUP_OFFSET, +SYSTEM_GROUP_SIZE).
+        // data follows metadata.
         let meta_logical = CHUNK_START;
         let data_logical = CHUNK_START + meta_size;
 
@@ -219,8 +330,54 @@ impl ChunkLayout {
         })
     }
 
-    /// Total physical bytes used by all chunks (system + metadata DUP + data).
-    pub fn dev_bytes_used(&self) -> u64 {
+    /// Compute the highest physical byte used on a device, including the
+    /// system group on device 1.
+    fn compute_dev_physical_end(
+        devid: u64,
+        meta_stripes: &[StripeInfo],
+        meta_size: u64,
+        data_stripes: &[StripeInfo],
+        data_size: u64,
+    ) -> u64 {
+        let mut end = if devid == 1 {
+            SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE
+        } else {
+            0
+        };
+        for s in meta_stripes {
+            if s.devid == devid {
+                end = end.max(s.offset + meta_size);
+            }
+        }
+        for s in data_stripes {
+            if s.devid == devid {
+                end = end.max(s.offset + data_size);
+            }
+        }
+        end
+    }
+
+    /// Total physical bytes used on a specific device by all chunks.
+    ///
+    /// Device 1 always has the system group. Metadata and data stripes
+    /// contribute their stripe size for each stripe on this device.
+    pub fn dev_bytes_used_for(&self, devid: u64) -> u64 {
+        let mut used = if devid == 1 { SYSTEM_GROUP_SIZE } else { 0 };
+        for s in &self.meta_stripes {
+            if s.devid == devid {
+                used += self.meta_size;
+            }
+        }
+        for s in &self.data_stripes {
+            if s.devid == devid {
+                used += self.data_size;
+            }
+        }
+        used
+    }
+
+    /// Total physical bytes used across all devices (sum of all stripes).
+    pub fn total_bytes_used(&self) -> u64 {
         SYSTEM_GROUP_SIZE
             + (self.meta_stripes.len() as u64 * self.meta_size)
             + (self.data_stripes.len() as u64 * self.data_size)
@@ -228,24 +385,31 @@ impl ChunkLayout {
 
     /// Map a logical address to its physical write locations.
     ///
-    /// System chunk: logical == physical (SINGLE).
-    /// Metadata chunk: two physical copies (DUP).
-    /// Data chunk: logical maps to one physical location (SINGLE).
-    pub fn logical_to_physical(&self, logical: u64) -> Vec<u64> {
+    /// Returns `(devid, physical_offset)` pairs.
+    /// System chunk: always device 1, logical == physical.
+    /// Metadata chunk: one pair per stripe.
+    /// Data chunk: one pair per stripe.
+    pub fn logical_to_physical(&self, logical: u64) -> Vec<(u64, u64)> {
         let sys_range =
             SYSTEM_GROUP_OFFSET..SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
         let meta_range = self.meta_logical..self.meta_logical + self.meta_size;
         let data_range = self.data_logical..self.data_logical + self.data_size;
 
         if sys_range.contains(&logical) {
-            // System chunk: logical == physical
-            vec![logical]
+            // System chunk: device 1, logical == physical
+            vec![(1, logical)]
         } else if meta_range.contains(&logical) {
             let off = logical - self.meta_logical;
-            self.meta_stripes.iter().map(|s| s.offset + off).collect()
+            self.meta_stripes
+                .iter()
+                .map(|s| (s.devid, s.offset + off))
+                .collect()
         } else if data_range.contains(&logical) {
             let off = logical - self.data_logical;
-            self.data_stripes.iter().map(|s| s.offset + off).collect()
+            self.data_stripes
+                .iter()
+                .map(|s| (s.devid, s.offset + off))
+                .collect()
         } else {
             panic!("logical address {logical:#x} not in any chunk")
         }
@@ -293,10 +457,20 @@ mod tests {
         uuid::Uuid::parse_str("deadbeef-dead-beef-dead-beefdeadbeef").unwrap()
     }
 
+    fn single_device(size: u64) -> Vec<ChunkDevice> {
+        vec![ChunkDevice {
+            devid: 1,
+            total_bytes: size,
+            dev_uuid: test_uuid(),
+        }]
+    }
+
     #[test]
     fn chunk_layout_256m() {
         // 256 MiB device: meta = min(256M, 25.6M) -> 32M (minimum), data = min(1G, 25.6M) -> 64M
-        let cl = ChunkLayout::new(256 * 1024 * 1024, test_uuid()).unwrap();
+        let devs = single_device(256 * 1024 * 1024);
+        let cl =
+            ChunkLayout::new(&devs, Profile::Dup, Profile::Single).unwrap();
         assert_eq!(cl.meta_size, 32 * 1024 * 1024);
         assert_eq!(cl.data_size, 64 * 1024 * 1024);
         assert_eq!(cl.meta_stripes.len(), 2);
@@ -311,7 +485,9 @@ mod tests {
     #[test]
     fn chunk_layout_1g() {
         // 1 GiB: meta = min(256M, 102.4M) -> 102M (rounded), data = min(1G, 102.4M) -> 102M
-        let cl = ChunkLayout::new(1024 * 1024 * 1024, test_uuid()).unwrap();
+        let devs = single_device(1024 * 1024 * 1024);
+        let cl =
+            ChunkLayout::new(&devs, Profile::Dup, Profile::Single).unwrap();
         let expected_stripe =
             (1024 * 1024 * 1024 / 10) / STRIPE_LEN * STRIPE_LEN;
         assert_eq!(cl.meta_size, expected_stripe);
@@ -321,8 +497,9 @@ mod tests {
     #[test]
     fn chunk_layout_10g() {
         // 10 GiB: meta = min(256M, 1G) -> 256M, data = min(1G, 1G) -> 1G
+        let devs = single_device(10 * 1024 * 1024 * 1024);
         let cl =
-            ChunkLayout::new(10 * 1024 * 1024 * 1024, test_uuid()).unwrap();
+            ChunkLayout::new(&devs, Profile::Dup, Profile::Single).unwrap();
         assert_eq!(cl.meta_size, 256 * 1024 * 1024);
         assert_eq!(cl.data_size, 1024 * 1024 * 1024);
     }
@@ -330,16 +507,98 @@ mod tests {
     #[test]
     fn chunk_layout_too_small() {
         // 100 MiB: needs 5M + 2*32M + 64M = 133M, doesn't fit
-        assert!(ChunkLayout::new(100 * 1024 * 1024, test_uuid()).is_none());
+        let devs = single_device(100 * 1024 * 1024);
+        assert!(
+            ChunkLayout::new(&devs, Profile::Dup, Profile::Single).is_none()
+        );
     }
 
     #[test]
-    fn chunk_layout_dev_bytes_used() {
-        let cl = ChunkLayout::new(256 * 1024 * 1024, test_uuid()).unwrap();
+    fn chunk_layout_total_bytes_used() {
+        let devs = single_device(256 * 1024 * 1024);
+        let cl =
+            ChunkLayout::new(&devs, Profile::Dup, Profile::Single).unwrap();
         // system(4M) + 2*meta(32M) + data(64M) = 132M
         assert_eq!(
-            cl.dev_bytes_used(),
+            cl.total_bytes_used(),
             SYSTEM_GROUP_SIZE + 2 * 32 * 1024 * 1024 + 64 * 1024 * 1024
         );
+    }
+
+    #[test]
+    fn chunk_layout_dev_bytes_used_single_device() {
+        let devs = single_device(256 * 1024 * 1024);
+        let cl =
+            ChunkLayout::new(&devs, Profile::Dup, Profile::Single).unwrap();
+        // All chunks on device 1: system(4M) + 2*meta(32M) + data(64M) = 132M
+        assert_eq!(
+            cl.dev_bytes_used_for(1),
+            SYSTEM_GROUP_SIZE + 2 * 32 * 1024 * 1024 + 64 * 1024 * 1024
+        );
+    }
+
+    fn two_devices(size: u64) -> Vec<ChunkDevice> {
+        let uuid2 =
+            uuid::Uuid::parse_str("cafebabe-cafe-babe-cafe-babecafebabe")
+                .unwrap();
+        vec![
+            ChunkDevice {
+                devid: 1,
+                total_bytes: size,
+                dev_uuid: test_uuid(),
+            },
+            ChunkDevice {
+                devid: 2,
+                total_bytes: size,
+                dev_uuid: uuid2,
+            },
+        ]
+    }
+
+    #[test]
+    fn chunk_layout_raid1_stripes() {
+        let devs = two_devices(256 * 1024 * 1024);
+        let cl =
+            ChunkLayout::new(&devs, Profile::Raid1, Profile::Single).unwrap();
+        // RAID1 metadata: one stripe on each device at CHUNK_START
+        assert_eq!(cl.meta_stripes.len(), 2);
+        assert_eq!(cl.meta_stripes[0].devid, 1);
+        assert_eq!(cl.meta_stripes[0].offset, CHUNK_START);
+        assert_eq!(cl.meta_stripes[1].devid, 2);
+        assert_eq!(cl.meta_stripes[1].offset, CHUNK_START);
+        // Data SINGLE on device 1 after metadata
+        assert_eq!(cl.data_stripes.len(), 1);
+        assert_eq!(cl.data_stripes[0].devid, 1);
+        assert_eq!(cl.data_stripes[0].offset, CHUNK_START + cl.meta_size);
+    }
+
+    #[test]
+    fn chunk_layout_raid1_dev_bytes() {
+        let devs = two_devices(256 * 1024 * 1024);
+        let cl =
+            ChunkLayout::new(&devs, Profile::Raid1, Profile::Single).unwrap();
+        // total = 512M, so meta_size and data_size are based on 512M/10
+        // Device 1: system(4M) + meta + data
+        assert_eq!(
+            cl.dev_bytes_used_for(1),
+            SYSTEM_GROUP_SIZE + cl.meta_size + cl.data_size
+        );
+        // Device 2: meta only (one RAID1 stripe)
+        assert_eq!(cl.dev_bytes_used_for(2), cl.meta_size);
+    }
+
+    #[test]
+    fn logical_to_physical_returns_devid() {
+        let devs = two_devices(256 * 1024 * 1024);
+        let cl =
+            ChunkLayout::new(&devs, Profile::Raid1, Profile::Single).unwrap();
+        // System chunk: device 1 only
+        let sys = cl.logical_to_physical(SYSTEM_GROUP_OFFSET);
+        assert_eq!(sys, vec![(1, SYSTEM_GROUP_OFFSET)]);
+        // Metadata: one on each device
+        let meta = cl.logical_to_physical(cl.meta_logical);
+        assert_eq!(meta.len(), 2);
+        assert_eq!(meta[0].0, 1);
+        assert_eq!(meta[1].0, 2);
     }
 }
