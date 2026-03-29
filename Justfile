@@ -63,9 +63,9 @@ coverage:
     sudo chown -R "$(id -u):$(id -g)" target/coverage/
     cargo llvm-cov report --html
 
-# Generate man pages to target/man/
-man:
-    cargo run --package btrfs-mangen
+# Generate man pages and shell completions to target/gen/
+gen:
+    cargo run --package btrfs-gen
 
 # run code formatter
 format:

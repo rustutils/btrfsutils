@@ -83,10 +83,13 @@
 
             # After building, generate man pages and install them
             postInstall = ''
-              # mangen is publish=false and not in default-members, so the
+              # btrfs-gen is publish=false and not in default-members, so the
               # binary won't be in $out/bin. Build and run it manually.
-              cargo run --package btrfs-mangen -- man-pages
-              installManPage man-pages/*.1
+              cargo run --package btrfs-gen -- gen-output
+              installManPage gen-output/man/*.1
+              installShellCompletion --bash gen-output/completions/btrfs.bash gen-output/completions/mkfs.btrfs.bash
+              installShellCompletion --zsh gen-output/completions/_btrfs gen-output/completions/_mkfs.btrfs
+              installShellCompletion --fish gen-output/completions/btrfs.fish gen-output/completions/mkfs.btrfs.fish
             '';
           });
         in

@@ -52,7 +52,7 @@ Most commands that talk to the kernel require root privileges or `CAP_SYS_ADMIN`
 | `stream` | Send stream parser and receive operations. Platform-independent parser with optional Linux-only receive support. |
 | `cli` | The command-line tool, built on top of `uapi`, `disk`, and `stream`. |
 | `mkfs` | Filesystem creation tool (`mkfs.btrfs`). Constructs on-disk B-tree nodes and writes them directly to block devices or image files. |
-| `mangen` | Man page generator. Uses `clap_mangen` to produce roff man pages for all commands. |
+| `util/gen` | Man page and shell completion generator. Uses `clap_mangen` and `clap_complete` to produce roff man pages and bash/zsh/fish/elvish completions. |
 | `docs` | Documentation, rendered with mdBook. |
 
 ## Testing
