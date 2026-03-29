@@ -75,10 +75,7 @@ pub fn file_extent_same(
             info_slice[i].logical_offset = target.logical_offset;
         }
 
-        btrfs_ioc_file_extent_same(
-            src_fd.as_raw_fd() as nix::libc::c_int,
-            &mut *args_ptr,
-        )?;
+        btrfs_ioc_file_extent_same(src_fd.as_raw_fd(), &mut *args_ptr)?;
 
         let info_slice = (*args_ptr).info.as_slice(count);
         Ok(info_slice

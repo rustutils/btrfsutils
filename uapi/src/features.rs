@@ -9,7 +9,6 @@ use crate::raw::{
     btrfs_ioc_set_features, btrfs_ioctl_feature_flags,
 };
 use bitflags::bitflags;
-use nix::libc::c_int;
 use std::os::fd::{AsRawFd, BorrowedFd};
 
 bitflags! {
@@ -115,7 +114,7 @@ fn parse_feature_flags(raw: &btrfs_ioctl_feature_flags) -> FeatureFlags {
 /// Query the feature flags currently active on the filesystem.
 pub fn get_features(fd: BorrowedFd<'_>) -> nix::Result<FeatureFlags> {
     let mut flags: btrfs_ioctl_feature_flags = unsafe { std::mem::zeroed() };
-    unsafe { btrfs_ioc_get_features(fd.as_raw_fd() as c_int, &mut flags) }?;
+    unsafe { btrfs_ioc_get_features(fd.as_raw_fd(), &mut flags) }?;
     Ok(parse_feature_flags(&flags))
 }
 
@@ -140,7 +139,7 @@ pub fn set_features(
     buf[0].incompat_flags = flags.incompat.bits();
     buf[1].compat_ro_flags = mask.compat_ro.bits();
     buf[1].incompat_flags = mask.incompat.bits();
-    unsafe { btrfs_ioc_set_features(fd.as_raw_fd() as c_int, &buf) }?;
+    unsafe { btrfs_ioc_set_features(fd.as_raw_fd(), &buf) }?;
     Ok(())
 }
 
@@ -153,9 +152,7 @@ pub fn get_supported_features(
     fd: BorrowedFd<'_>,
 ) -> nix::Result<SupportedFeatures> {
     let mut buf: [btrfs_ioctl_feature_flags; 3] = unsafe { std::mem::zeroed() };
-    unsafe {
-        btrfs_ioc_get_supported_features(fd.as_raw_fd() as c_int, &mut buf)
-    }?;
+    unsafe { btrfs_ioc_get_supported_features(fd.as_raw_fd(), &mut buf) }?;
 
     Ok(SupportedFeatures {
         compat_ro_supported: CompatRoFlags::from_bits_truncate(

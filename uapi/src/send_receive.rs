@@ -20,7 +20,6 @@ use crate::{
     tree_search::{SearchKey, tree_search},
 };
 use bitflags::bitflags;
-use nix::libc::c_int;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use uuid::Uuid;
 
@@ -73,7 +72,7 @@ pub fn send(
     // SAFETY: args is fully initialized, clone_sources points to valid memory
     // that outlives the ioctl call, and subvol_fd is a valid borrowed fd.
     unsafe {
-        btrfs_ioc_send(subvol_fd.as_raw_fd() as c_int, &args)?;
+        btrfs_ioc_send(subvol_fd.as_raw_fd(), &args)?;
     }
 
     Ok(())
@@ -108,7 +107,7 @@ pub fn received_subvol_set(
 
     // SAFETY: args is fully initialized, fd is a valid borrowed fd to a subvolume.
     unsafe {
-        btrfs_ioc_set_received_subvol(fd.as_raw_fd() as c_int, &mut args)?;
+        btrfs_ioc_set_received_subvol(fd.as_raw_fd(), &mut args)?;
     }
 
     Ok(args.rtransid)
@@ -138,7 +137,7 @@ pub fn clone_range(
 
     // SAFETY: args is fully initialized, both fds are valid.
     unsafe {
-        btrfs_ioc_clone_range(dest_fd.as_raw_fd() as c_int, &args)?;
+        btrfs_ioc_clone_range(dest_fd.as_raw_fd(), &args)?;
     }
 
     Ok(())
@@ -183,7 +182,7 @@ pub fn encoded_write(
     // references `data` which outlives this call. The ioctl reads from the
     // iov buffers and writes encoded data to the file.
     unsafe {
-        btrfs_ioc_encoded_write(fd.as_raw_fd() as c_int, &args)?;
+        btrfs_ioc_encoded_write(fd.as_raw_fd(), &args)?;
     }
 
     Ok(())
@@ -237,8 +236,7 @@ pub fn encoded_read(
     // SAFETY: args.iov points to a stack-allocated iovec whose iov_base
     // references `buf` which outlives this call. The ioctl writes encoded
     // data into the iov buffers.
-    let ret =
-        unsafe { btrfs_ioc_encoded_read(fd.as_raw_fd() as c_int, &mut args) }?;
+    let ret = unsafe { btrfs_ioc_encoded_read(fd.as_raw_fd(), &mut args) }?;
 
     Ok(EncodedReadResult {
         offset: args.offset as u64,

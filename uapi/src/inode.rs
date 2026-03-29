@@ -14,7 +14,6 @@ use crate::{
     },
     tree_search::{SearchKey, tree_search},
 };
-use nix::libc::c_int;
 use std::os::fd::{AsRawFd, BorrowedFd};
 
 /// Look up the tree ID (root ID) of the subvolume containing the given file or directory.
@@ -41,7 +40,7 @@ pub fn lookup_path_rootid(fd: BorrowedFd<'_>) -> nix::Result<u64> {
     };
 
     unsafe {
-        btrfs_ioc_ino_lookup(fd.as_raw_fd() as c_int, &mut args)?;
+        btrfs_ioc_ino_lookup(fd.as_raw_fd(), &mut args)?;
     }
 
     Ok(args.treeid)
@@ -80,7 +79,7 @@ pub fn ino_paths(fd: BorrowedFd<'_>, inum: u64) -> nix::Result<Vec<String>> {
     };
 
     unsafe {
-        btrfs_ioc_ino_paths(fd.as_raw_fd() as c_int, &mut args)?;
+        btrfs_ioc_ino_paths(fd.as_raw_fd(), &mut args)?;
     }
 
     // Parse the results from the data container
@@ -167,7 +166,7 @@ pub fn logical_ino(
     };
 
     unsafe {
-        btrfs_ioc_logical_ino_v2(fd.as_raw_fd() as c_int, &mut args)?;
+        btrfs_ioc_logical_ino_v2(fd.as_raw_fd(), &mut args)?;
     }
 
     // Parse the results from the data container
@@ -315,10 +314,7 @@ fn subvolid_resolve_sub(
                     };
 
                 unsafe {
-                    btrfs_ioc_ino_lookup(
-                        fd.as_raw_fd() as c_int,
-                        &mut ino_lookup_args,
-                    )?;
+                    btrfs_ioc_ino_lookup(fd.as_raw_fd(), &mut ino_lookup_args)?;
                 }
 
                 // Get the directory name (it's a null-terminated C string)
@@ -392,7 +388,7 @@ pub fn ino_lookup_user(
     };
 
     unsafe {
-        btrfs_ioc_ino_lookup_user(fd.as_raw_fd() as c_int, &mut args)?;
+        btrfs_ioc_ino_lookup_user(fd.as_raw_fd(), &mut args)?;
     }
 
     let name = unsafe { std::ffi::CStr::from_ptr(args.name.as_ptr()) }
