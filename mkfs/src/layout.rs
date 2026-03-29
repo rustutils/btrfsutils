@@ -214,21 +214,19 @@ impl ChunkLayout {
                     },
                 ]
             }
-            Profile::Raid1 => {
-                // One stripe on device 1 at CHUNK_START, one on device 2
-                // at CHUNK_START.
-                vec![
-                    StripeInfo {
-                        devid: devices[0].devid,
+            Profile::Raid1 | Profile::Raid1c3 | Profile::Raid1c4 => {
+                // One stripe per device, up to the profile's stripe count.
+                let n = metadata_profile.num_stripes() as usize;
+                if devices.len() < n {
+                    return None;
+                }
+                (0..n)
+                    .map(|i| StripeInfo {
+                        devid: devices[i].devid,
                         offset: CHUNK_START,
-                        dev_uuid: devices[0].dev_uuid,
-                    },
-                    StripeInfo {
-                        devid: devices[1].devid,
-                        offset: CHUNK_START,
-                        dev_uuid: devices[1].dev_uuid,
-                    },
-                ]
+                        dev_uuid: devices[i].dev_uuid,
+                    })
+                    .collect()
             }
             Profile::Single => {
                 vec![StripeInfo {
@@ -275,26 +273,26 @@ impl ChunkLayout {
                     },
                 ]
             }
-            Profile::Raid1 => {
-                // Data RAID1: one stripe on each device.
-                let dev2_meta_end = meta_stripes
-                    .iter()
-                    .filter(|s| s.devid == devices[1].devid)
-                    .map(|s| s.offset + meta_size)
-                    .max()
-                    .unwrap_or(CHUNK_START);
-                vec![
-                    StripeInfo {
-                        devid: devices[0].devid,
-                        offset: dev1_meta_end,
-                        dev_uuid: devices[0].dev_uuid,
-                    },
-                    StripeInfo {
-                        devid: devices[1].devid,
-                        offset: dev2_meta_end,
-                        dev_uuid: devices[1].dev_uuid,
-                    },
-                ]
+            Profile::Raid1 | Profile::Raid1c3 | Profile::Raid1c4 => {
+                let n = data_profile.num_stripes() as usize;
+                if devices.len() < n {
+                    return None;
+                }
+                (0..n)
+                    .map(|i| {
+                        let dev_meta_end = meta_stripes
+                            .iter()
+                            .filter(|s| s.devid == devices[i].devid)
+                            .map(|s| s.offset + meta_size)
+                            .max()
+                            .unwrap_or(CHUNK_START);
+                        StripeInfo {
+                            devid: devices[i].devid,
+                            offset: dev_meta_end,
+                            dev_uuid: devices[i].dev_uuid,
+                        }
+                    })
+                    .collect()
             }
             _ => {
                 return None;
