@@ -1,6 +1,6 @@
 [toolchain]
 channel = "1.94.1"
-components = ["clippy"]
+components = ["clippy", "llvm-tools"]
 targets = [
   "x86_64-unknown-linux-gnu",
   "x86_64-unknown-linux-musl",
