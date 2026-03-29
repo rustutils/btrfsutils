@@ -83,6 +83,64 @@ impl fmt::Display for BlockGroupFlags {
     }
 }
 
+bitflags::bitflags! {
+    /// Inode item flags stored in `btrfs_inode_item::flags`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct InodeFlags: u64 {
+        const NODATASUM      = raw::BTRFS_INODE_NODATASUM as u64;
+        const NODATACOW      = raw::BTRFS_INODE_NODATACOW as u64;
+        const READONLY       = raw::BTRFS_INODE_READONLY as u64;
+        const NOCOMPRESS     = raw::BTRFS_INODE_NOCOMPRESS as u64;
+        const PREALLOC       = raw::BTRFS_INODE_PREALLOC as u64;
+        const SYNC           = raw::BTRFS_INODE_SYNC as u64;
+        const IMMUTABLE      = raw::BTRFS_INODE_IMMUTABLE as u64;
+        const APPEND         = raw::BTRFS_INODE_APPEND as u64;
+        const NODUMP         = raw::BTRFS_INODE_NODUMP as u64;
+        const NOATIME        = raw::BTRFS_INODE_NOATIME as u64;
+        const DIRSYNC        = raw::BTRFS_INODE_DIRSYNC as u64;
+        const COMPRESS       = raw::BTRFS_INODE_COMPRESS as u64;
+        const ROOT_ITEM_INIT = raw::BTRFS_INODE_ROOT_ITEM_INIT as u64;
+        // Preserve unknown bits from the on-disk value.
+        const _ = !0;
+    }
+}
+
+impl fmt::Display for InodeFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const NAMES: &[(InodeFlags, &str)] = &[
+            (InodeFlags::NODATASUM, "NODATASUM"),
+            (InodeFlags::NODATACOW, "NODATACOW"),
+            (InodeFlags::READONLY, "READONLY"),
+            (InodeFlags::NOCOMPRESS, "NOCOMPRESS"),
+            (InodeFlags::PREALLOC, "PREALLOC"),
+            (InodeFlags::SYNC, "SYNC"),
+            (InodeFlags::IMMUTABLE, "IMMUTABLE"),
+            (InodeFlags::APPEND, "APPEND"),
+            (InodeFlags::NODUMP, "NODUMP"),
+            (InodeFlags::NOATIME, "NOATIME"),
+            (InodeFlags::DIRSYNC, "DIRSYNC"),
+            (InodeFlags::COMPRESS, "COMPRESS"),
+            (InodeFlags::ROOT_ITEM_INIT, "ROOT_ITEM_INIT"),
+        ];
+        let known: InodeFlags = NAMES
+            .iter()
+            .fold(InodeFlags::empty(), |a, &(flag, _)| a | flag);
+        let mut parts: Vec<String> = NAMES
+            .iter()
+            .filter(|&&(flag, _)| self.contains(flag))
+            .map(|&(_, name)| name.to_string())
+            .collect();
+        let unknown = *self & !known;
+        if !unknown.is_empty() {
+            parts.push(format!("UNKNOWN: 0x{:x}", unknown.bits()));
+        }
+        if parts.is_empty() {
+            write!(f, "none")
+        } else {
+            write!(f, "{}", parts.join("|"))
+        }
+    }
+}
 /// Btrfs timestamp (seconds + nanoseconds since epoch).
 #[derive(Debug, Clone, Copy)]
 pub struct Timespec {
@@ -238,7 +296,7 @@ pub struct InodeItem {
     pub gid: u32,
     pub mode: u32,
     pub rdev: u64,
-    pub flags: u64,
+    pub flags: InodeFlags,
     pub sequence: u64,
     pub atime: Timespec,
     pub ctime: Timespec,
@@ -264,7 +322,7 @@ impl InodeItem {
             gid: read_le_u32(data, 48),
             mode: read_le_u32(data, 52),
             rdev: read_le_u64(data, 56),
-            flags: read_le_u64(data, 64),
+            flags: InodeFlags::from_bits_truncate(read_le_u64(data, 64)),
             sequence: read_le_u64(data, 72),
             atime: Timespec::parse(data, ts_off),
             ctime: Timespec::parse(data, ts_off + ts_size),
@@ -374,6 +432,27 @@ impl DirItem {
     }
 }
 
+bitflags::bitflags! {
+    /// Root item flags stored in `btrfs_root_item::flags`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct RootItemFlags: u64 {
+        const RDONLY = raw::BTRFS_ROOT_SUBVOL_RDONLY as u64;
+        const DEAD   = raw::BTRFS_ROOT_SUBVOL_DEAD;
+        // Preserve unknown bits from the on-disk value.
+        const _ = !0;
+    }
+}
+
+impl fmt::Display for RootItemFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.contains(Self::RDONLY) {
+            write!(f, "RDONLY")
+        } else {
+            write!(f, "none")
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RootItem {
     pub generation: u64,
@@ -382,7 +461,7 @@ pub struct RootItem {
     pub byte_limit: u64,
     pub bytes_used: u64,
     pub last_snapshot: u64,
-    pub flags: u64,
+    pub flags: RootItemFlags,
     pub refs: u32,
     pub drop_progress: DiskKey,
     pub drop_level: u8,
@@ -422,7 +501,10 @@ impl RootItem {
             byte_limit: read_le_u64(data, inode_size + 24),
             bytes_used: read_le_u64(data, inode_size + 32),
             last_snapshot: read_le_u64(data, inode_size + 40),
-            flags: read_le_u64(data, inode_size + 48),
+            flags: RootItemFlags::from_bits_truncate(read_le_u64(
+                data,
+                inode_size + 48,
+            )),
             refs: read_le_u32(data, inode_size + 56),
             drop_progress: if dp_off + 17 <= data.len() {
                 DiskKey::parse(data, dp_off)
@@ -500,10 +582,6 @@ impl RootItem {
                 Timespec { sec: 0, nsec: 0 }
             },
         })
-    }
-
-    pub fn is_rdonly(&self) -> bool {
-        self.flags & u64::from(raw::BTRFS_ROOT_SUBVOL_RDONLY) != 0
     }
 }
 
@@ -676,11 +754,39 @@ impl InlineRef {
     }
 }
 
+bitflags::bitflags! {
+    /// Extent item flags stored in `btrfs_extent_item::flags`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct ExtentFlags: u64 {
+        const DATA         = raw::BTRFS_EXTENT_FLAG_DATA as u64;
+        const TREE_BLOCK   = raw::BTRFS_EXTENT_FLAG_TREE_BLOCK as u64;
+        const FULL_BACKREF = raw::BTRFS_BLOCK_FLAG_FULL_BACKREF as u64;
+        // Preserve unknown bits from the on-disk value.
+        const _ = !0;
+    }
+}
+
+impl fmt::Display for ExtentFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut parts = Vec::new();
+        if self.contains(Self::DATA) {
+            parts.push("DATA");
+        }
+        if self.contains(Self::TREE_BLOCK) {
+            parts.push("TREE_BLOCK");
+        }
+        if self.contains(Self::FULL_BACKREF) {
+            parts.push("FULL_BACKREF");
+        }
+        write!(f, "{}", parts.join("|"))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ExtentItem {
     pub refs: u64,
     pub generation: u64,
-    pub flags: u64,
+    pub flags: ExtentFlags,
     pub tree_block_key: Option<DiskKey>,
     pub tree_block_level: Option<u8>,
     pub skinny_level: Option<u64>,
@@ -689,26 +795,11 @@ pub struct ExtentItem {
 
 impl ExtentItem {
     pub fn is_data(&self) -> bool {
-        self.flags & u64::from(raw::BTRFS_EXTENT_FLAG_DATA) != 0
+        self.flags.contains(ExtentFlags::DATA)
     }
 
     pub fn is_tree_block(&self) -> bool {
-        self.flags & u64::from(raw::BTRFS_EXTENT_FLAG_TREE_BLOCK) != 0
-    }
-
-    pub fn flag_names(&self) -> String {
-        let mut names = Vec::new();
-        if self.is_data() {
-            names.push("DATA");
-        }
-        if self.is_tree_block() {
-            names.push("TREE_BLOCK");
-        }
-        if names.is_empty() {
-            "none".to_string()
-        } else {
-            names.join("|")
-        }
+        self.flags.contains(ExtentFlags::TREE_BLOCK)
     }
 
     pub fn parse(data: &[u8], key: &DiskKey) -> Option<Self> {
@@ -719,11 +810,10 @@ impl ExtentItem {
         }
         let refs = read_le_u64(data, 0);
         let generation = read_le_u64(data, 8);
-        let flags = read_le_u64(data, 16);
+        let flags = ExtentFlags::from_bits_truncate(read_le_u64(data, 16));
 
         let mut offset = mem::size_of::<raw::btrfs_extent_item>();
-        let is_tree_block =
-            flags & u64::from(raw::BTRFS_EXTENT_FLAG_TREE_BLOCK) != 0;
+        let is_tree_block = flags.contains(ExtentFlags::TREE_BLOCK);
 
         let mut tree_block_key = None;
         let mut tree_block_level = None;
@@ -884,7 +974,6 @@ impl BlockGroupItem {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct ChunkItem {
     pub length: u64,
@@ -930,7 +1019,9 @@ impl ChunkItem {
             length: read_le_u64(data, 0),
             owner: read_le_u64(data, 8),
             stripe_len: read_le_u64(data, 16),
-            chunk_type: BlockGroupFlags::from_bits_truncate(read_le_u64(data, 24)),
+            chunk_type: BlockGroupFlags::from_bits_truncate(read_le_u64(
+                data, 24,
+            )),
             io_align: read_le_u32(data, 32),
             io_width: read_le_u32(data, 36),
             sector_size: read_le_u32(data, 40),
@@ -1007,10 +1098,27 @@ impl DevExtent {
     }
 }
 
+bitflags::bitflags! {
+    /// Free space info flags stored in `btrfs_free_space_info::flags`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct FreeSpaceInfoFlags: u32 {
+        const USING_BITMAPS = raw::BTRFS_FREE_SPACE_USING_BITMAPS;
+        // Preserve unknown bits from the on-disk value.
+        const _ = !0;
+    }
+}
+
+impl fmt::Display for FreeSpaceInfoFlags {
+    // The C reference prints this field as an unsigned decimal integer (%u).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.bits())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FreeSpaceInfo {
     pub extent_count: u32,
-    pub flags: u32,
+    pub flags: FreeSpaceInfoFlags,
 }
 
 impl FreeSpaceInfo {
@@ -1020,7 +1128,7 @@ impl FreeSpaceInfo {
         }
         Some(Self {
             extent_count: read_le_u32(data, 0),
-            flags: read_le_u32(data, 4),
+            flags: FreeSpaceInfoFlags::from_bits_truncate(read_le_u32(data, 4)),
         })
     }
 }
@@ -1485,7 +1593,7 @@ mod tests {
         buf.extend_from_slice(&7u32.to_le_bytes());
         let info = FreeSpaceInfo::parse(&buf).unwrap();
         assert_eq!(info.extent_count, 42);
-        assert_eq!(info.flags, 7);
+        assert_eq!(info.flags, FreeSpaceInfoFlags::from_bits_truncate(7));
     }
 
     #[test]

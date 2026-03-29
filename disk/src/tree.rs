@@ -517,13 +517,46 @@ fn format_key_offset(key: &DiskKey) -> String {
     }
 }
 
+bitflags::bitflags! {
+    /// Tree block header flags stored in `btrfs_header::flags` (lower 56 bits;
+    /// the upper 8 bits hold the backref revision).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct HeaderFlags: u64 {
+        const WRITTEN = raw::BTRFS_HEADER_FLAG_WRITTEN as u64;
+        const RELOC   = raw::BTRFS_HEADER_FLAG_RELOC as u64;
+        // Preserve unknown bits from the on-disk value.
+        const _ = !0;
+    }
+}
+
+impl fmt::Display for HeaderFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let known = Self::WRITTEN | Self::RELOC;
+        let mut parts = Vec::new();
+        if self.contains(Self::WRITTEN) {
+            parts.push("WRITTEN");
+        }
+        if self.contains(Self::RELOC) {
+            parts.push("RELOC");
+        }
+        if !(*self & !known).is_empty() {
+            parts.push("UNKNOWN");
+        }
+        if parts.is_empty() {
+            write!(f, "0x0")
+        } else {
+            write!(f, "{}", parts.join("|"))
+        }
+    }
+}
+
 /// Parsed header of a btrfs tree block (shared by nodes and leaves).
 #[derive(Debug, Clone)]
 pub struct Header {
     pub csum: [u8; 32],
     pub fsid: Uuid,
     pub bytenr: u64,
-    pub flags: u64,
+    pub flags: HeaderFlags,
     pub chunk_tree_uuid: Uuid,
     pub generation: u64,
     pub owner: u64,
@@ -548,7 +581,7 @@ impl Header {
             csum,
             fsid: read_uuid(buf, 32),
             bytenr: read_le_u64(buf, 48),
-            flags: read_le_u64(buf, 56),
+            flags: HeaderFlags::from_bits_truncate(read_le_u64(buf, 56)),
             chunk_tree_uuid: read_uuid(buf, 64),
             generation: read_le_u64(buf, 80),
             owner: read_le_u64(buf, 88),
@@ -559,36 +592,14 @@ impl Header {
 
     /// Return the backref revision from the flags field.
     pub fn backref_rev(&self) -> u64 {
-        self.flags >> raw::BTRFS_BACKREF_REV_SHIFT
+        self.flags.bits() >> raw::BTRFS_BACKREF_REV_SHIFT
     }
 
-    /// Return the flags with the backref revision bits masked out.
-    pub fn block_flags(&self) -> u64 {
-        self.flags
-            & !((u64::from(raw::BTRFS_BACKREF_REV_MAX) - 1)
-                << raw::BTRFS_BACKREF_REV_SHIFT)
-    }
-}
-
-/// Format header flags as a human-readable string (e.g. "WRITTEN|RELOC").
-pub fn format_header_flags(flags: u64) -> String {
-    let mut names = Vec::new();
-    if flags & u64::from(raw::BTRFS_HEADER_FLAG_WRITTEN) != 0 {
-        names.push("WRITTEN");
-    }
-    if flags & u64::from(raw::BTRFS_HEADER_FLAG_RELOC) != 0 {
-        names.push("RELOC");
-    }
-    let known = u64::from(raw::BTRFS_HEADER_FLAG_WRITTEN)
-        | u64::from(raw::BTRFS_HEADER_FLAG_RELOC);
-    let unknown = flags & !known;
-    if unknown != 0 {
-        names.push("UNKNOWN");
-    }
-    if names.is_empty() {
-        "0x0".to_string()
-    } else {
-        names.join("|")
+    /// Return the block flags with the backref revision bits masked out.
+    pub fn block_flags(&self) -> HeaderFlags {
+        let mask = (u64::from(raw::BTRFS_BACKREF_REV_MAX) - 1)
+            << raw::BTRFS_BACKREF_REV_SHIFT;
+        HeaderFlags::from_bits_truncate(self.flags.bits() & !mask)
     }
 }
 
@@ -842,22 +853,29 @@ mod tests {
         assert_eq!(hdr.owner, 5);
         assert_eq!(hdr.nritems, 10);
         assert_eq!(hdr.level, 0);
-        assert_eq!(hdr.block_flags(), raw::BTRFS_HEADER_FLAG_WRITTEN as u64);
-    }
-
-    #[test]
-    fn format_header_flags_written() {
         assert_eq!(
-            format_header_flags(raw::BTRFS_HEADER_FLAG_WRITTEN as u64),
-            "WRITTEN"
+            hdr.block_flags(),
+            HeaderFlags::from_bits_truncate(
+                raw::BTRFS_HEADER_FLAG_WRITTEN as u64
+            )
         );
     }
 
     #[test]
-    fn format_header_flags_multiple() {
-        let flags = raw::BTRFS_HEADER_FLAG_WRITTEN as u64
-            | raw::BTRFS_HEADER_FLAG_RELOC as u64;
-        assert_eq!(format_header_flags(flags), "WRITTEN|RELOC");
+    fn header_flags_display_written() {
+        let flags = HeaderFlags::from_bits_truncate(
+            raw::BTRFS_HEADER_FLAG_WRITTEN as u64,
+        );
+        assert_eq!(flags.to_string(), "WRITTEN");
+    }
+
+    #[test]
+    fn header_flags_display_multiple() {
+        let flags = HeaderFlags::from_bits_truncate(
+            raw::BTRFS_HEADER_FLAG_WRITTEN as u64
+                | raw::BTRFS_HEADER_FLAG_RELOC as u64,
+        );
+        assert_eq!(flags.to_string(), "WRITTEN|RELOC");
     }
 
     #[test]

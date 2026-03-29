@@ -2,7 +2,7 @@ use crate::util::format_timespec;
 use btrfs_disk::{
     items::{self, FileExtentBody, InlineRef, ItemPayload, Timespec},
     raw,
-    tree::{Header, ObjectId, TreeBlock, format_header_flags, format_key},
+    tree::{Header, ObjectId, TreeBlock, format_key},
 };
 use std::mem;
 
@@ -109,13 +109,12 @@ fn print_leaf_header(
 }
 
 fn print_header_flags_line(label: &str, header: &Header, opts: &PrintOptions) {
-    let flags = header.block_flags();
-    let flag_names = format_header_flags(flags);
+    let block_flags = header.block_flags();
     print!(
         "{label} {} flags 0x{:x}({}) backref revision {}",
         header.bytenr,
-        flags,
-        flag_names,
+        block_flags.bits(),
+        block_flags,
         header.backref_rev()
     );
     if opts.csum_headers {
@@ -170,7 +169,12 @@ fn print_payload(
                 "\t\tblock group {} mode {:o} links {} uid {} gid {} rdev {}",
                 v.block_group, v.mode, v.nlink, v.uid, v.gid, v.rdev
             );
-            println!("\t\tsequence {} flags 0x{:x}(none)", v.sequence, v.flags);
+            println!(
+                "\t\tsequence {} flags 0x{:x}({})",
+                v.sequence,
+                v.flags.bits(),
+                v.flags
+            );
             for (name, ts) in [
                 ("atime", &v.atime),
                 ("ctime", &v.ctime),
@@ -243,8 +247,8 @@ fn print_payload(
             println!(
                 "\t\tlast_snapshot {} flags 0x{:x}({}) refs {}",
                 v.last_snapshot,
+                v.flags.bits(),
                 v.flags,
-                if v.is_rdonly() { "RDONLY" } else { "none" },
                 v.refs
             );
             println!(
@@ -356,9 +360,7 @@ fn print_payload(
         ItemPayload::ExtentItem(v) => {
             println!(
                 "\t\trefs {} gen {} flags {}",
-                v.refs,
-                v.generation,
-                v.flag_names()
+                v.refs, v.generation, v.flags
             );
             if let (Some(bk), Some(level)) =
                 (&v.tree_block_key, v.tree_block_level)
@@ -429,9 +431,7 @@ fn print_payload(
         ItemPayload::BlockGroupItem(v) => {
             println!(
                 "\t\tblock group used {} chunk_objectid {} flags {}",
-                v.used,
-                v.chunk_objectid,
-                v.flags
+                v.used, v.chunk_objectid, v.flags
             );
         }
         ItemPayload::FreeSpaceInfo(v) => {
@@ -445,10 +445,7 @@ fn print_payload(
         ItemPayload::ChunkItem(v) => {
             println!(
                 "\t\tlength {} owner {} stripe_len {} type {}",
-                v.length,
-                v.owner,
-                v.stripe_len,
-                v.chunk_type
+                v.length, v.owner, v.stripe_len, v.chunk_type
             );
             println!(
                 "\t\tio_align {} io_width {} sector_size {}",

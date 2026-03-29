@@ -395,7 +395,7 @@ mod tests {
         let data = free_space_info(3, 0);
         let parsed = items::FreeSpaceInfo::parse(&data).unwrap();
         assert_eq!(parsed.extent_count, 3);
-        assert_eq!(parsed.flags, 0);
+        assert_eq!(parsed.flags, items::FreeSpaceInfoFlags::empty());
     }
 
     #[test]
