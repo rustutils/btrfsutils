@@ -1352,3 +1352,616 @@ pub fn parse_item_payload(key: &DiskKey, data: &[u8]) -> ItemPayload {
         _ => ItemPayload::Unknown(data.to_vec()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Enum round-trips ──────────────────────────────────────────────
+
+    #[test]
+    fn compression_type_round_trip() {
+        for v in 0..=3 {
+            let ct = CompressionType::from_raw(v);
+            assert_eq!(ct.to_raw(), v);
+        }
+        assert_eq!(CompressionType::from_raw(0), CompressionType::None);
+        assert_eq!(CompressionType::from_raw(1), CompressionType::Zlib);
+        assert_eq!(CompressionType::from_raw(2), CompressionType::Lzo);
+        assert_eq!(CompressionType::from_raw(3), CompressionType::Zstd);
+        assert_eq!(CompressionType::from_raw(99), CompressionType::Unknown(99));
+        assert_eq!(CompressionType::Unknown(99).to_raw(), 99);
+    }
+
+    #[test]
+    fn compression_type_names() {
+        assert_eq!(CompressionType::None.name(), "none");
+        assert_eq!(CompressionType::Zlib.name(), "zlib");
+        assert_eq!(CompressionType::Lzo.name(), "lzo");
+        assert_eq!(CompressionType::Zstd.name(), "zstd");
+        assert_eq!(CompressionType::Unknown(42).name(), "unknown");
+    }
+
+    #[test]
+    fn file_extent_type_round_trip() {
+        assert_eq!(FileExtentType::from_raw(0), FileExtentType::Inline);
+        assert_eq!(FileExtentType::from_raw(1), FileExtentType::Regular);
+        assert_eq!(FileExtentType::from_raw(2), FileExtentType::Prealloc);
+        assert_eq!(FileExtentType::from_raw(77), FileExtentType::Unknown(77));
+        for v in 0..=2 {
+            let ft = FileExtentType::from_raw(v);
+            assert_eq!(ft.to_raw(), v);
+        }
+        assert_eq!(FileExtentType::Unknown(77).to_raw(), 77);
+    }
+
+    #[test]
+    fn file_extent_type_names() {
+        assert_eq!(FileExtentType::Inline.name(), "inline");
+        assert_eq!(FileExtentType::Regular.name(), "regular");
+        assert_eq!(FileExtentType::Prealloc.name(), "prealloc");
+        assert_eq!(FileExtentType::Unknown(5).name(), "unknown");
+    }
+
+    #[test]
+    fn file_type_from_raw_all_variants() {
+        assert_eq!(FileType::from_raw(0), FileType::Unknown);
+        assert_eq!(FileType::from_raw(1), FileType::RegFile);
+        assert_eq!(FileType::from_raw(2), FileType::Dir);
+        assert_eq!(FileType::from_raw(3), FileType::Chrdev);
+        assert_eq!(FileType::from_raw(4), FileType::Blkdev);
+        assert_eq!(FileType::from_raw(5), FileType::Fifo);
+        assert_eq!(FileType::from_raw(6), FileType::Sock);
+        assert_eq!(FileType::from_raw(7), FileType::Symlink);
+        assert_eq!(FileType::from_raw(8), FileType::Xattr);
+        assert_eq!(FileType::from_raw(99), FileType::Other(99));
+    }
+
+    #[test]
+    fn file_type_names() {
+        assert_eq!(FileType::Unknown.name(), "UNKNOWN");
+        assert_eq!(FileType::RegFile.name(), "FILE");
+        assert_eq!(FileType::Dir.name(), "DIR");
+        assert_eq!(FileType::Chrdev.name(), "CHRDEV");
+        assert_eq!(FileType::Blkdev.name(), "BLKDEV");
+        assert_eq!(FileType::Fifo.name(), "FIFO");
+        assert_eq!(FileType::Sock.name(), "SOCK");
+        assert_eq!(FileType::Symlink.name(), "SYMLINK");
+        assert_eq!(FileType::Xattr.name(), "XATTR");
+        assert_eq!(FileType::Other(200).name(), "UNKNOWN");
+    }
+
+    // ── Simple struct parsers ─────────────────────────────────────────
+
+    #[test]
+    fn block_group_item_parse() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&1000u64.to_le_bytes()); // used
+        buf.extend_from_slice(&256u64.to_le_bytes()); // chunk_objectid
+        buf.extend_from_slice(
+            &(raw::BTRFS_BLOCK_GROUP_DATA as u64).to_le_bytes(),
+        );
+        let item = BlockGroupItem::parse(&buf).unwrap();
+        assert_eq!(item.used, 1000);
+        assert_eq!(item.chunk_objectid, 256);
+        assert_eq!(item.flags, raw::BTRFS_BLOCK_GROUP_DATA as u64);
+    }
+
+    #[test]
+    fn block_group_item_too_short() {
+        assert!(BlockGroupItem::parse(&[0; 23]).is_none());
+    }
+
+    #[test]
+    fn free_space_info_parse() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&42u32.to_le_bytes());
+        buf.extend_from_slice(&7u32.to_le_bytes());
+        let info = FreeSpaceInfo::parse(&buf).unwrap();
+        assert_eq!(info.extent_count, 42);
+        assert_eq!(info.flags, 7);
+    }
+
+    #[test]
+    fn free_space_info_too_short() {
+        assert!(FreeSpaceInfo::parse(&[0; 7]).is_none());
+    }
+
+    #[test]
+    fn dev_extent_parse() {
+        let size = mem::size_of::<raw::btrfs_dev_extent>();
+        let mut buf = vec![0u8; size];
+        buf[0..8].copy_from_slice(&3u64.to_le_bytes()); // chunk_tree
+        buf[8..16].copy_from_slice(&256u64.to_le_bytes()); // chunk_objectid
+        buf[16..24].copy_from_slice(&0x10000u64.to_le_bytes()); // chunk_offset
+        buf[24..32].copy_from_slice(&0x40000u64.to_le_bytes()); // length
+        // chunk_tree_uuid at offset 32
+        buf[32..48].copy_from_slice(&[0xAB; 16]);
+        let de = DevExtent::parse(&buf).unwrap();
+        assert_eq!(de.chunk_tree, 3);
+        assert_eq!(de.chunk_objectid, 256);
+        assert_eq!(de.chunk_offset, 0x10000);
+        assert_eq!(de.length, 0x40000);
+        assert_eq!(de.chunk_tree_uuid.as_bytes(), &[0xAB; 16]);
+    }
+
+    #[test]
+    fn dev_extent_too_short() {
+        let size = mem::size_of::<raw::btrfs_dev_extent>();
+        assert!(DevExtent::parse(&vec![0u8; size - 1]).is_none());
+    }
+
+    #[test]
+    fn extent_data_ref_parse() {
+        let size = mem::size_of::<raw::btrfs_extent_data_ref>();
+        let mut buf = vec![0u8; size];
+        buf[0..8].copy_from_slice(&5u64.to_le_bytes()); // root
+        buf[8..16].copy_from_slice(&256u64.to_le_bytes()); // objectid
+        buf[16..24].copy_from_slice(&0u64.to_le_bytes()); // offset
+        buf[24..28].copy_from_slice(&1u32.to_le_bytes()); // count
+        let edr = ExtentDataRef::parse(&buf).unwrap();
+        assert_eq!(edr.root, 5);
+        assert_eq!(edr.objectid, 256);
+        assert_eq!(edr.offset, 0);
+        assert_eq!(edr.count, 1);
+    }
+
+    #[test]
+    fn extent_data_ref_too_short() {
+        assert!(ExtentDataRef::parse(&[0; 27]).is_none());
+    }
+
+    #[test]
+    fn shared_data_ref_parse() {
+        let buf = 17u32.to_le_bytes();
+        let sdr = SharedDataRef::parse(&buf).unwrap();
+        assert_eq!(sdr.count, 17);
+    }
+
+    #[test]
+    fn shared_data_ref_too_short() {
+        assert!(SharedDataRef::parse(&[0; 3]).is_none());
+    }
+
+    #[test]
+    fn qgroup_info_parse() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&100u64.to_le_bytes()); // generation
+        buf.extend_from_slice(&4096u64.to_le_bytes()); // referenced
+        buf.extend_from_slice(&4096u64.to_le_bytes()); // referenced_compressed
+        buf.extend_from_slice(&2048u64.to_le_bytes()); // exclusive
+        buf.extend_from_slice(&2048u64.to_le_bytes()); // exclusive_compressed
+        let qi = QgroupInfo::parse(&buf).unwrap();
+        assert_eq!(qi.generation, 100);
+        assert_eq!(qi.referenced, 4096);
+        assert_eq!(qi.referenced_compressed, 4096);
+        assert_eq!(qi.exclusive, 2048);
+        assert_eq!(qi.exclusive_compressed, 2048);
+    }
+
+    #[test]
+    fn qgroup_info_too_short() {
+        assert!(QgroupInfo::parse(&[0; 39]).is_none());
+    }
+
+    #[test]
+    fn qgroup_limit_parse() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&3u64.to_le_bytes()); // flags
+        buf.extend_from_slice(&1_000_000u64.to_le_bytes()); // max_referenced
+        buf.extend_from_slice(&500_000u64.to_le_bytes()); // max_exclusive
+        buf.extend_from_slice(&0u64.to_le_bytes()); // rsv_referenced
+        buf.extend_from_slice(&0u64.to_le_bytes()); // rsv_exclusive
+        let ql = QgroupLimit::parse(&buf).unwrap();
+        assert_eq!(ql.flags, 3);
+        assert_eq!(ql.max_referenced, 1_000_000);
+        assert_eq!(ql.max_exclusive, 500_000);
+        assert_eq!(ql.rsv_referenced, 0);
+        assert_eq!(ql.rsv_exclusive, 0);
+    }
+
+    #[test]
+    fn qgroup_limit_too_short() {
+        assert!(QgroupLimit::parse(&[0; 39]).is_none());
+    }
+
+    #[test]
+    fn qgroup_status_parse_minimal() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&1u64.to_le_bytes()); // version
+        buf.extend_from_slice(&50u64.to_le_bytes()); // generation
+        buf.extend_from_slice(&2u64.to_le_bytes()); // flags
+        buf.extend_from_slice(&0u64.to_le_bytes()); // scan
+        let qs = QgroupStatus::parse(&buf).unwrap();
+        assert_eq!(qs.version, 1);
+        assert_eq!(qs.generation, 50);
+        assert_eq!(qs.flags, 2);
+        assert_eq!(qs.scan, 0);
+        assert!(qs.enable_gen.is_none());
+    }
+
+    #[test]
+    fn qgroup_status_parse_with_enable_gen() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&1u64.to_le_bytes());
+        buf.extend_from_slice(&50u64.to_le_bytes());
+        buf.extend_from_slice(&2u64.to_le_bytes());
+        buf.extend_from_slice(&0u64.to_le_bytes());
+        buf.extend_from_slice(&99u64.to_le_bytes()); // enable_gen
+        let qs = QgroupStatus::parse(&buf).unwrap();
+        assert_eq!(qs.enable_gen, Some(99));
+    }
+
+    #[test]
+    fn qgroup_status_too_short() {
+        assert!(QgroupStatus::parse(&[0; 31]).is_none());
+    }
+
+    #[test]
+    fn dev_replace_item_parse() {
+        let mut buf = vec![0u8; 80];
+        buf[0..8].copy_from_slice(&1u64.to_le_bytes()); // src_devid
+        buf[8..16].copy_from_slice(&0x1000u64.to_le_bytes()); // cursor_left
+        buf[16..24].copy_from_slice(&0x2000u64.to_le_bytes()); // cursor_right
+        buf[24..32].copy_from_slice(&0u64.to_le_bytes()); // replace_mode
+        buf[32..40].copy_from_slice(&2u64.to_le_bytes()); // replace_state
+        buf[40..48].copy_from_slice(&1700000000u64.to_le_bytes()); // time_started
+        buf[48..56].copy_from_slice(&1700000100u64.to_le_bytes()); // time_stopped
+        buf[56..64].copy_from_slice(&3u64.to_le_bytes()); // num_write_errors
+        buf[64..72].copy_from_slice(&5u64.to_le_bytes()); // num_uncorrectable_read_errors
+        let dri = DevReplaceItem::parse(&buf).unwrap();
+        assert_eq!(dri.src_devid, 1);
+        assert_eq!(dri.cursor_left, 0x1000);
+        assert_eq!(dri.cursor_right, 0x2000);
+        assert_eq!(dri.replace_state, 2);
+        assert_eq!(dri.time_started, 1700000000);
+        assert_eq!(dri.time_stopped, 1700000100);
+        assert_eq!(dri.num_write_errors, 3);
+        assert_eq!(dri.num_uncorrectable_read_errors, 5);
+    }
+
+    #[test]
+    fn dev_replace_item_too_short() {
+        assert!(DevReplaceItem::parse(&[0; 79]).is_none());
+    }
+
+    #[test]
+    fn raid_stripe_item_parse() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&1u64.to_le_bytes()); // encoding
+        // stripe 1
+        buf.extend_from_slice(&1u64.to_le_bytes()); // devid
+        buf.extend_from_slice(&0x10000u64.to_le_bytes()); // physical
+        // stripe 2
+        buf.extend_from_slice(&2u64.to_le_bytes());
+        buf.extend_from_slice(&0x20000u64.to_le_bytes());
+        let rsi = RaidStripeItem::parse(&buf).unwrap();
+        assert_eq!(rsi.encoding, 1);
+        assert_eq!(rsi.stripes.len(), 2);
+        assert_eq!(rsi.stripes[0].devid, 1);
+        assert_eq!(rsi.stripes[0].physical, 0x10000);
+        assert_eq!(rsi.stripes[1].devid, 2);
+        assert_eq!(rsi.stripes[1].physical, 0x20000);
+    }
+
+    #[test]
+    fn raid_stripe_item_no_stripes() {
+        let buf = 42u64.to_le_bytes();
+        let rsi = RaidStripeItem::parse(&buf).unwrap();
+        assert_eq!(rsi.encoding, 42);
+        assert!(rsi.stripes.is_empty());
+    }
+
+    #[test]
+    fn raid_stripe_item_too_short() {
+        assert!(RaidStripeItem::parse(&[0; 7]).is_none());
+    }
+
+    // ── Variable-length parsers ───────────────────────────────────────
+
+    #[test]
+    fn inode_ref_parse_single() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&42u64.to_le_bytes()); // index
+        buf.extend_from_slice(&4u16.to_le_bytes()); // name_len
+        buf.extend_from_slice(b"test");
+        let refs = InodeRef::parse_all(&buf);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].index, 42);
+        assert_eq!(refs[0].name, b"test");
+    }
+
+    #[test]
+    fn inode_ref_parse_multiple() {
+        let mut buf = Vec::new();
+        // entry 1
+        buf.extend_from_slice(&1u64.to_le_bytes());
+        buf.extend_from_slice(&3u16.to_le_bytes());
+        buf.extend_from_slice(b"abc");
+        // entry 2
+        buf.extend_from_slice(&2u64.to_le_bytes());
+        buf.extend_from_slice(&2u16.to_le_bytes());
+        buf.extend_from_slice(b"xy");
+        let refs = InodeRef::parse_all(&buf);
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].index, 1);
+        assert_eq!(refs[0].name, b"abc");
+        assert_eq!(refs[1].index, 2);
+        assert_eq!(refs[1].name, b"xy");
+    }
+
+    #[test]
+    fn inode_ref_parse_truncated() {
+        // Header present but name extends past buffer end.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&1u64.to_le_bytes());
+        buf.extend_from_slice(&10u16.to_le_bytes()); // claims 10 bytes
+        buf.extend_from_slice(b"abc"); // only 3 available
+        let refs = InodeRef::parse_all(&buf);
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn inode_extref_parse_single() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&256u64.to_le_bytes()); // parent
+        buf.extend_from_slice(&3u64.to_le_bytes()); // index
+        buf.extend_from_slice(&5u16.to_le_bytes()); // name_len
+        buf.extend_from_slice(b"hello");
+        let refs = InodeExtref::parse_all(&buf);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].parent, 256);
+        assert_eq!(refs[0].index, 3);
+        assert_eq!(refs[0].name, b"hello");
+    }
+
+    #[test]
+    fn dir_item_parse_single() {
+        let dir_item_size = mem::size_of::<raw::btrfs_dir_item>();
+        let mut buf = vec![0u8; dir_item_size];
+        // location: DiskKey at offset 0 (17 bytes: u64 objectid + u8 type + u64 offset)
+        buf[0..8].copy_from_slice(&256u64.to_le_bytes()); // objectid
+        buf[8] = 1; // key type
+        buf[9..17].copy_from_slice(&0u64.to_le_bytes()); // offset
+        // transid at offset 17
+        buf[17..25].copy_from_slice(&100u64.to_le_bytes());
+        // data_len at offset 25
+        buf[25..27].copy_from_slice(&0u16.to_le_bytes());
+        // name_len at offset 27
+        buf[27..29].copy_from_slice(&4u16.to_le_bytes());
+        // file_type at offset 29
+        buf[29] = 1; // FT_REG_FILE
+        // Append name
+        buf.extend_from_slice(b"file");
+        let items = DirItem::parse_all(&buf);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].transid, 100);
+        assert_eq!(items[0].file_type, FileType::RegFile);
+        assert_eq!(items[0].name, b"file");
+        assert!(items[0].data.is_empty());
+    }
+
+    #[test]
+    fn root_ref_parse() {
+        let hdr_size = mem::size_of::<raw::btrfs_root_ref>();
+        let mut buf = vec![0u8; hdr_size];
+        buf[0..8].copy_from_slice(&256u64.to_le_bytes()); // dirid
+        buf[8..16].copy_from_slice(&7u64.to_le_bytes()); // sequence
+        buf[16..18].copy_from_slice(&6u16.to_le_bytes()); // name_len
+        buf.extend_from_slice(b"subvol");
+        let rr = RootRef::parse(&buf).unwrap();
+        assert_eq!(rr.dirid, 256);
+        assert_eq!(rr.sequence, 7);
+        assert_eq!(rr.name, b"subvol");
+    }
+
+    #[test]
+    fn root_ref_too_short() {
+        let hdr_size = mem::size_of::<raw::btrfs_root_ref>();
+        assert!(RootRef::parse(&vec![0u8; hdr_size - 1]).is_none());
+    }
+
+    #[test]
+    fn uuid_item_parse() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&256u64.to_le_bytes());
+        buf.extend_from_slice(&257u64.to_le_bytes());
+        buf.extend_from_slice(&258u64.to_le_bytes());
+        let ui = UuidItem::parse(&buf);
+        assert_eq!(ui.subvol_ids, vec![256, 257, 258]);
+    }
+
+    #[test]
+    fn uuid_item_empty() {
+        let ui = UuidItem::parse(&[]);
+        assert!(ui.subvol_ids.is_empty());
+    }
+
+    #[test]
+    fn dev_stats_parse() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&1u64.to_le_bytes()); // write_errs
+        buf.extend_from_slice(&2u64.to_le_bytes()); // read_errs
+        buf.extend_from_slice(&3u64.to_le_bytes()); // flush_errs
+        buf.extend_from_slice(&4u64.to_le_bytes()); // corruption_errs
+        buf.extend_from_slice(&5u64.to_le_bytes()); // generation
+        let ds = DevStats::parse(&buf);
+        assert_eq!(ds.values.len(), 5);
+        assert_eq!(ds.values[0], ("write_errs".to_string(), 1));
+        assert_eq!(ds.values[1], ("read_errs".to_string(), 2));
+        assert_eq!(ds.values[2], ("flush_errs".to_string(), 3));
+        assert_eq!(ds.values[3], ("corruption_errs".to_string(), 4));
+        assert_eq!(ds.values[4], ("generation".to_string(), 5));
+    }
+
+    #[test]
+    fn dev_stats_partial() {
+        // Only 2 values available.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&10u64.to_le_bytes());
+        buf.extend_from_slice(&20u64.to_le_bytes());
+        let ds = DevStats::parse(&buf);
+        assert_eq!(ds.values.len(), 2);
+        assert_eq!(ds.values[0].1, 10);
+        assert_eq!(ds.values[1].1, 20);
+    }
+
+    // ── FileExtentItem ────────────────────────────────────────────────
+
+    #[test]
+    fn file_extent_item_inline() {
+        let mut buf = vec![0u8; 21 + 10]; // 21 header + 10 inline data
+        buf[0..8].copy_from_slice(&7u64.to_le_bytes()); // generation
+        buf[8..16].copy_from_slice(&10u64.to_le_bytes()); // ram_bytes
+        buf[16] = 0; // compression = none
+        // bytes 17-19 are encryption/other_encoding (unused)
+        buf[20] = 0; // extent_type = inline
+        buf[21..31].copy_from_slice(&[0xAA; 10]); // inline data
+        let fei = FileExtentItem::parse(&buf).unwrap();
+        assert_eq!(fei.generation, 7);
+        assert_eq!(fei.ram_bytes, 10);
+        assert_eq!(fei.compression, CompressionType::None);
+        assert_eq!(fei.extent_type, FileExtentType::Inline);
+        match fei.body {
+            FileExtentBody::Inline { inline_size } => {
+                assert_eq!(inline_size, 10)
+            }
+            _ => panic!("expected inline body"),
+        }
+    }
+
+    #[test]
+    fn file_extent_item_regular() {
+        let mut buf = vec![0u8; 53];
+        buf[0..8].copy_from_slice(&100u64.to_le_bytes()); // generation
+        buf[8..16].copy_from_slice(&4096u64.to_le_bytes()); // ram_bytes
+        buf[16] = 1; // compression = zlib
+        buf[20] = 1; // extent_type = regular
+        buf[21..29].copy_from_slice(&0x100000u64.to_le_bytes()); // disk_bytenr
+        buf[29..37].copy_from_slice(&4096u64.to_le_bytes()); // disk_num_bytes
+        buf[37..45].copy_from_slice(&0u64.to_le_bytes()); // offset
+        buf[45..53].copy_from_slice(&4096u64.to_le_bytes()); // num_bytes
+        let fei = FileExtentItem::parse(&buf).unwrap();
+        assert_eq!(fei.generation, 100);
+        assert_eq!(fei.compression, CompressionType::Zlib);
+        assert_eq!(fei.extent_type, FileExtentType::Regular);
+        match fei.body {
+            FileExtentBody::Regular {
+                disk_bytenr,
+                disk_num_bytes,
+                offset,
+                num_bytes,
+            } => {
+                assert_eq!(disk_bytenr, 0x100000);
+                assert_eq!(disk_num_bytes, 4096);
+                assert_eq!(offset, 0);
+                assert_eq!(num_bytes, 4096);
+            }
+            _ => panic!("expected regular body"),
+        }
+    }
+
+    #[test]
+    fn file_extent_item_too_short() {
+        assert!(FileExtentItem::parse(&[0; 20]).is_none());
+    }
+
+    #[test]
+    fn file_extent_item_regular_too_short() {
+        // 21 bytes is enough for inline but not for regular.
+        let mut buf = vec![0u8; 21];
+        buf[20] = 1; // extent_type = regular
+        assert!(FileExtentItem::parse(&buf).is_none());
+    }
+
+    // ── Helper functions ──────────────────────────────────────────────
+
+    #[test]
+    fn raw_crc32c_known_value() {
+        // The raw CRC32C of an empty buffer with seed 0 should be 0.
+        assert_eq!(raw_crc32c(0, &[]), 0);
+        // Verify that raw_crc32c differs from the standard CRC32C.
+        // Standard CRC32C of "123456789" is 0xE3069283.
+        let raw = raw_crc32c(0, b"123456789");
+        let standard = crc32c::crc32c(b"123456789");
+        assert_eq!(standard, 0xE3069283);
+        assert_ne!(raw, standard);
+        // raw_crc32c is deterministic.
+        assert_eq!(raw, raw_crc32c(0, b"123456789"));
+        // Chaining: raw_crc32c with a nonzero seed produces different results.
+        let chained = raw_crc32c(raw, b"more");
+        assert_ne!(chained, raw);
+    }
+
+    #[test]
+    fn extent_data_ref_hash_deterministic() {
+        let h1 = extent_data_ref_hash(5, 256, 0);
+        let h2 = extent_data_ref_hash(5, 256, 0);
+        assert_eq!(h1, h2);
+        // Different inputs produce different hashes.
+        let h3 = extent_data_ref_hash(5, 256, 4096);
+        assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn format_chunk_type_data_single() {
+        let flags = raw::BTRFS_BLOCK_GROUP_DATA as u64;
+        assert_eq!(format_chunk_type(flags), "DATA|single");
+    }
+
+    #[test]
+    fn format_chunk_type_metadata_dup() {
+        let flags = raw::BTRFS_BLOCK_GROUP_METADATA as u64
+            | raw::BTRFS_BLOCK_GROUP_DUP as u64;
+        assert_eq!(format_chunk_type(flags), "METADATA|DUP");
+    }
+
+    #[test]
+    fn format_chunk_type_system_raid1() {
+        let flags = raw::BTRFS_BLOCK_GROUP_SYSTEM as u64
+            | raw::BTRFS_BLOCK_GROUP_RAID1 as u64;
+        assert_eq!(format_chunk_type(flags), "SYSTEM|RAID1");
+    }
+
+    #[test]
+    fn format_chunk_type_data_metadata() {
+        let flags = raw::BTRFS_BLOCK_GROUP_DATA as u64
+            | raw::BTRFS_BLOCK_GROUP_METADATA as u64;
+        assert_eq!(format_chunk_type(flags), "DATA|METADATA|single");
+    }
+
+    #[test]
+    fn format_chunk_type_no_type_bits() {
+        // Profile only, no DATA/SYSTEM/METADATA bit.
+        assert_eq!(format_chunk_type(0), "single");
+        assert_eq!(
+            format_chunk_type(raw::BTRFS_BLOCK_GROUP_RAID0 as u64),
+            "RAID0"
+        );
+    }
+
+    #[test]
+    fn format_chunk_type_all_profiles() {
+        let data = raw::BTRFS_BLOCK_GROUP_DATA as u64;
+        assert_eq!(
+            format_chunk_type(data | raw::BTRFS_BLOCK_GROUP_RAID5 as u64),
+            "DATA|RAID5"
+        );
+        assert_eq!(
+            format_chunk_type(data | raw::BTRFS_BLOCK_GROUP_RAID6 as u64),
+            "DATA|RAID6"
+        );
+        assert_eq!(
+            format_chunk_type(data | raw::BTRFS_BLOCK_GROUP_RAID10 as u64),
+            "DATA|RAID10"
+        );
+        assert_eq!(
+            format_chunk_type(data | raw::BTRFS_BLOCK_GROUP_RAID1C3 as u64),
+            "DATA|RAID1C3"
+        );
+        assert_eq!(
+            format_chunk_type(data | raw::BTRFS_BLOCK_GROUP_RAID1C4 as u64),
+            "DATA|RAID1C4"
+        );
+    }
+}
