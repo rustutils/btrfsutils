@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "btrfs-disk",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-disk"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bindgen",
  "crc32c",
@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-mangen"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "btrfs-cli",
  "btrfs-mkfs",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-mkfs"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "blake2",
@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-stream"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "btrfs-uapi",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-uapi"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bindgen",
  "bitflags",
