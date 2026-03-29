@@ -10,8 +10,78 @@ use crate::{
     tree::{DiskKey, ObjectId},
     util::{read_le_u16, read_le_u32, read_le_u64, read_uuid},
 };
-use std::mem;
+use std::{fmt, mem};
 use uuid::Uuid;
+
+bitflags::bitflags! {
+    /// Block group / chunk type flags: the combination of chunk type
+    /// (DATA, SYSTEM, METADATA) and RAID profile stored in on-disk chunk
+    /// items and block group items.
+    ///
+    /// Display produces the dump-tree format: `DATA|DUP`, `METADATA|single`, etc.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct BlockGroupFlags: u64 {
+        const DATA     = raw::BTRFS_BLOCK_GROUP_DATA as u64;
+        const SYSTEM   = raw::BTRFS_BLOCK_GROUP_SYSTEM as u64;
+        const METADATA = raw::BTRFS_BLOCK_GROUP_METADATA as u64;
+        const RAID0    = raw::BTRFS_BLOCK_GROUP_RAID0 as u64;
+        const RAID1    = raw::BTRFS_BLOCK_GROUP_RAID1 as u64;
+        const DUP      = raw::BTRFS_BLOCK_GROUP_DUP as u64;
+        const RAID10   = raw::BTRFS_BLOCK_GROUP_RAID10 as u64;
+        const RAID5    = raw::BTRFS_BLOCK_GROUP_RAID5 as u64;
+        const RAID6    = raw::BTRFS_BLOCK_GROUP_RAID6 as u64;
+        const RAID1C3  = raw::BTRFS_BLOCK_GROUP_RAID1C3 as u64;
+        const RAID1C4  = raw::BTRFS_BLOCK_GROUP_RAID1C4 as u64;
+    }
+}
+
+impl BlockGroupFlags {
+    /// Returns the RAID profile name, or `"single"` when no profile bit is set.
+    pub fn profile_name(self) -> &'static str {
+        let profile = self
+            & (Self::RAID0
+                | Self::RAID1
+                | Self::DUP
+                | Self::RAID10
+                | Self::RAID5
+                | Self::RAID6
+                | Self::RAID1C3
+                | Self::RAID1C4);
+        match profile {
+            p if p == Self::RAID0 => "RAID0",
+            p if p == Self::RAID1 => "RAID1",
+            p if p == Self::DUP => "DUP",
+            p if p == Self::RAID10 => "RAID10",
+            p if p == Self::RAID5 => "RAID5",
+            p if p == Self::RAID6 => "RAID6",
+            p if p == Self::RAID1C3 => "RAID1C3",
+            p if p == Self::RAID1C4 => "RAID1C4",
+            _ => "single",
+        }
+    }
+}
+
+impl fmt::Display for BlockGroupFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut parts: Vec<&str> = Vec::new();
+        if self.contains(Self::DATA) {
+            parts.push("DATA");
+        }
+        if self.contains(Self::SYSTEM) {
+            parts.push("SYSTEM");
+        }
+        if self.contains(Self::METADATA) {
+            parts.push("METADATA");
+        }
+        let profile = self.profile_name();
+        if parts.is_empty() {
+            write!(f, "{profile}")
+        } else {
+            parts.push(profile);
+            write!(f, "{}", parts.join("|"))
+        }
+    }
+}
 
 /// Btrfs timestamp (seconds + nanoseconds since epoch).
 #[derive(Debug, Clone, Copy)]
@@ -798,7 +868,7 @@ impl SharedDataRef {
 pub struct BlockGroupItem {
     pub used: u64,
     pub chunk_objectid: u64,
-    pub flags: u64,
+    pub flags: BlockGroupFlags,
 }
 
 impl BlockGroupItem {
@@ -809,64 +879,18 @@ impl BlockGroupItem {
         Some(Self {
             used: read_le_u64(data, 0),
             chunk_objectid: read_le_u64(data, 8),
-            flags: read_le_u64(data, 16),
+            flags: BlockGroupFlags::from_bits_truncate(read_le_u64(data, 16)),
         })
     }
 }
 
-/// Format a block group / chunk type flags value as a human-readable string.
-///
-/// The type field is split into a type part (DATA, SYSTEM, METADATA) and a
-/// profile part (RAID0, RAID1, DUP, single, etc.).
-pub fn format_chunk_type(flags: u64) -> String {
-    let mut type_names = Vec::new();
-    if flags & u64::from(raw::BTRFS_BLOCK_GROUP_DATA) != 0 {
-        type_names.push("DATA");
-    }
-    if flags & u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM) != 0 {
-        type_names.push("SYSTEM");
-    }
-    if flags & u64::from(raw::BTRFS_BLOCK_GROUP_METADATA) != 0 {
-        type_names.push("METADATA");
-    }
-
-    let profile = flags & u64::from(raw::BTRFS_BLOCK_GROUP_PROFILE_MASK);
-    let profile_name = if profile == 0 {
-        "single"
-    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID0) != 0 {
-        "RAID0"
-    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID1) != 0 {
-        "RAID1"
-    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_DUP) != 0 {
-        "DUP"
-    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID10) != 0 {
-        "RAID10"
-    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID5) != 0 {
-        "RAID5"
-    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID6) != 0 {
-        "RAID6"
-    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID1C3) != 0 {
-        "RAID1C3"
-    } else if profile & u64::from(raw::BTRFS_BLOCK_GROUP_RAID1C4) != 0 {
-        "RAID1C4"
-    } else {
-        "unknown"
-    };
-
-    if type_names.is_empty() {
-        profile_name.to_string()
-    } else {
-        type_names.push(profile_name);
-        type_names.join("|")
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct ChunkItem {
     pub length: u64,
     pub owner: u64,
     pub stripe_len: u64,
-    pub chunk_type: u64,
+    pub chunk_type: BlockGroupFlags,
     pub io_align: u32,
     pub io_width: u32,
     pub sector_size: u32,
@@ -906,7 +930,7 @@ impl ChunkItem {
             length: read_le_u64(data, 0),
             owner: read_le_u64(data, 8),
             stripe_len: read_le_u64(data, 16),
-            chunk_type: read_le_u64(data, 24),
+            chunk_type: BlockGroupFlags::from_bits_truncate(read_le_u64(data, 24)),
             io_align: read_le_u32(data, 32),
             io_width: read_le_u32(data, 36),
             sector_size: read_le_u32(data, 40),
@@ -1446,7 +1470,7 @@ mod tests {
         let item = BlockGroupItem::parse(&buf).unwrap();
         assert_eq!(item.used, 1000);
         assert_eq!(item.chunk_objectid, 256);
-        assert_eq!(item.flags, raw::BTRFS_BLOCK_GROUP_DATA as u64);
+        assert_eq!(item.flags, BlockGroupFlags::DATA);
     }
 
     #[test]
@@ -1906,63 +1930,51 @@ mod tests {
     }
 
     #[test]
-    fn format_chunk_type_data_single() {
-        let flags = raw::BTRFS_BLOCK_GROUP_DATA as u64;
-        assert_eq!(format_chunk_type(flags), "DATA|single");
+    fn block_group_flags_data_single() {
+        let flags = BlockGroupFlags::DATA;
+        assert_eq!(format!("{flags}"), "DATA|single");
     }
 
     #[test]
-    fn format_chunk_type_metadata_dup() {
-        let flags = raw::BTRFS_BLOCK_GROUP_METADATA as u64
-            | raw::BTRFS_BLOCK_GROUP_DUP as u64;
-        assert_eq!(format_chunk_type(flags), "METADATA|DUP");
+    fn block_group_flags_metadata_dup() {
+        let flags = BlockGroupFlags::METADATA | BlockGroupFlags::DUP;
+        assert_eq!(format!("{flags}"), "METADATA|DUP");
     }
 
     #[test]
-    fn format_chunk_type_system_raid1() {
-        let flags = raw::BTRFS_BLOCK_GROUP_SYSTEM as u64
-            | raw::BTRFS_BLOCK_GROUP_RAID1 as u64;
-        assert_eq!(format_chunk_type(flags), "SYSTEM|RAID1");
+    fn block_group_flags_system_raid1() {
+        let flags = BlockGroupFlags::SYSTEM | BlockGroupFlags::RAID1;
+        assert_eq!(format!("{flags}"), "SYSTEM|RAID1");
     }
 
     #[test]
-    fn format_chunk_type_data_metadata() {
-        let flags = raw::BTRFS_BLOCK_GROUP_DATA as u64
-            | raw::BTRFS_BLOCK_GROUP_METADATA as u64;
-        assert_eq!(format_chunk_type(flags), "DATA|METADATA|single");
+    fn block_group_flags_data_metadata() {
+        let flags = BlockGroupFlags::DATA | BlockGroupFlags::METADATA;
+        assert_eq!(format!("{flags}"), "DATA|METADATA|single");
     }
 
     #[test]
-    fn format_chunk_type_no_type_bits() {
+    fn block_group_flags_no_type_bits() {
         // Profile only, no DATA/SYSTEM/METADATA bit.
-        assert_eq!(format_chunk_type(0), "single");
-        assert_eq!(
-            format_chunk_type(raw::BTRFS_BLOCK_GROUP_RAID0 as u64),
-            "RAID0"
-        );
+        assert_eq!(format!("{}", BlockGroupFlags::empty()), "single");
+        assert_eq!(format!("{}", BlockGroupFlags::RAID0), "RAID0");
     }
 
     #[test]
-    fn format_chunk_type_all_profiles() {
-        let data = raw::BTRFS_BLOCK_GROUP_DATA as u64;
+    fn block_group_flags_all_profiles() {
+        let data = BlockGroupFlags::DATA;
+        assert_eq!(format!("{}", data | BlockGroupFlags::RAID5), "DATA|RAID5");
+        assert_eq!(format!("{}", data | BlockGroupFlags::RAID6), "DATA|RAID6");
         assert_eq!(
-            format_chunk_type(data | raw::BTRFS_BLOCK_GROUP_RAID5 as u64),
-            "DATA|RAID5"
-        );
-        assert_eq!(
-            format_chunk_type(data | raw::BTRFS_BLOCK_GROUP_RAID6 as u64),
-            "DATA|RAID6"
-        );
-        assert_eq!(
-            format_chunk_type(data | raw::BTRFS_BLOCK_GROUP_RAID10 as u64),
+            format!("{}", data | BlockGroupFlags::RAID10),
             "DATA|RAID10"
         );
         assert_eq!(
-            format_chunk_type(data | raw::BTRFS_BLOCK_GROUP_RAID1C3 as u64),
+            format!("{}", data | BlockGroupFlags::RAID1C3),
             "DATA|RAID1C3"
         );
         assert_eq!(
-            format_chunk_type(data | raw::BTRFS_BLOCK_GROUP_RAID1C4 as u64),
+            format!("{}", data | BlockGroupFlags::RAID1C4),
             "DATA|RAID1C4"
         );
     }

@@ -320,7 +320,7 @@ mod tests {
             parsed.chunk_objectid,
             raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64
         );
-        assert_eq!(parsed.flags, raw::BTRFS_BLOCK_GROUP_SYSTEM as u64);
+        assert_eq!(parsed.flags, items::BlockGroupFlags::SYSTEM);
     }
 
     #[test]
@@ -360,7 +360,7 @@ mod tests {
         let parsed = items::ChunkItem::parse(&data).unwrap();
         assert_eq!(parsed.length, 4 * 1024 * 1024);
         assert_eq!(parsed.owner, raw::BTRFS_EXTENT_TREE_OBJECTID as u64);
-        assert_eq!(parsed.chunk_type, raw::BTRFS_BLOCK_GROUP_SYSTEM as u64);
+        assert_eq!(parsed.chunk_type, items::BlockGroupFlags::SYSTEM);
         assert_eq!(parsed.num_stripes, 1);
         assert_eq!(parsed.stripes.len(), 1);
         assert_eq!(parsed.stripes[0].devid, 1);

@@ -431,7 +431,7 @@ fn print_payload(
                 "\t\tblock group used {} chunk_objectid {} flags {}",
                 v.used,
                 v.chunk_objectid,
-                items::format_chunk_type(v.flags)
+                v.flags
             );
         }
         ItemPayload::FreeSpaceInfo(v) => {
@@ -448,7 +448,7 @@ fn print_payload(
                 v.length,
                 v.owner,
                 v.stripe_len,
-                items::format_chunk_type(v.chunk_type)
+                v.chunk_type
             );
             println!(
                 "\t\tio_align {} io_width {} sector_size {}",
