@@ -89,6 +89,82 @@ impl BlockLayout {
     }
 }
 
+/// 64 KiB -- default stripe length for btrfs chunks.
+/// From kernel-shared/volumes.h: BTRFS_STRIPE_LEN
+pub const STRIPE_LEN: u64 = 64 * 1024;
+
+/// Physical offset where non-system chunks start (after system group).
+const CHUNK_START: u64 = SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
+
+/// Computed layout for metadata (DUP) and data (SINGLE) block groups.
+pub struct ChunkLayout {
+    /// Logical address of the metadata chunk.
+    pub meta_logical: u64,
+    /// Logical size of the metadata chunk (one stripe).
+    pub meta_size: u64,
+    /// Physical offset of DUP stripe 0.
+    pub meta_phys_0: u64,
+    /// Physical offset of DUP stripe 1.
+    pub meta_phys_1: u64,
+    /// Logical address of the data chunk.
+    pub data_logical: u64,
+    /// Logical and physical size of the data chunk (SINGLE).
+    pub data_size: u64,
+    /// Physical offset of the data chunk.
+    pub data_phys: u64,
+}
+
+impl ChunkLayout {
+    /// Compute metadata and data chunk placement for the given device size.
+    ///
+    /// Returns `None` if the device is too small to fit even the minimum
+    /// metadata DUP (2 x 32 MiB) plus minimum data SINGLE (64 MiB).
+    pub fn new(total_bytes: u64) -> Option<Self> {
+        // Meta stripe size: min(256 MiB, total/10), minimum 32 MiB, round down to STRIPE_LEN.
+        let meta_size =
+            (total_bytes / 10).clamp(32 * 1024 * 1024, 256 * 1024 * 1024);
+        let meta_size = meta_size / STRIPE_LEN * STRIPE_LEN;
+
+        // Data size: min(1 GiB, total/10), minimum 64 MiB, round down to STRIPE_LEN.
+        let data_size =
+            (total_bytes / 10).clamp(64 * 1024 * 1024, 1024 * 1024 * 1024);
+        let data_size = data_size / STRIPE_LEN * STRIPE_LEN;
+
+        // DUP: two physical stripes, sequential after system group.
+        let meta_phys_0 = CHUNK_START;
+        let meta_phys_1 = CHUNK_START + meta_size;
+
+        // Data starts after both DUP stripes.
+        let data_phys = CHUNK_START + 2 * meta_size;
+
+        // Validate everything fits.
+        if data_phys + data_size > total_bytes {
+            return None;
+        }
+
+        // Logical addresses: metadata follows system group logically,
+        // data follows metadata. These must not overlap with the system
+        // group logical range [SYSTEM_GROUP_OFFSET, +SYSTEM_GROUP_SIZE).
+        let meta_logical = CHUNK_START;
+        let data_logical = CHUNK_START + meta_size;
+
+        Some(ChunkLayout {
+            meta_logical,
+            meta_size,
+            meta_phys_0,
+            meta_phys_1,
+            data_logical,
+            data_size,
+            data_phys,
+        })
+    }
+
+    /// Total physical bytes used by all chunks (system + metadata DUP + data).
+    pub fn dev_bytes_used(&self) -> u64 {
+        SYSTEM_GROUP_SIZE + 2 * self.meta_size + self.data_size
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,5 +186,52 @@ mod tests {
     fn total_used() {
         let layout = BlockLayout::new(16384);
         assert_eq!(layout.total_used(), 8 * 16384);
+    }
+
+    #[test]
+    fn chunk_layout_256m() {
+        // 256 MiB device: meta = min(256M, 25.6M) -> 32M (minimum), data = min(1G, 25.6M) -> 64M
+        let cl = ChunkLayout::new(256 * 1024 * 1024).unwrap();
+        assert_eq!(cl.meta_size, 32 * 1024 * 1024);
+        assert_eq!(cl.data_size, 64 * 1024 * 1024);
+        assert_eq!(cl.meta_phys_0, CHUNK_START);
+        assert_eq!(cl.meta_phys_1, CHUNK_START + 32 * 1024 * 1024);
+        assert_eq!(cl.data_phys, CHUNK_START + 64 * 1024 * 1024);
+        assert_eq!(cl.meta_logical, CHUNK_START);
+        assert_eq!(cl.data_logical, CHUNK_START + 32 * 1024 * 1024);
+    }
+
+    #[test]
+    fn chunk_layout_1g() {
+        // 1 GiB: meta = min(256M, 102.4M) -> 102M (rounded), data = min(1G, 102.4M) -> 102M
+        let cl = ChunkLayout::new(1024 * 1024 * 1024).unwrap();
+        let expected_stripe =
+            (1024 * 1024 * 1024 / 10) / STRIPE_LEN * STRIPE_LEN;
+        assert_eq!(cl.meta_size, expected_stripe);
+        assert_eq!(cl.data_size, expected_stripe);
+    }
+
+    #[test]
+    fn chunk_layout_10g() {
+        // 10 GiB: meta = min(256M, 1G) -> 256M, data = min(1G, 1G) -> 1G
+        let cl = ChunkLayout::new(10 * 1024 * 1024 * 1024).unwrap();
+        assert_eq!(cl.meta_size, 256 * 1024 * 1024);
+        assert_eq!(cl.data_size, 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn chunk_layout_too_small() {
+        // 100 MiB: needs 5M + 2*32M + 64M = 133M, doesn't fit
+        assert!(ChunkLayout::new(100 * 1024 * 1024).is_none());
+    }
+
+    #[test]
+    fn chunk_layout_dev_bytes_used() {
+        let cl = ChunkLayout::new(256 * 1024 * 1024).unwrap();
+        // system(4M) + 2*meta(32M) + data(64M) = 132M
+        assert_eq!(
+            cl.dev_bytes_used(),
+            SYSTEM_GROUP_SIZE + 2 * 32 * 1024 * 1024 + 64 * 1024 * 1024
+        );
     }
 }

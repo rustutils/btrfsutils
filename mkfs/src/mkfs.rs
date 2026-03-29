@@ -5,7 +5,10 @@
 
 use crate::{
     items,
-    layout::{BlockLayout, SYSTEM_GROUP_OFFSET, SYSTEM_GROUP_SIZE, TreeId},
+    layout::{
+        BlockLayout, ChunkLayout, SYSTEM_GROUP_OFFSET, SYSTEM_GROUP_SIZE,
+        TreeId,
+    },
     superblock::SuperblockBuilder,
     tree::{Key, LeafBuilder, LeafHeader},
     write::{self, SUPER_INFO_OFFSET},
@@ -164,14 +167,15 @@ impl MkfsConfig {
 
 /// Create a btrfs filesystem on the given device or image file.
 pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
-    let min_size = SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
-    if cfg.total_bytes < min_size {
+    let chunks = ChunkLayout::new(cfg.total_bytes);
+    if chunks.is_none() {
         bail!(
             "device too small: {} bytes, need at least {} bytes",
             cfg.total_bytes,
-            min_size
+            minimum_device_size(cfg.nodesize)
         );
     }
+    let chunks = chunks.unwrap();
 
     let file = OpenOptions::new()
         .read(true)
@@ -192,12 +196,13 @@ pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
 
     // Build all 8 tree blocks.
     let root_tree = build_root_tree(cfg, &layout, &leaf_header)?;
-    let extent_tree = build_extent_tree(cfg, &layout, &leaf_header)?;
-    let chunk_tree = build_chunk_tree(cfg, &layout, &leaf_header)?;
-    let dev_tree = build_dev_tree(cfg, &layout, &leaf_header)?;
+    let extent_tree = build_extent_tree(cfg, &layout, &chunks, &leaf_header)?;
+    let chunk_tree = build_chunk_tree(cfg, &layout, &chunks, &leaf_header)?;
+    let dev_tree = build_dev_tree(cfg, &chunks, &leaf_header)?;
     let fs_tree = build_root_dir_tree(cfg, &leaf_header(TreeId::Fs))?;
     let csum_tree = build_empty_tree(cfg.nodesize, &leaf_header(TreeId::Csum));
-    let free_space_tree = build_free_space_tree(cfg, &layout, &leaf_header)?;
+    let free_space_tree =
+        build_free_space_tree(cfg, &layout, &chunks, &leaf_header)?;
     let data_reloc_tree =
         build_root_dir_tree(cfg, &leaf_header(TreeId::DataReloc))?;
 
@@ -222,7 +227,7 @@ pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
     }
 
     // Build and write the superblock.
-    let superblock = build_superblock(cfg, &layout)?;
+    let superblock = build_superblock(cfg, &layout, &chunks)?;
     write::pwrite_all(&file, &superblock, SUPER_INFO_OFFSET)
         .context("failed to write superblock")?;
 
@@ -324,41 +329,44 @@ fn build_root_tree(
 fn build_extent_tree(
     cfg: &MkfsConfig,
     layout: &BlockLayout,
+    chunks: &ChunkLayout,
     leaf_header: &dyn Fn(TreeId) -> LeafHeader,
 ) -> Result<Vec<u8>> {
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Extent));
     let generation = 1u64;
     let skinny = cfg.skinny_metadata();
+    let add_block_group = !cfg.has_block_group_tree();
 
     // Items must be sorted by key. The extent tree contains:
     // 1. For each tree block: METADATA_ITEM + TREE_BLOCK_REF
-    // 2. BLOCK_GROUP_ITEM for the system chunk (if not using block-group-tree)
+    // 2. BLOCK_GROUP_ITEMs for system, metadata, and data chunks
+    //    (if not using block-group-tree)
     //
-    // Block addresses are ascending (sequential layout), so we just need
-    // to insert the BLOCK_GROUP_ITEM at the right position.
+    // Block addresses are ascending (sequential layout), and block
+    // group items are keyed by logical offset, so we interleave them
+    // at the correct positions.
 
-    let bg_key = Key::new(
+    let sys_bg_key = Key::new(
         SYSTEM_GROUP_OFFSET,
         raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
         SYSTEM_GROUP_SIZE,
     );
-    let bg_data = items::block_group_item(
+    let sys_bg_data = items::block_group_item(
         layout.total_used(),
         raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
         raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
     );
-    let add_block_group = !cfg.has_block_group_tree();
-    let mut bg_inserted = false;
+    let mut sys_bg_inserted = false;
 
     for &tree in &TreeId::ALL {
         let addr = layout.block_addr(tree);
 
-        // Insert block group item before the first tree block that
+        // Insert system block group item before the first tree block that
         // has an address above the system group offset.
-        if add_block_group && !bg_inserted && addr > SYSTEM_GROUP_OFFSET {
-            leaf.push(bg_key, &bg_data)
+        if add_block_group && !sys_bg_inserted && addr > SYSTEM_GROUP_OFFSET {
+            leaf.push(sys_bg_key, &sys_bg_data)
                 .map_err(|e| anyhow::anyhow!("extent tree: {e}"))?;
-            bg_inserted = true;
+            sys_bg_inserted = true;
         }
 
         // METADATA_ITEM (skinny) or EXTENT_ITEM
@@ -383,21 +391,56 @@ fn build_extent_tree(
             .map_err(|e| anyhow::anyhow!("extent tree: {e}"))?;
     }
 
+    // Metadata and data block group items sort after all tree block
+    // items since their logical offsets (>= 5 MiB) are higher than
+    // tree block addresses (starting at 1 MiB).
+    if add_block_group {
+        // BLOCK_GROUP_ITEM for metadata (DUP)
+        let meta_bg_key = Key::new(
+            chunks.meta_logical,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            chunks.meta_size,
+        );
+        let meta_bg_data = items::block_group_item(
+            0,
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_BLOCK_GROUP_METADATA as u64
+                | raw::BTRFS_BLOCK_GROUP_DUP as u64,
+        );
+        leaf.push(meta_bg_key, &meta_bg_data)
+            .map_err(|e| anyhow::anyhow!("extent tree: {e}"))?;
+
+        // BLOCK_GROUP_ITEM for data (SINGLE)
+        let data_bg_key = Key::new(
+            chunks.data_logical,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            chunks.data_size,
+        );
+        let data_bg_data = items::block_group_item(
+            0,
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_BLOCK_GROUP_DATA as u64,
+        );
+        leaf.push(data_bg_key, &data_bg_data)
+            .map_err(|e| anyhow::anyhow!("extent tree: {e}"))?;
+    }
+
     Ok(leaf.finish())
 }
 
 fn build_chunk_tree(
     cfg: &MkfsConfig,
     _layout: &BlockLayout,
+    chunks: &ChunkLayout,
     leaf_header: &dyn Fn(TreeId) -> LeafHeader,
 ) -> Result<Vec<u8>> {
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Chunk));
 
-    // DEV_ITEM for device 1
+    // DEV_ITEM for device 1 (bytes_used includes all chunks)
     let dev_data = items::dev_item(
         1,
         cfg.total_bytes,
-        SYSTEM_GROUP_SIZE,
+        chunks.dev_bytes_used(),
         cfg.sectorsize,
         &cfg.dev_uuid,
         &cfg.fs_uuid,
@@ -411,7 +454,7 @@ fn build_chunk_tree(
         .map_err(|e| anyhow::anyhow!("chunk tree: {e}"))?;
 
     // CHUNK_ITEM for the system chunk
-    let chunk_data = items::chunk_item_single(
+    let sys_chunk_data = items::chunk_item_single(
         SYSTEM_GROUP_SIZE,
         raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
         raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
@@ -420,12 +463,50 @@ fn build_chunk_tree(
         SYSTEM_GROUP_OFFSET,
         &cfg.dev_uuid,
     );
-    let chunk_key = Key::new(
+    let sys_chunk_key = Key::new(
         raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
         raw::BTRFS_CHUNK_ITEM_KEY as u8,
         SYSTEM_GROUP_OFFSET,
     );
-    leaf.push(chunk_key, &chunk_data)
+    leaf.push(sys_chunk_key, &sys_chunk_data)
+        .map_err(|e| anyhow::anyhow!("chunk tree: {e}"))?;
+
+    // CHUNK_ITEM for metadata DUP
+    let meta_chunk_data = items::chunk_item_dup(
+        chunks.meta_size,
+        raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
+        raw::BTRFS_BLOCK_GROUP_METADATA as u64
+            | raw::BTRFS_BLOCK_GROUP_DUP as u64,
+        cfg.sectorsize,
+        1,
+        chunks.meta_phys_0,
+        chunks.meta_phys_1,
+        &cfg.dev_uuid,
+    );
+    let meta_chunk_key = Key::new(
+        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        raw::BTRFS_CHUNK_ITEM_KEY as u8,
+        chunks.meta_logical,
+    );
+    leaf.push(meta_chunk_key, &meta_chunk_data)
+        .map_err(|e| anyhow::anyhow!("chunk tree: {e}"))?;
+
+    // CHUNK_ITEM for data SINGLE
+    let data_chunk_data = items::chunk_item_non_bootstrap_single(
+        chunks.data_size,
+        raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
+        raw::BTRFS_BLOCK_GROUP_DATA as u64,
+        cfg.sectorsize,
+        1,
+        chunks.data_phys,
+        &cfg.dev_uuid,
+    );
+    let data_chunk_key = Key::new(
+        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        raw::BTRFS_CHUNK_ITEM_KEY as u8,
+        chunks.data_logical,
+    );
+    leaf.push(data_chunk_key, &data_chunk_data)
         .map_err(|e| anyhow::anyhow!("chunk tree: {e}"))?;
 
     Ok(leaf.finish())
@@ -433,12 +514,12 @@ fn build_chunk_tree(
 
 fn build_dev_tree(
     cfg: &MkfsConfig,
-    _layout: &BlockLayout,
+    chunks: &ChunkLayout,
     leaf_header: &dyn Fn(TreeId) -> LeafHeader,
 ) -> Result<Vec<u8>> {
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Dev));
 
-    // DEV_STATS (PERSISTENT_ITEM) for device 1 — all zeros
+    // DEV_STATS (PERSISTENT_ITEM) for device 1 -- all zeros
     let stats_key = Key::new(
         raw::BTRFS_DEV_STATS_OBJECTID as u64,
         raw::BTRFS_PERSISTENT_ITEM_KEY as u8,
@@ -448,20 +529,60 @@ fn build_dev_tree(
         .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
 
     // DEV_EXTENT for the system chunk
-    let extent_data = items::dev_extent(
+    let sys_extent = items::dev_extent(
         raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
         raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
         SYSTEM_GROUP_OFFSET,
         SYSTEM_GROUP_SIZE,
         &cfg.chunk_tree_uuid,
     );
-    let extent_key = Key::new(
-        1, // devid
-        raw::BTRFS_DEV_EXTENT_KEY as u8,
-        SYSTEM_GROUP_OFFSET,
+    leaf.push(
+        Key::new(1, raw::BTRFS_DEV_EXTENT_KEY as u8, SYSTEM_GROUP_OFFSET),
+        &sys_extent,
+    )
+    .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
+
+    // DEV_EXTENT for metadata DUP stripe 0
+    let meta_ext_0 = items::dev_extent(
+        raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
+        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        chunks.meta_logical,
+        chunks.meta_size,
+        &cfg.chunk_tree_uuid,
     );
-    leaf.push(extent_key, &extent_data)
-        .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
+    leaf.push(
+        Key::new(1, raw::BTRFS_DEV_EXTENT_KEY as u8, chunks.meta_phys_0),
+        &meta_ext_0,
+    )
+    .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
+
+    // DEV_EXTENT for metadata DUP stripe 1
+    let meta_ext_1 = items::dev_extent(
+        raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
+        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        chunks.meta_logical,
+        chunks.meta_size,
+        &cfg.chunk_tree_uuid,
+    );
+    leaf.push(
+        Key::new(1, raw::BTRFS_DEV_EXTENT_KEY as u8, chunks.meta_phys_1),
+        &meta_ext_1,
+    )
+    .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
+
+    // DEV_EXTENT for data SINGLE
+    let data_ext = items::dev_extent(
+        raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
+        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        chunks.data_logical,
+        chunks.data_size,
+        &cfg.chunk_tree_uuid,
+    );
+    leaf.push(
+        Key::new(1, raw::BTRFS_DEV_EXTENT_KEY as u8, chunks.data_phys),
+        &data_ext,
+    )
+    .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
 
     Ok(leaf.finish())
 }
@@ -513,6 +634,7 @@ fn build_root_dir_tree(
 fn build_free_space_tree(
     cfg: &MkfsConfig,
     layout: &BlockLayout,
+    chunks: &ChunkLayout,
     leaf_header: &dyn Fn(TreeId) -> LeafHeader,
 ) -> Result<Vec<u8>> {
     if !cfg.has_free_space_tree() {
@@ -525,31 +647,69 @@ fn build_free_space_tree(
     let mut leaf =
         LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::FreeSpace));
 
-    let free_start = SYSTEM_GROUP_OFFSET + layout.total_used();
-    let free_length = SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE - free_start;
+    // System block group: free space after tree blocks
+    let sys_free_start = SYSTEM_GROUP_OFFSET + layout.total_used();
+    let sys_free_length =
+        SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE - sys_free_start;
 
-    // FREE_SPACE_INFO for the system block group
-    let info_key = Key::new(
+    let sys_info_key = Key::new(
         SYSTEM_GROUP_OFFSET,
         raw::BTRFS_FREE_SPACE_INFO_KEY as u8,
         SYSTEM_GROUP_SIZE,
     );
-    leaf.push(info_key, &items::free_space_info(1, 0))
+    leaf.push(sys_info_key, &items::free_space_info(1, 0))
         .map_err(|e| anyhow::anyhow!("free space tree: {e}"))?;
 
-    // FREE_SPACE_EXTENT for the unallocated space in the system group
-    let extent_key = Key::new(
-        free_start,
+    let sys_extent_key = Key::new(
+        sys_free_start,
         raw::BTRFS_FREE_SPACE_EXTENT_KEY as u8,
-        free_length,
+        sys_free_length,
     );
-    leaf.push_empty(extent_key)
+    leaf.push_empty(sys_extent_key)
+        .map_err(|e| anyhow::anyhow!("free space tree: {e}"))?;
+
+    // Metadata block group: entirely free (used=0)
+    let meta_info_key = Key::new(
+        chunks.meta_logical,
+        raw::BTRFS_FREE_SPACE_INFO_KEY as u8,
+        chunks.meta_size,
+    );
+    leaf.push(meta_info_key, &items::free_space_info(1, 0))
+        .map_err(|e| anyhow::anyhow!("free space tree: {e}"))?;
+
+    let meta_extent_key = Key::new(
+        chunks.meta_logical,
+        raw::BTRFS_FREE_SPACE_EXTENT_KEY as u8,
+        chunks.meta_size,
+    );
+    leaf.push_empty(meta_extent_key)
+        .map_err(|e| anyhow::anyhow!("free space tree: {e}"))?;
+
+    // Data block group: entirely free (used=0)
+    let data_info_key = Key::new(
+        chunks.data_logical,
+        raw::BTRFS_FREE_SPACE_INFO_KEY as u8,
+        chunks.data_size,
+    );
+    leaf.push(data_info_key, &items::free_space_info(1, 0))
+        .map_err(|e| anyhow::anyhow!("free space tree: {e}"))?;
+
+    let data_extent_key = Key::new(
+        chunks.data_logical,
+        raw::BTRFS_FREE_SPACE_EXTENT_KEY as u8,
+        chunks.data_size,
+    );
+    leaf.push_empty(data_extent_key)
         .map_err(|e| anyhow::anyhow!("free space tree: {e}"))?;
 
     Ok(leaf.finish())
 }
 
-fn build_superblock(cfg: &MkfsConfig, layout: &BlockLayout) -> Result<Vec<u8>> {
+fn build_superblock(
+    cfg: &MkfsConfig,
+    layout: &BlockLayout,
+    chunks: &ChunkLayout,
+) -> Result<Vec<u8>> {
     let generation = 1u64;
 
     // Build the sys_chunk_array: disk_key + chunk_item bytes.
@@ -574,7 +734,7 @@ fn build_superblock(cfg: &MkfsConfig, layout: &BlockLayout) -> Result<Vec<u8>> {
     let dev_item_bytes = items::dev_item(
         1,
         cfg.total_bytes,
-        SYSTEM_GROUP_SIZE,
+        chunks.dev_bytes_used(),
         cfg.sectorsize,
         &cfg.dev_uuid,
         &cfg.fs_uuid,
@@ -685,10 +845,16 @@ pub fn discard_device(path: &Path, size: u64) -> Result<()> {
     Ok(())
 }
 
-/// Minimum filesystem size: system group offset + system group size.
+/// Minimum filesystem size.
+///
+/// Must fit the system group (5 MiB), metadata DUP (2 x 32 MiB minimum),
+/// and data SINGLE (64 MiB minimum): 5 + 64 + 64 = 133 MiB.
 pub fn minimum_device_size(nodesize: u32) -> u64 {
-    // Must fit the superblock (at 64K), the system group (at 1M, 4M long),
-    // and all tree blocks within the system group.
     let _ = nodesize;
-    SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE
+    // System (5M) + 2 * min_meta (32M) + min_data (64M) = 133M.
+    // ChunkLayout::new enforces this via data_phys + data_size <= total.
+    SYSTEM_GROUP_OFFSET
+        + SYSTEM_GROUP_SIZE
+        + 2 * 32 * 1024 * 1024
+        + 64 * 1024 * 1024
 }

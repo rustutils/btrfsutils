@@ -19,8 +19,9 @@ fn test_config(total_bytes: u64) -> MkfsConfig {
     }
 }
 
-/// Minimum valid image size: system group offset (1 MiB) + system group size (4 MiB).
-const MIN_SIZE: u64 = 5 * 1024 * 1024;
+/// Minimum valid image size: system (5 MiB) + metadata DUP (2*32 MiB) + data (64 MiB) = 133 MiB.
+/// Use 256 MiB for comfortable headroom.
+const MIN_SIZE: u64 = 256 * 1024 * 1024;
 
 fn create_image(size: u64) -> tempfile::NamedTempFile {
     let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -91,8 +92,9 @@ fn mkfs_superblock_generation_is_one() {
 
 #[test]
 fn mkfs_too_small_fails() {
-    let image = create_image(1024 * 1024); // 1 MiB, too small
-    let cfg = test_config(1024 * 1024);
+    let too_small = 100 * 1024 * 1024; // 100 MiB, too small for metadata DUP + data
+    let image = create_image(too_small);
+    let cfg = test_config(too_small);
     let err = mkfs::make_btrfs(image.path(), &cfg).unwrap_err();
     assert!(
         err.to_string().contains("too small"),
@@ -117,7 +119,8 @@ fn has_btrfs_superblock_after_mkfs() {
 #[test]
 fn minimum_device_size_matches_expected() {
     let min = mkfs::minimum_device_size(16384);
-    assert_eq!(min, MIN_SIZE);
+    // 5 MiB (system) + 64 MiB (2 * 32M meta DUP) + 64 MiB (data) = 133 MiB
+    assert_eq!(min, 133 * 1024 * 1024);
 }
 
 #[test]
@@ -191,9 +194,8 @@ fn mkfs_with_no_free_space_tree() {
 
 #[test]
 fn mkfs_with_different_nodesize() {
-    // 64 KiB nodesize needs a larger image: the system group must fit
-    // all tree blocks at 64K each.
-    let size = 8 * 1024 * 1024;
+    // 64 KiB nodesize: still needs 133 MiB minimum for chunks.
+    let size = MIN_SIZE;
     let image = create_image(size);
     let mut cfg = test_config(size);
     cfg.nodesize = 65536;

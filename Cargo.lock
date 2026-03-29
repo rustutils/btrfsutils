@@ -163,6 +163,7 @@ dependencies = [
  "crc32c",
  "libc",
  "nix",
+ "tempfile",
  "uuid",
 ]
 
