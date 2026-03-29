@@ -179,6 +179,10 @@
           cargo-fmt = craneLibNightly.cargoFmt {
             inherit src;
           };
+
+          cargo-deny = craneLib.cargoDeny {
+            inherit src;
+          };
         });
 
       devShells = forAllSystems (system:
@@ -222,6 +226,7 @@
               pkgs.jq
               pkgs.cargo-insta
               pkgs.cargo-llvm-cov
+              pkgs.cargo-deny
               pkgs.taplo
             ];
 

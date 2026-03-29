@@ -75,6 +75,7 @@ format:
 # run static linters
 check:
     cargo +nightly fmt --all --check
+    cargo deny check
     taplo check
     RUSTDOCFLAGS="-Dwarnings" cargo doc --no-deps
     cargo clippy -- -Dwarnings
