@@ -23,5 +23,14 @@ flate2 = { version = "1", optional = true }
 zstd = { version = "0.13", optional = true }
 lzo1x = { version = "0.2", optional = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+nix = { workspace = true }
+libc = { workspace = true }
+
+[[test]]
+name = "receive"
+required-features = ["receive"]
+
 [features]
 receive = ["dep:anyhow", "dep:btrfs-uapi", "dep:nix", "dep:flate2", "dep:zstd", "dep:lzo1x"]

@@ -1445,3 +1445,215 @@ fn send_receive_truncate() {
     let meta = std::fs::metadata(&recv).unwrap();
     assert_eq!(meta.len(), 1024, "truncated file should be 1024 bytes");
 }
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_receive_mknod_mksock() {
+    let (_td1, mnt1) = single_mount();
+    let (_td2, mnt2) = single_mount();
+    let mp1 = mnt1.path().to_str().unwrap();
+    let mp2 = mnt2.path().to_str().unwrap();
+    let stream_file = format!("{}/mknod.bin", _td1.path().to_str().unwrap());
+
+    let src = format!("{mp1}/devnodes");
+    btrfs_ok(&["subvolume", "create", &src]);
+
+    // Create a character device node (null device: 1,3) and a unix socket.
+    nix::sys::stat::mknod(
+        &std::path::PathBuf::from(format!("{src}/chardev")),
+        nix::sys::stat::SFlag::S_IFCHR,
+        nix::sys::stat::Mode::from_bits_truncate(0o666),
+        nix::sys::stat::makedev(1, 3),
+    )
+    .unwrap();
+
+    // Unix socket.
+    let sock_path = format!("{src}/mysock");
+    let sock = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+    drop(sock);
+
+    btrfs_ok(&["property", "set", "-t", "subvol", &src, "ro", "true"]);
+    btrfs_ok(&["send", "-f", &stream_file, &src]);
+    btrfs_ok(&["receive", "-f", &stream_file, mp2]);
+
+    let recv = format!("{mp2}/devnodes");
+
+    // Verify character device.
+    let chardev_meta =
+        std::fs::symlink_metadata(format!("{recv}/chardev")).unwrap();
+    assert!(
+        chardev_meta.file_type().is_char_device(),
+        "expected char device"
+    );
+
+    // Verify socket.
+    let sock_meta =
+        std::fs::symlink_metadata(format!("{recv}/mysock")).unwrap();
+    assert!(sock_meta.file_type().is_socket(), "expected socket");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_receive_rmdir() {
+    let (_td1, mnt1) = single_mount();
+    let (_td2, mnt2) = single_mount();
+    let mp1 = mnt1.path().to_str().unwrap();
+    let mp2 = mnt2.path().to_str().unwrap();
+    let base_stream =
+        format!("{}/rmdir_base.bin", _td1.path().to_str().unwrap());
+    let incr_stream =
+        format!("{}/rmdir_incr.bin", _td1.path().to_str().unwrap());
+
+    let src = format!("{mp1}/rmdir_src");
+    btrfs_ok(&["subvolume", "create", &src]);
+    std::fs::create_dir(format!("{src}/mydir")).unwrap();
+    write_test_data(Path::new(&format!("{src}/mydir")), "file.bin", 1024);
+
+    let snap1 = format!("{mp1}/rmdir_snap1");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap1]);
+
+    // Remove the directory and its contents.
+    std::fs::remove_file(format!("{src}/mydir/file.bin")).unwrap();
+    std::fs::remove_dir(format!("{src}/mydir")).unwrap();
+
+    let snap2 = format!("{mp1}/rmdir_snap2");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap2]);
+
+    btrfs_ok(&["send", "-f", &base_stream, &snap1]);
+    btrfs_ok(&["receive", "-f", &base_stream, mp2]);
+    btrfs_ok(&["send", "-p", &snap1, "-f", &incr_stream, &snap2]);
+    btrfs_ok(&["receive", "-f", &incr_stream, mp2]);
+
+    let recv = format!("{mp2}/rmdir_snap2");
+    assert!(
+        !Path::new(&format!("{recv}/mydir")).exists(),
+        "mydir should have been removed"
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_receive_remove_xattr() {
+    let (_td1, mnt1) = single_mount();
+    let (_td2, mnt2) = single_mount();
+    let mp1 = mnt1.path().to_str().unwrap();
+    let mp2 = mnt2.path().to_str().unwrap();
+    let base_stream =
+        format!("{}/xattr_base.bin", _td1.path().to_str().unwrap());
+    let incr_stream =
+        format!("{}/xattr_incr.bin", _td1.path().to_str().unwrap());
+
+    let src = format!("{mp1}/xattr_rm_src");
+    btrfs_ok(&["subvolume", "create", &src]);
+    let file_path = format!("{src}/testfile");
+    std::fs::write(&file_path, b"content").unwrap();
+
+    // Set an xattr, then take a snapshot.
+    let status = std::process::Command::new("setfattr")
+        .args(["-n", "user.remove_me", "-v", "val", &file_path])
+        .status()
+        .expect("setfattr not found");
+    assert!(status.success());
+
+    let snap1 = format!("{mp1}/xattr_snap1");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap1]);
+
+    // Remove the xattr and take another snapshot.
+    let status = std::process::Command::new("setfattr")
+        .args(["-x", "user.remove_me", &file_path])
+        .status()
+        .expect("setfattr not found");
+    assert!(status.success());
+
+    let snap2 = format!("{mp1}/xattr_snap2");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap2]);
+
+    btrfs_ok(&["send", "-f", &base_stream, &snap1]);
+    btrfs_ok(&["receive", "-f", &base_stream, mp2]);
+    btrfs_ok(&["send", "-p", &snap1, "-f", &incr_stream, &snap2]);
+
+    // Verify the incremental stream contains remove_xattr.
+    let dump = btrfs_ok(&["receive", "--dump", "-f", &incr_stream]);
+    assert!(
+        dump.contains("remove_xattr"),
+        "expected remove_xattr in stream:\n{dump}"
+    );
+
+    btrfs_ok(&["receive", "-f", &incr_stream, mp2]);
+
+    // Verify the xattr is gone on the received side.
+    let recv_file = format!("{mp2}/xattr_snap2/testfile");
+    let output = std::process::Command::new("getfattr")
+        .args(["-n", "user.remove_me", &recv_file])
+        .output()
+        .expect("getfattr not found");
+    assert!(!output.status.success(), "xattr should have been removed");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_receive_fallocate() {
+    let (_td1, mnt1) = single_mount();
+    let (_td2, mnt2) = single_mount();
+    let mp1 = mnt1.path().to_str().unwrap();
+    let mp2 = mnt2.path().to_str().unwrap();
+    let base_stream =
+        format!("{}/falloc_base.bin", _td1.path().to_str().unwrap());
+    let incr_stream =
+        format!("{}/falloc_incr.bin", _td1.path().to_str().unwrap());
+
+    let src = format!("{mp1}/falloc_src");
+    btrfs_ok(&["subvolume", "create", &src]);
+
+    // Write a file, then take a base snapshot.
+    write_test_data(Path::new(&src), "holey.bin", 256 * 1024);
+
+    let snap1 = format!("{mp1}/falloc_snap1");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap1]);
+
+    // Punch a hole in the middle of the file.
+    let file_path = format!("{src}/holey.bin");
+    let status = std::process::Command::new("fallocate")
+        .args([
+            "--punch-hole",
+            "--offset",
+            "65536",
+            "--length",
+            "65536",
+            &file_path,
+        ])
+        .status()
+        .expect("fallocate not found");
+    assert!(status.success(), "fallocate --punch-hole failed");
+
+    let snap2 = format!("{mp1}/falloc_snap2");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap2]);
+
+    btrfs_ok(&["send", "-f", &base_stream, &snap1]);
+    btrfs_ok(&["receive", "-f", &base_stream, mp2]);
+    // Use --proto 2 to get v2 stream with fallocate commands.
+    btrfs_ok(&[
+        "send",
+        "--proto",
+        "2",
+        "-p",
+        &snap1,
+        "-f",
+        &incr_stream,
+        &snap2,
+    ]);
+    btrfs_ok(&["receive", "-f", &incr_stream, mp2]);
+
+    // Verify the file size is preserved but the hole exists.
+    let recv_file = format!("{mp2}/falloc_snap2/holey.bin");
+    let meta = std::fs::metadata(&recv_file).unwrap();
+    assert_eq!(meta.len(), 256 * 1024);
+
+    // Read the hole region — should be zeros.
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(&recv_file).unwrap();
+    f.seek(SeekFrom::Start(65536)).unwrap();
+    let mut hole = vec![0u8; 65536];
+    f.read_exact(&mut hole).unwrap();
+    assert!(hole.iter().all(|&b| b == 0), "punched hole should be zeros");
+}
