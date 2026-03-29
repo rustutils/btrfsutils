@@ -180,17 +180,17 @@ pub fn logical_ino(
         if i + 2 < container.elem_cnt as usize {
             let val_offset_inum = unsafe {
                 let val_ptr = container.val.as_ptr();
-                *val_ptr.add(i) as u64
+                *val_ptr.add(i)
             };
 
             let val_offset_offset = unsafe {
                 let val_ptr = container.val.as_ptr();
-                *val_ptr.add(i + 1) as u64
+                *val_ptr.add(i + 1)
             };
 
             let val_offset_root = unsafe {
                 let val_ptr = container.val.as_ptr();
-                *val_ptr.add(i + 2) as u64
+                *val_ptr.add(i + 2)
             };
 
             results.push(LogicalInoResult {

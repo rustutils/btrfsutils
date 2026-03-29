@@ -3,6 +3,9 @@ members = ["uapi", "disk", "stream", "cli", "mkfs", "util/gen"]
 default-members = ["uapi", "disk", "stream", "cli", "mkfs"]
 resolver = "2"
 
+[workspace.metadata.crane]
+name = "btrfs"
+
 [workspace.package]
 version = "0.5.0"
 edition = "2024"

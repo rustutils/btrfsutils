@@ -100,7 +100,63 @@
 
       checks = forAllSystems (system:
         let
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [ rust-overlay.overlays.default ];
+          };
+
+          toolchainToml = builtins.fromTOML (builtins.readFile ./rust-toolchain.toml);
+          channel = toolchainToml.toolchain.channel;
+
+          rustToolchain =
+            let
+              isVersion = builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+" channel != null;
+              base = if isVersion
+                then pkgs.rust-bin.stable.${channel}.default
+                else pkgs.rust-bin.${channel}.latest.default;
+            in base.override {
+              extensions = toolchainToml.toolchain.components or [];
+              targets = toolchainToml.toolchain.targets or [];
+            };
+
+          craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+
+          # Nightly toolchain for rustfmt (we use nightly formatting features).
+          rustNightly = pkgs.rust-bin.nightly.latest.default.override {
+            extensions = [ "rustfmt" ];
+          };
+          craneLibNightly = (crane.mkLib pkgs).overrideToolchain rustNightly;
+
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              let base = builtins.baseNameOf path; in
+              (craneLib.filterCargoSources path type)
+              || builtins.match ".*\\.(h|c)$" base != null
+              || builtins.match ".*\\.snap$" base != null
+              || builtins.match ".*\\.snap\\.new$" base != null
+              || builtins.match ".*\\.img\\.gz$" base != null;
+          };
+
+          commonArgs = {
+            inherit src;
+            pname = "btrfs";
+            strictDeps = true;
+
+            nativeBuildInputs = [
+              pkgs.llvmPackages.libclang
+              pkgs.clang
+            ];
+
+            buildInputs = [
+              pkgs.linuxHeaders
+            ];
+
+            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+            BINDGEN_EXTRA_CLANG_ARGS = "-isystem ${pkgs.linuxHeaders}/include";
+          };
+
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
         in
         {
           taplo = pkgs.runCommand "taplo-check" {
@@ -110,6 +166,19 @@
             taplo check
             touch $out
           '';
+
+          cargo-test = craneLib.cargoTest (commonArgs // {
+            inherit cargoArtifacts;
+          });
+
+          cargo-clippy = craneLib.cargoClippy (commonArgs // {
+            inherit cargoArtifacts;
+            cargoClippyExtraArgs = "-- -Dwarnings";
+          });
+
+          cargo-fmt = craneLibNightly.cargoFmt {
+            inherit src;
+          };
         });
 
       devShells = forAllSystems (system:
