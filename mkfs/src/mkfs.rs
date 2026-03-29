@@ -337,7 +337,7 @@ fn build_extent_tree(
     // so addresses are not monotonically increasing — we must sort.
     let mut extent_items: Vec<(Key, Vec<u8>)> = Vec::new();
 
-    // For each tree block: METADATA_ITEM + TREE_BLOCK_REF
+    // For each tree block: METADATA_ITEM with inline TREE_BLOCK_REF
     for &tree in &TreeId::ALL {
         let addr = layout.block_addr(tree);
 
@@ -348,15 +348,8 @@ fn build_extent_tree(
         };
         let offset = if skinny { 0 } else { cfg.nodesize as u64 };
         let key = Key::new(addr, item_type, offset);
-        let data = items::extent_item(1, generation, skinny);
+        let data = items::extent_item(1, generation, skinny, tree.objectid());
         extent_items.push((key, data));
-
-        let ref_key = Key::new(
-            addr,
-            raw::BTRFS_TREE_BLOCK_REF_KEY as u8,
-            tree.objectid(),
-        );
-        extent_items.push((ref_key, Vec::new()));
     }
 
     // BLOCK_GROUP_ITEMs for system, metadata, and data chunks
@@ -409,13 +402,8 @@ fn build_extent_tree(
     extent_items.sort_by_key(|(k, _)| *k);
 
     for (key, data) in &extent_items {
-        if data.is_empty() {
-            leaf.push_empty(*key)
-                .map_err(|e| anyhow::anyhow!("extent tree: {e}"))?;
-        } else {
-            leaf.push(*key, data)
-                .map_err(|e| anyhow::anyhow!("extent tree: {e}"))?;
-        }
+        leaf.push(*key, data)
+            .map_err(|e| anyhow::anyhow!("extent tree: {e}"))?;
     }
 
     Ok(leaf.finish())

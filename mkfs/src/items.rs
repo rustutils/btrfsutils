@@ -70,24 +70,40 @@ pub fn chunk_tree_root_item(
     )
 }
 
-/// Serialize an EXTENT_ITEM for a tree block (metadata extent).
+/// Serialize an EXTENT_ITEM for a tree block (metadata extent) with an
+/// inline TREE_BLOCK_REF.
 ///
-/// For skinny metadata (the default), the item is just the 24-byte
-/// btrfs_extent_item header. For non-skinny, it also includes the
-/// btrfs_tree_block_info (17 + 1 bytes).
-pub fn extent_item(refs: u64, generation: u64, skinny: bool) -> Vec<u8> {
+/// For skinny metadata (the default), the layout is:
+///   24 bytes btrfs_extent_item + 9 bytes inline ref (type + root_objectid)
+/// For non-skinny, it also includes btrfs_tree_block_info before the ref.
+///
+/// The inline ref eliminates the need for a separate TREE_BLOCK_REF item
+/// and is required by `btrfs check`.
+pub fn extent_item(
+    refs: u64,
+    generation: u64,
+    skinny: bool,
+    owner_root: u64,
+) -> Vec<u8> {
     let base_size = mem::size_of::<raw::btrfs_extent_item>();
-    let extra = if skinny {
+    let tree_block_info_size = if skinny {
         0
     } else {
         mem::size_of::<raw::btrfs_tree_block_info>()
     };
-    let size = base_size + extra;
+    // Inline ref: 1 byte type + 8 bytes offset
+    let inline_ref_size = 9;
+    let size = base_size + tree_block_info_size + inline_ref_size;
     let mut buf = vec![0u8; size];
 
     write_le_u64(&mut buf, 0, refs);
     write_le_u64(&mut buf, 8, generation);
     write_le_u64(&mut buf, 16, raw::BTRFS_EXTENT_FLAG_TREE_BLOCK as u64);
+
+    // Inline TREE_BLOCK_REF
+    let ref_off = base_size + tree_block_info_size;
+    buf[ref_off] = raw::BTRFS_TREE_BLOCK_REF_KEY as u8;
+    write_le_u64(&mut buf, ref_off + 1, owner_root);
 
     buf
 }
@@ -449,17 +465,20 @@ mod tests {
 
     #[test]
     fn extent_item_skinny_size() {
-        let data = extent_item(1, 1, true);
-        assert_eq!(data.len(), mem::size_of::<raw::btrfs_extent_item>());
+        let data = extent_item(1, 1, true, 5);
+        // 24 bytes extent_item + 9 bytes inline TREE_BLOCK_REF
+        assert_eq!(data.len(), mem::size_of::<raw::btrfs_extent_item>() + 9);
     }
 
     #[test]
     fn extent_item_non_skinny_size() {
-        let data = extent_item(1, 1, false);
+        let data = extent_item(1, 1, false, 5);
+        // 24 bytes extent_item + 18 bytes tree_block_info + 9 bytes inline ref
         assert_eq!(
             data.len(),
             mem::size_of::<raw::btrfs_extent_item>()
                 + mem::size_of::<raw::btrfs_tree_block_info>()
+                + 9
         );
     }
 
