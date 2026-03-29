@@ -531,8 +531,23 @@ impl Drop for MountPoint {
     }
 }
 
-/// Create an image, format it, attach a loop device, mount, verify accessible.
-fn make_mount_verify(cfg: &mut MkfsConfig) {
+/// Run `btrfs check` on an image file and assert it passes.
+fn btrfs_check(image: &std::path::Path) {
+    let output = Command::new("btrfs")
+        .args(["check", &image.to_string_lossy()])
+        .output()
+        .expect("failed to run btrfs check");
+    assert!(
+        output.status.success(),
+        "btrfs check failed on {}:\n{}",
+        image.display(),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+/// Create image files for all devices, format, run btrfs check, then mount
+/// and verify the filesystem is accessible.
+fn make_check_mount_verify(cfg: &mut MkfsConfig) {
     // Create image files for all devices.
     let images: Vec<_> = cfg
         .devices
@@ -544,6 +559,9 @@ fn make_mount_verify(cfg: &mut MkfsConfig) {
     }
 
     mkfs::make_btrfs(cfg).unwrap();
+
+    // Verify with btrfs check before mounting.
+    btrfs_check(images[0].path());
 
     // Mount the first device and verify it's accessible.
     let loop_dev = LoopDev::attach(images[0].path());
@@ -564,7 +582,7 @@ fn make_mount_verify(cfg: &mut MkfsConfig) {
 #[ignore = "requires elevated privileges"]
 fn mount_single_device_crc32c() {
     let mut cfg = test_config(MIN_SIZE);
-    make_mount_verify(&mut cfg);
+    make_check_mount_verify(&mut cfg);
 }
 
 #[test]
@@ -572,7 +590,7 @@ fn mount_single_device_crc32c() {
 fn mount_single_device_xxhash() {
     let mut cfg = test_config(MIN_SIZE);
     cfg.csum_type = ChecksumType::Xxhash64;
-    make_mount_verify(&mut cfg);
+    make_check_mount_verify(&mut cfg);
 }
 
 #[test]
@@ -580,7 +598,7 @@ fn mount_single_device_xxhash() {
 fn mount_single_device_sha256() {
     let mut cfg = test_config(MIN_SIZE);
     cfg.csum_type = ChecksumType::Sha256;
-    make_mount_verify(&mut cfg);
+    make_check_mount_verify(&mut cfg);
 }
 
 #[test]
@@ -588,7 +606,7 @@ fn mount_single_device_sha256() {
 fn mount_single_device_blake2() {
     let mut cfg = test_config(MIN_SIZE);
     cfg.csum_type = ChecksumType::Blake2b;
-    make_mount_verify(&mut cfg);
+    make_check_mount_verify(&mut cfg);
 }
 
 #[test]
@@ -600,7 +618,7 @@ fn mount_single_device_no_block_group_tree() {
         enabled: false,
     }])
     .unwrap();
-    make_mount_verify(&mut cfg);
+    make_check_mount_verify(&mut cfg);
 }
 
 #[test]
@@ -608,7 +626,7 @@ fn mount_single_device_no_block_group_tree() {
 fn mount_single_device_nodesize_64k() {
     let mut cfg = test_config(MIN_SIZE);
     cfg.nodesize = 65536;
-    make_mount_verify(&mut cfg);
+    make_check_mount_verify(&mut cfg);
 }
 
 #[test]
@@ -616,5 +634,5 @@ fn mount_single_device_nodesize_64k() {
 fn mount_single_device_with_label() {
     let mut cfg = test_config(MIN_SIZE);
     cfg.label = Some("integration-test".to_string());
-    make_mount_verify(&mut cfg);
+    make_check_mount_verify(&mut cfg);
 }
