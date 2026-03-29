@@ -1047,10 +1047,13 @@ fn decompress_lzo(
 
         let remaining = (output_len - out.len()).min(sector_size);
         let mut segment_out = vec![0u8; remaining];
-        lzo1x::decompress(&data[pos..pos + seg_len], &mut segment_out)
-            .map_err(|e| {
-                anyhow!("LZO decompression failed at offset {pos}: {e:?}")
-            })?;
+        lzokay::decompress::decompress(
+            &data[pos..pos + seg_len],
+            &mut segment_out,
+        )
+        .map_err(|e| {
+            anyhow!("LZO decompression failed at offset {pos}: {e:?}")
+        })?;
         out.extend_from_slice(&segment_out);
 
         pos += seg_len;
