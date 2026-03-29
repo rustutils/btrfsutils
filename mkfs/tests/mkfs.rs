@@ -1,27 +1,50 @@
 use btrfs_mkfs::{
-    args::{Feature, FeatureArg},
-    mkfs::{self, MkfsConfig},
+    args::{Feature, FeatureArg, Profile},
+    mkfs::{self, DeviceInfo, MkfsConfig},
 };
-use std::io::{Seek, SeekFrom, Write};
+use std::{
+    io::{Seek, SeekFrom, Write},
+    path::PathBuf,
+};
 use uuid::Uuid;
 
 fn test_config(total_bytes: u64) -> MkfsConfig {
     MkfsConfig {
         nodesize: 16384,
         sectorsize: 4096,
-        total_bytes,
+        devices: vec![DeviceInfo {
+            devid: 1,
+            path: PathBuf::new(),
+            total_bytes,
+            dev_uuid: Uuid::from_bytes([0xAB; 16]),
+        }],
         label: None,
         fs_uuid: Uuid::from_bytes([0xDE; 16]),
-        dev_uuid: Uuid::from_bytes([0xAB; 16]),
         chunk_tree_uuid: Uuid::from_bytes([0xCD; 16]),
         incompat_flags: MkfsConfig::default_incompat_flags(),
         compat_ro_flags: MkfsConfig::default_compat_ro_flags(),
+        data_profile: Profile::Single,
+        metadata_profile: Profile::Dup,
     }
 }
 
 /// Minimum valid image size: system (5 MiB) + metadata DUP (2*32 MiB) + data (64 MiB) = 133 MiB.
 /// Use 256 MiB for comfortable headroom.
 const MIN_SIZE: u64 = 256 * 1024 * 1024;
+
+/// Set the device path in the config and call make_btrfs.
+fn make_btrfs_on(image: &tempfile::NamedTempFile, cfg: &mut MkfsConfig) {
+    cfg.devices[0].path = image.path().to_path_buf();
+    mkfs::make_btrfs(cfg).unwrap();
+}
+
+fn make_btrfs_on_err(
+    image: &tempfile::NamedTempFile,
+    cfg: &mut MkfsConfig,
+) -> anyhow::Error {
+    cfg.devices[0].path = image.path().to_path_buf();
+    mkfs::make_btrfs(cfg).unwrap_err()
+}
 
 fn create_image(size: u64) -> tempfile::NamedTempFile {
     let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -35,8 +58,8 @@ fn create_image(size: u64) -> tempfile::NamedTempFile {
 #[test]
 fn mkfs_creates_valid_superblock() {
     let image = create_image(MIN_SIZE);
-    let cfg = test_config(MIN_SIZE);
-    mkfs::make_btrfs(image.path(), &cfg).unwrap();
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
 
     let mut file = std::fs::File::open(image.path()).unwrap();
     let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
@@ -46,8 +69,8 @@ fn mkfs_creates_valid_superblock() {
 #[test]
 fn mkfs_superblock_has_correct_uuid() {
     let image = create_image(MIN_SIZE);
-    let cfg = test_config(MIN_SIZE);
-    mkfs::make_btrfs(image.path(), &cfg).unwrap();
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
 
     let mut file = std::fs::File::open(image.path()).unwrap();
     let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
@@ -57,8 +80,8 @@ fn mkfs_superblock_has_correct_uuid() {
 #[test]
 fn mkfs_superblock_has_correct_sizes() {
     let image = create_image(MIN_SIZE);
-    let cfg = test_config(MIN_SIZE);
-    mkfs::make_btrfs(image.path(), &cfg).unwrap();
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
 
     let mut file = std::fs::File::open(image.path()).unwrap();
     let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
@@ -72,7 +95,7 @@ fn mkfs_superblock_has_label() {
     let image = create_image(MIN_SIZE);
     let mut cfg = test_config(MIN_SIZE);
     cfg.label = Some("test-label".to_string());
-    mkfs::make_btrfs(image.path(), &cfg).unwrap();
+    make_btrfs_on(&image, &mut cfg);
 
     let mut file = std::fs::File::open(image.path()).unwrap();
     let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
@@ -82,8 +105,8 @@ fn mkfs_superblock_has_label() {
 #[test]
 fn mkfs_superblock_generation_is_one() {
     let image = create_image(MIN_SIZE);
-    let cfg = test_config(MIN_SIZE);
-    mkfs::make_btrfs(image.path(), &cfg).unwrap();
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
 
     let mut file = std::fs::File::open(image.path()).unwrap();
     let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
@@ -94,8 +117,8 @@ fn mkfs_superblock_generation_is_one() {
 fn mkfs_too_small_fails() {
     let too_small = 100 * 1024 * 1024; // 100 MiB, too small for metadata DUP + data
     let image = create_image(too_small);
-    let cfg = test_config(too_small);
-    let err = mkfs::make_btrfs(image.path(), &cfg).unwrap_err();
+    let mut cfg = test_config(too_small);
+    let err = make_btrfs_on_err(&image, &mut cfg);
     assert!(
         err.to_string().contains("too small"),
         "expected 'too small' error, got: {err}"
@@ -111,8 +134,8 @@ fn has_btrfs_superblock_on_empty_file() {
 #[test]
 fn has_btrfs_superblock_after_mkfs() {
     let image = create_image(MIN_SIZE);
-    let cfg = test_config(MIN_SIZE);
-    mkfs::make_btrfs(image.path(), &cfg).unwrap();
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
     assert!(mkfs::has_btrfs_superblock(image.path()));
 }
 
@@ -181,7 +204,7 @@ fn mkfs_with_no_free_space_tree() {
         enabled: false,
     }];
     cfg.apply_features(&features).unwrap();
-    mkfs::make_btrfs(image.path(), &cfg).unwrap();
+    make_btrfs_on(&image, &mut cfg);
 
     let mut file = std::fs::File::open(image.path()).unwrap();
     let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
@@ -199,7 +222,7 @@ fn mkfs_with_different_nodesize() {
     let image = create_image(size);
     let mut cfg = test_config(size);
     cfg.nodesize = 65536;
-    mkfs::make_btrfs(image.path(), &cfg).unwrap();
+    make_btrfs_on(&image, &mut cfg);
 
     let mut file = std::fs::File::open(image.path()).unwrap();
     let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();

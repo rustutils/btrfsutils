@@ -24,17 +24,43 @@ use std::{
 };
 use uuid::Uuid;
 
+/// Information about a single device in the filesystem.
+pub struct DeviceInfo {
+    pub devid: u64,
+    pub path: std::path::PathBuf,
+    pub total_bytes: u64,
+    pub dev_uuid: Uuid,
+}
+
 /// Configuration for filesystem creation.
 pub struct MkfsConfig {
     pub nodesize: u32,
     pub sectorsize: u32,
-    pub total_bytes: u64,
+    pub devices: Vec<DeviceInfo>,
     pub label: Option<String>,
     pub fs_uuid: Uuid,
-    pub dev_uuid: Uuid,
     pub chunk_tree_uuid: Uuid,
     pub incompat_flags: u64,
     pub compat_ro_flags: u64,
+    pub data_profile: crate::args::Profile,
+    pub metadata_profile: crate::args::Profile,
+}
+
+impl MkfsConfig {
+    /// Total bytes across all devices.
+    pub fn total_bytes(&self) -> u64 {
+        self.devices.iter().map(|d| d.total_bytes).sum()
+    }
+
+    /// Number of devices.
+    pub fn num_devices(&self) -> u64 {
+        self.devices.len() as u64
+    }
+
+    /// The primary device (devid 1).
+    pub fn primary_device(&self) -> &DeviceInfo {
+        &self.devices[0]
+    }
 }
 
 impl MkfsConfig {
@@ -165,23 +191,32 @@ impl MkfsConfig {
     }
 }
 
-/// Create a btrfs filesystem on the given device or image file.
-pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
-    let chunks = ChunkLayout::new(cfg.total_bytes);
+/// Create a btrfs filesystem on one or more devices.
+pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
+    let chunks = ChunkLayout::new(cfg.total_bytes());
     if chunks.is_none() {
         bail!(
             "device too small: {} bytes, need at least {} bytes",
-            cfg.total_bytes,
+            cfg.total_bytes(),
             minimum_device_size(cfg.nodesize)
         );
     }
     let chunks = chunks.unwrap();
 
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-        .with_context(|| format!("failed to open {}", path.display()))?;
+    // Open all device files.
+    let files: Vec<File> = cfg
+        .devices
+        .iter()
+        .map(|dev| {
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&dev.path)
+                .with_context(|| {
+                    format!("failed to open {}", dev.path.display())
+                })
+        })
+        .collect::<Result<_>>()?;
 
     let layout = BlockLayout::new(cfg.nodesize, chunks.meta_logical);
     let generation = 1u64;
@@ -224,22 +259,28 @@ pub fn make_btrfs(path: &Path, cfg: &MkfsConfig) -> Result<()> {
     }
 
     // Write tree blocks to disk.
+    // TODO: when ChunkLayout returns (devid, phys), route writes to the
+    // correct device file. For now all writes go to device 1.
     for (tree_id, mut block) in trees {
         write::fill_csum(&mut block);
         let logical = layout.block_addr(tree_id);
         for phys in chunks.logical_to_physical(logical) {
-            write::pwrite_all(&file, &block, phys).with_context(|| {
+            write::pwrite_all(&files[0], &block, phys).with_context(|| {
                 format!("failed to write {tree_id:?} tree block")
             })?;
         }
     }
 
-    // Build and write the superblock.
+    // Build and write superblock to all devices.
     let superblock = build_superblock(cfg, &layout, &chunks)?;
-    write::pwrite_all(&file, &superblock, SUPER_INFO_OFFSET)
-        .context("failed to write superblock")?;
+    for file in &files {
+        write::pwrite_all(file, &superblock, SUPER_INFO_OFFSET)
+            .context("failed to write superblock")?;
+    }
 
-    file.sync_all().context("fsync failed")?;
+    for file in &files {
+        file.sync_all().context("fsync failed")?;
+    }
     Ok(())
 }
 
@@ -439,10 +480,10 @@ fn build_chunk_tree(
     // DEV_ITEM for device 1 (bytes_used includes all chunks)
     let dev_data = items::dev_item(
         1,
-        cfg.total_bytes,
+        cfg.total_bytes(),
         chunks.dev_bytes_used(),
         cfg.sectorsize,
-        &cfg.dev_uuid,
+        &cfg.primary_device().dev_uuid,
         &cfg.fs_uuid,
     );
     let dev_key = Key::new(
@@ -461,7 +502,7 @@ fn build_chunk_tree(
         cfg.sectorsize,
         1,
         SYSTEM_GROUP_OFFSET,
-        &cfg.dev_uuid,
+        &cfg.primary_device().dev_uuid,
     );
     let sys_chunk_key = Key::new(
         raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
@@ -481,7 +522,7 @@ fn build_chunk_tree(
         1,
         chunks.meta_phys_0,
         chunks.meta_phys_1,
-        &cfg.dev_uuid,
+        &cfg.primary_device().dev_uuid,
     );
     let meta_chunk_key = Key::new(
         raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
@@ -499,7 +540,7 @@ fn build_chunk_tree(
         cfg.sectorsize,
         1,
         chunks.data_phys,
-        &cfg.dev_uuid,
+        &cfg.primary_device().dev_uuid,
     );
     let data_chunk_key = Key::new(
         raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
@@ -788,7 +829,7 @@ fn build_superblock(
         cfg.sectorsize,
         1,
         SYSTEM_GROUP_OFFSET,
-        &cfg.dev_uuid,
+        &cfg.primary_device().dev_uuid,
     );
     let mut sys_chunk_array = items::disk_key(&chunk_key);
     sys_chunk_array.extend_from_slice(&chunk_data);
@@ -796,10 +837,10 @@ fn build_superblock(
     // Build the dev_item for the superblock.
     let dev_item_bytes = items::dev_item(
         1,
-        cfg.total_bytes,
+        cfg.total_bytes(),
         chunks.dev_bytes_used(),
         cfg.sectorsize,
-        &cfg.dev_uuid,
+        &cfg.primary_device().dev_uuid,
         &cfg.fs_uuid,
     );
 
@@ -818,13 +859,13 @@ fn build_superblock(
         .set_root(layout.block_addr(TreeId::Root))
         .set_chunk_root(layout.block_addr(TreeId::Chunk))
         .set_chunk_root_generation(generation)
-        .set_total_bytes(cfg.total_bytes)
+        .set_total_bytes(cfg.total_bytes())
         .set_bytes_used(
             layout.system_used()
                 + layout.metadata_used(cfg.has_block_group_tree()),
         )
         .set_root_dir_objectid(raw::BTRFS_FIRST_FREE_OBJECTID as u64)
-        .set_num_devices(1)
+        .set_num_devices(cfg.num_devices())
         .set_sectorsize(cfg.sectorsize)
         .set_nodesize(cfg.nodesize)
         .set_stripesize(cfg.sectorsize)

@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use btrfs_mkfs::{
-    args::{Arguments, ChecksumArg},
-    mkfs,
+    args::{Arguments, ChecksumArg, Profile},
+    mkfs::{self, DeviceInfo},
 };
 use clap::Parser;
 use std::os::unix::fs::FileTypeExt;
@@ -9,12 +9,6 @@ use uuid::Uuid;
 
 fn main() -> Result<()> {
     let args = Arguments::parse();
-
-    if args.devices.len() > 1 {
-        bail!("multi-device mkfs is not yet implemented");
-    }
-
-    let path = &args.devices[0];
 
     // Resolve sizes.
     let nodesize = args.nodesize.map(|s| s.0 as u32).unwrap_or(16384);
@@ -49,65 +43,116 @@ fn main() -> Result<()> {
         bail!("label too long: {} bytes (max 255)", label.len());
     }
 
-    // Determine device size.
-    let total_bytes = if let Some(byte_count) = args.byte_count {
-        byte_count.0
-    } else {
-        mkfs::device_size(path)?
-    };
+    // Profile defaults: DUP metadata for single device, RAID1 for multi-device.
+    let num_devices = args.devices.len();
+    let metadata_profile =
+        args.metadata_profile.unwrap_or(if num_devices > 1 {
+            Profile::Raid1
+        } else {
+            Profile::Dup
+        });
+    let data_profile = args.data_profile.unwrap_or(Profile::Single);
 
-    // Minimum size check.
-    let min_size = mkfs::minimum_device_size(nodesize);
-    if total_bytes < min_size {
+    // Validate profile vs device count.
+    if num_devices < metadata_profile.min_devices() {
         bail!(
-            "device too small: {} bytes, need at least {} bytes ({} MiB)",
-            total_bytes,
-            min_size,
-            min_size / (1024 * 1024)
+            "metadata profile {} requires at least {} devices, got {}",
+            metadata_profile,
+            metadata_profile.min_devices(),
+            num_devices
+        );
+    }
+    if num_devices < data_profile.min_devices() {
+        bail!(
+            "data profile {} requires at least {} devices, got {}",
+            data_profile,
+            data_profile.min_devices(),
+            num_devices
         );
     }
 
-    // Device safety checks (block devices only).
-    let metadata = std::fs::metadata(path)
-        .ok()
-        .filter(|m| m.file_type().is_block_device());
-    if metadata.is_some() {
-        if mkfs::is_device_mounted(path)? {
+    // Build device list.
+    let mut devices = Vec::with_capacity(num_devices);
+    for (i, dev_path) in args.devices.iter().enumerate() {
+        let devid = (i + 1) as u64;
+        let total_bytes = if let Some(byte_count) = args.byte_count {
+            byte_count.0
+        } else {
+            mkfs::device_size(dev_path)?
+        };
+
+        // Minimum size check.
+        let min_size = mkfs::minimum_device_size(nodesize);
+        if total_bytes < min_size {
             bail!(
-                "'{}' is mounted; refusing to format a mounted device",
-                path.display()
+                "device '{}' too small: {} bytes, need at least {} bytes ({} MiB)",
+                dev_path.display(),
+                total_bytes,
+                min_size,
+                min_size / (1024 * 1024)
             );
         }
-        if !args.force && mkfs::has_btrfs_superblock(path) {
-            bail!(
-                "'{}' already contains a btrfs filesystem; use -f to force",
-                path.display()
-            );
+
+        // Device safety checks (block devices only).
+        let is_block = std::fs::metadata(dev_path)
+            .ok()
+            .is_some_and(|m| m.file_type().is_block_device());
+        if is_block {
+            if mkfs::is_device_mounted(dev_path)? {
+                bail!(
+                    "'{}' is mounted; refusing to format a mounted device",
+                    dev_path.display()
+                );
+            }
+            if !args.force && mkfs::has_btrfs_superblock(dev_path) {
+                bail!(
+                    "'{}' already contains a btrfs filesystem; use -f to force",
+                    dev_path.display()
+                );
+            }
         }
+
+        let dev_uuid = if i == 0 {
+            args.device_uuid.unwrap_or_else(Uuid::new_v4)
+        } else {
+            Uuid::new_v4()
+        };
+
+        devices.push(DeviceInfo {
+            devid,
+            path: dev_path.clone(),
+            total_bytes,
+            dev_uuid,
+        });
     }
 
-    // Generate or parse UUIDs.
+    // Generate or parse filesystem UUID.
     let fs_uuid = args.filesystem_uuid.unwrap_or_else(Uuid::new_v4);
-    let dev_uuid = args.device_uuid.unwrap_or_else(Uuid::new_v4);
     let chunk_tree_uuid = Uuid::new_v4();
 
     let mut cfg = mkfs::MkfsConfig {
         nodesize,
         sectorsize,
-        total_bytes,
+        devices,
         label: args.label,
         fs_uuid,
-        dev_uuid,
         chunk_tree_uuid,
         incompat_flags: mkfs::MkfsConfig::default_incompat_flags(),
         compat_ro_flags: mkfs::MkfsConfig::default_compat_ro_flags(),
+        data_profile,
+        metadata_profile,
     };
 
     // Apply user-specified feature flags.
     cfg.apply_features(&args.features)?;
 
     if !args.quiet {
-        eprintln!("Creating btrfs filesystem on {}", path.display());
+        let device_names: Vec<_> = cfg
+            .devices
+            .iter()
+            .map(|d| d.path.display().to_string())
+            .collect();
+        eprintln!("Creating btrfs filesystem on {}", device_names.join(", "));
         eprintln!(
             "  Label:          {}",
             cfg.label.as_deref().unwrap_or("(none)")
@@ -117,23 +162,40 @@ fn main() -> Result<()> {
         eprintln!("  Sector size:    {}", cfg.sectorsize);
         eprintln!(
             "  Filesystem size: {} ({} bytes)",
-            human_size(cfg.total_bytes),
-            cfg.total_bytes
+            human_size(cfg.total_bytes()),
+            cfg.total_bytes()
         );
-    }
-
-    // TRIM the device before writing (unless -K).
-    if metadata.is_some() && !args.nodiscard {
-        if !args.quiet {
-            eprintln!("Performing full device TRIM...");
-        }
-        if let Err(e) = mkfs::discard_device(path, total_bytes) {
-            // TRIM failure is non-fatal (device may not support it).
-            eprintln!("WARNING: discard failed: {e:#}");
+        if num_devices > 1 {
+            eprintln!("  Data profile:   {}", cfg.data_profile);
+            eprintln!("  Metadata profile: {}", cfg.metadata_profile);
         }
     }
 
-    mkfs::make_btrfs(path, &cfg)?;
+    // TRIM each device before writing (unless -K).
+    if !args.nodiscard {
+        for dev in &cfg.devices {
+            let is_block = std::fs::metadata(&dev.path)
+                .ok()
+                .is_some_and(|m| m.file_type().is_block_device());
+            if is_block {
+                if !args.quiet {
+                    eprintln!(
+                        "Performing full device TRIM on {}...",
+                        dev.path.display()
+                    );
+                }
+                if let Err(e) = mkfs::discard_device(&dev.path, dev.total_bytes)
+                {
+                    eprintln!(
+                        "WARNING: discard failed on {}: {e:#}",
+                        dev.path.display()
+                    );
+                }
+            }
+        }
+    }
+
+    mkfs::make_btrfs(&cfg)?;
 
     if !args.quiet {
         eprintln!("Done.");

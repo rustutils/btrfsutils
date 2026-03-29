@@ -179,7 +179,6 @@ impl std::str::FromStr for SizeArg {
 }
 
 /// Block group RAID profile.
-/// Block group RAID profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Profile {
     Single,
@@ -224,6 +223,50 @@ impl std::fmt::Display for Profile {
             Profile::Raid5 => write!(f, "RAID5"),
             Profile::Raid6 => write!(f, "RAID6"),
             Profile::Raid10 => write!(f, "RAID10"),
+        }
+    }
+}
+
+impl Profile {
+    /// The block group flag bits for this profile (ORed with type flags).
+    pub fn block_group_flag(self) -> u64 {
+        use btrfs_disk::raw;
+        match self {
+            Profile::Single => 0,
+            Profile::Dup => raw::BTRFS_BLOCK_GROUP_DUP as u64,
+            Profile::Raid0 => raw::BTRFS_BLOCK_GROUP_RAID0 as u64,
+            Profile::Raid1 => raw::BTRFS_BLOCK_GROUP_RAID1 as u64,
+            Profile::Raid1c3 => raw::BTRFS_BLOCK_GROUP_RAID1C3 as u64,
+            Profile::Raid1c4 => raw::BTRFS_BLOCK_GROUP_RAID1C4 as u64,
+            Profile::Raid5 => raw::BTRFS_BLOCK_GROUP_RAID5 as u64,
+            Profile::Raid6 => raw::BTRFS_BLOCK_GROUP_RAID6 as u64,
+            Profile::Raid10 => raw::BTRFS_BLOCK_GROUP_RAID10 as u64,
+        }
+    }
+
+    /// Number of physical stripes for this profile.
+    pub fn num_stripes(self) -> u16 {
+        match self {
+            Profile::Single => 1,
+            Profile::Dup | Profile::Raid1 => 2,
+            Profile::Raid1c3 => 3,
+            Profile::Raid1c4 => 4,
+            // RAID0/5/6/10 stripe count depends on device count; not
+            // supported yet — these are here for completeness.
+            Profile::Raid0
+            | Profile::Raid5
+            | Profile::Raid6
+            | Profile::Raid10 => 2,
+        }
+    }
+
+    /// Minimum number of devices required for this profile.
+    pub fn min_devices(self) -> usize {
+        match self {
+            Profile::Single | Profile::Dup => 1,
+            Profile::Raid0 | Profile::Raid1 | Profile::Raid5 => 2,
+            Profile::Raid1c3 | Profile::Raid6 => 3,
+            Profile::Raid1c4 | Profile::Raid10 => 4,
         }
     }
 }
