@@ -14,6 +14,7 @@ Arguments {
         DeviceCommand {
             subcommand: Remove(
                 DeviceRemoveCommand {
+                    enqueue: false,
                     args: [
                         "/dev/sdb",
                         "/mnt",

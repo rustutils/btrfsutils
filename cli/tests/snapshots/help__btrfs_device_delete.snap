@@ -10,15 +10,19 @@ special token "missing" (to remove a device that is no longer present), or
 
 The operation requires CAP_SYS_ADMIN.
 
-Usage: delete <ARGS> <ARGS>...
+Usage: delete [OPTIONS] <ARGS> <ARGS>...
 
 Arguments:
   <ARGS> <ARGS>...
+          
+
+Options:
+      --enqueue
           One or more devices to remove (path, devid, "missing", or "cancel"),
           followed by the filesystem mount point
           
-          Example: btrfs device remove /dev/sdb 3 missing /mnt/data
+          Example: btrfs device remove /dev/sdb 3 missing /mnt/data Wait if
+          another exclusive operation is running, rather than failing
 
-Options:
   -h, --help
           Print help (see a summary with '-h')

@@ -1,6 +1,10 @@
 use crate::{Format, Runnable};
 use anyhow::{Context, Result};
-use btrfs_uapi::device::{DeviceSpec, device_remove};
+use btrfs_uapi::{
+    device::{DeviceSpec, device_remove},
+    filesystem::filesystem_info,
+    sysfs::SysfsBtrfs,
+};
 use clap::Parser;
 use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
 
@@ -17,6 +21,10 @@ pub struct DeviceRemoveCommand {
     /// followed by the filesystem mount point
     ///
     /// Example: btrfs device remove /dev/sdb 3 missing /mnt/data
+    /// Wait if another exclusive operation is running, rather than failing
+    #[clap(long)]
+    pub enqueue: bool,
+
     #[clap(required = true, num_args = 2..)]
     pub args: Vec<String>,
 }
@@ -34,6 +42,26 @@ impl Runnable for DeviceRemoveCommand {
         let file = File::open(&mount)
             .with_context(|| format!("failed to open '{}'", mount.display()))?;
         let fd = file.as_fd();
+
+        if self.enqueue {
+            let info = filesystem_info(fd).with_context(|| {
+                format!(
+                    "failed to get filesystem info for '{}'",
+                    mount.display()
+                )
+            })?;
+            let sysfs = SysfsBtrfs::new(&info.uuid);
+            let op =
+                sysfs.wait_for_exclusive_operation().with_context(|| {
+                    format!(
+                        "failed to check exclusive operation on '{}'",
+                        mount.display()
+                    )
+                })?;
+            if op != "none" {
+                eprintln!("waited for exclusive operation '{op}' to finish");
+            }
+        }
 
         let mut had_error = false;
 
