@@ -8,7 +8,10 @@ use common::{
     BackingFile, LoopbackDevice, single_mount, verify_test_data,
     write_test_data,
 };
-use std::path::Path;
+use std::{
+    os::unix::fs::{FileTypeExt, MetadataExt},
+    path::Path,
+};
 
 // ── filesystem (assertions) ──────────────────────────────────────────
 
@@ -1268,4 +1271,177 @@ fn replace_cancel_not_running() {
         out.contains("no replace") || out.contains("not in progress"),
         "expected no-op cancel message:\n{out}"
     );
+}
+
+// ── send/receive: special files ─────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_receive_special_files() {
+    let (_td1, mnt1) = single_mount();
+    let (_td2, mnt2) = single_mount();
+    let mp1 = mnt1.path().to_str().unwrap();
+    let mp2 = mnt2.path().to_str().unwrap();
+    let stream_file = format!("{}/special.bin", _td1.path().to_str().unwrap());
+
+    let src = format!("{mp1}/special");
+    btrfs_ok(&["subvolume", "create", &src]);
+
+    // Create various special files.
+    write_test_data(Path::new(&src), "regular.bin", 4096);
+    std::os::unix::fs::symlink("regular.bin", format!("{src}/link.sym"))
+        .unwrap();
+    std::fs::hard_link(
+        format!("{src}/regular.bin"),
+        format!("{src}/hardlink.bin"),
+    )
+    .unwrap();
+    // FIFO (named pipe).
+    nix::unistd::mkfifo(
+        &std::path::PathBuf::from(format!("{src}/pipe")),
+        nix::sys::stat::Mode::from_bits_truncate(0o644),
+    )
+    .unwrap();
+
+    btrfs_ok(&["property", "set", "-t", "subvol", &src, "ro", "true"]);
+    btrfs_ok(&["send", "-f", &stream_file, &src]);
+    btrfs_ok(&["receive", "-f", &stream_file, mp2]);
+
+    let recv = format!("{mp2}/special");
+
+    // Regular file.
+    verify_test_data(Path::new(&recv), "regular.bin", 4096);
+
+    // Symlink.
+    let link_target = std::fs::read_link(format!("{recv}/link.sym")).unwrap();
+    assert_eq!(link_target.to_str().unwrap(), "regular.bin");
+
+    // Hard link (should share inode with regular.bin).
+    let meta_orig = std::fs::metadata(format!("{recv}/regular.bin")).unwrap();
+    let meta_hard = std::fs::metadata(format!("{recv}/hardlink.bin")).unwrap();
+    assert_eq!(meta_orig.ino(), meta_hard.ino());
+
+    // FIFO.
+    let fifo_meta = std::fs::symlink_metadata(format!("{recv}/pipe")).unwrap();
+    assert!(
+        fifo_meta.file_type().is_fifo(),
+        "expected FIFO, got {:?}",
+        fifo_meta.file_type()
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_receive_xattrs() {
+    let (_td1, mnt1) = single_mount();
+    let (_td2, mnt2) = single_mount();
+    let mp1 = mnt1.path().to_str().unwrap();
+    let mp2 = mnt2.path().to_str().unwrap();
+    let stream_file = format!("{}/xattr.bin", _td1.path().to_str().unwrap());
+
+    let src = format!("{mp1}/xattr_test");
+    btrfs_ok(&["subvolume", "create", &src]);
+
+    let file_path = format!("{src}/testfile");
+    std::fs::write(&file_path, b"xattr test content").unwrap();
+
+    // Set xattrs using the setfattr command.
+    let status = std::process::Command::new("setfattr")
+        .args(["-n", "user.myattr", "-v", "hello", &file_path])
+        .status()
+        .expect("setfattr not found");
+    assert!(status.success(), "setfattr failed");
+
+    btrfs_ok(&["property", "set", "-t", "subvol", &src, "ro", "true"]);
+    btrfs_ok(&["send", "-f", &stream_file, &src]);
+    btrfs_ok(&["receive", "-f", &stream_file, mp2]);
+
+    // Verify xattr was preserved.
+    let recv_file = format!("{mp2}/xattr_test/testfile");
+    let output = std::process::Command::new("getfattr")
+        .args(["--only-values", "-n", "user.myattr", &recv_file])
+        .output()
+        .expect("getfattr not found");
+    assert!(output.status.success(), "getfattr failed");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "hello",
+        "xattr value mismatch"
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_receive_force_decompress() {
+    // Source: mount with zstd compression.
+    let td1 = tempfile::tempdir().unwrap();
+    let file1 = BackingFile::new(td1.path(), "disk.img", 512_000_000);
+    file1.mkfs();
+    let lo1 = LoopbackDevice::new(file1);
+    let mnt1 = common::Mount::with_options(lo1, td1.path(), &["compress=zstd"]);
+    let mp1 = mnt1.path().to_str().unwrap();
+
+    let (_td2, mnt2) = single_mount();
+    let mp2 = mnt2.path().to_str().unwrap();
+    let stream_file = format!("{}/decomp.bin", td1.path().to_str().unwrap());
+
+    let src = format!("{mp1}/decomp_test");
+    btrfs_ok(&["subvolume", "create", &src]);
+    common::write_compressible_data(Path::new(&src), "data.bin", 128 * 1024);
+    write_test_data(Path::new(&src), "pattern.bin", 64 * 1024);
+    btrfs_ok(&["filesystem", "sync", mp1]);
+
+    btrfs_ok(&["property", "set", "-t", "subvol", &src, "ro", "true"]);
+    btrfs_ok(&["send", "--compressed-data", "-f", &stream_file, &src]);
+
+    // Receive with --force-decompress to exercise the decompression fallback.
+    btrfs_ok(&["receive", "--force-decompress", "-f", &stream_file, mp2]);
+
+    let recv = format!("{mp2}/decomp_test");
+    assert!(Path::new(&recv).is_dir(), "received subvol not found");
+
+    let data = std::fs::read(format!("{recv}/data.bin")).unwrap();
+    assert_eq!(data.len(), 128 * 1024);
+    assert!(data.iter().all(|&b| b == 0), "data.bin should be all zeros");
+    verify_test_data(Path::new(&recv), "pattern.bin", 64 * 1024);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_receive_truncate() {
+    let (_td1, mnt1) = single_mount();
+    let (_td2, mnt2) = single_mount();
+    let mp1 = mnt1.path().to_str().unwrap();
+    let mp2 = mnt2.path().to_str().unwrap();
+    let base_stream =
+        format!("{}/trunc_base.bin", _td1.path().to_str().unwrap());
+    let incr_stream =
+        format!("{}/trunc_incr.bin", _td1.path().to_str().unwrap());
+
+    let src = format!("{mp1}/trunc_src");
+    btrfs_ok(&["subvolume", "create", &src]);
+    write_test_data(Path::new(&src), "shrink.bin", 65536);
+
+    let snap1 = format!("{mp1}/trunc_snap1");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap1]);
+
+    // Truncate the file to a smaller size.
+    let f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(format!("{src}/shrink.bin"))
+        .unwrap();
+    f.set_len(1024).unwrap();
+    drop(f);
+
+    let snap2 = format!("{mp1}/trunc_snap2");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap2]);
+
+    btrfs_ok(&["send", "-f", &base_stream, &snap1]);
+    btrfs_ok(&["receive", "-f", &base_stream, mp2]);
+    btrfs_ok(&["send", "-p", &snap1, "-f", &incr_stream, &snap2]);
+    btrfs_ok(&["receive", "-f", &incr_stream, mp2]);
+
+    let recv = format!("{mp2}/trunc_snap2/shrink.bin");
+    let meta = std::fs::metadata(&recv).unwrap();
+    assert_eq!(meta.len(), 1024, "truncated file should be 1024 bytes");
 }

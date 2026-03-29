@@ -541,3 +541,271 @@ impl std::str::FromStr for CompressArg {
         Ok(CompressArg { algorithm, level })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- SizeArg::from_str ---
+
+    #[test]
+    fn size_arg_bare_number() {
+        assert_eq!("0".parse::<SizeArg>().unwrap(), SizeArg(0));
+        assert_eq!("42".parse::<SizeArg>().unwrap(), SizeArg(42));
+    }
+
+    #[test]
+    fn size_arg_all_suffixes() {
+        assert_eq!("1k".parse::<SizeArg>().unwrap(), SizeArg(1 << 10));
+        assert_eq!("1kib".parse::<SizeArg>().unwrap(), SizeArg(1 << 10));
+        assert_eq!("1m".parse::<SizeArg>().unwrap(), SizeArg(1 << 20));
+        assert_eq!("1mib".parse::<SizeArg>().unwrap(), SizeArg(1 << 20));
+        assert_eq!("1g".parse::<SizeArg>().unwrap(), SizeArg(1 << 30));
+        assert_eq!("1gib".parse::<SizeArg>().unwrap(), SizeArg(1 << 30));
+        assert_eq!("1t".parse::<SizeArg>().unwrap(), SizeArg(1 << 40));
+        assert_eq!("1p".parse::<SizeArg>().unwrap(), SizeArg(1 << 50));
+        assert_eq!("1e".parse::<SizeArg>().unwrap(), SizeArg(1 << 60));
+    }
+
+    #[test]
+    fn size_arg_case_insensitive() {
+        assert_eq!("16K".parse::<SizeArg>().unwrap(), SizeArg(16 << 10));
+        assert_eq!("4MiB".parse::<SizeArg>().unwrap(), SizeArg(4 << 20));
+        assert_eq!("2G".parse::<SizeArg>().unwrap(), SizeArg(2 << 30));
+    }
+
+    #[test]
+    fn size_arg_bad_number() {
+        assert!("abc".parse::<SizeArg>().is_err());
+        assert!("".parse::<SizeArg>().is_err());
+    }
+
+    #[test]
+    fn size_arg_unknown_suffix() {
+        assert!("10X".parse::<SizeArg>().is_err());
+    }
+
+    #[test]
+    fn size_arg_overflow() {
+        assert!("16385P".parse::<SizeArg>().is_err());
+        assert!("17E".parse::<SizeArg>().is_err());
+    }
+
+    // --- Profile::from_str ---
+
+    #[test]
+    fn profile_all_variants() {
+        assert_eq!("single".parse::<Profile>().unwrap(), Profile::Single);
+        assert_eq!("dup".parse::<Profile>().unwrap(), Profile::Dup);
+        assert_eq!("raid0".parse::<Profile>().unwrap(), Profile::Raid0);
+        assert_eq!("raid1".parse::<Profile>().unwrap(), Profile::Raid1);
+        assert_eq!("raid1c3".parse::<Profile>().unwrap(), Profile::Raid1c3);
+        assert_eq!("raid1c4".parse::<Profile>().unwrap(), Profile::Raid1c4);
+        assert_eq!("raid5".parse::<Profile>().unwrap(), Profile::Raid5);
+        assert_eq!("raid6".parse::<Profile>().unwrap(), Profile::Raid6);
+        assert_eq!("raid10".parse::<Profile>().unwrap(), Profile::Raid10);
+    }
+
+    #[test]
+    fn profile_case_insensitive() {
+        assert_eq!("SINGLE".parse::<Profile>().unwrap(), Profile::Single);
+        assert_eq!("Raid1C3".parse::<Profile>().unwrap(), Profile::Raid1c3);
+    }
+
+    #[test]
+    fn profile_unknown() {
+        assert!("raid99".parse::<Profile>().is_err());
+    }
+
+    // --- Profile::Display round-trip ---
+
+    #[test]
+    fn profile_display_roundtrip() {
+        let all = [
+            Profile::Single,
+            Profile::Dup,
+            Profile::Raid0,
+            Profile::Raid1,
+            Profile::Raid1c3,
+            Profile::Raid1c4,
+            Profile::Raid5,
+            Profile::Raid6,
+            Profile::Raid10,
+        ];
+        for p in all {
+            let s = p.to_string();
+            assert_eq!(
+                s.parse::<Profile>().unwrap(),
+                p,
+                "round-trip failed for {s}"
+            );
+        }
+    }
+
+    // --- Profile::block_group_flag ---
+
+    #[test]
+    fn profile_block_group_flag_single() {
+        assert_eq!(Profile::Single.block_group_flag(), 0);
+    }
+
+    #[test]
+    fn profile_block_group_flag_dup() {
+        assert_ne!(Profile::Dup.block_group_flag(), 0);
+    }
+
+    #[test]
+    fn profile_block_group_flag_raid1() {
+        assert_ne!(Profile::Raid1.block_group_flag(), 0);
+        assert_ne!(
+            Profile::Raid1.block_group_flag(),
+            Profile::Dup.block_group_flag()
+        );
+    }
+
+    // --- Profile::num_stripes ---
+
+    #[test]
+    fn profile_num_stripes() {
+        assert_eq!(Profile::Single.num_stripes(4), 1);
+        assert_eq!(Profile::Dup.num_stripes(1), 2);
+        assert_eq!(Profile::Raid1.num_stripes(2), 2);
+        assert_eq!(Profile::Raid1c3.num_stripes(3), 3);
+        assert_eq!(Profile::Raid1c4.num_stripes(4), 4);
+        assert_eq!(Profile::Raid0.num_stripes(5), 5);
+    }
+
+    // --- Profile::min_devices ---
+
+    #[test]
+    fn profile_min_devices() {
+        assert_eq!(Profile::Single.min_devices(), 1);
+        assert_eq!(Profile::Dup.min_devices(), 1);
+        assert_eq!(Profile::Raid0.min_devices(), 2);
+        assert_eq!(Profile::Raid1.min_devices(), 2);
+        assert_eq!(Profile::Raid5.min_devices(), 2);
+        assert_eq!(Profile::Raid1c3.min_devices(), 3);
+        assert_eq!(Profile::Raid6.min_devices(), 3);
+        assert_eq!(Profile::Raid1c4.min_devices(), 4);
+        assert_eq!(Profile::Raid10.min_devices(), 4);
+    }
+
+    // --- ChecksumArg::from_str ---
+
+    #[test]
+    fn checksum_all_names() {
+        assert_eq!(
+            "crc32c".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::Crc32c
+        );
+        assert_eq!(
+            "xxhash".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::Xxhash
+        );
+        assert_eq!(
+            "sha256".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::Sha256
+        );
+        assert_eq!(
+            "blake2".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::Blake2
+        );
+    }
+
+    #[test]
+    fn checksum_aliases() {
+        assert_eq!(
+            "xxhash64".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::Xxhash
+        );
+        assert_eq!(
+            "blake2b".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::Blake2
+        );
+    }
+
+    #[test]
+    fn checksum_unknown() {
+        assert!("md5".parse::<ChecksumArg>().is_err());
+    }
+
+    // --- ChecksumArg::Display round-trip ---
+
+    #[test]
+    fn checksum_display_roundtrip() {
+        let all = [
+            ChecksumArg::Crc32c,
+            ChecksumArg::Xxhash,
+            ChecksumArg::Sha256,
+            ChecksumArg::Blake2,
+        ];
+        for c in all {
+            let s = c.to_string();
+            assert_eq!(
+                s.parse::<ChecksumArg>().unwrap(),
+                c,
+                "round-trip failed for {s}"
+            );
+        }
+    }
+
+    // --- FeatureArg::from_str ---
+
+    #[test]
+    fn feature_enable() {
+        let f: FeatureArg = "no-holes".parse().unwrap();
+        assert_eq!(f.feature, Feature::NoHoles);
+        assert!(f.enabled);
+    }
+
+    #[test]
+    fn feature_disable() {
+        let f: FeatureArg = "^no-holes".parse().unwrap();
+        assert_eq!(f.feature, Feature::NoHoles);
+        assert!(!f.enabled);
+    }
+
+    #[test]
+    fn feature_aliases() {
+        assert_eq!(
+            "fst".parse::<FeatureArg>().unwrap().feature,
+            Feature::FreeSpaceTree
+        );
+        assert_eq!(
+            "bgt".parse::<FeatureArg>().unwrap().feature,
+            Feature::BlockGroupTree
+        );
+    }
+
+    #[test]
+    fn feature_underscore_normalization() {
+        let f: FeatureArg = "skinny_metadata".parse().unwrap();
+        assert_eq!(f.feature, Feature::SkinnyMetadata);
+    }
+
+    #[test]
+    fn feature_unknown() {
+        assert!("bogus".parse::<FeatureArg>().is_err());
+    }
+
+    // --- Feature::Display round-trip ---
+
+    #[test]
+    fn feature_display_roundtrip() {
+        let samples = [
+            Feature::NoHoles,
+            Feature::SkinnyMetadata,
+            Feature::FreeSpaceTree,
+            Feature::BlockGroupTree,
+            Feature::Extref,
+        ];
+        for feat in samples {
+            let s = feat.to_string();
+            assert_eq!(
+                s.parse::<Feature>().unwrap(),
+                feat,
+                "round-trip failed for {s}"
+            );
+        }
+    }
+}

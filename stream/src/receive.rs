@@ -1069,3 +1069,204 @@ fn path_to_cstring(path: &Path) -> Result<CString> {
         format!("path contains null byte: '{}'", path.display())
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    // -- decompress: compression type 0 (none) --
+
+    #[test]
+    fn decompress_none_passthrough() {
+        let data = b"hello world";
+        let result = decompress(data, data.len(), 0).unwrap();
+        assert_eq!(result, data);
+    }
+
+    // -- decompress: compression type 1 (zlib) --
+
+    #[test]
+    fn decompress_zlib() {
+        use flate2::write::ZlibEncoder;
+        use std::io::Write;
+
+        let original = b"the quick brown fox jumps over the lazy dog";
+        let mut encoder =
+            ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(original).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let result = decompress(&compressed, original.len(), 1).unwrap();
+        assert_eq!(result, original);
+    }
+
+    // -- decompress: compression type 2 (zstd) --
+
+    #[test]
+    fn decompress_zstd() {
+        let original = b"repeating data repeating data repeating data";
+        let compressed = zstd::bulk::compress(original, 3).unwrap();
+
+        let result = decompress(&compressed, original.len(), 2).unwrap();
+        assert_eq!(result, original);
+    }
+
+    // -- decompress: unsupported compression type --
+
+    #[test]
+    fn decompress_unsupported_type() {
+        let err = decompress(b"data", 4, 99).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported compression type 99"),
+            "unexpected error: {err}"
+        );
+    }
+
+    // -- decompress_lzo: header too short --
+
+    #[test]
+    fn decompress_lzo_header_too_short() {
+        let err = decompress_lzo(&[0, 1, 2], 100, 4096).unwrap_err();
+        assert!(
+            err.to_string().contains("too short"),
+            "unexpected error: {err}"
+        );
+    }
+
+    // -- decompress_lzo: total_len exceeds data --
+
+    #[test]
+    fn decompress_lzo_total_len_exceeds_data() {
+        // total_len = 1000, but data is only 8 bytes
+        let mut data = vec![0u8; 8];
+        data[0..4].copy_from_slice(&1000u32.to_le_bytes());
+        let err = decompress_lzo(&data, 100, 4096).unwrap_err();
+        assert!(
+            err.to_string().contains("exceeds data length"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Build a btrfs-format LZO compressed buffer from raw segments.
+    /// Each segment is LZO1X compressed data for one sector.
+    fn build_lzo_buffer(segments: &[Vec<u8>], sector_size: usize) -> Vec<u8> {
+        let mut buf = Vec::new();
+        // Placeholder for total_len header
+        buf.extend_from_slice(&[0u8; 4]);
+
+        for seg in segments {
+            // 4-byte segment length
+            buf.extend_from_slice(&(seg.len() as u32).to_le_bytes());
+            buf.extend_from_slice(seg);
+            // Pad to next sector boundary if needed (relative to start of
+            // segment data, which begins at offset 4 in the overall buffer).
+            // The position within the buffer after writing this segment:
+            let pos = buf.len();
+            let sector_rem = sector_size - (pos % sector_size);
+            if sector_rem < 4 && sector_rem < sector_size {
+                // Pad so next segment header is aligned
+                buf.resize(buf.len() + sector_rem, 0);
+            }
+        }
+
+        // Write total_len (includes the 4-byte header itself)
+        let total = buf.len() as u32;
+        buf[0..4].copy_from_slice(&total.to_le_bytes());
+        buf
+    }
+
+    // -- decompress_lzo: single segment --
+
+    #[test]
+    fn decompress_lzo_single_segment() {
+        let original = b"hello lzo compression test data!";
+        let compressed =
+            lzo1x::compress(original, lzo1x::CompressLevel::default());
+
+        let buf = build_lzo_buffer(&[compressed], 4096);
+        let result = decompress_lzo(&buf, original.len(), 4096).unwrap();
+        assert_eq!(&result[..original.len()], original.as_slice());
+    }
+
+    // -- decompress_lzo: output zero-fill --
+    // When the decompressed data from all segments is shorter than output_len,
+    // the remainder is zero-filled. We use a 4096-byte sector whose decompressed
+    // content is exactly 4096 bytes, then request output_len = 8192 so the
+    // second half is zeros.
+
+    #[test]
+    fn decompress_lzo_output_zero_fill() {
+        // Create exactly one sector worth of data (4096 bytes)
+        let original = vec![0xABu8; 4096];
+        let compressed =
+            lzo1x::compress(&original, lzo1x::CompressLevel::default());
+
+        let output_len = 8192; // twice the data we have
+        let buf = build_lzo_buffer(&[compressed], 4096);
+        let result = decompress_lzo(&buf, output_len, 4096).unwrap();
+        assert_eq!(&result[..4096], original.as_slice());
+        // Remainder should be zero-filled
+        assert!(
+            result[4096..].iter().all(|&b| b == 0),
+            "expected zero-fill after decompressed data"
+        );
+        assert_eq!(result.len(), output_len);
+    }
+
+    // -- decompress_lzo: segment data truncated --
+
+    #[test]
+    fn decompress_lzo_segment_truncated() {
+        // total_len header says 20 bytes total, segment header says 100
+        // bytes but only a few remain
+        let mut data = vec![0u8; 20];
+        let total_len: u32 = 20;
+        data[0..4].copy_from_slice(&total_len.to_le_bytes());
+        // Segment header at offset 4: claims 100 bytes of compressed data
+        let seg_len: u32 = 100;
+        data[4..8].copy_from_slice(&seg_len.to_le_bytes());
+        // Only 12 bytes remain (offsets 8..20), far less than 100
+
+        let err = decompress_lzo(&data, 4096, 4096).unwrap_err();
+        assert!(
+            err.to_string().contains("truncated"),
+            "unexpected error: {err}"
+        );
+    }
+
+    // -- decompress: LZO via compression types 3-7 --
+
+    #[test]
+    fn decompress_lzo_via_compression_type_3() {
+        let original = b"lzo via decompress entry point";
+        let compressed =
+            lzo1x::compress(original, lzo1x::CompressLevel::default());
+        let buf = build_lzo_buffer(&[compressed], 4096);
+
+        // compression=3 means sector_size = 1 << (3-3+12) = 4096
+        let result = decompress(&buf, original.len(), 3).unwrap();
+        assert_eq!(&result[..original.len()], original.as_slice());
+    }
+
+    // -- path_to_cstring --
+
+    #[test]
+    fn path_to_cstring_valid() {
+        let path = Path::new("/tmp/test-file");
+        let cstr = path_to_cstring(path).unwrap();
+        assert_eq!(cstr.as_bytes(), b"/tmp/test-file");
+    }
+
+    #[test]
+    fn path_to_cstring_with_null_byte() {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+        let os_str = OsStr::from_bytes(b"/tmp/bad\x00path");
+        let path = Path::new(os_str);
+        let err = path_to_cstring(path).unwrap_err();
+        assert!(
+            err.to_string().contains("null byte"),
+            "unexpected error: {err}"
+        );
+    }
+}
