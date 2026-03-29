@@ -1,7 +1,7 @@
 stages:
   - check
   - build
-  - pages
+  - deploy
 
 check:
   image: nixos/nix:latest
@@ -9,7 +9,7 @@ check:
   before_script:
     - echo 'experimental-features = nix-command flakes' >> /etc/nix/nix.conf
   script:
-    - nix flake check
+    - nix flake check -L
 
 build:
   image: nixos/nix:latest
@@ -27,8 +27,8 @@ build:
     - master
 
 pages:
-  stage: pages
   image: alpine
+  stage: deploy
   script:
     - apk add mdbook
     - mdbook build
