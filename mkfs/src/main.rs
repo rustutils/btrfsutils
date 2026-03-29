@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use btrfs_mkfs::{
     args::{Arguments, ChecksumArg, Profile},
     mkfs::{self, DeviceInfo},
+    write::ChecksumType,
 };
 use clap::Parser;
 use std::os::unix::fs::FileTypeExt;
@@ -26,15 +27,13 @@ fn main() -> Result<()> {
         bail!("invalid sectorsize {sectorsize}: must be a power of 2 >= 4096");
     }
 
-    // Validate checksum algorithm.
-    if let Some(csum) = args.checksum
-        && csum != ChecksumArg::Crc32c
-    {
-        bail!(
-            "checksum algorithm '{}' is not yet supported; only crc32c is available",
-            csum
-        );
-    }
+    // Map checksum argument to ChecksumType.
+    let csum_type = match args.checksum {
+        None | Some(ChecksumArg::Crc32c) => ChecksumType::Crc32c,
+        Some(ChecksumArg::Xxhash) => ChecksumType::Xxhash64,
+        Some(ChecksumArg::Sha256) => ChecksumType::Sha256,
+        Some(ChecksumArg::Blake2) => ChecksumType::Blake2b,
+    };
 
     // Validate label.
     if let Some(ref label) = args.label
@@ -141,6 +140,7 @@ fn main() -> Result<()> {
         compat_ro_flags: mkfs::MkfsConfig::default_compat_ro_flags(),
         data_profile,
         metadata_profile,
+        csum_type,
     };
 
     // Apply user-specified feature flags.

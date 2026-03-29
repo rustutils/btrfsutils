@@ -1,6 +1,7 @@
 use btrfs_mkfs::{
     args::{Feature, FeatureArg, Profile},
     mkfs::{self, DeviceInfo, MkfsConfig},
+    write::ChecksumType,
 };
 use std::{
     io::{Seek, SeekFrom, Write},
@@ -25,6 +26,7 @@ fn test_config(total_bytes: u64) -> MkfsConfig {
         compat_ro_flags: MkfsConfig::default_compat_ro_flags(),
         data_profile: Profile::Single,
         metadata_profile: Profile::Dup,
+        csum_type: ChecksumType::Crc32c,
     }
 }
 
@@ -53,6 +55,7 @@ fn test_config_two_devices(per_device_bytes: u64) -> MkfsConfig {
         compat_ro_flags: MkfsConfig::default_compat_ro_flags(),
         data_profile: Profile::Single,
         metadata_profile: Profile::Raid1,
+        csum_type: ChecksumType::Crc32c,
     }
 }
 

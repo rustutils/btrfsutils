@@ -44,6 +44,7 @@ pub struct MkfsConfig {
     pub compat_ro_flags: u64,
     pub data_profile: crate::args::Profile,
     pub metadata_profile: crate::args::Profile,
+    pub csum_type: crate::write::ChecksumType,
 }
 
 impl MkfsConfig {
@@ -270,7 +271,7 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
 
     // Write tree blocks to disk, routing each stripe to the correct device.
     for (tree_id, mut block) in trees {
-        write::fill_csum(&mut block);
+        write::fill_csum(&mut block, cfg.csum_type);
         let logical = layout.block_addr(tree_id);
         for (devid, phys) in chunks.logical_to_physical(logical) {
             let file_idx = (devid - 1) as usize;
@@ -907,7 +908,7 @@ fn build_superblock(
         .set_stripesize(cfg.sectorsize)
         .set_incompat_flags(cfg.incompat_flags)
         .set_compat_ro_flags(cfg.compat_ro_flags)
-        .set_csum_type(0) // CRC32C
+        .set_csum_type(cfg.csum_type.to_raw())
         .set_cache_generation(cache_generation)
         .set_dev_item(&dev_item_bytes)
         .set_sys_chunk_array(&sys_chunk_array);
@@ -917,7 +918,7 @@ fn build_superblock(
     }
 
     let mut buf = sb.finish();
-    write::fill_csum(&mut buf);
+    write::fill_csum(&mut buf, cfg.csum_type);
     Ok(buf.to_vec())
 }
 

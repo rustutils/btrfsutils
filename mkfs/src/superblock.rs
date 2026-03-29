@@ -260,7 +260,7 @@ mod tests {
         let mut buf = sb.finish();
 
         // Compute checksum so the parser accepts it.
-        crate::write::fill_csum(&mut buf);
+        crate::write::fill_csum(&mut buf, crate::write::ChecksumType::Crc32c);
 
         // read_superblock expects the superblock at mirror 0 offset (64 KiB).
         // Build a buffer large enough to place our superblock at the right offset.
