@@ -1,13 +1,27 @@
 # btrfs-progrs
 
-An implementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs) 
-utilities for creating, managing and inspecting btrfs filesystems, written
-in Rust.
+An implementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs)
+utilities for creating, managing and inspecting btrfs filesystems, written in
+Rust.
+
+This project contains low-level libraries for interacting with the btrfs kernel
+driver (`btrfs-uapi`), parsing and writing on-disk data structures
+(`btrfs-disk`), parsing and handling btrfs send streams (`btrfs-stream`).  The
+goal for these is to be useful libraries that can be used in other projects to
+interact with btrfs filesystems programmatically.
+
+It also contains high-level CLI crates (`btrfs-cli` for the `btrfs` utility,
+and `btrfs-mkfs` for the `mkfs.btrfs` utility) that are compatible with the
+respective utilities from `btrfs-progs`. These aim to be drop-in replacements,
+but may be missing some advanced features or have a simpler implementation.
 
 ## Status
 
-This project is under active development. Most commands are fully implemented and
-produce output matching the C original.
+This project is under active development. Most commands are fully implemented
+and produce output matching the C original.
+
+Currently, `btrfs check`, `btrfs restore` and `btrfs rescue` are not
+implemented, and exist only as stubs.
 
 ## Building
 
