@@ -45,6 +45,9 @@ pub struct MkfsConfig {
     pub data_profile: crate::args::Profile,
     pub metadata_profile: crate::args::Profile,
     pub csum_type: crate::write::ChecksumType,
+    /// Override for the current time (seconds since epoch). Used for
+    /// deterministic output in tests. None means use SystemTime::now().
+    pub creation_time: Option<u64>,
 }
 
 impl MkfsConfig {
@@ -61,6 +64,16 @@ impl MkfsConfig {
     /// The primary device (devid 1).
     pub fn primary_device(&self) -> &DeviceInfo {
         &self.devices[0]
+    }
+
+    /// Current time in seconds since epoch (uses override if set).
+    fn now_secs(&self) -> u64 {
+        self.creation_time.unwrap_or_else(|| {
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        })
     }
 }
 
@@ -351,7 +364,14 @@ fn build_root_tree(
         // The FS tree root item gets a UUID, timestamps, and
         // BTRFS_INODE_ROOT_ITEM_INIT flag.
         if entry.is_fs_tree {
-            let uuid = Uuid::new_v4();
+            // Derive FS tree UUID deterministically from fs_uuid by
+            // flipping bits. In production fs_uuid is random, so this
+            // is effectively random too.
+            let mut uuid_bytes = *cfg.fs_uuid.as_bytes();
+            for b in &mut uuid_bytes {
+                *b ^= 0xFF;
+            }
+            let uuid = Uuid::from_bytes(uuid_bytes);
             let uuid_off = mem::offset_of!(raw::btrfs_root_item, uuid);
             btrfs_disk::util::write_uuid(&mut data, uuid_off, &uuid);
 
@@ -369,10 +389,7 @@ fn build_root_tree(
             btrfs_disk::util::write_le_u64(&mut data, 24, cfg.nodesize as u64);
 
             // Set timestamps: otime and ctime
-            let now = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            let now = cfg.now_secs();
             let ctime_off = mem::offset_of!(raw::btrfs_root_item, ctime);
             let otime_off = mem::offset_of!(raw::btrfs_root_item, otime);
             let ts_size = mem::size_of::<raw::btrfs_timespec>();
@@ -674,10 +691,7 @@ fn build_root_dir_tree(
     let mut leaf = LeafBuilder::new(cfg.nodesize, header);
     let generation = 1u64;
 
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now = cfg.now_secs();
 
     // INODE_ITEM for objectid 256 (BTRFS_FIRST_FREE_OBJECTID)
     let inode_key = Key::new(

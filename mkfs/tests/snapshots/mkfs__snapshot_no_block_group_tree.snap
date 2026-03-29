@@ -1,0 +1,6 @@
+---
+source: mkfs/tests/mkfs.rs
+expression: compressed
+extension: img.gz
+snapshot_kind: binary
+---

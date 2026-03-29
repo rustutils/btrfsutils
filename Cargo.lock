@@ -180,6 +180,8 @@ dependencies = [
  "btrfs-disk",
  "clap",
  "crc32c",
+ "flate2",
+ "insta",
  "libc",
  "nix",
  "sha2",

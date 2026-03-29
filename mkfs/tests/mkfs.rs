@@ -3,8 +3,9 @@ use btrfs_mkfs::{
     mkfs::{self, DeviceInfo, MkfsConfig},
     write::ChecksumType,
 };
+use flate2::{Compression, write::GzEncoder};
 use std::{
-    io::{Seek, SeekFrom, Write},
+    io::{Read as _, Seek, SeekFrom, Write},
     path::PathBuf,
 };
 use uuid::Uuid;
@@ -27,6 +28,7 @@ fn test_config(total_bytes: u64) -> MkfsConfig {
         data_profile: Profile::Single,
         metadata_profile: Profile::Dup,
         csum_type: ChecksumType::Crc32c,
+        creation_time: None,
     }
 }
 
@@ -56,6 +58,7 @@ fn test_config_two_devices(per_device_bytes: u64) -> MkfsConfig {
         data_profile: Profile::Single,
         metadata_profile: Profile::Raid1,
         csum_type: ChecksumType::Crc32c,
+        creation_time: None,
     }
 }
 
@@ -339,6 +342,80 @@ fn mkfs_raid1_total_bytes_is_sum() {
     let mut f1 = std::fs::File::open(img1.path()).unwrap();
     let sb1 = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
     assert_eq!(sb1.total_bytes, 2 * per_dev);
+}
+
+// --- Deterministic image snapshot tests ---
+//
+// Create filesystem images with fixed UUIDs and timestamps, compress them,
+// and snapshot the compressed bytes. Any change to the on-disk format will
+// show up as a snapshot diff.
+
+fn deterministic_config(total_bytes: u64) -> MkfsConfig {
+    MkfsConfig {
+        nodesize: 16384,
+        sectorsize: 4096,
+        devices: vec![DeviceInfo {
+            devid: 1,
+            path: PathBuf::new(),
+            total_bytes,
+            dev_uuid: Uuid::from_bytes([0xAB; 16]),
+        }],
+        label: None,
+        fs_uuid: Uuid::from_bytes([0xDE; 16]),
+        chunk_tree_uuid: Uuid::from_bytes([0xCD; 16]),
+        incompat_flags: MkfsConfig::default_incompat_flags(),
+        compat_ro_flags: MkfsConfig::default_compat_ro_flags(),
+        data_profile: Profile::Single,
+        metadata_profile: Profile::Dup,
+        csum_type: ChecksumType::Crc32c,
+        creation_time: Some(1700000000), // fixed timestamp
+    }
+}
+
+/// Create an image, format it, read back the raw bytes, gzip them.
+fn make_image_compressed(cfg: &mut MkfsConfig) -> Vec<u8> {
+    let image = create_image(cfg.devices[0].total_bytes);
+    cfg.devices[0].path = image.path().to_path_buf();
+    mkfs::make_btrfs(cfg).unwrap();
+
+    // Read back the full image.
+    let mut raw = Vec::new();
+    std::fs::File::open(image.path())
+        .unwrap()
+        .read_to_end(&mut raw)
+        .unwrap();
+
+    // Gzip compress.
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(&raw).unwrap();
+    encoder.finish().unwrap()
+}
+
+#[test]
+fn snapshot_default_single_device() {
+    let mut cfg = deterministic_config(MIN_SIZE);
+    let compressed = make_image_compressed(&mut cfg);
+    insta::assert_binary_snapshot!(".img.gz", compressed);
+}
+
+#[test]
+fn snapshot_xxhash() {
+    let mut cfg = deterministic_config(MIN_SIZE);
+    cfg.csum_type = ChecksumType::Xxhash64;
+    let compressed = make_image_compressed(&mut cfg);
+    insta::assert_binary_snapshot!(".img.gz", compressed);
+}
+
+#[test]
+fn snapshot_no_block_group_tree() {
+    let mut cfg = deterministic_config(MIN_SIZE);
+    cfg.apply_features(&[FeatureArg {
+        feature: Feature::BlockGroupTree,
+        enabled: false,
+    }])
+    .unwrap();
+    let compressed = make_image_compressed(&mut cfg);
+    insta::assert_binary_snapshot!(".img.gz", compressed);
 }
 
 // --- Privileged integration tests (mount) ---

@@ -141,6 +141,7 @@ fn main() -> Result<()> {
         data_profile,
         metadata_profile,
         csum_type,
+        creation_time: None,
     };
 
     // Apply user-specified feature flags.

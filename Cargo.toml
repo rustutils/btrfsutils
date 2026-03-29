@@ -24,6 +24,7 @@ xxhash-rust = { version = "0.8", features = ["xxh64"] }
 sha2 = "0.10"
 blake2 = "0.10"
 tempfile = "3"
+insta = "1"
 bindgen = "0.72.1"
 
 btrfs-uapi = { path = "uapi", version = "0.4.0" }
