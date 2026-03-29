@@ -26,9 +26,19 @@
           toolchainToml = builtins.fromTOML (builtins.readFile ./rust-toolchain.toml);
           channel = toolchainToml.toolchain.channel;
 
-          rustToolchain = pkgs.rust-bin.${channel}.latest.default.override {
-            extensions = toolchainToml.toolchain.components or [];
-          };
+          # rust-overlay expects "stable", "beta", or "nightly" as the
+          # top-level key. A pinned version like "1.94.1" lives under
+          # pkgs.rust-bin.stable."1.94.1".
+          rustToolchain =
+            let
+              isVersion = builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+" channel != null;
+              base = if isVersion
+                then pkgs.rust-bin.stable.${channel}.default
+                else pkgs.rust-bin.${channel}.latest.default;
+            in base.override {
+              extensions = toolchainToml.toolchain.components or [];
+              targets = toolchainToml.toolchain.targets or [];
+            };
 
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
@@ -95,9 +105,16 @@
           toolchainToml = builtins.fromTOML (builtins.readFile ./rust-toolchain.toml);
           channel = toolchainToml.toolchain.channel;
 
-          rustToolchain = pkgs.rust-bin.${channel}.latest.default.override {
-            extensions = toolchainToml.toolchain.components or [];
-          };
+          rustToolchain =
+            let
+              isVersion = builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+" channel != null;
+              base = if isVersion
+                then pkgs.rust-bin.stable.${channel}.default
+                else pkgs.rust-bin.${channel}.latest.default;
+            in base.override {
+              extensions = toolchainToml.toolchain.components or [];
+              targets = toolchainToml.toolchain.targets or [];
+            };
 
           # Nightly just for cargo fmt (Justfile runs `cargo +nightly fmt`)
           rustNightly = pkgs.rust-bin.nightly.latest.default.override {
