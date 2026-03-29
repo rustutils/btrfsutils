@@ -1221,3 +1221,51 @@ fn subvolume_delete_verbose() {
         "expected verbose delete message:\n{out}"
     );
 }
+
+// ── replace start/status/cancel ─────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn replace_start_and_status() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // Write some data so the replace has something to copy.
+    write_test_data(Path::new(mp), "testdata", 1024 * 1024);
+
+    // Create target device.
+    let target_file =
+        BackingFile::new(_td.path(), "replace-target.img", 512_000_000);
+    let target_dev = LoopbackDevice::new(target_file);
+    let target_path = target_dev.path().to_str().unwrap();
+
+    // Replace devid 1 with the target device; -B waits for completion.
+    btrfs_ok(&["replace", "start", "-B", "-f", "1", target_path, mp]);
+
+    // After completion, status should show finished/completed.
+    let out = btrfs_ok(&["replace", "status", mp]);
+    assert!(
+        out.contains("finished")
+            || out.contains("completed")
+            || out.contains("Started")
+            || out.contains("no device replace"),
+        "unexpected replace status after completion:\n{out}"
+    );
+
+    // Verify data is still accessible.
+    verify_test_data(Path::new(mp), "testdata", 1024 * 1024);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn replace_cancel_not_running() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // Cancel with no replace running should succeed and report it.
+    let out = btrfs_ok(&["replace", "cancel", mp]);
+    assert!(
+        out.contains("no replace") || out.contains("not in progress"),
+        "expected no-op cancel message:\n{out}"
+    );
+}
