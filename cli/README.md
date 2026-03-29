@@ -61,3 +61,7 @@ cargo test -p btrfs-cli
 # Run integration tests (requires root and btrfs-progs installed)
 just test
 ```
+
+## License
+
+Licensed under the [GNU General Public License v2.0](LICENSE.md).
