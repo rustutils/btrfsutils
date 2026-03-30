@@ -125,6 +125,131 @@ fn filesystem_mkswapfile() {
     );
 }
 
+// ── filesystem resize error cases ────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_resize_missing_args() {
+    // resize with no arguments should fail.
+    let (_, _, code) = btrfs(&["filesystem", "resize"]);
+    assert_ne!(code, 0);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_resize_invalid_size() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    // Bogus size string should fail.
+    let (_, _, code) = btrfs(&["filesystem", "resize", "banana", mp]);
+    assert_ne!(code, 0);
+}
+
+// ── filesystem defrag compression variants ──────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_defrag_compress_lzo() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    common::write_compressible_data(Path::new(mp), "lzo.bin", 131072);
+    btrfs_ok(&["filesystem", "sync", mp]);
+    btrfs_ok(&[
+        "filesystem",
+        "defragment",
+        "-clzo",
+        &format!("{mp}/lzo.bin"),
+    ]);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_defrag_compress_zlib() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    common::write_compressible_data(Path::new(mp), "zlib.bin", 131072);
+    btrfs_ok(&["filesystem", "sync", mp]);
+    btrfs_ok(&[
+        "filesystem",
+        "defragment",
+        "-czlib",
+        &format!("{mp}/zlib.bin"),
+    ]);
+}
+
+// ── filesystem defrag recursion ─────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_defrag_recursion_with_subvol() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // Create a file in the root volume.
+    write_test_data(Path::new(mp), "root_file.bin", 65536);
+    // Create a subvolume with its own file.
+    let subvol = format!("{mp}/subvol");
+    btrfs_ok(&["subvolume", "create", &subvol]);
+    write_test_data(Path::new(&subvol), "subvol_file.bin", 65536);
+    btrfs_ok(&["filesystem", "sync", mp]);
+
+    // Recursive defrag from the root should complete without errors,
+    // stopping at the subvolume boundary.
+    btrfs_ok(&["filesystem", "defragment", "-r", mp]);
+
+    // Both files should still be intact.
+    verify_test_data(Path::new(mp), "root_file.bin", 65536);
+    verify_test_data(Path::new(&subvol), "subvol_file.bin", 65536);
+}
+
+// ── filesystem df unit suffixes ─────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_df_raw() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    let out = btrfs_ok(&["filesystem", "df", "--raw", mp]);
+    // Raw mode should output plain numbers (no KiB/MiB suffixes).
+    assert!(out.contains("total="), "expected raw output:\n{out}");
+    assert!(!out.contains("MiB"), "raw mode should not use MiB:\n{out}");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_df_kbytes() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    let raw = btrfs_ok(&["filesystem", "df", "--raw", mp]);
+    let kb = btrfs_ok(&["filesystem", "df", "--kbytes", mp]);
+    // --kbytes divides values by 1024 (no suffix). The numbers should
+    // be smaller than --raw output.
+    assert_ne!(raw, kb, "--kbytes should differ from --raw");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_df_mbytes() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    let raw = btrfs_ok(&["filesystem", "df", "--raw", mp]);
+    let mb = btrfs_ok(&["filesystem", "df", "--mbytes", mp]);
+    assert_ne!(raw, mb, "--mbytes should differ from --raw");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_df_si() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    let out = btrfs_ok(&["filesystem", "df", "--si", mp]);
+    // SI mode uses base-1000 suffixes (kB, MB, GB).
+    assert!(
+        out.contains('B'),
+        "expected size suffix in --si output:\n{out}"
+    );
+}
+
 // ── subvolume ────────────────────────────────────────────────────────
 
 #[test]
@@ -226,6 +351,89 @@ fn subvolume_get_set_flags() {
         "expected no readonly flag:\n{out}"
     );
 }
+
+// ── subvolume create -p (parent creation) ───────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_create_parents() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // Without -p, creating in a non-existent parent directory should fail.
+    let deep = format!("{mp}/dir1/dir2/subvol");
+    let (_, _, code) = btrfs(&["subvolume", "create", &deep]);
+    assert_ne!(code, 0, "create without -p in missing dir should fail");
+
+    // With -p, parent directories are created automatically.
+    btrfs_ok(&["subvolume", "create", "-p", &deep]);
+    assert!(Path::new(&deep).is_dir());
+
+    // Verify the parent directories exist and the subvolume is listed.
+    let out = btrfs_ok(&["subvolume", "list", mp]);
+    assert!(
+        out.contains("dir1/dir2/subvol"),
+        "expected nested subvol in list:\n{out}"
+    );
+}
+
+// ── subvolume create failures ───────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_create_existing_path_fails() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    let subvol = format!("{mp}/existing");
+    btrfs_ok(&["subvolume", "create", &subvol]);
+
+    // Creating the same subvolume again should fail.
+    let (_, _, code) = btrfs(&["subvolume", "create", &subvol]);
+    assert_ne!(code, 0, "create over existing subvolume should fail");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_create_over_file_fails() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    let file = format!("{mp}/afile");
+    std::fs::write(&file, b"hello").unwrap();
+
+    // Creating a subvolume where a regular file exists should fail.
+    let (_, _, code) = btrfs(&["subvolume", "create", &file]);
+    assert_ne!(code, 0, "create over existing file should fail");
+}
+
+// ── dry-run ─────────────────────────────────────────────────────────
+
+// TODO: enable when --dry-run is implemented for subvolume delete.
+// #[test]
+// #[ignore = "requires elevated privileges"]
+// fn dry_run_subvolume_delete() {
+//     let (_td, mnt) = single_mount();
+//     let mp = mnt.path().to_str().unwrap();
+//
+//     let subvol = format!("{mp}/dry_target");
+//     btrfs_ok(&["subvolume", "create", &subvol]);
+//     assert!(Path::new(&subvol).is_dir());
+//
+//     // --dry-run should not actually delete.
+//     btrfs_ok(&["--dry-run", "subvolume", "delete", &subvol]);
+//     assert!(
+//         Path::new(&subvol).is_dir(),
+//         "subvolume should still exist after --dry-run delete"
+//     );
+//
+//     // Without --dry-run, it should actually delete.
+//     btrfs_ok(&["subvolume", "delete", &subvol]);
+//     assert!(
+//         !Path::new(&subvol).exists(),
+//         "subvolume should be gone after real delete"
+//     );
+// }
 
 // ── property ─────────────────────────────────────────────────────────
 

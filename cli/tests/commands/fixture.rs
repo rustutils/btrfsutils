@@ -15,6 +15,42 @@
 
 use super::{btrfs_ok, common, redact_paths};
 
+// ── basic CLI (no filesystem needed) ─────────────────────────────────
+
+#[test]
+fn version_flag() {
+    let out = btrfs_ok(&["--version"]);
+    assert!(out.contains("btrfs-cli"), "--version output: {out}");
+}
+
+#[test]
+fn help_flag() {
+    let out = btrfs_ok(&["--help"]);
+    assert!(out.contains("Usage:"), "--help output: {out}");
+}
+
+#[test]
+fn no_args_returns_error() {
+    let (_stdout, _stderr, code) = super::btrfs(&[]);
+    assert_ne!(code, 0, "btrfs with no args should fail");
+}
+
+#[test]
+fn subcommand_help_flag() {
+    // --help on a subcommand should print usage for that subcommand.
+    let out = btrfs_ok(&["filesystem", "df", "--help"]);
+    assert!(
+        out.contains("filesystem df"),
+        "subcommand --help output: {out}"
+    );
+}
+
+#[test]
+fn invalid_subcommand_fails() {
+    let (_, _, code) = super::btrfs(&["nonexistent-command"]);
+    assert_ne!(code, 0, "invalid subcommand should fail");
+}
+
 // ── filesystem ───────────────────────────────────────────────────────
 
 #[test]
