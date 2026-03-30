@@ -127,15 +127,19 @@ impl Runnable for ScrubLimitCommand {
         let limit_vals: Vec<String> = devices
             .iter()
             .map(|d| {
-                sysfs
-                    .scrub_speed_max_get(d.devid)
-                    .map(|v| super::format_limit(v, &mode))
-                    .unwrap_or_else(|_| "-".to_owned())
+                sysfs.scrub_speed_max_get(d.devid).map_or_else(
+                    |_| "-".to_owned(),
+                    |v| super::format_limit(v, &mode),
+                )
             })
             .collect();
-        let limit_w = "Limit"
-            .len()
-            .max(limit_vals.iter().map(|s| s.len()).max().unwrap_or(0));
+        let limit_w = "Limit".len().max(
+            limit_vals
+                .iter()
+                .map(std::string::String::len)
+                .max()
+                .unwrap_or(0),
+        );
 
         println!("{:>id_w$}  {:>limit_w$}  Path", "Id", "Limit");
         println!("{:->id_w$}  {:->limit_w$}  ----", "", "");

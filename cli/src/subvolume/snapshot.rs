@@ -51,7 +51,7 @@ impl Runnable for SubvolumeSnapshotCommand {
         })?;
 
         let cname = CString::new(name_str).with_context(|| {
-            format!("snapshot name contains a null byte: '{}'", name_str)
+            format!("snapshot name contains a null byte: '{name_str}'")
         })?;
 
         let source_file = File::open(&self.source).with_context(|| {

@@ -26,7 +26,7 @@ impl Runnable for InodeResolveCommand {
             eprintln!("no paths found for inode {}", self.inode);
         } else {
             for path in paths {
-                println!("{}", path);
+                println!("{path}");
             }
         }
 

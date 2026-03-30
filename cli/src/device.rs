@@ -26,8 +26,9 @@ impl Runnable for DeviceCommand {
     fn run(&self, format: Format, dry_run: bool) -> Result<()> {
         match &self.subcommand {
             DeviceSubcommand::Add(cmd) => cmd.run(format, dry_run),
-            DeviceSubcommand::Remove(cmd) => cmd.run(format, dry_run),
-            DeviceSubcommand::Delete(cmd) => cmd.run(format, dry_run),
+            DeviceSubcommand::Remove(cmd) | DeviceSubcommand::Delete(cmd) => {
+                cmd.run(format, dry_run)
+            }
             DeviceSubcommand::Stats(cmd) => cmd.run(format, dry_run),
             DeviceSubcommand::Scan(cmd) => cmd.run(format, dry_run),
             DeviceSubcommand::Ready(cmd) => cmd.run(format, dry_run),

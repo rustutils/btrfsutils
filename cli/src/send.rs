@@ -252,9 +252,7 @@ impl Runnable for SendCommand {
 
         if proto > proto_supported && proto_supported == 1 {
             bail!(
-                "requested protocol version {} but kernel supports only {}",
-                proto,
-                proto_supported
+                "requested protocol version {proto} but kernel supports only {proto_supported}"
             );
         }
 

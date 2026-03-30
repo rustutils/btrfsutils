@@ -93,11 +93,9 @@ impl Runnable for FilesystemDefragCommand {
 
             if self.recursive && meta.is_dir() {
                 errors += self.defrag_recursive(path, &args)?;
-            } else {
-                if let Err(e) = self.defrag_one(path, &args) {
-                    eprintln!("error: {e:#}");
-                    errors += 1;
-                }
+            } else if let Err(e) = self.defrag_one(path, &args) {
+                eprintln!("error: {e:#}");
+                errors += 1;
             }
         }
 

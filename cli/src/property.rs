@@ -104,17 +104,14 @@ fn classify_object(attrs: &ObjectAttrs) -> Vec<PropertyObjectType> {
 
 /// Probe the filesystem to build `ObjectAttrs` for the given path.
 fn probe_object_attrs(path: &Path) -> ObjectAttrs {
-    let metadata = match fs::metadata(path) {
-        Ok(m) => m,
-        Err(_) => {
-            return ObjectAttrs {
-                exists: false,
-                is_block_device: false,
-                ino: 0,
-                is_subvolume: false,
-                is_fs_root: false,
-            };
-        }
+    let Ok(metadata) = fs::metadata(path) else {
+        return ObjectAttrs {
+            exists: false,
+            is_block_device: false,
+            ino: 0,
+            is_subvolume: false,
+            is_fs_root: false,
+        };
     };
 
     let is_block_device = metadata.file_type().is_block_device();

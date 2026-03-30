@@ -62,7 +62,7 @@ impl Runnable for LogicalResolveCommand {
                             );
                         } else {
                             for path in paths {
-                                println!("{}", path);
+                                println!("{path}");
                             }
                         }
                     }

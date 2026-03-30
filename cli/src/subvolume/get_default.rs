@@ -27,7 +27,7 @@ impl Runnable for SubvolumeGetDefaultCommand {
             println!("ID 5 (FS_TREE)");
         } else {
             // TODO: resolve name via BTRFS_IOC_GET_SUBVOL_INFO + path lookup
-            println!("ID {}", default_id);
+            println!("ID {default_id}");
         }
 
         Ok(())

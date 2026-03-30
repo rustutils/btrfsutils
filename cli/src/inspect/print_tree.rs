@@ -96,8 +96,7 @@ fn print_leaf_header(
     // Free space = gap between end of item descriptors and start of item data.
     let data_end = items
         .last()
-        .map(|item| header_size + item.offset)
-        .unwrap_or(nodesize);
+        .map_or(nodesize, |item| header_size + item.offset);
     let free_space = data_end.saturating_sub(items_array_end);
     let owner = ObjectId::from_raw(header.owner);
 

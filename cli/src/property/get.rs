@@ -31,21 +31,19 @@ impl Runnable for PropertyGetCommand {
 
         // Detect object type if not specified
         let detected_types = detect_object_types(&self.object);
-        let target_type = match self.object_type {
-            Some(t) => t,
-            None => {
-                // If ambiguous, require the user to specify
-                if detected_types.len() > 1 {
-                    bail!(
-                        "object type is ambiguous, please use option -t (detected: {:?})",
-                        detected_types
-                    );
-                }
-                detected_types
-                    .first()
-                    .copied()
-                    .ok_or_else(|| anyhow!("object is not a btrfs object"))?
+        let target_type = if let Some(t) = self.object_type {
+            t
+        } else {
+            // If ambiguous, require the user to specify
+            if detected_types.len() > 1 {
+                bail!(
+                    "object type is ambiguous, please use option -t (detected: {detected_types:?})"
+                );
             }
+            detected_types
+                .first()
+                .copied()
+                .ok_or_else(|| anyhow!("object is not a btrfs object"))?
         };
 
         // If a specific property is requested, get it
@@ -82,8 +80,10 @@ fn get_property(
                 flags.contains(btrfs_uapi::subvolume::SubvolumeFlags::RDONLY);
             println!("ro={}", if is_readonly { "true" } else { "false" });
         }
-        (PropertyObjectType::Filesystem, "label")
-        | (PropertyObjectType::Device, "label") => {
+        (
+            PropertyObjectType::Filesystem | PropertyObjectType::Device,
+            "label",
+        ) => {
             let label = label_get(file.as_fd()).with_context(|| {
                 format!("failed to get label for '{}'", path.display())
             })?;
@@ -94,9 +94,7 @@ fn get_property(
         }
         _ => {
             bail!(
-                "property '{}' is not applicable to object type {:?}",
-                name,
-                obj_type
+                "property '{name}' is not applicable to object type {obj_type:?}"
             );
         }
     }
@@ -126,13 +124,12 @@ fn get_compression_property(file: &File, path: &Path) -> Result<()> {
         if errno == ENODATA {
             // Attribute doesn't exist; compression not set
             return Ok(());
-        } else {
-            return Err(anyhow::anyhow!(
-                "failed to get compression for '{}': {}",
-                path.display(),
-                nix::errno::Errno::from_raw(errno)
-            ));
         }
+        return Err(anyhow::anyhow!(
+            "failed to get compression for '{}': {}",
+            path.display(),
+            nix::errno::Errno::from_raw(errno)
+        ));
     }
 
     let len = result as usize;
@@ -156,7 +153,7 @@ fn get_compression_property(file: &File, path: &Path) -> Result<()> {
     }
 
     let value = String::from_utf8_lossy(&buf);
-    println!("compression={}", value);
+    println!("compression={value}");
 
     Ok(())
 }

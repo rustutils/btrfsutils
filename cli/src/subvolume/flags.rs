@@ -37,7 +37,7 @@ impl Runnable for SubvolumeGetFlagsCommand {
             format!("failed to get flags for '{}'", self.path.display())
         })?;
 
-        println!("{}", flags);
+        println!("{flags}");
 
         Ok(())
     }

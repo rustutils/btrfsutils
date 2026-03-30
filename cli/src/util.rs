@@ -29,7 +29,7 @@ pub fn is_mounted(device: &Path) -> bool {
         return false;
     };
     let reader = std::io::BufReader::new(f);
-    for line in reader.lines().map_while(|l| l.ok()) {
+    for line in reader.lines().map_while(std::result::Result::ok) {
         let mut fields = line.split_whitespace();
         if let Some(src) = fields.next()
             && let Ok(src_canon) = fs::canonicalize(src)
@@ -173,13 +173,13 @@ impl std::ops::Deref for ParsedUuid {
 /// Example: `"0/5"` → `5`, `"1/256"` → `0x0001_0000_0000_0100`.
 pub fn parse_qgroupid(s: &str) -> anyhow::Result<u64> {
     let (level_str, id_str) = s.split_once('/').ok_or_else(|| {
-        anyhow::anyhow!("invalid qgroup ID '{}': expected <level>/<id>", s)
+        anyhow::anyhow!("invalid qgroup ID '{s}': expected <level>/<id>")
     })?;
     let level: u64 = level_str.parse().map_err(|_| {
-        anyhow::anyhow!("invalid qgroup level '{}' in '{}'", level_str, s)
+        anyhow::anyhow!("invalid qgroup level '{level_str}' in '{s}'")
     })?;
     let subvolid: u64 = id_str.parse().map_err(|_| {
-        anyhow::anyhow!("invalid qgroup subvolid '{}' in '{}'", id_str, s)
+        anyhow::anyhow!("invalid qgroup subvolid '{id_str}' in '{s}'")
     })?;
     Ok((level << 48) | subvolid)
 }

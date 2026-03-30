@@ -35,16 +35,16 @@ pub struct TreeStatsCommand {
 /// Map a tree name string or decimal integer to a tree object ID.
 fn parse_tree_id(s: &str) -> Result<u64> {
     match s {
-        "root" => Ok(raw::BTRFS_ROOT_TREE_OBJECTID as u64),
-        "extent" => Ok(raw::BTRFS_EXTENT_TREE_OBJECTID as u64),
-        "chunk" => Ok(raw::BTRFS_CHUNK_TREE_OBJECTID as u64),
-        "dev" => Ok(raw::BTRFS_DEV_TREE_OBJECTID as u64),
-        "fs" => Ok(raw::BTRFS_FS_TREE_OBJECTID as u64),
-        "csum" | "checksum" => Ok(raw::BTRFS_CSUM_TREE_OBJECTID as u64),
-        "quota" => Ok(raw::BTRFS_QUOTA_TREE_OBJECTID as u64),
-        "uuid" => Ok(raw::BTRFS_UUID_TREE_OBJECTID as u64),
+        "root" => Ok(u64::from(raw::BTRFS_ROOT_TREE_OBJECTID)),
+        "extent" => Ok(u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID)),
+        "chunk" => Ok(u64::from(raw::BTRFS_CHUNK_TREE_OBJECTID)),
+        "dev" => Ok(u64::from(raw::BTRFS_DEV_TREE_OBJECTID)),
+        "fs" => Ok(u64::from(raw::BTRFS_FS_TREE_OBJECTID)),
+        "csum" | "checksum" => Ok(u64::from(raw::BTRFS_CSUM_TREE_OBJECTID)),
+        "quota" => Ok(u64::from(raw::BTRFS_QUOTA_TREE_OBJECTID)),
+        "uuid" => Ok(u64::from(raw::BTRFS_UUID_TREE_OBJECTID)),
         "free-space" | "free_space" => {
-            Ok(raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64)
+            Ok(u64::from(raw::BTRFS_FREE_SPACE_TREE_OBJECTID))
         }
         "data-reloc" | "data_reloc" => {
             Ok(raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64)
@@ -175,28 +175,28 @@ impl Runnable for TreeStatsCommand {
             let root_tree_logical = fs.superblock.root;
             let default_trees: &[(u64, u64, bool)] = &[
                 (
-                    raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+                    u64::from(raw::BTRFS_ROOT_TREE_OBJECTID),
                     root_tree_logical,
                     false,
                 ),
                 (
-                    raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
+                    u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
                     fs.tree_roots
-                        .get(&(raw::BTRFS_EXTENT_TREE_OBJECTID as u64))
+                        .get(&u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID))
                         .map_or(0, |&(l, _)| l),
                     false,
                 ),
                 (
-                    raw::BTRFS_CSUM_TREE_OBJECTID as u64,
+                    u64::from(raw::BTRFS_CSUM_TREE_OBJECTID),
                     fs.tree_roots
-                        .get(&(raw::BTRFS_CSUM_TREE_OBJECTID as u64))
+                        .get(&u64::from(raw::BTRFS_CSUM_TREE_OBJECTID))
                         .map_or(0, |&(l, _)| l),
                     false,
                 ),
                 (
-                    raw::BTRFS_FS_TREE_OBJECTID as u64,
+                    u64::from(raw::BTRFS_FS_TREE_OBJECTID),
                     fs.tree_roots
-                        .get(&(raw::BTRFS_FS_TREE_OBJECTID as u64))
+                        .get(&u64::from(raw::BTRFS_FS_TREE_OBJECTID))
                         .map_or(0, |&(l, _)| l),
                     true,
                 ),

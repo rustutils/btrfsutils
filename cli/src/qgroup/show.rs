@@ -262,7 +262,7 @@ impl Runnable for QgroupShowCommand {
         if self.print_child {
             header.push_str(&format!("  {:<20}", "child"));
         }
-        println!("{}", header);
+        println!("{header}");
 
         for q in &qgroups {
             let id_str = format_qgroupid(q.qgroupid);
@@ -270,7 +270,7 @@ impl Runnable for QgroupShowCommand {
             let excl_str = fmt_size(q.excl, &mode);
 
             let mut line =
-                format!("{:<16} {:>12} {:>12}", id_str, rfer_str, excl_str);
+                format!("{id_str:<16} {rfer_str:>12} {excl_str:>12}");
 
             if self.print_rfer_limit {
                 let s = fmt_limit(
@@ -279,7 +279,7 @@ impl Runnable for QgroupShowCommand {
                     QgroupLimitFlags::MAX_RFER,
                     &mode,
                 );
-                line.push_str(&format!(" {:>12}", s));
+                line.push_str(&format!(" {s:>12}"));
             }
 
             if self.print_excl_limit {
@@ -289,7 +289,7 @@ impl Runnable for QgroupShowCommand {
                     QgroupLimitFlags::MAX_EXCL,
                     &mode,
                 );
-                line.push_str(&format!(" {:>12}", s));
+                line.push_str(&format!(" {s:>12}"));
             }
 
             if self.print_parent {
@@ -304,7 +304,7 @@ impl Runnable for QgroupShowCommand {
                 line.push_str(&format!("  {:<20}", children.join(",")));
             }
 
-            println!("{}", line);
+            println!("{line}");
         }
 
         Ok(())

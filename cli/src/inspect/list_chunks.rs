@@ -354,7 +354,7 @@ fn get_or_insert_count(counts: &mut Vec<(u64, u64)>, devid: u64) -> u64 {
 /// Compute the display width for a column: the max of the header width and
 /// the widths of all data values.
 fn col_w(header: &str, values: impl Iterator<Item = usize>) -> usize {
-    values.fold(header.len(), |acc, v| acc.max(v))
+    values.fold(header.len(), std::cmp::Ord::max)
 }
 
 /// Number of decimal digits in `n` (minimum 1).

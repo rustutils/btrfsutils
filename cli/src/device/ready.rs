@@ -37,7 +37,7 @@ impl Runnable for DeviceReadyCommand {
                 println!("'{}' is ready for mount", self.device.display());
                 Ok(())
             }
-            Err(Errno::ENOENT) | Err(Errno::ENXIO) => {
+            Err(Errno::ENOENT | Errno::ENXIO) => {
                 anyhow::bail!(
                     "'{}': not all devices are present, filesystem is not ready",
                     self.device.display()

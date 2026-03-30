@@ -109,7 +109,6 @@ impl Runnable for ReceiveCommand {
                     if max_errors > 0 && error_count >= max_errors {
                         bail!("too many errors ({error_count}), aborting");
                     }
-                    continue;
                 }
                 Ok(None) => {
                     // EOF — finalize and exit.
@@ -138,7 +137,6 @@ impl Runnable for ReceiveCommand {
                             return Ok(());
                         }
                     }
-                    continue;
                 }
                 Ok(Some(cmd)) => {
                     if matches!(

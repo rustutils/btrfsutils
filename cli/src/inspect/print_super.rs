@@ -212,8 +212,8 @@ fn print_backup_roots(sb: &Superblock) {
 
 fn format_super_flags(flags: u64) -> String {
     let known: &[(u64, &str)] = &[
-        (raw::BTRFS_HEADER_FLAG_WRITTEN as u64, "WRITTEN"),
-        (raw::BTRFS_HEADER_FLAG_RELOC as u64, "RELOC"),
+        (u64::from(raw::BTRFS_HEADER_FLAG_WRITTEN), "WRITTEN"),
+        (u64::from(raw::BTRFS_HEADER_FLAG_RELOC), "RELOC"),
         (raw::BTRFS_SUPER_FLAG_CHANGING_FSID, "CHANGING_FSID"),
         (raw::BTRFS_SUPER_FLAG_CHANGING_FSID_V2, "CHANGING_FSID_V2"),
         (raw::BTRFS_SUPER_FLAG_SEEDING, "SEEDING"),
@@ -235,16 +235,16 @@ fn format_super_flags(flags: u64) -> String {
 fn format_compat_ro_flags(flags: u64) -> String {
     let known: &[(u64, &str)] = &[
         (
-            raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64,
+            u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE),
             "FREE_SPACE_TREE",
         ),
         (
-            raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID as u64,
+            u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID),
             "FREE_SPACE_TREE_VALID",
         ),
-        (raw::BTRFS_FEATURE_COMPAT_RO_VERITY as u64, "VERITY"),
+        (u64::from(raw::BTRFS_FEATURE_COMPAT_RO_VERITY), "VERITY"),
         (
-            raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE as u64,
+            u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE),
             "BLOCK_GROUP_TREE",
         ),
     ];
@@ -254,55 +254,55 @@ fn format_compat_ro_flags(flags: u64) -> String {
 fn format_incompat_flags(flags: u64) -> String {
     let known: &[(u64, &str)] = &[
         (
-            raw::BTRFS_FEATURE_INCOMPAT_MIXED_BACKREF as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_MIXED_BACKREF),
             "MIXED_BACKREF",
         ),
         (
-            raw::BTRFS_FEATURE_INCOMPAT_DEFAULT_SUBVOL as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_DEFAULT_SUBVOL),
             "DEFAULT_SUBVOL",
         ),
         (
-            raw::BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS),
             "MIXED_GROUPS",
         ),
         (
-            raw::BTRFS_FEATURE_INCOMPAT_COMPRESS_LZO as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_COMPRESS_LZO),
             "COMPRESS_LZO",
         ),
         (
-            raw::BTRFS_FEATURE_INCOMPAT_COMPRESS_ZSTD as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_COMPRESS_ZSTD),
             "COMPRESS_ZSTD",
         ),
         (
-            raw::BTRFS_FEATURE_INCOMPAT_BIG_METADATA as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_BIG_METADATA),
             "BIG_METADATA",
         ),
         (
-            raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF),
             "EXTENDED_IREF",
         ),
-        (raw::BTRFS_FEATURE_INCOMPAT_RAID56 as u64, "RAID56"),
+        (u64::from(raw::BTRFS_FEATURE_INCOMPAT_RAID56), "RAID56"),
         (
-            raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA),
             "SKINNY_METADATA",
         ),
-        (raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES as u64, "NO_HOLES"),
+        (u64::from(raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES), "NO_HOLES"),
         (
-            raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID),
             "METADATA_UUID",
         ),
-        (raw::BTRFS_FEATURE_INCOMPAT_RAID1C34 as u64, "RAID1C34"),
-        (raw::BTRFS_FEATURE_INCOMPAT_ZONED as u64, "ZONED"),
+        (u64::from(raw::BTRFS_FEATURE_INCOMPAT_RAID1C34), "RAID1C34"),
+        (u64::from(raw::BTRFS_FEATURE_INCOMPAT_ZONED), "ZONED"),
         (
-            raw::BTRFS_FEATURE_INCOMPAT_EXTENT_TREE_V2 as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_EXTENT_TREE_V2),
             "EXTENT_TREE_V2",
         ),
         (
-            raw::BTRFS_FEATURE_INCOMPAT_RAID_STRIPE_TREE as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_RAID_STRIPE_TREE),
             "RAID_STRIPE_TREE",
         ),
         (
-            raw::BTRFS_FEATURE_INCOMPAT_SIMPLE_QUOTA as u64,
+            u64::from(raw::BTRFS_FEATURE_INCOMPAT_SIMPLE_QUOTA),
             "SIMPLE_QUOTA",
         ),
     ];

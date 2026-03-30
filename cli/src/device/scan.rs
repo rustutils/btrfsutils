@@ -41,7 +41,7 @@ impl Runnable for DeviceScanCommand {
                 for device in &self.devices {
                     match forget_one(device) {
                         Ok(()) => {
-                            println!("unregistered '{}'", device.display())
+                            println!("unregistered '{}'", device.display());
                         }
                         Err(e) => {
                             eprintln!(
@@ -99,13 +99,11 @@ fn scan_all() -> Result<()> {
 
     let mut registered = 0u32;
     for device in &devices {
-        let path_str = match device.to_str() {
-            Some(s) => s,
-            None => continue,
+        let Some(path_str) = device.to_str() else {
+            continue;
         };
-        let cpath = match CString::new(path_str) {
-            Ok(c) => c,
-            Err(_) => continue,
+        let Ok(cpath) = CString::new(path_str) else {
+            continue;
         };
         if device_scan(&cpath).is_ok() {
             println!("registered '{}'", device.display());
@@ -130,9 +128,8 @@ fn block_devices_from_proc_partitions() -> Result<Vec<PathBuf>> {
 
     let mut devices = Vec::new();
     for line in contents.lines().skip(2) {
-        let name = match line.split_whitespace().nth(3) {
-            Some(n) => n,
-            None => continue,
+        let Some(name) = line.split_whitespace().nth(3) else {
+            continue;
         };
         devices.push(PathBuf::from(format!("/dev/{name}")));
     }

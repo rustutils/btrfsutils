@@ -49,12 +49,11 @@ fn profile_ncopies(flags: BlockGroupFlags) -> u64 {
         || flags.contains(BlockGroupFlags::RAID10)
     {
         2
-    } else if flags.contains(BlockGroupFlags::RAID5)
-        || flags.contains(BlockGroupFlags::RAID6)
-    {
-        0
     } else {
-        1
+        u64::from(
+            !(flags.contains(BlockGroupFlags::RAID5)
+                || flags.contains(BlockGroupFlags::RAID6)),
+        )
     }
 }
 
@@ -236,8 +235,8 @@ fn print_usage(
         "    Free (statfs, df):\t\t{:>10}",
         fmt_size(free_statfs, mode)
     );
-    println!("    Data ratio:\t\t\t{:>10.2}", data_ratio);
-    println!("    Metadata ratio:\t\t{:>10.2}", meta_ratio);
+    println!("    Data ratio:\t\t\t{data_ratio:>10.2}");
+    println!("    Metadata ratio:\t\t{meta_ratio:>10.2}");
     println!(
         "    Global reserve:\t\t{:>10}\t(used: {})",
         fmt_size(l_global_reserve, mode),

@@ -86,15 +86,15 @@ impl Runnable for QuotaStatusCommand {
         }
 
         if let Some(threshold) = status.drop_subtree_threshold {
-            println!("  Drop subtree threshold:  {}", threshold);
+            println!("  Drop subtree threshold:  {threshold}");
         }
 
         if let Some(total) = status.total_count {
-            println!("  Total count:             {}", total);
+            println!("  Total count:             {total}");
         }
 
         if let Some(level0) = status.level0_count {
-            println!("  Level 0:                 {}", level0);
+            println!("  Level 0:                 {level0}");
         }
 
         Ok(())

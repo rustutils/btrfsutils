@@ -36,7 +36,7 @@ impl Runnable for SubvolidResolveCommand {
                 ),
             })?;
 
-        println!("{}", resolved_path);
+        println!("{resolved_path}");
         Ok(())
     }
 }

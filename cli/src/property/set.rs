@@ -40,21 +40,19 @@ impl Runnable for PropertySetCommand {
 
         // Detect object type if not specified
         let detected_types = detect_object_types(&self.object);
-        let target_type = match self.object_type {
-            Some(t) => t,
-            None => {
-                // If ambiguous, require the user to specify
-                if detected_types.len() > 1 {
-                    bail!(
-                        "object type is ambiguous, please use option -t (detected: {:?})",
-                        detected_types
-                    );
-                }
-                detected_types
-                    .first()
-                    .copied()
-                    .ok_or_else(|| anyhow!("object is not a btrfs object"))?
+        let target_type = if let Some(t) = self.object_type {
+            t
+        } else {
+            // If ambiguous, require the user to specify
+            if detected_types.len() > 1 {
+                bail!(
+                    "object type is ambiguous, please use option -t (detected: {detected_types:?})"
+                );
             }
+            detected_types
+                .first()
+                .copied()
+                .ok_or_else(|| anyhow!("object is not a btrfs object"))?
         };
 
         set_property(
@@ -82,8 +80,10 @@ fn set_property(
         (PropertyObjectType::Subvol, "ro") => {
             set_readonly_property(file, value, force, path)?;
         }
-        (PropertyObjectType::Filesystem, "label")
-        | (PropertyObjectType::Device, "label") => {
+        (
+            PropertyObjectType::Filesystem | PropertyObjectType::Device,
+            "label",
+        ) => {
             let cstring = CString::new(value.as_bytes())
                 .context("label must not contain null bytes")?;
             label_set(file.as_fd(), &cstring).with_context(|| {
@@ -95,9 +95,7 @@ fn set_property(
         }
         _ => {
             bail!(
-                "property '{}' is not applicable to object type {:?}",
-                name,
-                obj_type
+                "property '{name}' is not applicable to object type {obj_type:?}"
             );
         }
     }
@@ -114,7 +112,7 @@ fn set_readonly_property(
     let new_readonly = match value {
         "true" => true,
         "false" => false,
-        _ => bail!("invalid value for property: {}", value),
+        _ => bail!("invalid value for property: {value}"),
     };
 
     let current_flags =

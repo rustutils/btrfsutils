@@ -19,7 +19,7 @@ impl Runnable for RootidCommand {
             "failed to look up root ID (is this a btrfs filesystem?)",
         )?;
 
-        println!("{}", rootid);
+        println!("{rootid}");
         Ok(())
     }
 }

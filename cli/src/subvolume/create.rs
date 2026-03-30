@@ -67,7 +67,7 @@ impl Runnable for SubvolumeCreateCommand {
             };
 
             let cname = match CString::new(name_str).with_context(|| {
-                format!("subvolume name contains a null byte: '{}'", name_str)
+                format!("subvolume name contains a null byte: '{name_str}'")
             }) {
                 Ok(c) => c,
                 Err(e) => {

@@ -45,15 +45,13 @@ impl Runnable for FilesystemShowCommand {
         let mut seen_uuids = HashSet::new();
         let mut first = true;
         for mount in &mounts {
-            let file = match File::open(mount) {
-                Ok(f) => f,
-                Err(_) => continue,
+            let Ok(file) = File::open(mount) else {
+                continue;
             };
             let fd = file.as_fd();
 
-            let info = match filesystem_info(fd) {
-                Ok(i) => i,
-                Err(_) => continue,
+            let Ok(info) = filesystem_info(fd) else {
+                continue;
             };
 
             if let Some(filter) = &self.filter {

@@ -222,14 +222,14 @@ impl SubvolumeDeleteCommand {
 
         for child_id in children {
             if let Some(item) = all.iter().find(|i| i.root_id == child_id) {
-                if !item.name.is_empty() {
+                if item.name.is_empty() {
+                    log::info!("Delete subvolume (subvolid={child_id})");
+                } else {
                     log::info!(
                         "Delete subvolume '{}/{}'",
                         path.display(),
                         item.name
                     );
-                } else {
-                    log::info!("Delete subvolume (subvolid={child_id})");
                 }
             }
 

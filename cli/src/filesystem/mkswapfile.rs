@@ -18,7 +18,7 @@ use std::{
 };
 use uuid::Uuid;
 
-const FS_NOCOW_FL: libc::c_long = 0x00800000;
+const FS_NOCOW_FL: libc::c_long = 0x0080_0000;
 const MIN_SWAP_SIZE: u64 = 40 * 1024;
 
 /// Create a swapfile on a btrfs filesystem
@@ -69,8 +69,7 @@ impl Runnable for FilesystemMkswapfileCommand {
 
         anyhow::ensure!(
             size >= MIN_SWAP_SIZE,
-            "swapfile needs to be at least 40 KiB, got {} bytes",
-            size
+            "swapfile needs to be at least 40 KiB, got {size} bytes"
         );
 
         let uuid = self.uuid.as_deref().copied().unwrap_or_else(Uuid::new_v4);
@@ -85,7 +84,7 @@ impl Runnable for FilesystemMkswapfileCommand {
 
         let page_count = total_pages - 1;
         anyhow::ensure!(
-            page_count <= u32::MAX as u64,
+            u32::try_from(page_count).is_ok(),
             "swapfile too large: page count exceeds u32"
         );
 
