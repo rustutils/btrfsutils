@@ -43,19 +43,21 @@ pub enum ReplaceState {
 impl ReplaceState {
     fn from_raw(val: u64) -> Option<ReplaceState> {
         match val {
-            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_NEVER_STARTED as u64 => {
+            x if x
+                == u64::from(BTRFS_IOCTL_DEV_REPLACE_STATE_NEVER_STARTED) =>
+            {
                 Some(ReplaceState::NeverStarted)
             }
-            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_STARTED as u64 => {
+            x if x == u64::from(BTRFS_IOCTL_DEV_REPLACE_STATE_STARTED) => {
                 Some(ReplaceState::Started)
             }
-            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_FINISHED as u64 => {
+            x if x == u64::from(BTRFS_IOCTL_DEV_REPLACE_STATE_FINISHED) => {
                 Some(ReplaceState::Finished)
             }
-            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_CANCELED as u64 => {
+            x if x == u64::from(BTRFS_IOCTL_DEV_REPLACE_STATE_CANCELED) => {
                 Some(ReplaceState::Canceled)
             }
-            x if x == BTRFS_IOCTL_DEV_REPLACE_STATE_SUSPENDED as u64 => {
+            x if x == u64::from(BTRFS_IOCTL_DEV_REPLACE_STATE_SUSPENDED) => {
                 Some(ReplaceState::Suspended)
             }
             _ => None,
@@ -100,9 +102,9 @@ pub enum ReplaceSource<'a> {
 /// to by `fd`.
 pub fn replace_status(fd: BorrowedFd) -> nix::Result<ReplaceStatus> {
     let mut args: btrfs_ioctl_dev_replace_args = unsafe { mem::zeroed() };
-    args.cmd = BTRFS_IOCTL_DEV_REPLACE_CMD_STATUS as u64;
+    args.cmd = u64::from(BTRFS_IOCTL_DEV_REPLACE_CMD_STATUS);
 
-    unsafe { btrfs_ioc_dev_replace(fd.as_raw_fd(), &mut args) }?;
+    unsafe { btrfs_ioc_dev_replace(fd.as_raw_fd(), &raw mut args) }?;
 
     // SAFETY: we issued CMD_STATUS so the status union member is active.
     let status = unsafe { &args.__bindgen_anon_1.status };
@@ -168,7 +170,7 @@ pub fn replace_start(
     avoid_srcdev: bool,
 ) -> nix::Result<Result<(), ReplaceStartError>> {
     let mut args: btrfs_ioctl_dev_replace_args = unsafe { mem::zeroed() };
-    args.cmd = BTRFS_IOCTL_DEV_REPLACE_CMD_START as u64;
+    args.cmd = u64::from(BTRFS_IOCTL_DEV_REPLACE_CMD_START);
 
     // SAFETY: we are filling in the start union member before issuing CMD_START.
     let start = unsafe { &mut args.__bindgen_anon_1.start };
@@ -194,19 +196,23 @@ pub fn replace_start(
     start.tgtdev_name[..tgt_bytes.len()].copy_from_slice(tgt_bytes);
 
     start.cont_reading_from_srcdev_mode = if avoid_srcdev {
-        BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_AVOID as u64
+        u64::from(BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_AVOID)
     } else {
-        BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_ALWAYS as u64
+        u64::from(BTRFS_IOCTL_DEV_REPLACE_CONT_READING_FROM_SRCDEV_MODE_ALWAYS)
     };
 
-    unsafe { btrfs_ioc_dev_replace(fd.as_raw_fd(), &mut args) }?;
+    unsafe { btrfs_ioc_dev_replace(fd.as_raw_fd(), &raw mut args) }?;
 
     match args.result {
-        x if x == BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR as u64 => Ok(Ok(())),
-        x if x == BTRFS_IOCTL_DEV_REPLACE_RESULT_ALREADY_STARTED as u64 => {
+        x if x == u64::from(BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR) => {
+            Ok(Ok(()))
+        }
+        x if x == u64::from(BTRFS_IOCTL_DEV_REPLACE_RESULT_ALREADY_STARTED) => {
             Ok(Err(ReplaceStartError::AlreadyStarted))
         }
-        x if x == BTRFS_IOCTL_DEV_REPLACE_RESULT_SCRUB_INPROGRESS as u64 => {
+        x if x
+            == u64::from(BTRFS_IOCTL_DEV_REPLACE_RESULT_SCRUB_INPROGRESS) =>
+        {
             Ok(Err(ReplaceStartError::ScrubInProgress))
         }
         _ => Err(Errno::EINVAL),
@@ -220,13 +226,15 @@ pub fn replace_start(
 /// `Ok(false)` if no replace operation was in progress.
 pub fn replace_cancel(fd: BorrowedFd) -> nix::Result<bool> {
     let mut args: btrfs_ioctl_dev_replace_args = unsafe { mem::zeroed() };
-    args.cmd = BTRFS_IOCTL_DEV_REPLACE_CMD_CANCEL as u64;
+    args.cmd = u64::from(BTRFS_IOCTL_DEV_REPLACE_CMD_CANCEL);
 
-    unsafe { btrfs_ioc_dev_replace(fd.as_raw_fd(), &mut args) }?;
+    unsafe { btrfs_ioc_dev_replace(fd.as_raw_fd(), &raw mut args) }?;
 
     match args.result {
-        x if x == BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR as u64 => Ok(true),
-        x if x == BTRFS_IOCTL_DEV_REPLACE_RESULT_NOT_STARTED as u64 => {
+        x if x == u64::from(BTRFS_IOCTL_DEV_REPLACE_RESULT_NO_ERROR) => {
+            Ok(true)
+        }
+        x if x == u64::from(BTRFS_IOCTL_DEV_REPLACE_RESULT_NOT_STARTED) => {
             Ok(false)
         }
         _ => Err(Errno::EINVAL),

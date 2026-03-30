@@ -97,7 +97,7 @@ pub fn file_extents(fd: BorrowedFd) -> nix::Result<FileExtentInfo> {
             libc::ioctl(
                 raw_fd,
                 FS_IOC_FIEMAP,
-                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.as_mut_ptr().cast::<libc::c_void>(),
             )
         };
         if ret < 0 {

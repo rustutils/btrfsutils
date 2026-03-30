@@ -166,7 +166,7 @@ fn build_qgroup_inherit(qgroups: &[u64]) -> Vec<u64> {
     // SAFETY: buf is large enough and zeroed; we write through a properly
     // aligned pointer (btrfs_qgroup_inherit has 8-byte alignment).
     let inherit =
-        unsafe { &mut *(buf.as_mut_ptr() as *mut btrfs_qgroup_inherit) };
+        unsafe { &mut *buf.as_mut_ptr().cast::<btrfs_qgroup_inherit>() };
     inherit.num_qgroups = qgroups.len() as u64;
 
     // Write the qgroup IDs into the flexible array member.
@@ -186,7 +186,7 @@ fn set_qgroup_inherit(
     buf: &[u64],
     num_qgroups: usize,
 ) {
-    args.flags |= BTRFS_SUBVOL_QGROUP_INHERIT as u64;
+    args.flags |= u64::from(BTRFS_SUBVOL_QGROUP_INHERIT);
     let base_size = mem::size_of::<btrfs_qgroup_inherit>();
     let total_size = base_size + num_qgroups * mem::size_of::<u64>();
     args.__bindgen_anon_1.__bindgen_anon_1.size = total_size as u64;
@@ -218,7 +218,9 @@ pub fn subvolume_create(
         set_qgroup_inherit(&mut args, &inherit_buf, qgroups.len());
     }
 
-    unsafe { btrfs_ioc_subvol_create_v2(parent_fd.as_raw_fd(), &args) }?;
+    unsafe {
+        btrfs_ioc_subvol_create_v2(parent_fd.as_raw_fd(), &raw const args)
+    }?;
     Ok(())
 }
 
@@ -237,7 +239,9 @@ pub fn subvolume_create(
 pub fn subvolume_delete(parent_fd: BorrowedFd, name: &CStr) -> nix::Result<()> {
     let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
     set_v2_name(&mut args, name)?;
-    unsafe { btrfs_ioc_snap_destroy_v2(parent_fd.as_raw_fd(), &args) }?;
+    unsafe {
+        btrfs_ioc_snap_destroy_v2(parent_fd.as_raw_fd(), &raw const args)
+    }?;
     Ok(())
 }
 
@@ -254,9 +258,9 @@ pub fn subvolume_delete_by_id(
     subvolid: u64,
 ) -> nix::Result<()> {
     let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
-    args.flags = BTRFS_SUBVOL_SPEC_BY_ID as u64;
+    args.flags = u64::from(BTRFS_SUBVOL_SPEC_BY_ID);
     args.__bindgen_anon_2.subvolid = subvolid;
-    unsafe { btrfs_ioc_snap_destroy_v2(fd.as_raw_fd(), &args) }?;
+    unsafe { btrfs_ioc_snap_destroy_v2(fd.as_raw_fd(), &raw const args) }?;
     Ok(())
 }
 
@@ -280,9 +284,9 @@ pub fn snapshot_create(
 ) -> nix::Result<()> {
     let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
     // The `fd` field carries the source subvolume file descriptor.
-    args.fd = source_fd.as_raw_fd() as i64;
+    args.fd = i64::from(source_fd.as_raw_fd());
     if readonly {
-        args.flags = BTRFS_SUBVOL_RDONLY as u64;
+        args.flags = u64::from(BTRFS_SUBVOL_RDONLY);
     }
     set_v2_name(&mut args, name)?;
 
@@ -292,7 +296,9 @@ pub fn snapshot_create(
         set_qgroup_inherit(&mut args, &inherit_buf, qgroups.len());
     }
 
-    unsafe { btrfs_ioc_snap_create_v2(parent_fd.as_raw_fd(), &args) }?;
+    unsafe {
+        btrfs_ioc_snap_create_v2(parent_fd.as_raw_fd(), &raw const args)
+    }?;
     Ok(())
 }
 
@@ -318,7 +324,7 @@ pub fn subvolume_info_by_id(
 ) -> nix::Result<SubvolumeInfo> {
     let mut raw: btrfs_ioctl_get_subvol_info_args = unsafe { mem::zeroed() };
     raw.treeid = rootid;
-    unsafe { btrfs_ioc_get_subvol_info(fd.as_raw_fd(), &mut raw) }?;
+    unsafe { btrfs_ioc_get_subvol_info(fd.as_raw_fd(), &raw mut raw) }?;
 
     let name = unsafe { CStr::from_ptr(raw.name.as_ptr()) }
         .to_string_lossy()
@@ -348,7 +354,7 @@ pub fn subvolume_info_by_id(
 /// Read the flags of the subvolume that `fd` belongs to.
 pub fn subvolume_flags_get(fd: BorrowedFd) -> nix::Result<SubvolumeFlags> {
     let mut flags: u64 = 0;
-    unsafe { btrfs_ioc_subvol_getflags(fd.as_raw_fd(), &mut flags) }?;
+    unsafe { btrfs_ioc_subvol_getflags(fd.as_raw_fd(), &raw mut flags) }?;
     Ok(SubvolumeFlags::from_bits_truncate(flags))
 }
 
@@ -361,7 +367,7 @@ pub fn subvolume_flags_set(
     flags: SubvolumeFlags,
 ) -> nix::Result<()> {
     let raw: u64 = flags.bits();
-    unsafe { btrfs_ioc_subvol_setflags(fd.as_raw_fd(), &raw) }?;
+    unsafe { btrfs_ioc_subvol_setflags(fd.as_raw_fd(), &raw const raw) }?;
     Ok(())
 }
 
@@ -379,10 +385,10 @@ pub fn subvolume_default_get(fd: BorrowedFd) -> nix::Result<u64> {
     tree_search(
         fd,
         SearchKey::for_objectid_range(
-            BTRFS_ROOT_TREE_OBJECTID as u64,
+            u64::from(BTRFS_ROOT_TREE_OBJECTID),
             BTRFS_DIR_ITEM_KEY,
-            BTRFS_ROOT_TREE_DIR_OBJECTID as u64,
-            BTRFS_ROOT_TREE_DIR_OBJECTID as u64,
+            u64::from(BTRFS_ROOT_TREE_DIR_OBJECTID),
+            u64::from(BTRFS_ROOT_TREE_DIR_OBJECTID),
         ),
         |_hdr, data| {
             use crate::raw::btrfs_dir_item;
@@ -411,7 +417,7 @@ pub fn subvolume_default_get(fd: BorrowedFd) -> nix::Result<u64> {
         },
     )?;
 
-    Ok(default_id.unwrap_or(BTRFS_FS_TREE_OBJECTID as u64))
+    Ok(default_id.unwrap_or(u64::from(BTRFS_FS_TREE_OBJECTID)))
 }
 
 /// Set the default subvolume of the filesystem referred to by `fd` to
@@ -419,7 +425,7 @@ pub fn subvolume_default_get(fd: BorrowedFd) -> nix::Result<u64> {
 ///
 /// Pass [`FS_TREE_OBJECTID`] to restore the default.  Requires `CAP_SYS_ADMIN`.
 pub fn subvolume_default_set(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> {
-    unsafe { btrfs_ioc_default_subvol(fd.as_raw_fd(), &subvolid) }?;
+    unsafe { btrfs_ioc_default_subvol(fd.as_raw_fd(), &raw const subvolid) }?;
     Ok(())
 }
 
@@ -443,9 +449,9 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
     tree_search(
         fd,
         SearchKey::for_objectid_range(
-            BTRFS_ROOT_TREE_OBJECTID as u64,
+            u64::from(BTRFS_ROOT_TREE_OBJECTID),
             BTRFS_ROOT_ITEM_KEY,
-            BTRFS_FIRST_FREE_OBJECTID as u64,
+            u64::from(BTRFS_FIRST_FREE_OBJECTID),
             BTRFS_LAST_FREE_OBJECTID as u64,
         ),
         |hdr, data| {
@@ -459,9 +465,9 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
     tree_search(
         fd,
         SearchKey::for_objectid_range(
-            BTRFS_ROOT_TREE_OBJECTID as u64,
+            u64::from(BTRFS_ROOT_TREE_OBJECTID),
             BTRFS_ROOT_BACKREF_KEY,
-            BTRFS_FIRST_FREE_OBJECTID as u64,
+            u64::from(BTRFS_FIRST_FREE_OBJECTID),
             BTRFS_LAST_FREE_OBJECTID as u64,
         ),
         |hdr, data| {
@@ -495,7 +501,7 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
     let top_id =
         crate::inode::lookup_path_rootid(fd).unwrap_or(FS_TREE_OBJECTID);
 
-    resolve_full_paths(fd, &mut items, top_id)?;
+    resolve_full_paths(fd, &mut items, top_id);
 
     Ok(items)
 }
@@ -519,7 +525,7 @@ fn ino_lookup_dir_path(
     };
     // SAFETY: args is a valid, zeroed btrfs_ioctl_ino_lookup_args; the ioctl
     // fills in args.name with a null-terminated path string.
-    unsafe { btrfs_ioc_ino_lookup(fd.as_raw_fd(), &mut args) }?;
+    unsafe { btrfs_ioc_ino_lookup(fd.as_raw_fd(), &raw mut args) }?;
 
     // args.name is [c_char; 4080]; find the null terminator and decode.
     let name_ptr: *const c_char = args.name.as_ptr();
@@ -532,7 +538,7 @@ fn ino_lookup_dir_path(
 /// the full path relative to the filesystem root.
 ///
 /// For each subvolume we already have `parent_id`, `dir_id`, and the leaf name
-/// from the ROOT_BACKREF pass.  A single `BTRFS_IOC_INO_LOOKUP` call per item
+/// from the `ROOT_BACKREF` pass.  A single `BTRFS_IOC_INO_LOOKUP` call per item
 /// gives the path from the parent tree's root down to the directory that
 /// contains the subvolume (the "dir prefix").  Concatenating that prefix with
 /// the leaf name yields the subvolume's segment within its parent.  Walking up
@@ -542,7 +548,7 @@ fn resolve_full_paths(
     fd: BorrowedFd,
     items: &mut [SubvolumeListItem],
     top_id: u64,
-) -> nix::Result<()> {
+) {
     // Map root_id → index for O(1) parent lookups.
     let id_to_idx: HashMap<u64, usize> = items
         .iter()
@@ -587,8 +593,6 @@ fn resolve_full_paths(
             item.name = path;
         }
     }
-
-    Ok(())
 }
 
 /// Compute the full path for `root_id`, memoizing into `cache`.
@@ -597,7 +601,7 @@ fn resolve_full_paths(
 /// subvolume trees.  Collects segments from the target up to the FS tree
 /// root, then joins them in reverse order.
 ///
-/// Cycle detection is included: ROOT_BACKREF entries can form mutual parent
+/// Cycle detection is included: `ROOT_BACKREF` entries can form mutual parent
 /// relationships (e.g. a snapshot stored inside the subvolume it was taken
 /// from), which would otherwise loop forever.
 fn build_full_path(
@@ -661,7 +665,7 @@ fn build_full_path(
             if parent_path.is_empty() {
                 segment.clone()
             } else {
-                format!("{}/{}", parent_path, segment)
+                format!("{parent_path}/{segment}")
             }
         } else {
             segment.clone()
@@ -807,8 +811,9 @@ pub fn subvol_rootrefs(fd: BorrowedFd) -> nix::Result<Vec<SubvolRootRef>> {
             unsafe { std::mem::zeroed() };
         args.min_treeid = min_treeid;
 
-        let ret =
-            unsafe { btrfs_ioc_get_subvol_rootref(fd.as_raw_fd(), &mut args) };
+        let ret = unsafe {
+            btrfs_ioc_get_subvol_rootref(fd.as_raw_fd(), &raw mut args)
+        };
 
         // The kernel returns EOVERFLOW when there are more results than
         // fit in one batch. We read what we got and loop with the updated
@@ -852,7 +857,8 @@ pub fn subvol_sync_wait_one(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> {
         mode: BTRFS_SUBVOL_SYNC_WAIT_FOR_ONE,
         count: 0,
     };
-    match unsafe { btrfs_ioc_subvol_sync_wait(fd.as_raw_fd(), &args) } {
+    match unsafe { btrfs_ioc_subvol_sync_wait(fd.as_raw_fd(), &raw const args) }
+    {
         Ok(_) | Err(nix::errno::Errno::ENOENT) => Ok(()),
         Err(e) => Err(e),
     }
@@ -869,7 +875,7 @@ pub fn subvol_sync_wait_all(fd: BorrowedFd) -> nix::Result<()> {
         mode: BTRFS_SUBVOL_SYNC_WAIT_FOR_QUEUED,
         count: 0,
     };
-    unsafe { btrfs_ioc_subvol_sync_wait(fd.as_raw_fd(), &args) }?;
+    unsafe { btrfs_ioc_subvol_sync_wait(fd.as_raw_fd(), &raw const args) }?;
     Ok(())
 }
 

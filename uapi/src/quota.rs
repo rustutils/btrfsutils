@@ -53,21 +53,21 @@ use std::{
 /// faster but less precise than full qgroup accounting.
 pub fn quota_enable(fd: BorrowedFd, simple: bool) -> nix::Result<()> {
     let cmd = if simple {
-        BTRFS_QUOTA_CTL_ENABLE_SIMPLE_QUOTA as u64
+        u64::from(BTRFS_QUOTA_CTL_ENABLE_SIMPLE_QUOTA)
     } else {
-        BTRFS_QUOTA_CTL_ENABLE as u64
+        u64::from(BTRFS_QUOTA_CTL_ENABLE)
     };
     let mut args: btrfs_ioctl_quota_ctl_args = unsafe { mem::zeroed() };
     args.cmd = cmd;
-    unsafe { btrfs_ioc_quota_ctl(fd.as_raw_fd(), &mut args) }?;
+    unsafe { btrfs_ioc_quota_ctl(fd.as_raw_fd(), &raw mut args) }?;
     Ok(())
 }
 
 /// Disable quota accounting on the filesystem referred to by `fd`.
 pub fn quota_disable(fd: BorrowedFd) -> nix::Result<()> {
     let mut args: btrfs_ioctl_quota_ctl_args = unsafe { mem::zeroed() };
-    args.cmd = BTRFS_QUOTA_CTL_DISABLE as u64;
-    unsafe { btrfs_ioc_quota_ctl(fd.as_raw_fd(), &mut args) }?;
+    args.cmd = u64::from(BTRFS_QUOTA_CTL_DISABLE);
+    unsafe { btrfs_ioc_quota_ctl(fd.as_raw_fd(), &raw mut args) }?;
     Ok(())
 }
 
@@ -79,7 +79,7 @@ pub fn quota_disable(fd: BorrowedFd) -> nix::Result<()> {
 /// wait anyway can treat that as a non-error.
 pub fn quota_rescan(fd: BorrowedFd) -> nix::Result<()> {
     let args: btrfs_ioctl_quota_rescan_args = unsafe { mem::zeroed() };
-    unsafe { btrfs_ioc_quota_rescan(fd.as_raw_fd(), &args) }?;
+    unsafe { btrfs_ioc_quota_rescan(fd.as_raw_fd(), &raw const args) }?;
     Ok(())
 }
 
@@ -103,7 +103,7 @@ pub struct QuotaRescanStatus {
 /// Query the status of the quota rescan on the filesystem referred to by `fd`.
 pub fn quota_rescan_status(fd: BorrowedFd) -> nix::Result<QuotaRescanStatus> {
     let mut args: btrfs_ioctl_quota_rescan_args = unsafe { mem::zeroed() };
-    unsafe { btrfs_ioc_quota_rescan_status(fd.as_raw_fd(), &mut args) }?;
+    unsafe { btrfs_ioc_quota_rescan_status(fd.as_raw_fd(), &raw mut args) }?;
     Ok(QuotaRescanStatus {
         running: args.flags != 0,
         progress: args.progress,
@@ -115,6 +115,7 @@ pub fn quota_rescan_status(fd: BorrowedFd) -> nix::Result<QuotaRescanStatus> {
 /// `qgroupid = (level << 48) | subvolid`.  Level 0 qgroups correspond
 /// directly to subvolumes.
 #[inline]
+#[must_use]
 pub fn qgroupid_level(qgroupid: u64) -> u16 {
     (qgroupid >> 48) as u16
 }
@@ -123,6 +124,7 @@ pub fn qgroupid_level(qgroupid: u64) -> u16 {
 ///
 /// Only meaningful for level-0 qgroups.
 #[inline]
+#[must_use]
 pub fn qgroupid_subvolid(qgroupid: u64) -> u64 {
     qgroupid & 0x0000_FFFF_FFFF_FFFF
 }
@@ -221,14 +223,16 @@ impl QgroupEntryBuilder {
             excl: self.excl,
             excl_cmpr: self.excl_cmpr,
             limit_flags: QgroupLimitFlags::from_bits_truncate(self.limit_flags),
-            max_rfer: if self.limit_flags & BTRFS_QGROUP_LIMIT_MAX_RFER as u64
+            max_rfer: if self.limit_flags
+                & u64::from(BTRFS_QGROUP_LIMIT_MAX_RFER)
                 != 0
             {
                 self.max_rfer
             } else {
                 u64::MAX
             },
-            max_excl: if self.limit_flags & BTRFS_QGROUP_LIMIT_MAX_EXCL as u64
+            max_excl: if self.limit_flags
+                & u64::from(BTRFS_QGROUP_LIMIT_MAX_EXCL)
                 != 0
             {
                 self.max_excl
@@ -290,7 +294,7 @@ pub fn qgroup_create(fd: BorrowedFd, qgroupid: u64) -> nix::Result<()> {
     args.qgroupid = qgroupid;
     // SAFETY: args is fully initialised above and lives for the duration of
     // the ioctl call.
-    unsafe { btrfs_ioc_qgroup_create(fd.as_raw_fd(), &args) }?;
+    unsafe { btrfs_ioc_qgroup_create(fd.as_raw_fd(), &raw const args) }?;
     Ok(())
 }
 
@@ -302,7 +306,7 @@ pub fn qgroup_destroy(fd: BorrowedFd, qgroupid: u64) -> nix::Result<()> {
     args.qgroupid = qgroupid;
     // SAFETY: args is fully initialised above and lives for the duration of
     // the ioctl call.
-    unsafe { btrfs_ioc_qgroup_create(fd.as_raw_fd(), &args) }?;
+    unsafe { btrfs_ioc_qgroup_create(fd.as_raw_fd(), &raw const args) }?;
     Ok(())
 }
 
@@ -321,7 +325,8 @@ pub fn qgroup_assign(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
     args.dst = dst;
     // SAFETY: args is fully initialised above and lives for the duration of
     // the ioctl call.
-    let ret = unsafe { btrfs_ioc_qgroup_assign(fd.as_raw_fd(), &args) }?;
+    let ret =
+        unsafe { btrfs_ioc_qgroup_assign(fd.as_raw_fd(), &raw const args) }?;
     Ok(ret > 0)
 }
 
@@ -338,7 +343,8 @@ pub fn qgroup_remove(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
     args.dst = dst;
     // SAFETY: args is fully initialised above and lives for the duration of
     // the ioctl call.
-    let ret = unsafe { btrfs_ioc_qgroup_assign(fd.as_raw_fd(), &args) }?;
+    let ret =
+        unsafe { btrfs_ioc_qgroup_assign(fd.as_raw_fd(), &raw const args) }?;
     Ok(ret > 0)
 }
 
@@ -367,7 +373,7 @@ pub fn qgroup_limit(
     // SAFETY: args is fully initialised above and lives for the duration of
     // the ioctl call.  The ioctl number is #43 (_IOR direction in the kernel
     // header), which reads args from userspace.
-    unsafe { btrfs_ioc_qgroup_limit(fd.as_raw_fd(), &mut args) }?;
+    unsafe { btrfs_ioc_qgroup_limit(fd.as_raw_fd(), &raw mut args) }?;
     Ok(())
 }
 
@@ -383,7 +389,7 @@ pub fn qgroup_list(fd: BorrowedFd) -> nix::Result<QgroupList> {
 
     // Scan the quota tree for STATUS / INFO / LIMIT / RELATION items in one pass.
     let quota_key = SearchKey {
-        tree_id: BTRFS_QUOTA_TREE_OBJECTID as u64,
+        tree_id: u64::from(BTRFS_QUOTA_TREE_OBJECTID),
         min_objectid: 0,
         max_objectid: u64::MAX,
         min_type: BTRFS_QGROUP_STATUS_KEY,
@@ -473,9 +479,9 @@ fn collect_subvol_ids(fd: BorrowedFd) -> nix::Result<HashSet<u64>> {
     // BTRFS_LAST_FREE_OBJECTID binds as i32 = -256; cast to u64 gives
     // 0xFFFFFFFF_FFFFFF00 as expected.
     let key = SearchKey::for_objectid_range(
-        BTRFS_ROOT_TREE_OBJECTID as u64,
+        u64::from(BTRFS_ROOT_TREE_OBJECTID),
         BTRFS_ROOT_ITEM_KEY,
-        BTRFS_FIRST_FREE_OBJECTID as u64,
+        u64::from(BTRFS_FIRST_FREE_OBJECTID),
         BTRFS_LAST_FREE_OBJECTID as u64,
     );
 

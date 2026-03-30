@@ -83,6 +83,7 @@ pub struct DeviceStats {
 
 impl DeviceStats {
     /// Sum of all error counters.
+    #[must_use]
     pub fn total_errs(&self) -> u64 {
         self.write_errs
             + self.read_errs
@@ -92,6 +93,7 @@ impl DeviceStats {
     }
 
     /// Returns `true` if every counter is zero.
+    #[must_use]
     pub fn is_clean(&self) -> bool {
         self.total_errs() == 0
     }
@@ -171,13 +173,13 @@ pub fn device_info(
     let mut raw: btrfs_ioctl_dev_info_args = unsafe { mem::zeroed() };
     raw.devid = devid;
 
-    match unsafe { btrfs_ioc_dev_info(fd.as_raw_fd(), &mut raw) } {
+    match unsafe { btrfs_ioc_dev_info(fd.as_raw_fd(), &raw mut raw) } {
         Err(Errno::ENODEV) => return Ok(None),
         Err(e) => return Err(e),
         Ok(_) => {}
     }
 
-    let path = unsafe { CStr::from_ptr(raw.path.as_ptr() as *const _) }
+    let path = unsafe { CStr::from_ptr(raw.path.as_ptr().cast()) }
         .to_string_lossy()
         .into_owned();
 
@@ -215,7 +217,7 @@ pub fn device_info_all(
 pub fn device_add(fd: BorrowedFd, path: &CStr) -> nix::Result<()> {
     let mut raw: btrfs_ioctl_vol_args = unsafe { mem::zeroed() };
     copy_path_to_name(&mut raw.name, path)?;
-    unsafe { btrfs_ioc_add_dev(fd.as_raw_fd(), &raw) }?;
+    unsafe { btrfs_ioc_add_dev(fd.as_raw_fd(), &raw const raw) }?;
     Ok(())
 }
 
@@ -235,25 +237,29 @@ pub fn device_remove(fd: BorrowedFd, spec: DeviceSpec) -> nix::Result<()> {
 
     match spec {
         DeviceSpec::Id(devid) => {
-            args.flags = BTRFS_DEVICE_SPEC_BY_ID as u64;
+            args.flags = u64::from(BTRFS_DEVICE_SPEC_BY_ID);
             // SAFETY: devid is the active union member when BTRFS_DEVICE_SPEC_BY_ID is set.
             args.__bindgen_anon_2.devid = devid;
-            unsafe { btrfs_ioc_rm_dev_v2(fd.as_raw_fd(), &args) }?;
+            unsafe { btrfs_ioc_rm_dev_v2(fd.as_raw_fd(), &raw const args) }?;
         }
         DeviceSpec::Path(path) => {
             // SAFETY: name is the active union member when flags == 0.
             unsafe {
                 copy_path_to_name(&mut args.__bindgen_anon_2.name, path)
             }?;
-            match unsafe { btrfs_ioc_rm_dev_v2(fd.as_raw_fd(), &args) } {
+            match unsafe {
+                btrfs_ioc_rm_dev_v2(fd.as_raw_fd(), &raw const args)
+            } {
                 Ok(_) => {}
                 // Fall back to the old single-arg ioctl on kernels that either
                 // don't know about v2 (ENOTTY) or don't recognise our flags (EOPNOTSUPP).
-                Err(Errno::ENOTTY) | Err(Errno::EOPNOTSUPP) => {
+                Err(Errno::ENOTTY | Errno::EOPNOTSUPP) => {
                     let mut old: btrfs_ioctl_vol_args =
                         unsafe { mem::zeroed() };
                     copy_path_to_name(&mut old.name, path)?;
-                    unsafe { btrfs_ioc_rm_dev(fd.as_raw_fd(), &old) }?;
+                    unsafe {
+                        btrfs_ioc_rm_dev(fd.as_raw_fd(), &raw const old)
+                    }?;
                 }
                 Err(e) => return Err(e),
             }
@@ -272,7 +278,7 @@ pub fn device_scan(path: &CStr) -> nix::Result<()> {
     let ctl = open_control()?;
     let mut raw: btrfs_ioctl_vol_args = unsafe { mem::zeroed() };
     copy_path_to_name(&mut raw.name, path)?;
-    unsafe { btrfs_ioc_scan_dev(ctl.as_raw_fd(), &raw) }?;
+    unsafe { btrfs_ioc_scan_dev(ctl.as_raw_fd(), &raw const raw) }?;
     Ok(())
 }
 
@@ -289,7 +295,7 @@ pub fn device_forget(path: Option<&CStr>) -> nix::Result<()> {
     if let Some(p) = path {
         copy_path_to_name(&mut raw.name, p)?;
     }
-    unsafe { btrfs_ioc_forget_dev(ctl.as_raw_fd(), &raw) }?;
+    unsafe { btrfs_ioc_forget_dev(ctl.as_raw_fd(), &raw const raw) }?;
     Ok(())
 }
 
@@ -306,7 +312,7 @@ pub fn device_ready(path: &CStr) -> nix::Result<()> {
     // path from args.name, so we pass a mut pointer as ioctl_read! requires.
     let mut raw: btrfs_ioctl_vol_args = unsafe { mem::zeroed() };
     copy_path_to_name(&mut raw.name, path)?;
-    unsafe { btrfs_ioc_devices_ready(ctl.as_raw_fd(), &mut raw) }?;
+    unsafe { btrfs_ioc_devices_ready(ctl.as_raw_fd(), &raw mut raw) }?;
     Ok(())
 }
 
@@ -322,12 +328,12 @@ pub fn device_stats(
 ) -> nix::Result<DeviceStats> {
     let mut raw: btrfs_ioctl_get_dev_stats = unsafe { mem::zeroed() };
     raw.devid = devid;
-    raw.nr_items = btrfs_dev_stat_values_BTRFS_DEV_STAT_VALUES_MAX as u64;
+    raw.nr_items = u64::from(btrfs_dev_stat_values_BTRFS_DEV_STAT_VALUES_MAX);
     if reset {
-        raw.flags = BTRFS_DEV_STATS_RESET as u64;
+        raw.flags = u64::from(BTRFS_DEV_STATS_RESET);
     }
 
-    unsafe { btrfs_ioc_get_dev_stats(fd.as_raw_fd(), &mut raw) }?;
+    unsafe { btrfs_ioc_get_dev_stats(fd.as_raw_fd(), &raw mut raw) }?;
 
     Ok(DeviceStats {
         devid,
@@ -389,7 +395,7 @@ pub fn device_min_size(fd: BorrowedFd, devid: u64) -> nix::Result<u64> {
     tree_search(
         fd,
         SearchKey::for_objectid_range(
-            BTRFS_DEV_TREE_OBJECTID as u64,
+            u64::from(BTRFS_DEV_TREE_OBJECTID),
             BTRFS_DEV_EXTENT_KEY,
             devid,
             devid,

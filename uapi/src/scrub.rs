@@ -54,6 +54,7 @@ pub struct ScrubProgress {
 
 impl ScrubProgress {
     /// Total number of hard errors (read, super, verify, checksum).
+    #[must_use]
     pub fn error_count(&self) -> u64 {
         self.read_errors
             + self.super_errors
@@ -62,11 +63,13 @@ impl ScrubProgress {
     }
 
     /// Total bytes scrubbed (data + tree).
+    #[must_use]
     pub fn bytes_scrubbed(&self) -> u64 {
         self.data_bytes_scrubbed + self.tree_bytes_scrubbed
     }
 
     /// Returns `true` if no errors of any kind were found.
+    #[must_use]
     pub fn is_clean(&self) -> bool {
         self.error_count() == 0
             && self.corrected_errors == 0
@@ -167,9 +170,9 @@ pub fn scrub_start(
     args.start = 0;
     args.end = u64::MAX;
     if readonly {
-        args.flags = BTRFS_SCRUB_READONLY as u64;
+        args.flags = u64::from(BTRFS_SCRUB_READONLY);
     }
-    unsafe { btrfs_ioc_scrub(fd.as_raw_fd(), &mut args) }?;
+    unsafe { btrfs_ioc_scrub(fd.as_raw_fd(), &raw mut args) }?;
     Ok(from_raw(&args))
 }
 
@@ -192,7 +195,7 @@ pub fn scrub_progress(
     args.start = 0;
     args.end = u64::MAX;
 
-    match unsafe { btrfs_ioc_scrub_progress(fd.as_raw_fd(), &mut args) } {
+    match unsafe { btrfs_ioc_scrub_progress(fd.as_raw_fd(), &raw mut args) } {
         Err(nix::errno::Errno::ENOTCONN) => Ok(None),
         Err(e) => Err(e),
         Ok(_) => Ok(Some(from_raw(&args))),

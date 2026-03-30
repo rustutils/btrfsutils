@@ -89,6 +89,7 @@ pub struct CompressSpec {
 impl DefragRangeArgs {
     /// Create a new `DefragRangeArgs` with all defaults: defragment the
     /// entire file, no compression change, no flush.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             start: 0,
@@ -101,18 +102,21 @@ impl DefragRangeArgs {
     }
 
     /// Set the start offset in bytes.
+    #[must_use]
     pub fn start(mut self, start: u64) -> Self {
         self.start = start;
         self
     }
 
     /// Set the number of bytes to defragment.
+    #[must_use]
     pub fn len(mut self, len: u64) -> Self {
         self.len = len;
         self
     }
 
     /// Flush dirty data to disk after defragmenting.
+    #[must_use]
     pub fn flush(mut self) -> Self {
         self.flush = true;
         self
@@ -120,12 +124,14 @@ impl DefragRangeArgs {
 
     /// Set the extent size threshold. Extents larger than this will not be
     /// rewritten.
+    #[must_use]
     pub fn extent_thresh(mut self, thresh: u32) -> Self {
         self.extent_thresh = thresh;
         self
     }
 
     /// Compress the file using the given algorithm while defragmenting.
+    #[must_use]
     pub fn compress(mut self, spec: CompressSpec) -> Self {
         self.compress = Some(spec);
         self.nocomp = false;
@@ -133,6 +139,7 @@ impl DefragRangeArgs {
     }
 
     /// Disable compression while defragmenting (decompresses existing data).
+    #[must_use]
     pub fn nocomp(mut self) -> Self {
         self.nocomp = true;
         self.compress = None;
@@ -250,25 +257,25 @@ pub fn defrag_range(fd: BorrowedFd, args: &DefragRangeArgs) -> nix::Result<()> {
     raw.extent_thresh = args.extent_thresh;
 
     if args.flush {
-        raw.flags |= BTRFS_DEFRAG_RANGE_START_IO as u64;
+        raw.flags |= u64::from(BTRFS_DEFRAG_RANGE_START_IO);
     }
 
     if args.nocomp {
-        raw.flags |= BTRFS_DEFRAG_RANGE_NOCOMPRESS as u64;
+        raw.flags |= u64::from(BTRFS_DEFRAG_RANGE_NOCOMPRESS);
     } else if let Some(spec) = args.compress {
-        raw.flags |= BTRFS_DEFRAG_RANGE_COMPRESS as u64;
+        raw.flags |= u64::from(BTRFS_DEFRAG_RANGE_COMPRESS);
         match spec.level {
             None => {
                 raw.__bindgen_anon_1.compress_type = spec.compress_type as u32;
             }
             Some(level) => {
-                raw.flags |= BTRFS_DEFRAG_RANGE_COMPRESS_LEVEL as u64;
+                raw.flags |= u64::from(BTRFS_DEFRAG_RANGE_COMPRESS_LEVEL);
                 raw.__bindgen_anon_1.compress.type_ = spec.compress_type as u8;
                 raw.__bindgen_anon_1.compress.level = level;
             }
         }
     }
 
-    unsafe { btrfs_ioc_defrag_range(fd.as_raw_fd(), &raw) }?;
+    unsafe { btrfs_ioc_defrag_range(fd.as_raw_fd(), &raw const raw) }?;
     Ok(())
 }

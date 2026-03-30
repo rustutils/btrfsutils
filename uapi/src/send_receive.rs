@@ -58,7 +58,7 @@ pub fn send(
     version: u32,
 ) -> nix::Result<()> {
     let mut args: btrfs_ioctl_send_args = unsafe { std::mem::zeroed() };
-    args.send_fd = send_fd as i64;
+    args.send_fd = i64::from(send_fd);
     args.parent_root = parent_root;
     args.clone_sources_count = clone_sources.len() as u64;
     args.clone_sources = if clone_sources.is_empty() {
@@ -72,7 +72,7 @@ pub fn send(
     // SAFETY: args is fully initialized, clone_sources points to valid memory
     // that outlives the ioctl call, and subvol_fd is a valid borrowed fd.
     unsafe {
-        btrfs_ioc_send(subvol_fd.as_raw_fd(), &args)?;
+        btrfs_ioc_send(subvol_fd.as_raw_fd(), &raw const args)?;
     }
 
     Ok(())
@@ -107,7 +107,7 @@ pub fn received_subvol_set(
 
     // SAFETY: args is fully initialized, fd is a valid borrowed fd to a subvolume.
     unsafe {
-        btrfs_ioc_set_received_subvol(fd.as_raw_fd(), &mut args)?;
+        btrfs_ioc_set_received_subvol(fd.as_raw_fd(), &raw mut args)?;
     }
 
     Ok(args.rtransid)
@@ -129,7 +129,7 @@ pub fn clone_range(
     dest_offset: u64,
 ) -> nix::Result<()> {
     let args = btrfs_ioctl_clone_range_args {
-        src_fd: src_fd.as_raw_fd() as i64,
+        src_fd: i64::from(src_fd.as_raw_fd()),
         src_offset,
         src_length,
         dest_offset,
@@ -137,7 +137,7 @@ pub fn clone_range(
 
     // SAFETY: args is fully initialized, both fds are valid.
     unsafe {
-        btrfs_ioc_clone_range(dest_fd.as_raw_fd(), &args)?;
+        btrfs_ioc_clone_range(dest_fd.as_raw_fd(), &raw const args)?;
     }
 
     Ok(())
@@ -169,7 +169,7 @@ pub fn encoded_write(
     };
 
     let mut args: btrfs_ioctl_encoded_io_args = unsafe { std::mem::zeroed() };
-    args.iov = &iov as *const _ as *mut _;
+    args.iov = std::ptr::from_ref(&iov) as *mut _;
     args.iovcnt = 1;
     args.offset = offset as i64;
     args.len = unencoded_file_len;
@@ -182,7 +182,7 @@ pub fn encoded_write(
     // references `data` which outlives this call. The ioctl reads from the
     // iov buffers and writes encoded data to the file.
     unsafe {
-        btrfs_ioc_encoded_write(fd.as_raw_fd(), &args)?;
+        btrfs_ioc_encoded_write(fd.as_raw_fd(), &raw const args)?;
     }
 
     Ok(())
@@ -223,12 +223,12 @@ pub fn encoded_read(
     len: u64,
 ) -> nix::Result<EncodedReadResult> {
     let iov = nix::libc::iovec {
-        iov_base: buf.as_mut_ptr() as *mut _,
+        iov_base: buf.as_mut_ptr().cast(),
         iov_len: buf.len(),
     };
 
     let mut args: btrfs_ioctl_encoded_io_args = unsafe { std::mem::zeroed() };
-    args.iov = &iov as *const _ as *mut _;
+    args.iov = std::ptr::from_ref(&iov) as *mut _;
     args.iovcnt = 1;
     args.offset = offset as i64;
     args.len = len;
@@ -236,7 +236,7 @@ pub fn encoded_read(
     // SAFETY: args.iov points to a stack-allocated iovec whose iov_base
     // references `buf` which outlives this call. The ioctl writes encoded
     // data into the iov buffers.
-    let ret = unsafe { btrfs_ioc_encoded_read(fd.as_raw_fd(), &mut args) }?;
+    let ret = unsafe { btrfs_ioc_encoded_read(fd.as_raw_fd(), &raw mut args) }?;
 
     Ok(EncodedReadResult {
         offset: args.offset as u64,
@@ -286,8 +286,10 @@ fn search_uuid_tree(
     let objectid = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
     let offset = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
 
-    let mut key =
-        SearchKey::for_type(raw::BTRFS_UUID_TREE_OBJECTID as u64, item_type);
+    let mut key = SearchKey::for_type(
+        u64::from(raw::BTRFS_UUID_TREE_OBJECTID),
+        item_type,
+    );
     key.min_objectid = objectid;
     key.max_objectid = objectid;
     key.min_offset = offset;

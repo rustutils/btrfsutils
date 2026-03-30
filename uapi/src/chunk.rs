@@ -99,7 +99,7 @@ pub fn device_chunk_allocations(
     tree_search(
         fd,
         SearchKey::for_type(
-            BTRFS_CHUNK_TREE_OBJECTID as u64,
+            u64::from(BTRFS_CHUNK_TREE_OBJECTID),
             BTRFS_CHUNK_ITEM_KEY,
         ),
         |_hdr, data| {
@@ -130,10 +130,10 @@ pub fn chunk_list(fd: BorrowedFd) -> nix::Result<Vec<ChunkEntry>> {
     tree_search(
         fd,
         SearchKey::for_objectid_range(
-            BTRFS_CHUNK_TREE_OBJECTID as u64,
+            u64::from(BTRFS_CHUNK_TREE_OBJECTID),
             BTRFS_CHUNK_ITEM_KEY,
-            BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            u64::from(BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(BTRFS_FIRST_CHUNK_TREE_OBJECTID),
         ),
         |hdr, data| {
             if let Some(stripes) = parse_chunk_stripes(data) {
@@ -169,7 +169,7 @@ fn block_group_used(fd: BorrowedFd, logical_start: u64) -> Option<u64> {
     tree_search(
         fd,
         SearchKey {
-            tree_id: BTRFS_EXTENT_TREE_OBJECTID as u64,
+            tree_id: u64::from(BTRFS_EXTENT_TREE_OBJECTID),
             min_objectid: logical_start,
             max_objectid: logical_start,
             min_type: BTRFS_BLOCK_GROUP_ITEM_KEY,

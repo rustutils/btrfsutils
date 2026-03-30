@@ -35,12 +35,12 @@ use std::os::fd::{AsRawFd, BorrowedFd};
 pub fn lookup_path_rootid(fd: BorrowedFd<'_>) -> nix::Result<u64> {
     let mut args = crate::raw::btrfs_ioctl_ino_lookup_args {
         treeid: 0,
-        objectid: BTRFS_FIRST_FREE_OBJECTID as u64,
+        objectid: u64::from(BTRFS_FIRST_FREE_OBJECTID),
         ..unsafe { std::mem::zeroed() }
     };
 
     unsafe {
-        btrfs_ioc_ino_lookup(fd.as_raw_fd(), &mut args)?;
+        btrfs_ioc_ino_lookup(fd.as_raw_fd(), &raw mut args)?;
     }
 
     Ok(args.treeid)
@@ -79,13 +79,13 @@ pub fn ino_paths(fd: BorrowedFd<'_>, inum: u64) -> nix::Result<Vec<String>> {
     };
 
     unsafe {
-        btrfs_ioc_ino_paths(fd.as_raw_fd(), &mut args)?;
+        btrfs_ioc_ino_paths(fd.as_raw_fd(), &raw mut args)?;
     }
 
     // Parse the results from the data container
     // The buffer is laid out as: btrfs_data_container header, followed by val[] array
     let container =
-        unsafe { &*(buf.as_ptr() as *const crate::raw::btrfs_data_container) };
+        unsafe { &*buf.as_ptr().cast::<crate::raw::btrfs_data_container>() };
 
     let mut paths = Vec::new();
 
@@ -153,7 +153,7 @@ pub fn logical_ino(
     // Set up flags for v2 ioctl
     let mut flags = 0u64;
     if ignore_offset {
-        flags |= crate::raw::BTRFS_LOGICAL_INO_ARGS_IGNORE_OFFSET as u64;
+        flags |= u64::from(crate::raw::BTRFS_LOGICAL_INO_ARGS_IGNORE_OFFSET);
     }
 
     // Set up the ioctl arguments
@@ -166,12 +166,12 @@ pub fn logical_ino(
     };
 
     unsafe {
-        btrfs_ioc_logical_ino_v2(fd.as_raw_fd(), &mut args)?;
+        btrfs_ioc_logical_ino_v2(fd.as_raw_fd(), &raw mut args)?;
     }
 
     // Parse the results from the data container
     let container =
-        unsafe { &*(buf.as_ptr() as *const crate::raw::btrfs_data_container) };
+        unsafe { &*buf.as_ptr().cast::<crate::raw::btrfs_data_container>() };
 
     let mut results = Vec::new();
 
@@ -207,7 +207,7 @@ pub fn logical_ino(
 /// Resolve a subvolume ID to its full path on the filesystem.
 ///
 /// Recursively resolves the path to a subvolume by walking the root tree and using
-/// INO_LOOKUP to get directory names. The path is built from the subvolume's name
+/// `INO_LOOKUP` to get directory names. The path is built from the subvolume's name
 /// and the names of all parent directories up to the mount point.
 ///
 /// # Arguments
@@ -218,7 +218,7 @@ pub fn logical_ino(
 /// # Returns
 ///
 /// The full path to the subvolume relative to the filesystem root, or an empty string
-/// for the filesystem root itself (FS_TREE_OBJECTID).
+/// for the filesystem root itself (`FS_TREE_OBJECTID`).
 ///
 /// # Errors
 ///
@@ -250,7 +250,7 @@ fn subvolid_resolve_sub(
     use crate::raw::BTRFS_FS_TREE_OBJECTID;
 
     // If this is the filesystem root, we're done (empty path means root)
-    if subvol_id == BTRFS_FS_TREE_OBJECTID as u64 {
+    if subvol_id == u64::from(BTRFS_FS_TREE_OBJECTID) {
         return Ok(());
     }
 
@@ -264,7 +264,7 @@ fn subvolid_resolve_sub(
     tree_search(
         fd,
         SearchKey::for_objectid_range(
-            crate::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+            u64::from(crate::raw::BTRFS_ROOT_TREE_OBJECTID),
             crate::raw::BTRFS_ROOT_BACKREF_KEY,
             subvol_id,
             subvol_id,
@@ -304,7 +304,7 @@ fn subvolid_resolve_sub(
             let name_bytes = &data[header_size..header_size + name_len];
 
             // If dirid is not the first free objectid, we need to resolve the directory path too
-            if dirid != BTRFS_FIRST_FREE_OBJECTID as u64 {
+            if dirid != u64::from(BTRFS_FIRST_FREE_OBJECTID) {
                 // Look up the directory in the parent subvolume
                 let mut ino_lookup_args =
                     crate::raw::btrfs_ioctl_ino_lookup_args {
@@ -314,7 +314,10 @@ fn subvolid_resolve_sub(
                     };
 
                 unsafe {
-                    btrfs_ioc_ino_lookup(fd.as_raw_fd(), &mut ino_lookup_args)?;
+                    btrfs_ioc_ino_lookup(
+                        fd.as_raw_fd(),
+                        &raw mut ino_lookup_args,
+                    )?;
                 }
 
                 // Get the directory name (it's a null-terminated C string)
@@ -388,7 +391,7 @@ pub fn ino_lookup_user(
     };
 
     unsafe {
-        btrfs_ioc_ino_lookup_user(fd.as_raw_fd(), &mut args)?;
+        btrfs_ioc_ino_lookup_user(fd.as_raw_fd(), &raw mut args)?;
     }
 
     let name = unsafe { std::ffi::CStr::from_ptr(args.name.as_ptr()) }

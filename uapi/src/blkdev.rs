@@ -14,7 +14,7 @@ nix::ioctl_write_ptr!(blk_discard, 0x12, 119, [u64; 2]);
 /// Get the size of a block device in bytes.
 pub fn device_size(fd: BorrowedFd) -> nix::Result<u64> {
     let mut size: u64 = 0;
-    unsafe { blk_getsize64(fd.as_raw_fd(), &mut size) }?;
+    unsafe { blk_getsize64(fd.as_raw_fd(), &raw mut size) }?;
     Ok(size)
 }
 
@@ -29,7 +29,7 @@ pub fn discard_range(
     length: u64,
 ) -> nix::Result<()> {
     let range: [u64; 2] = [offset, length];
-    unsafe { blk_discard(fd.as_raw_fd(), &range) }?;
+    unsafe { blk_discard(fd.as_raw_fd(), &raw const range) }?;
     Ok(())
 }
 

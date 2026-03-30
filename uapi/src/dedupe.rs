@@ -64,18 +64,18 @@ pub fn file_extent_same(
     // We populate the header and info entries before calling the ioctl, and
     // read the results only after a successful return.
     unsafe {
-        let args_ptr = buf.as_mut_ptr() as *mut btrfs_ioctl_same_args;
+        let args_ptr = buf.as_mut_ptr().cast::<btrfs_ioctl_same_args>();
         (*args_ptr).logical_offset = src_offset;
         (*args_ptr).length = length;
         (*args_ptr).dest_count = count as u16;
 
         let info_slice = (*args_ptr).info.as_mut_slice(count);
         for (i, target) in targets.iter().enumerate() {
-            info_slice[i].fd = target.fd.as_raw_fd() as i64;
+            info_slice[i].fd = i64::from(target.fd.as_raw_fd());
             info_slice[i].logical_offset = target.logical_offset;
         }
 
-        btrfs_ioc_file_extent_same(src_fd.as_raw_fd(), &mut *args_ptr)?;
+        btrfs_ioc_file_extent_same(src_fd.as_raw_fd(), &raw mut *args_ptr)?;
 
         let info_slice = (*args_ptr).info.as_slice(count);
         Ok(info_slice

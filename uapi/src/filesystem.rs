@@ -40,8 +40,8 @@ pub struct FilesystemInfo {
 /// Query information about the btrfs filesystem referred to by `fd`.
 pub fn filesystem_info(fd: BorrowedFd) -> nix::Result<FilesystemInfo> {
     let mut raw: btrfs_ioctl_fs_info_args = unsafe { mem::zeroed() };
-    raw.flags = BTRFS_FS_INFO_FLAG_GENERATION as u64;
-    unsafe { btrfs_ioc_fs_info(fd.as_raw_fd(), &mut raw) }?;
+    raw.flags = u64::from(BTRFS_FS_INFO_FLAG_GENERATION);
+    unsafe { btrfs_ioc_fs_info(fd.as_raw_fd(), &raw mut raw) }?;
 
     Ok(FilesystemInfo {
         uuid: Uuid::from_bytes(raw.fsid),
@@ -66,7 +66,7 @@ pub fn sync(fd: BorrowedFd) -> nix::Result<()> {
 /// `wait_sync` to block until it completes.
 pub fn start_sync(fd: BorrowedFd) -> nix::Result<u64> {
     let mut transid: u64 = 0;
-    unsafe { btrfs_ioc_start_sync(fd.as_raw_fd(), &mut transid) }?;
+    unsafe { btrfs_ioc_start_sync(fd.as_raw_fd(), &raw mut transid) }?;
     Ok(transid)
 }
 
@@ -75,7 +75,7 @@ pub fn start_sync(fd: BorrowedFd) -> nix::Result<u64> {
 /// `transid` is the transaction ID returned by `start_sync`. Pass zero to
 /// wait for the current transaction.
 pub fn wait_sync(fd: BorrowedFd, transid: u64) -> nix::Result<()> {
-    unsafe { btrfs_ioc_wait_sync(fd.as_raw_fd(), &transid) }?;
+    unsafe { btrfs_ioc_wait_sync(fd.as_raw_fd(), &raw const transid) }?;
     Ok(())
 }
 
@@ -84,7 +84,7 @@ pub fn wait_sync(fd: BorrowedFd, transid: u64) -> nix::Result<()> {
 /// Returns the label as a [`CString`]. An empty string means no label is set.
 pub fn label_get(fd: BorrowedFd) -> nix::Result<CString> {
     let mut buf = [0i8; BTRFS_LABEL_SIZE as usize];
-    unsafe { btrfs_ioc_get_fslabel(fd.as_raw_fd(), &mut buf) }?;
+    unsafe { btrfs_ioc_get_fslabel(fd.as_raw_fd(), &raw mut buf) }?;
     let cstr = unsafe { CStr::from_ptr(buf.as_ptr()) };
     // CStr::to_owned() copies the bytes into a freshly allocated CString,
     // which is safe to return after `buf` goes out of scope.
@@ -108,7 +108,7 @@ pub fn label_set(fd: BorrowedFd, label: &CStr) -> nix::Result<()> {
     for (i, &b) in bytes.iter().enumerate() {
         buf[i] = b as c_char;
     }
-    unsafe { btrfs_ioc_set_fslabel(fd.as_raw_fd(), &buf) }?;
+    unsafe { btrfs_ioc_set_fslabel(fd.as_raw_fd(), &raw const buf) }?;
     Ok(())
 }
 
@@ -150,6 +150,7 @@ pub struct ResizeArgs {
 }
 
 impl ResizeArgs {
+    #[must_use]
     pub fn new(amount: ResizeAmount) -> Self {
         Self {
             devid: None,
@@ -157,6 +158,7 @@ impl ResizeArgs {
         }
     }
 
+    #[must_use]
     pub fn with_devid(mut self, devid: u64) -> Self {
         self.devid = Some(devid);
         self
@@ -194,7 +196,7 @@ pub fn resize(fd: BorrowedFd, args: ResizeArgs) -> nix::Result<()> {
         raw.name[i] = b as c_char;
     }
 
-    unsafe { btrfs_ioc_resize(fd.as_raw_fd(), &raw) }?;
+    unsafe { btrfs_ioc_resize(fd.as_raw_fd(), &raw const raw) }?;
     Ok(())
 }
 

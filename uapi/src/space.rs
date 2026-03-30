@@ -54,6 +54,7 @@ bitflags! {
 
 impl BlockGroupFlags {
     /// Returns the human-readable chunk type name.
+    #[must_use]
     pub fn type_name(self) -> &'static str {
         if self.contains(Self::GLOBAL_RSV) {
             return "GlobalReserve";
@@ -69,6 +70,7 @@ impl BlockGroupFlags {
     }
 
     /// Returns the human-readable RAID profile name.
+    #[must_use]
     pub fn profile_name(self) -> &'static str {
         let profile = self
             & (Self::RAID0
@@ -291,7 +293,7 @@ impl From<btrfs_ioctl_space_info> for SpaceInfo {
 pub fn space_info(fd: BorrowedFd) -> nix::Result<Vec<SpaceInfo>> {
     // Phase 1: query with space_slots = 0 to discover the number of entries.
     let mut args: btrfs_ioctl_space_args = unsafe { mem::zeroed() };
-    unsafe { btrfs_ioc_space_info(fd.as_raw_fd(), &mut args) }?;
+    unsafe { btrfs_ioc_space_info(fd.as_raw_fd(), &raw mut args) }?;
     let count = args.total_spaces as usize;
 
     if count == 0 {
@@ -313,9 +315,9 @@ pub fn space_info(fd: BorrowedFd) -> nix::Result<Vec<SpaceInfo>> {
     // We write space_slots before the ioctl and read spaces[] only after the
     // ioctl has populated them, keeping everything within the allocation.
     unsafe {
-        let args_ptr = buf.as_mut_ptr() as *mut btrfs_ioctl_space_args;
+        let args_ptr = buf.as_mut_ptr().cast::<btrfs_ioctl_space_args>();
         (*args_ptr).space_slots = count as u64;
-        btrfs_ioc_space_info(fd.as_raw_fd(), &mut *args_ptr)?;
+        btrfs_ioc_space_info(fd.as_raw_fd(), &raw mut *args_ptr)?;
         Ok((*args_ptr)
             .spaces
             .as_slice(count)

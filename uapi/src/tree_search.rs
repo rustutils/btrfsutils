@@ -66,6 +66,7 @@ pub struct SearchKey {
 impl SearchKey {
     /// Return all items of `item_type` in `tree_id`, across every objectid
     /// and offset.
+    #[must_use]
     pub fn for_type(tree_id: u64, item_type: u32) -> Self {
         Self {
             tree_id,
@@ -82,6 +83,7 @@ impl SearchKey {
 
     /// Return all items of `item_type` in `tree_id` whose objectid falls in
     /// `[min_objectid, max_objectid]`.
+    #[must_use]
     pub fn for_objectid_range(
         tree_id: u64,
         item_type: u32,
@@ -148,7 +150,7 @@ pub fn tree_search(
     loop {
         args.key.nr_items = ITEMS_PER_BATCH;
 
-        unsafe { btrfs_ioc_tree_search(fd.as_raw_fd(), &mut args) }?;
+        unsafe { btrfs_ioc_tree_search(fd.as_raw_fd(), &raw mut args) }?;
 
         let nr = args.key.nr_items;
         if nr == 0 {
@@ -185,7 +187,9 @@ pub fn tree_search(
                 return Err(nix::errno::Errno::EOVERFLOW);
             }
             let raw_hdr: btrfs_ioctl_search_header = unsafe {
-                (buf_base.add(off) as *const btrfs_ioctl_search_header)
+                buf_base
+                    .add(off)
+                    .cast::<btrfs_ioctl_search_header>()
                     .read_unaligned()
             };
             let hdr = SearchHeader {
@@ -246,7 +250,7 @@ pub fn tree_search_v2(
     let mut buf = vec![0u64; num_u64s];
 
     // SAFETY: buf is correctly sized and aligned for btrfs_ioctl_search_args_v2.
-    let args_ptr = buf.as_mut_ptr() as *mut btrfs_ioctl_search_args_v2;
+    let args_ptr = buf.as_mut_ptr().cast::<btrfs_ioctl_search_args_v2>();
     unsafe {
         fill_search_key(&mut (*args_ptr).key, &key);
     }
@@ -258,7 +262,7 @@ pub fn tree_search_v2(
         }
 
         match unsafe {
-            btrfs_ioc_tree_search_v2(fd.as_raw_fd(), &mut *args_ptr)
+            btrfs_ioc_tree_search_v2(fd.as_raw_fd(), &raw mut *args_ptr)
         } {
             Ok(_) => {}
             Err(nix::errno::Errno::EOVERFLOW) => {
@@ -273,13 +277,13 @@ pub fn tree_search_v2(
                 buf.resize(num_u64s, 0);
                 // args_ptr must be refreshed after reallocation.
                 let args_ptr_new =
-                    buf.as_mut_ptr() as *mut btrfs_ioctl_search_args_v2;
+                    buf.as_mut_ptr().cast::<btrfs_ioctl_search_args_v2>();
                 unsafe {
                     (*args_ptr_new).key.nr_items = ITEMS_PER_BATCH;
                     (*args_ptr_new).buf_size = capacity as u64;
                     btrfs_ioc_tree_search_v2(
                         fd.as_raw_fd(),
-                        &mut *args_ptr_new,
+                        &raw mut *args_ptr_new,
                     )?;
                 }
                 // Fall through to process results with the new pointer.
@@ -290,7 +294,7 @@ pub fn tree_search_v2(
         }
 
         // Re-derive pointer after potential reallocation.
-        let args_ptr = buf.as_mut_ptr() as *mut btrfs_ioctl_search_args_v2;
+        let args_ptr = buf.as_mut_ptr().cast::<btrfs_ioctl_search_args_v2>();
 
         let nr = unsafe { (*args_ptr).key.nr_items };
         if nr == 0 {
@@ -316,7 +320,9 @@ pub fn tree_search_v2(
                 return Err(nix::errno::Errno::EOVERFLOW);
             }
             let raw_hdr: btrfs_ioctl_search_header = unsafe {
-                (data_base.add(off) as *const btrfs_ioctl_search_header)
+                data_base
+                    .add(off)
+                    .cast::<btrfs_ioctl_search_header>()
                     .read_unaligned()
             };
             let hdr = SearchHeader {

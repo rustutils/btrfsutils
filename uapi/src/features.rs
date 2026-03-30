@@ -90,11 +90,11 @@ pub struct FeatureFlags {
 /// at runtime).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SupportedFeatures {
-    /// Compat_ro flags the kernel understands.
+    /// `compat_ro` flags the kernel understands.
     pub compat_ro_supported: CompatRoFlags,
-    /// Compat_ro flags that can be enabled at runtime.
+    /// `compat_ro` flags that can be enabled at runtime.
     pub compat_ro_safe_set: CompatRoFlags,
-    /// Compat_ro flags that can be disabled at runtime.
+    /// `compat_ro` flags that can be disabled at runtime.
     pub compat_ro_safe_clear: CompatRoFlags,
     /// Incompat flags the kernel understands.
     pub incompat_supported: IncompatFlags,
@@ -114,7 +114,7 @@ fn parse_feature_flags(raw: &btrfs_ioctl_feature_flags) -> FeatureFlags {
 /// Query the feature flags currently active on the filesystem.
 pub fn get_features(fd: BorrowedFd<'_>) -> nix::Result<FeatureFlags> {
     let mut flags: btrfs_ioctl_feature_flags = unsafe { std::mem::zeroed() };
-    unsafe { btrfs_ioc_get_features(fd.as_raw_fd(), &mut flags) }?;
+    unsafe { btrfs_ioc_get_features(fd.as_raw_fd(), &raw mut flags) }?;
     Ok(parse_feature_flags(&flags))
 }
 
@@ -139,20 +139,20 @@ pub fn set_features(
     buf[0].incompat_flags = flags.incompat.bits();
     buf[1].compat_ro_flags = mask.compat_ro.bits();
     buf[1].incompat_flags = mask.incompat.bits();
-    unsafe { btrfs_ioc_set_features(fd.as_raw_fd(), &buf) }?;
+    unsafe { btrfs_ioc_set_features(fd.as_raw_fd(), &raw const buf) }?;
     Ok(())
 }
 
 /// Query the feature flags supported by the running kernel.
 ///
-/// Returns three sets per category (compat_ro, incompat): which flags the
+/// Returns three sets per category (`compat_ro`, incompat): which flags the
 /// kernel understands, which can be enabled at runtime, and which can be
 /// disabled at runtime.
 pub fn get_supported_features(
     fd: BorrowedFd<'_>,
 ) -> nix::Result<SupportedFeatures> {
     let mut buf: [btrfs_ioctl_feature_flags; 3] = unsafe { std::mem::zeroed() };
-    unsafe { btrfs_ioc_get_supported_features(fd.as_raw_fd(), &mut buf) }?;
+    unsafe { btrfs_ioc_get_supported_features(fd.as_raw_fd(), &raw mut buf) }?;
 
     Ok(SupportedFeatures {
         compat_ro_supported: CompatRoFlags::from_bits_truncate(

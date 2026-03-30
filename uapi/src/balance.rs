@@ -7,7 +7,20 @@
 //!
 //! Requires `CAP_SYS_ADMIN`.
 
-use crate::raw::*;
+use crate::raw::{
+    BTRFS_BALANCE_ARGS_CONVERT, BTRFS_BALANCE_ARGS_DEVID,
+    BTRFS_BALANCE_ARGS_DRANGE, BTRFS_BALANCE_ARGS_LIMIT,
+    BTRFS_BALANCE_ARGS_LIMIT_RANGE, BTRFS_BALANCE_ARGS_PROFILES,
+    BTRFS_BALANCE_ARGS_SOFT, BTRFS_BALANCE_ARGS_STRIPES_RANGE,
+    BTRFS_BALANCE_ARGS_USAGE, BTRFS_BALANCE_ARGS_USAGE_RANGE,
+    BTRFS_BALANCE_ARGS_VRANGE, BTRFS_BALANCE_CTL_CANCEL,
+    BTRFS_BALANCE_CTL_PAUSE, BTRFS_BALANCE_DATA, BTRFS_BALANCE_FORCE,
+    BTRFS_BALANCE_METADATA, BTRFS_BALANCE_RESUME,
+    BTRFS_BALANCE_STATE_CANCEL_REQ, BTRFS_BALANCE_STATE_PAUSE_REQ,
+    BTRFS_BALANCE_STATE_RUNNING, BTRFS_BALANCE_SYSTEM, btrfs_balance_args,
+    btrfs_ioc_balance_ctl, btrfs_ioc_balance_progress, btrfs_ioc_balance_v2,
+    btrfs_ioctl_balance_args,
+};
 use bitflags::bitflags;
 use nix::libc::c_int;
 use std::os::{fd::AsRawFd, unix::io::BorrowedFd};
@@ -120,12 +133,14 @@ impl Default for BalanceArgs {
 
 impl BalanceArgs {
     /// Create a new `BalanceArgs` with no filters enabled.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Filter by chunk profile bitmask. The value is a bitmask of
     /// `BTRFS_BLOCK_GROUP_*` profile flags.
+    #[must_use]
     pub fn profiles(mut self, profiles: u64) -> Self {
         self.raw.profiles = profiles;
         self.raw.flags |= BalanceArgsFlags::PROFILES.bits();
@@ -133,6 +148,7 @@ impl BalanceArgs {
     }
 
     /// Filter chunks whose usage is below `percent` (0..100).
+    #[must_use]
     pub fn usage(mut self, percent: u64) -> Self {
         // SAFETY: the union field `usage` and `usage_min`/`usage_max` overlap;
         // setting `usage` covers the whole 8-byte field.
@@ -142,6 +158,7 @@ impl BalanceArgs {
     }
 
     /// Filter chunks whose usage falls in `min..=max` percent.
+    #[must_use]
     pub fn usage_range(mut self, min: u32, max: u32) -> Self {
         self.raw.__bindgen_anon_1.__bindgen_anon_1.usage_min = min;
         self.raw.__bindgen_anon_1.__bindgen_anon_1.usage_max = max;
@@ -150,6 +167,7 @@ impl BalanceArgs {
     }
 
     /// Filter chunks that reside on the given device ID.
+    #[must_use]
     pub fn devid(mut self, devid: u64) -> Self {
         self.raw.devid = devid;
         self.raw.flags |= BalanceArgsFlags::DEVID.bits();
@@ -157,6 +175,7 @@ impl BalanceArgs {
     }
 
     /// Filter chunks whose physical range on-disk overlaps `start..end`.
+    #[must_use]
     pub fn drange(mut self, start: u64, end: u64) -> Self {
         self.raw.pstart = start;
         self.raw.pend = end;
@@ -165,6 +184,7 @@ impl BalanceArgs {
     }
 
     /// Filter chunks whose virtual address range overlaps `start..end`.
+    #[must_use]
     pub fn vrange(mut self, start: u64, end: u64) -> Self {
         self.raw.vstart = start;
         self.raw.vend = end;
@@ -173,6 +193,7 @@ impl BalanceArgs {
     }
 
     /// Process at most `limit` chunks.
+    #[must_use]
     pub fn limit(mut self, limit: u64) -> Self {
         self.raw.__bindgen_anon_2.limit = limit;
         self.raw.flags |= BalanceArgsFlags::LIMIT.bits();
@@ -180,6 +201,7 @@ impl BalanceArgs {
     }
 
     /// Process between `min` and `max` chunks.
+    #[must_use]
     pub fn limit_range(mut self, min: u32, max: u32) -> Self {
         self.raw.__bindgen_anon_2.__bindgen_anon_1.limit_min = min;
         self.raw.__bindgen_anon_2.__bindgen_anon_1.limit_max = max;
@@ -188,6 +210,7 @@ impl BalanceArgs {
     }
 
     /// Filter chunks that span between `min` and `max` stripes.
+    #[must_use]
     pub fn stripes_range(mut self, min: u32, max: u32) -> Self {
         self.raw.stripes_min = min;
         self.raw.stripes_max = max;
@@ -196,6 +219,7 @@ impl BalanceArgs {
     }
 
     /// Convert balanced chunks to the given profile.
+    #[must_use]
     pub fn convert(mut self, profile: u64) -> Self {
         self.raw.target = profile;
         self.raw.flags |= BalanceArgsFlags::CONVERT.bits();
@@ -203,6 +227,7 @@ impl BalanceArgs {
     }
 
     /// When converting, skip chunks already on the target profile.
+    #[must_use]
     pub fn soft(mut self) -> Self {
         self.raw.flags |= BalanceArgsFlags::SOFT.bits();
         self
@@ -268,7 +293,7 @@ pub fn balance(
     }
 
     unsafe {
-        btrfs_ioc_balance_v2(fd.as_raw_fd(), &mut args)?;
+        btrfs_ioc_balance_v2(fd.as_raw_fd(), &raw mut args)?;
     }
 
     Ok(BalanceProgress {
@@ -301,7 +326,7 @@ pub fn balance_progress(
     let mut args: btrfs_ioctl_balance_args = unsafe { std::mem::zeroed() };
 
     unsafe {
-        btrfs_ioc_balance_progress(fd.as_raw_fd(), &mut args)?;
+        btrfs_ioc_balance_progress(fd.as_raw_fd(), &raw mut args)?;
     }
 
     let state = BalanceState::from_bits_truncate(args.state);

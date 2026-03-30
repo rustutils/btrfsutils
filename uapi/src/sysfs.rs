@@ -27,12 +27,14 @@ use uuid::Uuid;
 
 /// Returns the sysfs directory path for the btrfs filesystem with the given
 /// UUID: `/sys/fs/btrfs/<uuid>`.
+#[must_use]
 pub fn sysfs_btrfs_path(uuid: &Uuid) -> PathBuf {
     PathBuf::from(format!("/sys/fs/btrfs/{}", uuid.as_hyphenated()))
 }
 
 /// Returns the path to a named file within the sysfs directory for the
 /// filesystem with the given UUID: `/sys/fs/btrfs/<uuid>/<name>`.
+#[must_use]
 pub fn sysfs_btrfs_path_file(uuid: &Uuid, name: &str) -> PathBuf {
     sysfs_btrfs_path(uuid).join(name)
 }
@@ -61,6 +63,7 @@ pub struct SysfsBtrfs {
 
 impl SysfsBtrfs {
     /// Create a new `SysfsBtrfs` for the filesystem with the given UUID.
+    #[must_use]
     pub fn new(uuid: &Uuid) -> Self {
         Self {
             base: sysfs_btrfs_path(uuid),
@@ -147,7 +150,7 @@ impl SysfsBtrfs {
         })
     }
 
-    /// Reset the `max_commit_ms` counter by writing `0` to the commit_stats
+    /// Reset the `max_commit_ms` counter by writing `0` to the `commit_stats`
     /// file. Requires root.
     /// `/sys/fs/btrfs/<uuid>/commit_stats`
     pub fn reset_commit_stats(&self) -> io::Result<()> {
@@ -276,6 +279,7 @@ impl SysfsBtrfs {
     /// Returns `1` if the sysfs file does not exist (older kernels without
     /// versioned send stream support).
     /// `/sys/fs/btrfs/features/send_stream_version`
+    #[must_use]
     pub fn send_stream_version(&self) -> u32 {
         // This is a global feature file, not per-filesystem.
         let path =
