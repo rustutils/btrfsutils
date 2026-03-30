@@ -59,5 +59,9 @@ Options:
       --csum-items
           Print checksums stored in checksum items
 
+      --noscan
+          Do not scan for additional devices (accepted for compatibility, has no
+          effect since this implementation reads from a single device)
+
   -h, --help
           Print help (see a summary with '-h')

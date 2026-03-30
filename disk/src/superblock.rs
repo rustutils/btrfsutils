@@ -461,6 +461,14 @@ pub fn read_superblock(
     mirror: u32,
 ) -> io::Result<Superblock> {
     let offset = super_mirror_offset(mirror);
+    read_superblock_at(reader, offset)
+}
+
+/// Read and parse a btrfs superblock from a reader at an explicit byte offset.
+pub fn read_superblock_at(
+    reader: &mut (impl Read + Seek),
+    offset: u64,
+) -> io::Result<Superblock> {
     let raw = read_raw_superblock(reader, offset)?;
     Ok(parse_superblock(&raw))
 }

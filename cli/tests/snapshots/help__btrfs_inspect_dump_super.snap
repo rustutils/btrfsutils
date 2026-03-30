@@ -24,6 +24,10 @@ Options:
   -s, --super <MIRROR>
           Print only this superblock mirror (0, 1, or 2)
 
+      --bytenr <BYTENR>
+          Read the superblock from this byte offset instead of using a mirror
+          index
+
   -F, --force
           Attempt to print superblocks with bad magic
 

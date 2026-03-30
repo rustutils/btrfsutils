@@ -28,6 +28,10 @@ pub struct DumpSuperCommand {
     #[clap(short = 's', long = "super", value_parser = clap::value_parser!(u32).range(..SUPER_MIRROR_MAX as i64))]
     mirror: Option<u32>,
 
+    /// Read the superblock from this byte offset instead of using a mirror index
+    #[clap(long, conflicts_with_all = ["mirror", "all"])]
+    bytenr: Option<u64>,
+
     /// Attempt to print superblocks with bad magic
     #[clap(short = 'F', long)]
     force: bool,
@@ -39,37 +43,41 @@ impl Runnable for DumpSuperCommand {
             format!("failed to open '{}'", self.path.display())
         })?;
 
-        let mirrors: Vec<u32> = if self.all {
-            (0..SUPER_MIRROR_MAX).collect()
-        } else if let Some(m) = self.mirror {
-            vec![m]
+        // Collect (offset, label) pairs for each superblock to print.
+        let offsets: Vec<(u64, String)> = if let Some(bytenr) = self.bytenr {
+            vec![(bytenr, format!("bytenr={bytenr}"))]
+        } else if self.all {
+            (0..SUPER_MIRROR_MAX)
+                .map(|m| {
+                    let off = superblock::super_mirror_offset(m);
+                    (off, format!("bytenr={off}"))
+                })
+                .collect()
         } else {
-            vec![0]
+            let m = self.mirror.unwrap_or(0);
+            let off = superblock::super_mirror_offset(m);
+            vec![(off, format!("bytenr={off}"))]
         };
 
-        for (i, &mirror) in mirrors.iter().enumerate() {
+        for (i, (offset, label)) in offsets.iter().enumerate() {
             if i > 0 {
                 println!();
             }
 
-            let offset = superblock::super_mirror_offset(mirror);
-            println!(
-                "superblock: bytenr={offset}, device={}",
-                self.path.display()
-            );
+            println!("superblock: {label}, device={}", self.path.display());
 
-            let sb = match superblock::read_superblock(&mut file, mirror) {
+            let sb = match superblock::read_superblock_at(&mut file, *offset) {
                 Ok(sb) => sb,
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                     println!(
-                        "superblock mirror {mirror} beyond end of device, skipping"
+                        "superblock at {label} beyond end of device, skipping"
                     );
                     continue;
                 }
                 Err(e) => {
                     return Err(e).with_context(|| {
                         format!(
-                            "failed to read superblock mirror {mirror} from '{}'",
+                            "failed to read superblock at {label} from '{}'",
                             self.path.display()
                         )
                     });
@@ -79,12 +87,12 @@ impl Runnable for DumpSuperCommand {
             if !sb.magic_is_valid() && !self.force {
                 if self.all {
                     println!(
-                        "superblock mirror {mirror} has bad magic, skipping (use -F to force)"
+                        "superblock at {label} has bad magic, skipping (use -F to force)"
                     );
                     continue;
                 }
                 bail!(
-                    "bad magic on superblock mirror {mirror} of '{}' (use -F to force)",
+                    "bad magic on superblock at {label} of '{}' (use -F to force)",
                     self.path.display()
                 );
             }

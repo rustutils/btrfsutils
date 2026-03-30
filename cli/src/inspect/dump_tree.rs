@@ -75,6 +75,11 @@ pub struct DumpTreeCommand {
     /// Print checksums stored in checksum items
     #[clap(long)]
     csum_items: bool,
+
+    /// Do not scan for additional devices (accepted for compatibility,
+    /// has no effect since this implementation reads from a single device)
+    #[clap(long)]
+    noscan: bool,
 }
 
 impl Runnable for DumpTreeCommand {
