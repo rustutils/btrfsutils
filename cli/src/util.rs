@@ -31,12 +31,11 @@ pub fn is_mounted(device: &Path) -> bool {
     let reader = std::io::BufReader::new(f);
     for line in reader.lines().map_while(|l| l.ok()) {
         let mut fields = line.split_whitespace();
-        if let Some(src) = fields.next() {
-            if let Ok(src_canon) = fs::canonicalize(src) {
-                if src_canon == canon {
-                    return true;
-                }
-            }
+        if let Some(src) = fields.next()
+            && let Ok(src_canon) = fs::canonicalize(src)
+            && src_canon == canon
+        {
+            return true;
         }
     }
     false

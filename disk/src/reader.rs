@@ -382,11 +382,7 @@ fn walk_stats<R: Read + Seek>(
 
                 let cur = ptr.blockptr;
                 if last_block + nodesize != cur {
-                    let distance = if last_block + nodesize < cur {
-                        cur - (last_block + nodesize)
-                    } else {
-                        (last_block + nodesize) - cur
-                    };
+                    let distance = cur.abs_diff(last_block + nodesize);
                     stats.total_seeks += 1;
                     stats.total_seek_len += distance;
                     if distance > stats.max_seek_len {

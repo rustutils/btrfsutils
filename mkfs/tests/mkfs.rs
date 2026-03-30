@@ -1,3 +1,8 @@
+use btrfs_disk::{
+    items::RootItem,
+    reader::{self, Traversal},
+    tree::KeyType,
+};
 use btrfs_mkfs::{
     args::{Feature, FeatureArg, Profile},
     mkfs::{self, DeviceInfo, MkfsConfig},
@@ -635,4 +640,301 @@ fn mount_single_device_with_label() {
     let mut cfg = test_config(MIN_SIZE);
     cfg.label = Some("integration-test".to_string());
     make_check_mount_verify(&mut cfg);
+}
+
+// --- Validation tests (adapted from btrfs-progs mkfs-tests 003, 008) ---
+
+/// Mixed mode requires equal nodesize and sectorsize (test 003).
+#[test]
+fn mixed_mode_requires_equal_nodesize_sectorsize() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.sectorsize = 4096;
+    cfg.nodesize = 16384;
+    cfg.apply_features(&[FeatureArg {
+        feature: Feature::MixedBg,
+        enabled: true,
+    }])
+    .unwrap();
+    // With mixed-bg enabled, nodesize != sectorsize should fail.
+    let err = make_btrfs_on_err(&image, &mut cfg);
+    assert!(
+        err.to_string().to_lowercase().contains("mixed")
+            || err.to_string().to_lowercase().contains("sector")
+            || err.to_string().to_lowercase().contains("node"),
+        "expected mixed-mode validation error, got: {err}"
+    );
+}
+
+/// Unaligned nodesize/sectorsize combos are rejected (test 008).
+#[test]
+fn invalid_unaligned_sectorsize_rejected() {
+    // 8191 is not a power of two.
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.sectorsize = 8191;
+    cfg.nodesize = 8191;
+    let err = make_btrfs_on_err(&image, &mut cfg);
+    assert!(
+        err.to_string().contains("sectorsize")
+            || err.to_string().contains("nodesize")
+            || err.to_string().contains("power"),
+        "expected validation error, got: {err}"
+    );
+}
+
+/// Aligned sectorsize with unaligned nodesize is rejected (test 008).
+#[test]
+fn invalid_unaligned_nodesize_rejected() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.sectorsize = 4096;
+    cfg.nodesize = 16385; // Not a power of two.
+    let err = make_btrfs_on_err(&image, &mut cfg);
+    assert!(
+        err.to_string().contains("nodesize")
+            || err.to_string().contains("power"),
+        "expected nodesize validation error, got: {err}"
+    );
+}
+
+/// Sectorsize larger than nodesize is rejected (test 008).
+#[test]
+fn sectorsize_larger_than_nodesize_rejected() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.sectorsize = 8192;
+    cfg.nodesize = 4096;
+    let err = make_btrfs_on_err(&image, &mut cfg);
+    assert!(
+        err.to_string().contains("nodesize")
+            || err.to_string().contains("sectorsize"),
+        "expected nodesize < sectorsize error, got: {err}"
+    );
+}
+
+/// Nodesize too large (> 64K) is rejected (test 008).
+#[test]
+fn nodesize_too_large_rejected() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.nodesize = 131072; // 128K, exceeds 64K limit.
+    let err = make_btrfs_on_err(&image, &mut cfg);
+    assert!(
+        err.to_string().contains("nodesize") || err.to_string().contains("64"),
+        "expected nodesize too large error, got: {err}"
+    );
+}
+
+/// Valid aligned sectorsize and nodesize combinations work (test 008).
+#[test]
+fn valid_sectorsize_nodesize_combos() {
+    // 4K sector, 16K node — standard.
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.sectorsize = 4096;
+    cfg.nodesize = 16384;
+    make_btrfs_on(&image, &mut cfg);
+
+    let mut file = std::fs::File::open(image.path()).unwrap();
+    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.sectorsize, 4096);
+    assert_eq!(sb.nodesize, 16384);
+}
+
+/// Large sectorsize (64K) with equal nodesize works (test 008).
+#[test]
+fn large_sectorsize_64k_works() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.sectorsize = 65536;
+    cfg.nodesize = 65536;
+    make_btrfs_on(&image, &mut cfg);
+
+    let mut file = std::fs::File::open(image.path()).unwrap();
+    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.sectorsize, 65536);
+    assert_eq!(sb.nodesize, 65536);
+}
+
+// --- Nodesize/sectorsize combination tests (adapted from test 007) ---
+
+/// Various valid nodesize >= sectorsize combos produce valid superblocks.
+#[test]
+fn nodesize_sectorsize_combinations() {
+    let sizes = [4096, 8192, 16384, 32768, 65536];
+    for &nodesize in &sizes {
+        for &sectorsize in &sizes {
+            if nodesize < sectorsize {
+                continue;
+            }
+            let image = create_image(MIN_SIZE);
+            let mut cfg = test_config(MIN_SIZE);
+            cfg.nodesize = nodesize;
+            cfg.sectorsize = sectorsize;
+            make_btrfs_on(&image, &mut cfg);
+
+            let mut file = std::fs::File::open(image.path()).unwrap();
+            let sb =
+                btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+            assert!(
+                sb.magic_is_valid(),
+                "invalid superblock for nodesize={nodesize} sectorsize={sectorsize}"
+            );
+            assert_eq!(sb.nodesize, nodesize);
+            assert_eq!(sb.sectorsize, sectorsize);
+        }
+    }
+}
+
+// --- Reserved 1M range test (adapted from test 013) ---
+
+/// No device extent should start below 1 MiB (the reserved range).
+#[test]
+fn first_dev_extent_above_reserved_1m() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
+
+    let file = std::fs::File::open(image.path()).unwrap();
+    let fs = reader::filesystem_open(file).unwrap();
+
+    // Find the device tree (objectid 4) root.
+    let dev_tree_id = btrfs_disk::raw::BTRFS_DEV_TREE_OBJECTID as u64;
+    let (dev_root, _) = fs
+        .tree_roots
+        .get(&dev_tree_id)
+        .expect("device tree not found");
+
+    // Walk the device tree and collect all DEV_EXTENT offsets.
+    let mut dev_extent_offsets = Vec::new();
+    let mut block_reader = fs.reader;
+    reader::tree_walk(
+        &mut block_reader,
+        *dev_root,
+        Traversal::Dfs,
+        &mut |block| {
+            if let btrfs_disk::tree::TreeBlock::Leaf { items, .. } = block {
+                for item in items {
+                    if item.key.key_type == KeyType::DeviceExtent {
+                        // The key offset is the physical byte offset on device.
+                        dev_extent_offsets.push(item.key.offset);
+                    }
+                }
+            }
+        },
+    )
+    .unwrap();
+
+    assert!(
+        !dev_extent_offsets.is_empty(),
+        "no device extents found in device tree"
+    );
+
+    let one_mib = 1024 * 1024;
+    for offset in &dev_extent_offsets {
+        assert!(
+            *offset >= one_mib,
+            "device extent at offset {offset} is within the reserved 0-1M range"
+        );
+    }
+}
+
+// --- FS_TREE UUID and otime test (adapted from test 015) ---
+
+/// The FS_TREE ROOT_ITEM should have a non-nil UUID and non-zero otime.
+#[test]
+fn fs_tree_root_item_has_uuid_and_otime() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
+
+    let file = std::fs::File::open(image.path()).unwrap();
+    let fs = reader::filesystem_open(file).unwrap();
+
+    // Read the root tree to find FS_TREE's ROOT_ITEM.
+    let root_tree_logical = fs.superblock.root;
+    let mut fs_tree_root_item: Option<RootItem> = None;
+    let fs_tree_id = btrfs_disk::raw::BTRFS_FS_TREE_OBJECTID as u64;
+
+    let mut block_reader = fs.reader;
+    reader::tree_walk(
+        &mut block_reader,
+        root_tree_logical,
+        Traversal::Dfs,
+        &mut |block| {
+            if let btrfs_disk::tree::TreeBlock::Leaf { items, data, .. } = block
+            {
+                let header_size =
+                    std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
+                for item in items {
+                    if item.key.objectid == fs_tree_id
+                        && item.key.key_type == KeyType::RootItem
+                    {
+                        let start = header_size + item.offset as usize;
+                        let end = start + item.size as usize;
+                        if end <= data.len() {
+                            fs_tree_root_item =
+                                RootItem::parse(&data[start..end]);
+                        }
+                    }
+                }
+            }
+        },
+    )
+    .unwrap();
+
+    let root_item =
+        fs_tree_root_item.expect("FS_TREE ROOT_ITEM not found in root tree");
+
+    // UUID must be non-nil.
+    assert!(!root_item.uuid.is_nil(), "FS_TREE ROOT_ITEM uuid is nil");
+
+    // otime must be non-zero (seconds > 0).
+    assert!(root_item.otime.sec > 0, "FS_TREE ROOT_ITEM otime is zero");
+}
+
+// --- Free-space-tree no bitmaps test (adapted from test 024) ---
+
+/// An empty filesystem's free-space-tree should have no FREE_SPACE_BITMAP items.
+#[test]
+fn free_space_tree_no_bitmaps_on_empty_fs() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
+
+    let file = std::fs::File::open(image.path()).unwrap();
+    let fs = reader::filesystem_open(file).unwrap();
+
+    // Find the free-space tree (objectid 10) root.
+    let fst_id = btrfs_disk::raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64;
+    let fst_root = fs.tree_roots.get(&fst_id);
+
+    // If there's no free-space tree at all (feature disabled), that's fine.
+    if let Some((fst_logical, _)) = fst_root {
+        let mut bitmap_count = 0u64;
+        let mut block_reader = fs.reader;
+        reader::tree_walk(
+            &mut block_reader,
+            *fst_logical,
+            Traversal::Dfs,
+            &mut |block| {
+                if let btrfs_disk::tree::TreeBlock::Leaf { items, .. } = block {
+                    for item in items {
+                        if item.key.key_type == KeyType::FreeSpaceBitmap {
+                            bitmap_count += 1;
+                        }
+                    }
+                }
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            bitmap_count, 0,
+            "found {bitmap_count} FREE_SPACE_BITMAP items on empty filesystem"
+        );
+    }
 }

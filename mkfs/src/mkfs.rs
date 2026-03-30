@@ -210,6 +210,35 @@ impl MkfsConfig {
 
 /// Create a btrfs filesystem on one or more devices.
 pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
+    // Validate nodesize/sectorsize.
+    if !cfg.sectorsize.is_power_of_two() || cfg.sectorsize < 4096 {
+        bail!(
+            "invalid sectorsize {}: must be a power of 2 >= 4096",
+            cfg.sectorsize
+        );
+    }
+    if !cfg.nodesize.is_power_of_two()
+        || cfg.nodesize < cfg.sectorsize
+        || cfg.nodesize > 65536
+    {
+        bail!(
+            "invalid nodesize {}: must be a power of 2, \
+             >= sectorsize ({}), and <= 64K",
+            cfg.nodesize,
+            cfg.sectorsize
+        );
+    }
+    // Mixed block groups require nodesize == sectorsize.
+    if cfg.incompat_flags & raw::BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS as u64 != 0
+        && cfg.nodesize != cfg.sectorsize
+    {
+        bail!(
+            "mixed block groups require nodesize ({}) == sectorsize ({})",
+            cfg.nodesize,
+            cfg.sectorsize
+        );
+    }
+
     let chunk_devs: Vec<ChunkDevice> = cfg
         .devices
         .iter()
