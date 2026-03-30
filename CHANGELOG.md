@@ -7,14 +7,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- Shell completion generation for bash, fish, and zsh via `btrfs-util gen completions`
+- `btrfs inspect-internal tree-stats`: walk any B-tree and report node counts,
+  seek statistics, cluster sizes, and inline data bytes
+- `btrfs rescue super-recover`: scan all superblock mirrors and restore the
+  highest-generation copy to all mirror locations
+- `btrfs rescue zero-log`: clear the log tree root pointer to allow mounting
+  filesystems with corrupted log trees
+- `btrfs rescue create-control-device`: create `/dev/btrfs-control` if missing
+- Shell completion generation for bash, fish, and zsh via `btrfs-gen completions`
 - `nix flake check` now runs clippy, rustfmt, and unit tests
 - taplo for TOML formatting and linting
+- cargo-deny for dependency license and vulnerability auditing
+- Developer and user documentation (mdBook)
+- `LICENSE.md` files for all crates
+- `BlockGroupFlags` and five additional bitflags types in `btrfs-disk` for
+  typed on-disk field parsing
+- Integration tests adapted from btrfs-progs cli-tests (mkfs validation,
+  on-disk format verification, nodesize/sectorsize matrix)
+- mkfs library now validates nodesize, sectorsize, and mixed-bg constraints
+  (previously only validated in the CLI entry point)
 
 ### Changed
 - CI migrated from manual cargo invocations to `nix flake check`
-- `mangen` binary renamed to `btrfs-util gen` to consolidate generation tools
-- `btrfs-mkfs` binary renamed from `mkfs` for consistency
+- `mangen` binary renamed to `btrfs-gen` to consolidate generation tools
+- `btrfs-mkfs` binary renamed from `mkfs-btrfs` for consistency
+- `btrfs-disk` API renamed: `Dev` -> `Device`, `Fs` -> `Filesystem`, function
+  names follow `noun_verb` convention
+- LZO decompression switched from `lzo1x` to `lzokay` crate
+- Pedantic clippy lints fixed across `btrfs-disk`
 
 ### Fixed
 - LZO decompression sector alignment in `btrfs receive` for streams with
