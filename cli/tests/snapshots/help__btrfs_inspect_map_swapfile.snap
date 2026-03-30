@@ -2,14 +2,22 @@
 source: cli/tests/help.rs
 expression: text
 ---
-Print physical extents of a file suitable for swap
+Print physical offset of first block and resume offset if file is suitable as
+swapfile.
 
-Usage: map-swapfile <PATH>
+All conditions of swapfile extents are verified if they could pass kernel tests.
+Use the value of resume offset for /sys/power/resume_offset, this depends on the
+page size that is detected on this system.
+
+Usage: map-swapfile [OPTIONS] <PATH>
 
 Arguments:
   <PATH>
           Path to a file on the btrfs filesystem
 
 Options:
+  -r, --resume-offset
+          Print only the value of resume_offset
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')

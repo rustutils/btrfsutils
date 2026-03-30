@@ -17,7 +17,8 @@ Commands:
   inode-resolve     Get file system paths for the given inode
   logical-resolve   Get file system paths for the given logical address
   subvolid-resolve  Resolve the path of a subvolume given its ID
-  map-swapfile      Print physical extents of a file suitable for swap
+  map-swapfile      Print physical offset of first block and resume offset if
+                    file is suitable as swapfile
   min-dev-size      Print the minimum size a device can be shrunk to
   dump-tree         Dump tree blocks from a btrfs device or image file
   dump-super        Dump the btrfs superblock from a device or image file
