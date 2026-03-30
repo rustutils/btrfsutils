@@ -360,9 +360,8 @@ pub fn read_superblock_bytes_at(
 /// Only CRC32C (`csum_type` == 0) is validated; other checksum types always return `false`.
 pub fn superblock_is_valid(buf: &[u8; SUPER_INFO_SIZE]) -> bool {
     let magic_off = mem::offset_of!(raw::btrfs_super_block, magic);
-    let magic = u64::from_le_bytes(
-        buf[magic_off..magic_off + 8].try_into().unwrap(),
-    );
+    let magic =
+        u64::from_le_bytes(buf[magic_off..magic_off + 8].try_into().unwrap());
     if magic != raw::BTRFS_MAGIC {
         return false;
     }
@@ -394,9 +393,7 @@ pub fn csum_superblock(buf: &mut [u8; SUPER_INFO_SIZE]) -> io::Result<()> {
     let csum_type = u16::from_le_bytes(
         buf[csum_type_off..csum_type_off + 2].try_into().unwrap(),
     );
-    if u32::from(csum_type)
-        != raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32
-    {
+    if u32::from(csum_type) != raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             format!("unsupported checksum type {csum_type}"),
@@ -676,15 +673,16 @@ mod tests {
         );
         assert_eq!(mirror1_bytenr, super_mirror_offset(1));
         // Both mirrors should be valid after the write.
-        let primary_buf: [u8; SUPER_INFO_SIZE] = device
-            [SUPER_INFO_OFFSET as usize..SUPER_INFO_OFFSET as usize + SUPER_INFO_SIZE]
+        let primary_buf: [u8; SUPER_INFO_SIZE] = device[SUPER_INFO_OFFSET
+            as usize
+            ..SUPER_INFO_OFFSET as usize + SUPER_INFO_SIZE]
             .try_into()
             .unwrap();
         assert!(superblock_is_valid(&primary_buf));
-        let mirror1_buf: [u8; SUPER_INFO_SIZE] =
-            device[mirror1_off..mirror1_off + SUPER_INFO_SIZE]
-                .try_into()
-                .unwrap();
+        let mirror1_buf: [u8; SUPER_INFO_SIZE] = device
+            [mirror1_off..mirror1_off + SUPER_INFO_SIZE]
+            .try_into()
+            .unwrap();
         assert!(superblock_is_valid(&mirror1_buf));
     }
 }

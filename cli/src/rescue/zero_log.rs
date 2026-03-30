@@ -1,6 +1,8 @@
-use crate::{util::is_mounted, Format, Runnable};
-use anyhow::{bail, Context, Result};
-use btrfs_disk::superblock::{read_superblock_bytes, write_superblock_all_mirrors};
+use crate::{Format, Runnable, util::is_mounted};
+use anyhow::{Context, Result, bail};
+use btrfs_disk::superblock::{
+    read_superblock_bytes, write_superblock_all_mirrors,
+};
 use clap::Parser;
 use std::{fs::OpenOptions, mem, path::PathBuf};
 
@@ -40,8 +42,7 @@ impl Runnable for RescueZeroLogCommand {
         })?;
 
         use btrfs_disk::raw;
-        let log_root_off =
-            mem::offset_of!(raw::btrfs_super_block, log_root);
+        let log_root_off = mem::offset_of!(raw::btrfs_super_block, log_root);
         let log_root_level_off =
             mem::offset_of!(raw::btrfs_super_block, log_root_level);
 
@@ -59,10 +60,7 @@ impl Runnable for RescueZeroLogCommand {
         buf[log_root_level_off] = 0;
 
         write_superblock_all_mirrors(&mut file, &buf).with_context(|| {
-            format!(
-                "failed to write superblock to '{}'",
-                self.device.display()
-            )
+            format!("failed to write superblock to '{}'", self.device.display())
         })?;
 
         Ok(())

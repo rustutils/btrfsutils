@@ -1,8 +1,11 @@
-use crate::{util::fmt_size, util::SizeFormat, Format, Runnable};
+use crate::{
+    Format, Runnable,
+    util::{SizeFormat, fmt_size},
+};
 use anyhow::{Context, Result};
 use btrfs_disk::{
     raw,
-    reader::{self, tree_stats_collect, TreeStats},
+    reader::{self, TreeStats, tree_stats_collect},
 };
 use clap::Parser;
 use std::{path::PathBuf, time::Instant};
@@ -55,16 +58,12 @@ fn parse_tree_id(s: &str) -> Result<u64> {
 fn tree_name(id: u64) -> String {
     match id as u32 {
         x if x == raw::BTRFS_ROOT_TREE_OBJECTID => "root tree".to_string(),
-        x if x == raw::BTRFS_EXTENT_TREE_OBJECTID => {
-            "extent tree".to_string()
-        }
+        x if x == raw::BTRFS_EXTENT_TREE_OBJECTID => "extent tree".to_string(),
         x if x == raw::BTRFS_CHUNK_TREE_OBJECTID => "chunk tree".to_string(),
         x if x == raw::BTRFS_DEV_TREE_OBJECTID => "dev tree".to_string(),
         x if x == raw::BTRFS_FS_TREE_OBJECTID => "fs tree".to_string(),
         x if x == raw::BTRFS_CSUM_TREE_OBJECTID => "csum tree".to_string(),
-        x if x == raw::BTRFS_QUOTA_TREE_OBJECTID => {
-            "quota tree".to_string()
-        }
+        x if x == raw::BTRFS_QUOTA_TREE_OBJECTID => "quota tree".to_string(),
         x if x == raw::BTRFS_UUID_TREE_OBJECTID => "uuid tree".to_string(),
         x if x == raw::BTRFS_FREE_SPACE_TREE_OBJECTID => {
             "free-space tree".to_string()
@@ -154,16 +153,13 @@ impl Runnable for TreeStatsCommand {
             let tree_id = parse_tree_id(tree_spec)?;
             let (root_logical, _) =
                 fs.tree_roots.get(&tree_id).copied().ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "tree {tree_id} not found in filesystem"
-                    )
+                    anyhow::anyhow!("tree {tree_id} not found in filesystem")
                 })?;
 
             let name = tree_name(tree_id);
             let start = Instant::now();
-            let stats =
-                tree_stats_collect(&mut fs.reader, root_logical, true)
-                    .with_context(|| format!("failed to walk {name}"))?;
+            let stats = tree_stats_collect(&mut fs.reader, root_logical, true)
+                .with_context(|| format!("failed to walk {name}"))?;
             let elapsed = start.elapsed();
             print_stats(
                 &name,

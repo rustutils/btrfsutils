@@ -1,8 +1,8 @@
-use crate::{util::is_mounted, Format, Runnable};
-use anyhow::{bail, Context, Result};
+use crate::{Format, Runnable, util::is_mounted};
+use anyhow::{Context, Result, bail};
 use btrfs_disk::superblock::{
-    read_superblock_bytes_at, super_mirror_offset, superblock_generation,
-    superblock_is_valid, write_superblock_all_mirrors, SUPER_MIRROR_MAX,
+    SUPER_MIRROR_MAX, read_superblock_bytes_at, super_mirror_offset,
+    superblock_generation, superblock_is_valid, write_superblock_all_mirrors,
 };
 use clap::Parser;
 use std::{
@@ -53,10 +53,18 @@ impl Runnable for RescueSuperRecoverCommand {
                 Ok(buf) => {
                     if superblock_is_valid(&buf) {
                         let generation = superblock_generation(&buf);
-                        good.push(MirrorRecord { bytenr, buf, generation });
+                        good.push(MirrorRecord {
+                            bytenr,
+                            buf,
+                            generation,
+                        });
                     } else {
                         let generation = superblock_generation(&buf);
-                        bad.push(MirrorRecord { bytenr, buf, generation });
+                        bad.push(MirrorRecord {
+                            bytenr,
+                            buf,
+                            generation,
+                        });
                     }
                 }
                 Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
@@ -105,7 +113,9 @@ impl Runnable for RescueSuperRecoverCommand {
         }
 
         if !self.yes {
-            print!("Make sure this is a btrfs disk otherwise the tool will destroy other fs, Are you sure? (yes/no): ");
+            print!(
+                "Make sure this is a btrfs disk otherwise the tool will destroy other fs, Are you sure? (yes/no): "
+            );
             io::stdout().flush()?;
             let stdin = io::stdin();
             let mut line = String::new();
@@ -122,15 +132,19 @@ impl Runnable for RescueSuperRecoverCommand {
             .write(true)
             .open(&self.device)
             .with_context(|| {
-                format!("failed to open '{}' for writing", self.device.display())
+                format!(
+                    "failed to open '{}' for writing",
+                    self.device.display()
+                )
             })?;
-        write_superblock_all_mirrors(&mut file_rw, &source.buf)
-            .with_context(|| {
+        write_superblock_all_mirrors(&mut file_rw, &source.buf).with_context(
+            || {
                 format!(
                     "failed to write superblocks to '{}'",
                     self.device.display()
                 )
-            })?;
+            },
+        )?;
 
         println!("Recovered bad superblocks successfully");
         Ok(())

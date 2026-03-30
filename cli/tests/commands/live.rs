@@ -422,13 +422,17 @@ fn subvolume_create_mixed_paths() {
     let valid1 = format!("{mp}/sub1");
     let valid2 = format!("{mp}/sub2");
 
-    let (_, _, code) = btrfs(&["subvolume", "create", &invalid, &valid1, &valid2]);
+    let (_, _, code) =
+        btrfs(&["subvolume", "create", &invalid, &valid1, &valid2]);
     assert_ne!(code, 0, "should fail due to invalid path");
 
     // The valid subvolumes should exist despite the overall failure.
     assert!(Path::new(&valid1).is_dir(), "sub1 should have been created");
     assert!(Path::new(&valid2).is_dir(), "sub2 should have been created");
-    assert!(!Path::new(&invalid).exists(), "invalid path should not exist");
+    assert!(
+        !Path::new(&invalid).exists(),
+        "invalid path should not exist"
+    );
 }
 
 #[test]
@@ -449,7 +453,10 @@ fn subvolume_create_parents_mixed() {
     assert!(Path::new(&flat).is_dir(), "flat should exist");
 
     let out = btrfs_ok(&["subvolume", "list", mp]);
-    assert!(out.contains("dir1/deep/sub1"), "expected deep1 in list:\n{out}");
+    assert!(
+        out.contains("dir1/deep/sub1"),
+        "expected deep1 in list:\n{out}"
+    );
     assert!(out.contains("dir2/sub2"), "expected deep2 in list:\n{out}");
     assert!(out.contains("sub3"), "expected flat in list:\n{out}");
 }
@@ -936,9 +943,7 @@ fn send_parent_multi_subvol() {
     btrfs_ok(&["subvolume", "snapshot", "-r", &parent, &snap3]);
 
     // Send snap2 and snap3 incrementally using snap1 as the parent.
-    btrfs_ok(&[
-        "send", "-f", &stream, "-p", &snap1, &snap2, &snap3,
-    ]);
+    btrfs_ok(&["send", "-f", &stream, "-p", &snap1, &snap2, &snap3]);
 
     // Receive on a second mount.
     let (_td2, mnt2) = single_mount();
@@ -1350,14 +1355,7 @@ fn subvolume_show_qgroup_limit() {
     let rootid_out =
         btrfs_ok(&["inspect-internal", "rootid", &subv_with_limit]);
     let rootid = rootid_out.trim();
-    btrfs_ok(&[
-        "qgroup",
-        "limit",
-        "-e",
-        "1G",
-        &format!("0/{rootid}"),
-        mp,
-    ]);
+    btrfs_ok(&["qgroup", "limit", "-e", "1G", &format!("0/{rootid}"), mp]);
 
     // subvolume show should succeed for both subvolumes even with
     // quotas and limits active.
