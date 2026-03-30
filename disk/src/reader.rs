@@ -9,8 +9,8 @@ use crate::{
     raw,
     superblock::{self, Superblock},
     tree::{KeyType, TreeBlock},
-    util::read_le_u64,
 };
+use bytes::Buf;
 use std::{
     collections::BTreeMap,
     io::{self, Read, Seek, SeekFrom},
@@ -441,8 +441,8 @@ fn collect_root_items<R: Read + Seek>(
                 if item_start + root_item_bytenr_offset + 8 > data.len() {
                     continue;
                 }
-                let bytenr =
-                    read_le_u64(data, item_start + root_item_bytenr_offset);
+                let mut buf = &data[item_start + root_item_bytenr_offset..];
+                let bytenr = buf.get_u64_le();
                 if bytenr != 0 {
                     tree_roots
                         .insert(item.key.objectid, (bytenr, item.key.offset));

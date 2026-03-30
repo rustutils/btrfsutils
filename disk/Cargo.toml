@@ -12,6 +12,7 @@ keywords = ["btrfs", "filesystem", "parser", "userspace"]
 
 [dependencies]
 bitflags = { workspace = true }
+bytes = { workspace = true }
 crc32c = { workspace = true }
 uuid = { workspace = true }
 

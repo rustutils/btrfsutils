@@ -8,10 +8,18 @@
 use crate::{
     raw,
     tree::{DiskKey, ObjectId},
-    util::{raw_crc32c, read_le_u16, read_le_u32, read_le_u64, read_uuid},
+    util::raw_crc32c,
 };
+use bytes::Buf;
 use std::{fmt, mem};
 use uuid::Uuid;
+
+/// Read a UUID (16 bytes) from a `Buf` cursor, advancing it by 16 bytes.
+fn get_uuid(buf: &mut &[u8]) -> Uuid {
+    let bytes: [u8; 16] = buf[..16].try_into().unwrap();
+    buf.advance(16);
+    Uuid::from_bytes(bytes)
+}
 
 bitflags::bitflags! {
     /// Block group / chunk type flags: the combination of chunk type
@@ -149,10 +157,10 @@ pub struct Timespec {
 }
 
 impl Timespec {
-    fn parse(data: &[u8], off: usize) -> Self {
+    fn parse(buf: &mut &[u8]) -> Self {
         Self {
-            sec: read_le_u64(data, off),
-            nsec: read_le_u32(data, off + 8),
+            sec: buf.get_u64_le(),
+            nsec: buf.get_u32_le(),
         }
     }
 }
@@ -309,25 +317,28 @@ impl InodeItem {
         if data.len() < mem::size_of::<raw::btrfs_inode_item>() {
             return None;
         }
-        let ts_off = mem::offset_of!(raw::btrfs_inode_item, atime);
-        let ts_size = mem::size_of::<raw::btrfs_timespec>();
+        let mut buf = data;
         Some(Self {
-            generation: read_le_u64(data, 0),
-            transid: read_le_u64(data, 8),
-            size: read_le_u64(data, 16),
-            nbytes: read_le_u64(data, 24),
-            block_group: read_le_u64(data, 32),
-            nlink: read_le_u32(data, 40),
-            uid: read_le_u32(data, 44),
-            gid: read_le_u32(data, 48),
-            mode: read_le_u32(data, 52),
-            rdev: read_le_u64(data, 56),
-            flags: InodeFlags::from_bits_truncate(read_le_u64(data, 64)),
-            sequence: read_le_u64(data, 72),
-            atime: Timespec::parse(data, ts_off),
-            ctime: Timespec::parse(data, ts_off + ts_size),
-            mtime: Timespec::parse(data, ts_off + 2 * ts_size),
-            otime: Timespec::parse(data, ts_off + 3 * ts_size),
+            generation: buf.get_u64_le(),
+            transid: buf.get_u64_le(),
+            size: buf.get_u64_le(),
+            nbytes: buf.get_u64_le(),
+            block_group: buf.get_u64_le(),
+            nlink: buf.get_u32_le(),
+            uid: buf.get_u32_le(),
+            gid: buf.get_u32_le(),
+            mode: buf.get_u32_le(),
+            rdev: buf.get_u64_le(),
+            flags: InodeFlags::from_bits_truncate(buf.get_u64_le()),
+            sequence: buf.get_u64_le(),
+            // Skip reserved[4] (4 x u64 = 32 bytes)
+            atime: {
+                buf.advance(32);
+                Timespec::parse(&mut buf)
+            },
+            ctime: Timespec::parse(&mut buf),
+            mtime: Timespec::parse(&mut buf),
+            otime: Timespec::parse(&mut buf),
         })
     }
 }
@@ -341,18 +352,16 @@ pub struct InodeRef {
 impl InodeRef {
     pub fn parse_all(data: &[u8]) -> Vec<Self> {
         let mut result = Vec::new();
-        let mut offset = 0usize;
-        while offset + 10 <= data.len() {
-            let index = read_le_u64(data, offset);
-            let name_len = read_le_u16(data, offset + 8) as usize;
-            offset += 10;
-            let name = if offset + name_len <= data.len() {
-                data[offset..offset + name_len].to_vec()
-            } else {
+        let mut buf = data;
+        while buf.remaining() >= 10 {
+            let index = buf.get_u64_le();
+            let name_len = buf.get_u16_le() as usize;
+            if buf.remaining() < name_len {
                 break;
-            };
+            }
+            let name = buf[..name_len].to_vec();
+            buf.advance(name_len);
             result.push(Self { index, name });
-            offset += name_len;
         }
         result
     }
@@ -368,23 +377,21 @@ pub struct InodeExtref {
 impl InodeExtref {
     pub fn parse_all(data: &[u8]) -> Vec<Self> {
         let mut result = Vec::new();
-        let mut offset = 0usize;
-        while offset + 18 <= data.len() {
-            let parent = read_le_u64(data, offset);
-            let index = read_le_u64(data, offset + 8);
-            let name_len = read_le_u16(data, offset + 16) as usize;
-            offset += 18;
-            let name = if offset + name_len <= data.len() {
-                data[offset..offset + name_len].to_vec()
-            } else {
+        let mut buf = data;
+        while buf.remaining() >= 18 {
+            let parent = buf.get_u64_le();
+            let index = buf.get_u64_le();
+            let name_len = buf.get_u16_le() as usize;
+            if buf.remaining() < name_len {
                 break;
-            };
+            }
+            let name = buf[..name_len].to_vec();
+            buf.advance(name_len);
             result.push(Self {
                 parent,
                 index,
                 name,
             });
-            offset += name_len;
         }
         result
     }
@@ -400,33 +407,33 @@ pub struct DirItem {
 }
 
 impl DirItem {
-    pub fn parse_all(buf: &[u8]) -> Vec<Self> {
+    pub fn parse_all(data: &[u8]) -> Vec<Self> {
         let mut result = Vec::new();
-        let mut offset = 0usize;
         let dir_item_size = mem::size_of::<raw::btrfs_dir_item>();
+        let mut buf = data;
 
-        while offset + dir_item_size <= buf.len() {
-            let location = DiskKey::parse(buf, offset);
-            let transid = read_le_u64(buf, offset + 17);
-            let data_len = read_le_u16(buf, offset + 25) as usize;
-            let name_len = read_le_u16(buf, offset + 27) as usize;
-            let file_type = FileType::from_raw(buf[offset + 29]);
-            offset += dir_item_size;
+        while buf.remaining() >= dir_item_size {
+            let location = DiskKey::parse(buf, 0);
+            buf.advance(17); // skip past DiskKey (u64 + u8 + u64)
+            let transid = buf.get_u64_le();
+            let data_len = buf.get_u16_le() as usize;
+            let name_len = buf.get_u16_le() as usize;
+            let file_type = FileType::from_raw(buf.get_u8());
 
-            if offset + name_len + data_len > buf.len() {
+            if buf.remaining() < name_len + data_len {
                 break;
             }
-            let name = buf[offset..offset + name_len].to_vec();
-            let data =
-                buf[offset + name_len..offset + name_len + data_len].to_vec();
+            let name = buf[..name_len].to_vec();
+            buf.advance(name_len);
+            let item_data = buf[..data_len].to_vec();
+            buf.advance(data_len);
             result.push(Self {
                 location,
                 transid,
                 file_type,
                 name,
-                data,
+                data: item_data,
             });
-            offset += name_len + data_len;
         }
         result
     }
@@ -487,100 +494,138 @@ impl RootItem {
             return None;
         }
 
+        let mut buf = &data[inode_size..];
+        let generation = buf.get_u64_le();
+        let root_dirid = buf.get_u64_le();
+        let bytenr = buf.get_u64_le();
+        let byte_limit = buf.get_u64_le();
+        let bytes_used = buf.get_u64_le();
+        let last_snapshot = buf.get_u64_le();
+        let flags = RootItemFlags::from_bits_truncate(buf.get_u64_le());
+        let refs = buf.get_u32_le();
+
         let dp_off = inode_size + 60;
+        let drop_progress = if dp_off + 17 <= data.len() {
+            DiskKey::parse(data, dp_off)
+        } else {
+            DiskKey::parse(&[0; 17], 0)
+        };
+        let drop_level = if dp_off + 17 < data.len() {
+            data[dp_off + 17]
+        } else {
+            0
+        };
+
         let level_off = mem::offset_of!(raw::btrfs_root_item, level);
+        let level = if level_off < data.len() {
+            data[level_off]
+        } else {
+            0
+        };
+        let generation_v2 = if level_off + 1 + 8 <= data.len() {
+            let mut b = &data[level_off + 1..];
+            b.get_u64_le()
+        } else {
+            0
+        };
+
         let uuid_off = mem::offset_of!(raw::btrfs_root_item, uuid);
+        let uuid = if uuid_off + 16 <= data.len() {
+            let mut b = &data[uuid_off..];
+            get_uuid(&mut b)
+        } else {
+            Uuid::nil()
+        };
+        let parent_uuid = if uuid_off + 32 <= data.len() {
+            let mut b = &data[uuid_off + 16..];
+            get_uuid(&mut b)
+        } else {
+            Uuid::nil()
+        };
+        let received_uuid = if uuid_off + 48 <= data.len() {
+            let mut b = &data[uuid_off + 32..];
+            get_uuid(&mut b)
+        } else {
+            Uuid::nil()
+        };
+
         let ct_off = mem::offset_of!(raw::btrfs_root_item, ctransid);
+        let ctransid = if ct_off + 8 <= data.len() {
+            let mut b = &data[ct_off..];
+            b.get_u64_le()
+        } else {
+            0
+        };
+        let otransid = if ct_off + 16 <= data.len() {
+            let mut b = &data[ct_off + 8..];
+            b.get_u64_le()
+        } else {
+            0
+        };
+        let stransid = if ct_off + 24 <= data.len() {
+            let mut b = &data[ct_off + 16..];
+            b.get_u64_le()
+        } else {
+            0
+        };
+        let rtransid = if ct_off + 32 <= data.len() {
+            let mut b = &data[ct_off + 24..];
+            b.get_u64_le()
+        } else {
+            0
+        };
+
         let ctime_off = mem::offset_of!(raw::btrfs_root_item, ctime);
         let ts_size = mem::size_of::<raw::btrfs_timespec>();
+        let ctime = if ctime_off + ts_size <= data.len() {
+            let mut b = &data[ctime_off..];
+            Timespec::parse(&mut b)
+        } else {
+            Timespec { sec: 0, nsec: 0 }
+        };
+        let otime = if ctime_off + 2 * ts_size <= data.len() {
+            let mut b = &data[ctime_off + ts_size..];
+            Timespec::parse(&mut b)
+        } else {
+            Timespec { sec: 0, nsec: 0 }
+        };
+        let stime = if ctime_off + 3 * ts_size <= data.len() {
+            let mut b = &data[ctime_off + 2 * ts_size..];
+            Timespec::parse(&mut b)
+        } else {
+            Timespec { sec: 0, nsec: 0 }
+        };
+        let rtime = if ctime_off + 4 * ts_size <= data.len() {
+            let mut b = &data[ctime_off + 3 * ts_size..];
+            Timespec::parse(&mut b)
+        } else {
+            Timespec { sec: 0, nsec: 0 }
+        };
 
         Some(Self {
-            generation: read_le_u64(data, inode_size),
-            root_dirid: read_le_u64(data, inode_size + 8),
-            bytenr: read_le_u64(data, inode_size + 16),
-            byte_limit: read_le_u64(data, inode_size + 24),
-            bytes_used: read_le_u64(data, inode_size + 32),
-            last_snapshot: read_le_u64(data, inode_size + 40),
-            flags: RootItemFlags::from_bits_truncate(read_le_u64(
-                data,
-                inode_size + 48,
-            )),
-            refs: read_le_u32(data, inode_size + 56),
-            drop_progress: if dp_off + 17 <= data.len() {
-                DiskKey::parse(data, dp_off)
-            } else {
-                DiskKey::parse(&[0; 17], 0)
-            },
-            drop_level: if dp_off + 17 < data.len() {
-                data[dp_off + 17]
-            } else {
-                0
-            },
-            level: if level_off < data.len() {
-                data[level_off]
-            } else {
-                0
-            },
-            generation_v2: if level_off + 1 + 8 <= data.len() {
-                read_le_u64(data, level_off + 1)
-            } else {
-                0
-            },
-            uuid: if uuid_off + 16 <= data.len() {
-                read_uuid(data, uuid_off)
-            } else {
-                Uuid::nil()
-            },
-            parent_uuid: if uuid_off + 32 <= data.len() {
-                read_uuid(data, uuid_off + 16)
-            } else {
-                Uuid::nil()
-            },
-            received_uuid: if uuid_off + 48 <= data.len() {
-                read_uuid(data, uuid_off + 32)
-            } else {
-                Uuid::nil()
-            },
-            ctransid: if ct_off + 8 <= data.len() {
-                read_le_u64(data, ct_off)
-            } else {
-                0
-            },
-            otransid: if ct_off + 16 <= data.len() {
-                read_le_u64(data, ct_off + 8)
-            } else {
-                0
-            },
-            stransid: if ct_off + 24 <= data.len() {
-                read_le_u64(data, ct_off + 16)
-            } else {
-                0
-            },
-            rtransid: if ct_off + 32 <= data.len() {
-                read_le_u64(data, ct_off + 24)
-            } else {
-                0
-            },
-            ctime: if ctime_off + ts_size <= data.len() {
-                Timespec::parse(data, ctime_off)
-            } else {
-                Timespec { sec: 0, nsec: 0 }
-            },
-            otime: if ctime_off + 2 * ts_size <= data.len() {
-                Timespec::parse(data, ctime_off + ts_size)
-            } else {
-                Timespec { sec: 0, nsec: 0 }
-            },
-            stime: if ctime_off + 3 * ts_size <= data.len() {
-                Timespec::parse(data, ctime_off + 2 * ts_size)
-            } else {
-                Timespec { sec: 0, nsec: 0 }
-            },
-            rtime: if ctime_off + 4 * ts_size <= data.len() {
-                Timespec::parse(data, ctime_off + 3 * ts_size)
-            } else {
-                Timespec { sec: 0, nsec: 0 }
-            },
+            generation,
+            root_dirid,
+            bytenr,
+            byte_limit,
+            bytes_used,
+            last_snapshot,
+            flags,
+            refs,
+            drop_progress,
+            drop_level,
+            level,
+            generation_v2,
+            uuid,
+            parent_uuid,
+            received_uuid,
+            ctransid,
+            otransid,
+            stransid,
+            rtransid,
+            ctime,
+            otime,
+            stime,
+            rtime,
         })
     }
 }
@@ -597,9 +642,10 @@ impl RootRef {
         if data.len() < mem::size_of::<raw::btrfs_root_ref>() {
             return None;
         }
-        let dirid = read_le_u64(data, 0);
-        let sequence = read_le_u64(data, 8);
-        let name_len = read_le_u16(data, 16) as usize;
+        let mut buf = data;
+        let dirid = buf.get_u64_le();
+        let sequence = buf.get_u64_le();
+        let name_len = buf.get_u16_le() as usize;
         let name_start = mem::size_of::<raw::btrfs_root_ref>();
         let name = if name_start + name_len <= data.len() {
             data[name_start..name_start + name_len].to_vec()
@@ -641,21 +687,23 @@ impl FileExtentItem {
         if data.len() < 21 {
             return None;
         }
-        let generation = read_le_u64(data, 0);
-        let ram_bytes = read_le_u64(data, 8);
-        let compression = CompressionType::from_raw(data[16]);
-        let extent_type = FileExtentType::from_raw(data[20]);
+        let mut buf = data;
+        let generation = buf.get_u64_le();
+        let ram_bytes = buf.get_u64_le();
+        let compression = CompressionType::from_raw(buf.get_u8());
+        buf.advance(3); // skip encryption, other_encoding
+        let extent_type = FileExtentType::from_raw(buf.get_u8());
 
         let body = if extent_type == FileExtentType::Inline {
             FileExtentBody::Inline {
-                inline_size: data.len() - 21,
+                inline_size: buf.remaining(),
             }
-        } else if data.len() >= 53 {
+        } else if buf.remaining() >= 32 {
             FileExtentBody::Regular {
-                disk_bytenr: read_le_u64(data, 21),
-                disk_num_bytes: read_le_u64(data, 29),
-                offset: read_le_u64(data, 37),
-                num_bytes: read_le_u64(data, 45),
+                disk_bytenr: buf.get_u64_le(),
+                disk_num_bytes: buf.get_u64_le(),
+                offset: buf.get_u64_le(),
+                num_bytes: buf.get_u64_le(),
             }
         } else {
             return None;
@@ -799,22 +847,22 @@ impl ExtentItem {
         if data.len() < mem::size_of::<raw::btrfs_extent_item>() {
             return None;
         }
-        let refs = read_le_u64(data, 0);
-        let generation = read_le_u64(data, 8);
-        let flags = ExtentFlags::from_bits_truncate(read_le_u64(data, 16));
+        let mut buf = data;
+        let refs = buf.get_u64_le();
+        let generation = buf.get_u64_le();
+        let flags = ExtentFlags::from_bits_truncate(buf.get_u64_le());
 
-        let mut offset = mem::size_of::<raw::btrfs_extent_item>();
         let is_tree_block = flags.contains(ExtentFlags::TREE_BLOCK);
 
         let mut tree_block_key = None;
         let mut tree_block_level = None;
         if is_tree_block
             && key.key_type == KeyType::ExtentItem
-            && offset + 17 < data.len()
+            && buf.remaining() > 17
         {
-            tree_block_key = Some(DiskKey::parse(data, offset));
-            tree_block_level = Some(data[offset + 17]);
-            offset += mem::size_of::<raw::btrfs_tree_block_info>();
+            tree_block_key = Some(DiskKey::parse(buf, 0));
+            buf.advance(17); // skip DiskKey
+            tree_block_level = Some(buf.get_u8());
         }
 
         let skinny_level =
@@ -825,14 +873,13 @@ impl ExtentItem {
             };
 
         let mut inline_refs = Vec::new();
-        while offset < data.len() {
-            let ref_type = data[offset];
-            let ref_offset = if offset + 9 <= data.len() {
-                read_le_u64(data, offset + 1)
+        while buf.remaining() > 0 {
+            let ref_type = buf.get_u8();
+            let ref_offset = if buf.remaining() >= 8 {
+                buf.get_u64_le()
             } else {
                 0
             };
-            offset += 1 + 8;
 
             match u32::from(ref_type) {
                 raw::BTRFS_TREE_BLOCK_REF_KEY => {
@@ -849,14 +896,14 @@ impl ExtentItem {
                 }
                 raw::BTRFS_EXTENT_DATA_REF_KEY => {
                     // EXTENT_DATA_REF has no 8-byte offset field; the struct
-                    // starts directly after the type byte. Back up the 8 bytes
-                    // we speculatively consumed.
-                    let struct_start = offset - 8;
-                    if struct_start + 28 <= data.len() {
-                        let root = read_le_u64(data, struct_start);
-                        let oid = read_le_u64(data, struct_start + 8);
-                        let off = read_le_u64(data, struct_start + 16);
-                        let count = read_le_u32(data, struct_start + 24);
+                    // starts directly after the type byte. The 8 bytes we
+                    // speculatively consumed are actually the first field
+                    // (root) of the struct, so reinterpret them.
+                    let root = ref_offset; // already read as u64_le
+                    if buf.remaining() >= 20 {
+                        let oid = buf.get_u64_le();
+                        let off = buf.get_u64_le();
+                        let count = buf.get_u32_le();
                         // The C tool prints a CRC hash for the display offset;
                         // compute it the same way: hash(root, objectid, offset).
                         let hash = extent_data_ref_hash(root, oid, off);
@@ -867,20 +914,18 @@ impl ExtentItem {
                             offset: off,
                             count,
                         });
-                        offset = struct_start + 28;
                     } else {
                         break;
                     }
                 }
                 raw::BTRFS_SHARED_DATA_REF_KEY => {
-                    if offset + 4 <= data.len() {
-                        let count = read_le_u32(data, offset);
+                    if buf.remaining() >= 4 {
+                        let count = buf.get_u32_le();
                         inline_refs.push(InlineRef::SharedDataBackref {
                             ref_offset,
                             parent: ref_offset,
                             count,
                         });
-                        offset += 4;
                     } else {
                         break;
                     }
@@ -920,11 +965,12 @@ impl ExtentDataRef {
         if data.len() < mem::size_of::<raw::btrfs_extent_data_ref>() {
             return None;
         }
+        let mut buf = data;
         Some(Self {
-            root: read_le_u64(data, 0),
-            objectid: read_le_u64(data, 8),
-            offset: read_le_u64(data, 16),
-            count: read_le_u32(data, 24),
+            root: buf.get_u64_le(),
+            objectid: buf.get_u64_le(),
+            offset: buf.get_u64_le(),
+            count: buf.get_u32_le(),
         })
     }
 }
@@ -939,8 +985,9 @@ impl SharedDataRef {
         if data.len() < 4 {
             return None;
         }
+        let mut buf = data;
         Some(Self {
-            count: read_le_u32(data, 0),
+            count: buf.get_u32_le(),
         })
     }
 }
@@ -957,10 +1004,11 @@ impl BlockGroupItem {
         if data.len() < mem::size_of::<raw::btrfs_block_group_item>() {
             return None;
         }
+        let mut buf = data;
         Some(Self {
-            used: read_le_u64(data, 0),
-            chunk_objectid: read_le_u64(data, 8),
-            flags: BlockGroupFlags::from_bits_truncate(read_le_u64(data, 16)),
+            used: buf.get_u64_le(),
+            chunk_objectid: buf.get_u64_le(),
+            flags: BlockGroupFlags::from_bits_truncate(buf.get_u64_le()),
         })
     }
 }
@@ -992,32 +1040,43 @@ impl ChunkItem {
         if data.len() < chunk_base_size {
             return None;
         }
-        let num_stripes = read_le_u16(data, 44);
+        let mut buf = data;
+        let length = buf.get_u64_le();
+        let owner = buf.get_u64_le();
+        let stripe_len = buf.get_u64_le();
+        let chunk_type = BlockGroupFlags::from_bits_truncate(buf.get_u64_le());
+        let io_align = buf.get_u32_le();
+        let io_width = buf.get_u32_le();
+        let sector_size = buf.get_u32_le();
+        let num_stripes = buf.get_u16_le();
+        let sub_stripes = buf.get_u16_le();
         let stripe_size = mem::size_of::<raw::btrfs_stripe>();
         let mut stripes = Vec::with_capacity(num_stripes as usize);
+        let mut sbuf = &data[chunk_base_size..];
         for i in 0..num_stripes as usize {
             let s_off = chunk_base_size + i * stripe_size;
             if s_off + stripe_size > data.len() {
                 break;
             }
+            let devid = sbuf.get_u64_le();
+            let offset = sbuf.get_u64_le();
+            let dev_uuid = get_uuid(&mut sbuf);
             stripes.push(ChunkStripe {
-                devid: read_le_u64(data, s_off),
-                offset: read_le_u64(data, s_off + 8),
-                dev_uuid: read_uuid(data, s_off + 16),
+                devid,
+                offset,
+                dev_uuid,
             });
         }
         Some(Self {
-            length: read_le_u64(data, 0),
-            owner: read_le_u64(data, 8),
-            stripe_len: read_le_u64(data, 16),
-            chunk_type: BlockGroupFlags::from_bits_truncate(read_le_u64(
-                data, 24,
-            )),
-            io_align: read_le_u32(data, 32),
-            io_width: read_le_u32(data, 36),
-            sector_size: read_le_u32(data, 40),
+            length,
+            owner,
+            stripe_len,
+            chunk_type,
+            io_align,
+            io_width,
+            sector_size,
             num_stripes,
-            sub_stripes: read_le_u16(data, 46),
+            sub_stripes,
             stripes,
         })
     }
@@ -1046,21 +1105,36 @@ impl DeviceItem {
         if data.len() < mem::size_of::<raw::btrfs_dev_item>() {
             return None;
         }
+        let mut buf = data;
+        let devid = buf.get_u64_le();
+        let total_bytes = buf.get_u64_le();
+        let bytes_used = buf.get_u64_le();
+        let io_align = buf.get_u32_le();
+        let io_width = buf.get_u32_le();
+        let sector_size = buf.get_u32_le();
+        let dev_type = buf.get_u64_le();
+        let generation = buf.get_u64_le();
+        let start_offset = buf.get_u64_le();
+        let dev_group = buf.get_u32_le();
+        let seek_speed = buf.get_u8();
+        let bandwidth = buf.get_u8();
+        let uuid = get_uuid(&mut buf);
+        let fsid = get_uuid(&mut buf);
         Some(Self {
-            devid: read_le_u64(data, 0),
-            total_bytes: read_le_u64(data, 8),
-            bytes_used: read_le_u64(data, 16),
-            io_align: read_le_u32(data, 24),
-            io_width: read_le_u32(data, 28),
-            sector_size: read_le_u32(data, 32),
-            dev_type: read_le_u64(data, 36),
-            generation: read_le_u64(data, 44),
-            start_offset: read_le_u64(data, 52),
-            dev_group: read_le_u32(data, 60),
-            seek_speed: data[64],
-            bandwidth: data[65],
-            uuid: read_uuid(data, 66),
-            fsid: read_uuid(data, 82),
+            devid,
+            total_bytes,
+            bytes_used,
+            io_align,
+            io_width,
+            sector_size,
+            dev_type,
+            generation,
+            start_offset,
+            dev_group,
+            seek_speed,
+            bandwidth,
+            uuid,
+            fsid,
         })
     }
 }
@@ -1079,12 +1153,18 @@ impl DeviceExtent {
         if data.len() < mem::size_of::<raw::btrfs_dev_extent>() {
             return None;
         }
+        let mut buf = data;
+        let chunk_tree = buf.get_u64_le();
+        let chunk_objectid = buf.get_u64_le();
+        let chunk_offset = buf.get_u64_le();
+        let length = buf.get_u64_le();
+        let chunk_tree_uuid = get_uuid(&mut buf);
         Some(Self {
-            chunk_tree: read_le_u64(data, 0),
-            chunk_objectid: read_le_u64(data, 8),
-            chunk_offset: read_le_u64(data, 16),
-            length: read_le_u64(data, 24),
-            chunk_tree_uuid: read_uuid(data, 32),
+            chunk_tree,
+            chunk_objectid,
+            chunk_offset,
+            length,
+            chunk_tree_uuid,
         })
     }
 }
@@ -1117,9 +1197,10 @@ impl FreeSpaceInfo {
         if data.len() < 8 {
             return None;
         }
+        let mut buf = data;
         Some(Self {
-            extent_count: read_le_u32(data, 0),
-            flags: FreeSpaceInfoFlags::from_bits_truncate(read_le_u32(data, 4)),
+            extent_count: buf.get_u32_le(),
+            flags: FreeSpaceInfoFlags::from_bits_truncate(buf.get_u32_le()),
         })
     }
 }
@@ -1138,16 +1219,22 @@ impl QgroupStatus {
         if data.len() < 32 {
             return None;
         }
+        let mut buf = data;
+        let version = buf.get_u64_le();
+        let generation = buf.get_u64_le();
+        let flags = buf.get_u64_le();
+        let scan = buf.get_u64_le();
+        let enable_gen = if buf.remaining() >= 8 {
+            Some(buf.get_u64_le())
+        } else {
+            None
+        };
         Some(Self {
-            version: read_le_u64(data, 0),
-            generation: read_le_u64(data, 8),
-            flags: read_le_u64(data, 16),
-            scan: read_le_u64(data, 24),
-            enable_gen: if data.len() >= 40 {
-                Some(read_le_u64(data, 32))
-            } else {
-                None
-            },
+            version,
+            generation,
+            flags,
+            scan,
+            enable_gen,
         })
     }
 }
@@ -1166,12 +1253,13 @@ impl QgroupInfo {
         if data.len() < mem::size_of::<raw::btrfs_qgroup_info_item>() {
             return None;
         }
+        let mut buf = data;
         Some(Self {
-            generation: read_le_u64(data, 0),
-            referenced: read_le_u64(data, 8),
-            referenced_compressed: read_le_u64(data, 16),
-            exclusive: read_le_u64(data, 24),
-            exclusive_compressed: read_le_u64(data, 32),
+            generation: buf.get_u64_le(),
+            referenced: buf.get_u64_le(),
+            referenced_compressed: buf.get_u64_le(),
+            exclusive: buf.get_u64_le(),
+            exclusive_compressed: buf.get_u64_le(),
         })
     }
 }
@@ -1190,12 +1278,13 @@ impl QgroupLimit {
         if data.len() < mem::size_of::<raw::btrfs_qgroup_limit_item>() {
             return None;
         }
+        let mut buf = data;
         Some(Self {
-            flags: read_le_u64(data, 0),
-            max_referenced: read_le_u64(data, 8),
-            max_exclusive: read_le_u64(data, 16),
-            rsv_referenced: read_le_u64(data, 24),
-            rsv_exclusive: read_le_u64(data, 32),
+            flags: buf.get_u64_le(),
+            max_referenced: buf.get_u64_le(),
+            max_exclusive: buf.get_u64_le(),
+            rsv_referenced: buf.get_u64_le(),
+            rsv_exclusive: buf.get_u64_le(),
         })
     }
 }
@@ -1214,11 +1303,11 @@ impl DeviceStats {
             "corruption_errs",
             "generation",
         ];
+        let mut buf = data;
         let mut values = Vec::new();
-        for (i, name) in stat_names.iter().enumerate() {
-            let off = i * 8;
-            if off + 8 <= data.len() {
-                values.push((name.to_string(), read_le_u64(data, off)));
+        for name in &stat_names {
+            if buf.remaining() >= 8 {
+                values.push((name.to_string(), buf.get_u64_le()));
             }
         }
         DeviceStats { values }
@@ -1232,11 +1321,10 @@ pub struct UuidItem {
 
 impl UuidItem {
     pub fn parse(data: &[u8]) -> Self {
+        let mut buf = data;
         let mut subvol_ids = Vec::new();
-        let mut offset = 0;
-        while offset + 8 <= data.len() {
-            subvol_ids.push(read_le_u64(data, offset));
-            offset += 8;
+        while buf.remaining() >= 8 {
+            subvol_ids.push(buf.get_u64_le());
         }
         Self { subvol_ids }
     }
@@ -1298,16 +1386,17 @@ impl DeviceReplaceItem {
         if data.len() < 80 {
             return None;
         }
+        let mut buf = data;
         Some(Self {
-            src_devid: read_le_u64(data, 0),
-            cursor_left: read_le_u64(data, 8),
-            cursor_right: read_le_u64(data, 16),
-            replace_mode: read_le_u64(data, 24),
-            replace_state: read_le_u64(data, 32),
-            time_started: read_le_u64(data, 40),
-            time_stopped: read_le_u64(data, 48),
-            num_write_errors: read_le_u64(data, 56),
-            num_uncorrectable_read_errors: read_le_u64(data, 64),
+            src_devid: buf.get_u64_le(),
+            cursor_left: buf.get_u64_le(),
+            cursor_right: buf.get_u64_le(),
+            replace_mode: buf.get_u64_le(),
+            replace_state: buf.get_u64_le(),
+            time_started: buf.get_u64_le(),
+            time_stopped: buf.get_u64_le(),
+            num_write_errors: buf.get_u64_le(),
+            num_uncorrectable_read_errors: buf.get_u64_le(),
         })
     }
 }
@@ -1329,15 +1418,14 @@ impl RaidStripeItem {
         if data.len() < 8 {
             return None;
         }
-        let encoding = read_le_u64(data, 0);
+        let mut buf = data;
+        let encoding = buf.get_u64_le();
         let mut stripes = Vec::new();
-        let mut offset = 8;
-        while offset + 16 <= data.len() {
+        while buf.remaining() >= 16 {
             stripes.push(RaidStripeEntry {
-                devid: read_le_u64(data, offset),
-                physical: read_le_u64(data, offset + 8),
+                devid: buf.get_u64_le(),
+                physical: buf.get_u64_le(),
             });
-            offset += 16;
         }
         Some(Self { encoding, stripes })
     }
@@ -1362,7 +1450,8 @@ pub fn parse_item_payload(key: &DiskKey, data: &[u8]) -> ItemPayload {
         }
         KeyType::DirLogItem | KeyType::DirLogIndex => {
             let end = if data.len() >= 8 {
-                read_le_u64(data, 0)
+                let mut buf = data;
+                buf.get_u64_le()
             } else {
                 0
             };
@@ -1402,8 +1491,9 @@ pub fn parse_item_payload(key: &DiskKey, data: &[u8]) -> ItemPayload {
         },
         KeyType::ExtentOwnerRef => {
             if data.len() >= 8 {
+                let mut buf = data;
                 ItemPayload::ExtentOwnerRef {
-                    root: read_le_u64(data, 0),
+                    root: buf.get_u64_le(),
                 }
             } else {
                 ItemPayload::Unknown(data.to_vec())
@@ -1456,7 +1546,10 @@ pub fn parse_item_payload(key: &DiskKey, data: &[u8]) -> ItemPayload {
                 && data.len() >= 8
             {
                 ItemPayload::BalanceItem {
-                    flags: read_le_u64(data, 0),
+                    flags: {
+                        let mut buf = data;
+                        buf.get_u64_le()
+                    },
                 }
             } else {
                 ItemPayload::Unknown(data.to_vec())

@@ -8,12 +8,16 @@
 //! physical offsets, seeded from the `sys_chunk_array` and then populated from
 //! the full chunk tree.
 
-use crate::{
-    raw,
-    util::{read_le_u16, read_le_u64, read_uuid},
-};
+use crate::raw;
+use bytes::Buf;
 use std::{collections::BTreeMap, mem};
 use uuid::Uuid;
+
+fn get_uuid(buf: &mut &[u8]) -> Uuid {
+    let bytes: [u8; 16] = buf[..16].try_into().unwrap();
+    buf.advance(16);
+    Uuid::from_bytes(bytes)
+}
 
 /// A single stripe in a chunk mapping.
 #[derive(Debug, Clone)]
@@ -96,11 +100,14 @@ pub fn parse_chunk_item(
         return None;
     }
 
-    let length = read_le_u64(buf, 0);
-    let stripe_len = read_le_u64(buf, 16);
-    let chunk_type = read_le_u64(buf, 24);
-    let num_stripes = read_le_u16(buf, 44);
-    let sub_stripes = read_le_u16(buf, 46);
+    let mut b = buf;
+    let length = b.get_u64_le();
+    b.advance(8); // owner
+    let stripe_len = b.get_u64_le();
+    let chunk_type = b.get_u64_le();
+    b.advance(12); // io_align(4) + io_width(4) + sector_size(4)
+    let num_stripes = b.get_u16_le();
+    let sub_stripes = b.get_u16_le();
 
     let total_size = chunk_base_size + num_stripes as usize * stripe_size;
     if buf.len() < total_size {
@@ -108,12 +115,15 @@ pub fn parse_chunk_item(
     }
 
     let mut stripes = Vec::with_capacity(num_stripes as usize);
-    for i in 0..num_stripes as usize {
-        let s_off = chunk_base_size + i * stripe_size;
+    let mut b = &buf[chunk_base_size..];
+    for _ in 0..num_stripes as usize {
+        let devid = b.get_u64_le();
+        let offset = b.get_u64_le();
+        let dev_uuid = get_uuid(&mut b);
         stripes.push(Stripe {
-            devid: read_le_u64(buf, s_off),
-            offset: read_le_u64(buf, s_off + 8),
-            dev_uuid: read_uuid(buf, s_off + 16),
+            devid,
+            offset,
+            dev_uuid,
         });
     }
 
@@ -142,7 +152,8 @@ pub fn seed_from_sys_chunk_array(array: &[u8], size: u32) -> ChunkTreeCache {
     let mut offset = 0usize;
 
     while offset + disk_key_size <= array.len() {
-        let key_offset = read_le_u64(array, offset + 9);
+        let mut b = &array[offset + 9..];
+        let key_offset = b.get_u64_le();
         offset += disk_key_size;
 
         if let Some((mapping, consumed)) =

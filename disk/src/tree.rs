@@ -9,12 +9,16 @@
 //! enums for key types and well-known object IDs, with safe LE parsing from
 //! raw byte buffers.
 
-use crate::{
-    raw,
-    util::{read_le_u32, read_le_u64, read_uuid},
-};
+use crate::raw;
+use bytes::Buf;
 use std::{fmt, mem};
 use uuid::Uuid;
+
+fn get_uuid(buf: &mut &[u8]) -> Uuid {
+    let bytes: [u8; 16] = buf[..16].try_into().unwrap();
+    buf.advance(16);
+    Uuid::from_bytes(bytes)
+}
 
 /// Btrfs item key type, identifying what kind of item a key refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -449,10 +453,14 @@ impl DiskKey {
     /// Parse a disk key from `buf` at byte offset `off`.
     /// The on-disk layout is: objectid (le64), type (u8), offset (le64) = 17 bytes.
     pub fn parse(buf: &[u8], off: usize) -> Self {
+        let mut buf = &buf[off..];
+        let objectid = buf.get_u64_le();
+        let key_type = KeyType::from_raw(buf.get_u8());
+        let offset = buf.get_u64_le();
         Self {
-            objectid: read_le_u64(buf, off),
-            key_type: KeyType::from_raw(buf[off + 8]),
-            offset: read_le_u64(buf, off + 9),
+            objectid,
+            key_type,
+            offset,
         }
     }
 }
@@ -575,18 +583,28 @@ impl Header {
             "buffer too small for btrfs_header: {} < {HEADER_SIZE}",
             buf.len()
         );
+        let mut b = buf;
         let mut csum = [0u8; 32];
-        csum.copy_from_slice(&buf[0..32]);
+        csum.copy_from_slice(&b[..32]);
+        b.advance(32);
+        let fsid = get_uuid(&mut b);
+        let bytenr = b.get_u64_le();
+        let flags = HeaderFlags::from_bits_truncate(b.get_u64_le());
+        let chunk_tree_uuid = get_uuid(&mut b);
+        let generation = b.get_u64_le();
+        let owner = b.get_u64_le();
+        let nritems = b.get_u32_le();
+        let level = b.get_u8();
         Self {
             csum,
-            fsid: read_uuid(buf, 32),
-            bytenr: read_le_u64(buf, 48),
-            flags: HeaderFlags::from_bits_truncate(read_le_u64(buf, 56)),
-            chunk_tree_uuid: read_uuid(buf, 64),
-            generation: read_le_u64(buf, 80),
-            owner: read_le_u64(buf, 88),
-            nritems: read_le_u32(buf, 96),
-            level: buf[100],
+            fsid,
+            bytenr,
+            flags,
+            chunk_tree_uuid,
+            generation,
+            owner,
+            nritems,
+            level,
         }
     }
 
@@ -617,10 +635,12 @@ const KEY_PTR_SIZE: usize = mem::size_of::<raw::btrfs_key_ptr>();
 impl KeyPtr {
     /// Parse a key pointer from `buf` at byte offset `off`.
     fn parse(buf: &[u8], off: usize) -> Self {
+        let key = DiskKey::parse(buf, off);
+        let mut buf = &buf[off + 17..];
         Self {
-            key: DiskKey::parse(buf, off),
-            blockptr: read_le_u64(buf, off + 17),
-            generation: read_le_u64(buf, off + 25),
+            key,
+            blockptr: buf.get_u64_le(),
+            generation: buf.get_u64_le(),
         }
     }
 }
@@ -644,10 +664,12 @@ const ITEM_SIZE: usize = mem::size_of::<raw::btrfs_item>();
 impl Item {
     /// Parse an item descriptor from `buf` at byte offset `off`.
     fn parse(buf: &[u8], off: usize) -> Self {
+        let key = DiskKey::parse(buf, off);
+        let mut buf = &buf[off + 17..];
         Self {
-            key: DiskKey::parse(buf, off),
-            offset: read_le_u32(buf, off + 17),
-            size: read_le_u32(buf, off + 21),
+            key,
+            offset: buf.get_u32_le(),
+            size: buf.get_u32_le(),
         }
     }
 }
