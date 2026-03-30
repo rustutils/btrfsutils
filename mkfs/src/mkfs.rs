@@ -415,32 +415,29 @@ fn build_root_tree(
             }
             let uuid = Uuid::from_bytes(uuid_bytes);
             let uuid_off = mem::offset_of!(raw::btrfs_root_item, uuid);
-            btrfs_disk::util::write_uuid(&mut data, uuid_off, &uuid);
+            data[uuid_off..uuid_off + 16].copy_from_slice(uuid.as_bytes());
 
             // Set inode flags = BTRFS_INODE_ROOT_ITEM_INIT
             let flags_off = mem::offset_of!(raw::btrfs_inode_item, flags);
-            btrfs_disk::util::write_le_u64(
-                &mut data,
-                flags_off,
-                raw::BTRFS_INODE_ROOT_ITEM_INIT as u64,
+            data[flags_off..flags_off + 8].copy_from_slice(
+                &(raw::BTRFS_INODE_ROOT_ITEM_INIT as u64).to_le_bytes(),
             );
 
             // Set inode.size = 3 (C reference convention)
-            btrfs_disk::util::write_le_u64(&mut data, 16, 3);
+            data[16..24].copy_from_slice(&3u64.to_le_bytes());
             // Set inode.nbytes = nodesize
-            btrfs_disk::util::write_le_u64(&mut data, 24, cfg.nodesize as u64);
+            data[24..32].copy_from_slice(&(cfg.nodesize as u64).to_le_bytes());
 
             // Set timestamps: otime and ctime
             let now = cfg.now_secs();
             let ctime_off = mem::offset_of!(raw::btrfs_root_item, ctime);
             let otime_off = mem::offset_of!(raw::btrfs_root_item, otime);
-            let ts_size = mem::size_of::<raw::btrfs_timespec>();
-            btrfs_disk::util::write_le_u64(&mut data, otime_off, now);
-            btrfs_disk::util::write_le_u32(&mut data, otime_off + 8, 0);
-            btrfs_disk::util::write_le_u64(&mut data, ctime_off, now);
-            btrfs_disk::util::write_le_u32(&mut data, ctime_off + 8, 0);
-            // Zero stime and rtime (already zero).
-            let _ = ts_size; // used conceptually for offset calculation
+            data[otime_off..otime_off + 8].copy_from_slice(&now.to_le_bytes());
+            data[otime_off + 8..otime_off + 12]
+                .copy_from_slice(&0u32.to_le_bytes());
+            data[ctime_off..ctime_off + 8].copy_from_slice(&now.to_le_bytes());
+            data[ctime_off + 8..ctime_off + 12]
+                .copy_from_slice(&0u32.to_le_bytes());
         }
 
         leaf.push(key, &data)

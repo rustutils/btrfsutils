@@ -5,12 +5,15 @@
 //! bindgen structs in `btrfs_disk::raw` via `offset_of!` and `size_of`.
 
 use crate::tree::Key;
-use btrfs_disk::{
-    raw,
-    util::{write_le_u16, write_le_u32, write_le_u64, write_uuid},
-};
+use btrfs_disk::raw;
+use bytes::BufMut;
 use std::mem;
 use uuid::Uuid;
+
+/// Write a UUID (16 bytes) to a `BufMut`.
+fn put_uuid(buf: &mut impl BufMut, uuid: &Uuid) {
+    buf.put_slice(uuid.as_bytes());
+}
 
 /// Serialize a ROOT_ITEM.
 ///
@@ -24,31 +27,37 @@ pub fn root_item(
     nodesize: u32,
 ) -> Vec<u8> {
     let size = mem::size_of::<raw::btrfs_root_item>();
-    let mut buf = vec![0u8; size];
     let inode_size = mem::size_of::<raw::btrfs_inode_item>();
+    let mut buf = Vec::with_capacity(size);
 
-    // Embedded inode_item: set generation, nlink=1, mode=040755 (directory)
-    write_le_u64(&mut buf, 0, generation); // inode.generation
-    write_le_u32(&mut buf, 40, 1); // inode.nlink
-    write_le_u32(&mut buf, 52, 0o40755); // inode.mode
+    // Embedded inode_item: generation, then zeros until nlink at 40
+    buf.put_u64_le(generation); // inode.generation
+    buf.put_bytes(0, 32); // transid..block_group (offsets 8..40)
+    buf.put_u32_le(1); // inode.nlink
+    buf.put_bytes(0, 8); // uid, gid (offsets 44..52)
+    buf.put_u32_le(0o40755); // inode.mode
+    buf.put_bytes(0, inode_size - 56); // rdev..otime
 
     // Root-specific fields (after the embedded inode)
-    write_le_u64(&mut buf, inode_size, generation);
-    write_le_u64(&mut buf, inode_size + 8, root_dirid);
-    write_le_u64(&mut buf, inode_size + 16, bytenr);
-    // byte_limit at inode_size + 24: 0
-    write_le_u64(&mut buf, inode_size + 32, nodesize as u64); // bytes_used
-    // last_snapshot, flags: zero
-    write_le_u32(&mut buf, inode_size + 56, 1); // refs = 1
+    buf.put_u64_le(generation); // generation
+    buf.put_u64_le(root_dirid); // root_dirid
+    buf.put_u64_le(bytenr); // bytenr
+    buf.put_u64_le(0); // byte_limit
+    buf.put_u64_le(nodesize as u64); // bytes_used
+    buf.put_u64_le(0); // last_snapshot
+    buf.put_u64_le(0); // flags
+    buf.put_u32_le(1); // refs = 1
 
-    // drop_progress key (17 bytes) at inode_size + 60: zero
-    // drop_level at inode_size + 77: zero
-    // level at offset_of!(btrfs_root_item, level): zero
-
-    // generation_v2 follows level
+    // drop_progress key (17 bytes) + drop_level (1 byte) + level (1 byte)
     let level_off = mem::offset_of!(raw::btrfs_root_item, level);
-    write_le_u64(&mut buf, level_off + 1, generation); // generation_v2
+    let pad_to_level = level_off - buf.len();
+    buf.put_bytes(0, pad_to_level);
+    buf.put_u8(0); // level
 
+    buf.put_u64_le(generation); // generation_v2
+
+    // Pad rest with zeros (uuid, parent_uuid, received_uuid, ctransid, etc.)
+    buf.resize(size, 0);
     buf
 }
 
@@ -85,38 +94,34 @@ pub fn extent_item(
     skinny: bool,
     owner_root: u64,
 ) -> Vec<u8> {
-    let base_size = mem::size_of::<raw::btrfs_extent_item>();
     let tree_block_info_size = if skinny {
         0
     } else {
         mem::size_of::<raw::btrfs_tree_block_info>()
     };
-    // Inline ref: 1 byte type + 8 bytes offset
-    let inline_ref_size = 9;
-    let size = base_size + tree_block_info_size + inline_ref_size;
-    let mut buf = vec![0u8; size];
+    let mut buf = Vec::new();
 
-    write_le_u64(&mut buf, 0, refs);
-    write_le_u64(&mut buf, 8, generation);
-    write_le_u64(&mut buf, 16, raw::BTRFS_EXTENT_FLAG_TREE_BLOCK as u64);
+    buf.put_u64_le(refs);
+    buf.put_u64_le(generation);
+    buf.put_u64_le(raw::BTRFS_EXTENT_FLAG_TREE_BLOCK as u64);
+
+    // Zero-fill tree_block_info (non-skinny only)
+    buf.put_bytes(0, tree_block_info_size);
 
     // Inline TREE_BLOCK_REF
-    let ref_off = base_size + tree_block_info_size;
-    buf[ref_off] = raw::BTRFS_TREE_BLOCK_REF_KEY as u8;
-    write_le_u64(&mut buf, ref_off + 1, owner_root);
+    buf.put_u8(raw::BTRFS_TREE_BLOCK_REF_KEY as u8);
+    buf.put_u64_le(owner_root);
 
     buf
 }
 
 /// Serialize a BLOCK_GROUP_ITEM.
 pub fn block_group_item(used: u64, chunk_objectid: u64, flags: u64) -> Vec<u8> {
-    let size = mem::size_of::<raw::btrfs_block_group_item>();
-    let mut buf = vec![0u8; size];
-
-    write_le_u64(&mut buf, 0, used);
-    write_le_u64(&mut buf, 8, chunk_objectid);
-    write_le_u64(&mut buf, 16, flags);
-
+    let mut buf =
+        Vec::with_capacity(mem::size_of::<raw::btrfs_block_group_item>());
+    buf.put_u64_le(used);
+    buf.put_u64_le(chunk_objectid);
+    buf.put_u64_le(flags);
     buf
 }
 
@@ -130,22 +135,17 @@ pub fn dev_item(
     fsid: &Uuid,
 ) -> Vec<u8> {
     let size = mem::size_of::<raw::btrfs_dev_item>();
-    let mut buf = vec![0u8; size];
+    let mut buf = Vec::with_capacity(size);
 
-    write_le_u64(&mut buf, 0, devid);
-    write_le_u64(&mut buf, 8, total_bytes);
-    write_le_u64(&mut buf, 16, bytes_used);
-    write_le_u32(&mut buf, 24, sector_size); // io_align
-    write_le_u32(&mut buf, 28, sector_size); // io_width
-    write_le_u32(&mut buf, 32, sector_size); // sector_size
-    // dev_type at 36: 0
-    // generation at 44: 0
-    // start_offset at 52: 0
-    // dev_group at 60: 0
-    // seek_speed at 64: 0
-    // bandwidth at 65: 0
-    write_uuid(&mut buf, 66, dev_uuid);
-    write_uuid(&mut buf, 82, fsid);
+    buf.put_u64_le(devid);
+    buf.put_u64_le(total_bytes);
+    buf.put_u64_le(bytes_used);
+    buf.put_u32_le(sector_size); // io_align
+    buf.put_u32_le(sector_size); // io_width
+    buf.put_u32_le(sector_size); // sector_size
+    buf.put_bytes(0, 30); // dev_type(8)+generation(8)+start_offset(8)+dev_group(4)+seek_speed(1)+bandwidth(1)
+    put_uuid(&mut buf, dev_uuid);
+    put_uuid(&mut buf, fsid);
 
     buf
 }
@@ -166,26 +166,22 @@ pub fn chunk_item(
     sector_size: u32,
     stripes: &[StripeInfo],
 ) -> Vec<u8> {
-    let base_size = mem::offset_of!(raw::btrfs_chunk, stripe);
-    let stripe_entry_size = mem::size_of::<raw::btrfs_stripe>();
-    let size = base_size + stripes.len() * stripe_entry_size;
-    let mut buf = vec![0u8; size];
+    let mut buf = Vec::new();
 
-    write_le_u64(&mut buf, 0, length);
-    write_le_u64(&mut buf, 8, owner);
-    write_le_u64(&mut buf, 16, crate::layout::STRIPE_LEN);
-    write_le_u64(&mut buf, 24, chunk_type);
-    write_le_u32(&mut buf, 32, io_align);
-    write_le_u32(&mut buf, 36, io_width);
-    write_le_u32(&mut buf, 40, sector_size);
-    write_le_u16(&mut buf, 44, stripes.len() as u16);
-    write_le_u16(&mut buf, 46, 0); // sub_stripes
+    buf.put_u64_le(length);
+    buf.put_u64_le(owner);
+    buf.put_u64_le(crate::layout::STRIPE_LEN);
+    buf.put_u64_le(chunk_type);
+    buf.put_u32_le(io_align);
+    buf.put_u32_le(io_width);
+    buf.put_u32_le(sector_size);
+    buf.put_u16_le(stripes.len() as u16);
+    buf.put_u16_le(0); // sub_stripes
 
-    for (i, stripe) in stripes.iter().enumerate() {
-        let off = base_size + i * stripe_entry_size;
-        write_le_u64(&mut buf, off, stripe.devid);
-        write_le_u64(&mut buf, off + 8, stripe.offset);
-        write_uuid(&mut buf, off + 16, &stripe.dev_uuid);
+    for stripe in stripes {
+        buf.put_u64_le(stripe.devid);
+        buf.put_u64_le(stripe.offset);
+        put_uuid(&mut buf, &stripe.dev_uuid);
     }
 
     buf
@@ -222,15 +218,12 @@ pub fn dev_extent(
     length: u64,
     chunk_tree_uuid: &Uuid,
 ) -> Vec<u8> {
-    let size = mem::size_of::<raw::btrfs_dev_extent>();
-    let mut buf = vec![0u8; size];
-
-    write_le_u64(&mut buf, 0, chunk_tree);
-    write_le_u64(&mut buf, 8, chunk_objectid);
-    write_le_u64(&mut buf, 16, chunk_offset);
-    write_le_u64(&mut buf, 24, length);
-    write_uuid(&mut buf, 32, chunk_tree_uuid);
-
+    let mut buf = Vec::with_capacity(mem::size_of::<raw::btrfs_dev_extent>());
+    buf.put_u64_le(chunk_tree);
+    buf.put_u64_le(chunk_objectid);
+    buf.put_u64_le(chunk_offset);
+    buf.put_u64_le(length);
+    put_uuid(&mut buf, chunk_tree_uuid);
     buf
 }
 
@@ -242,9 +235,9 @@ pub fn dev_stats_zeroed() -> Vec<u8> {
 
 /// Serialize a FREE_SPACE_INFO.
 pub fn free_space_info(extent_count: u32, flags: u32) -> Vec<u8> {
-    let mut buf = vec![0u8; 8];
-    write_le_u32(&mut buf, 0, extent_count);
-    write_le_u32(&mut buf, 4, flags);
+    let mut buf = Vec::with_capacity(8);
+    buf.put_u32_le(extent_count);
+    buf.put_u32_le(flags);
     buf
 }
 
@@ -254,27 +247,26 @@ pub fn free_space_info(extent_count: u32, flags: u32) -> Vec<u8> {
 /// generation and timestamps.
 pub fn inode_item_dir(generation: u64, nbytes: u64, now_sec: u64) -> Vec<u8> {
     let size = mem::size_of::<raw::btrfs_inode_item>();
-    let mut buf = vec![0u8; size];
+    let mut buf = Vec::with_capacity(size);
 
-    write_le_u64(&mut buf, 0, generation); // generation
-    // transid at 8: 0 (set by kernel on first write)
-    // size at 16: 0 (empty directory)
-    write_le_u64(&mut buf, 24, nbytes); // nbytes
-    // block_group at 32: 0
-    write_le_u32(&mut buf, 40, 1); // nlink
-    // uid at 44: 0
-    // gid at 48: 0
-    write_le_u32(&mut buf, 52, 0o40755); // mode = S_IFDIR | 0755
-    // rdev at 56: 0
-    // flags at 64: 0
-    // sequence at 72: 0
+    buf.put_u64_le(generation); // generation
+    buf.put_u64_le(0); // transid
+    buf.put_u64_le(0); // size
+    buf.put_u64_le(nbytes); // nbytes
+    buf.put_u64_le(0); // block_group
+    buf.put_u32_le(1); // nlink
+    buf.put_u32_le(0); // uid
+    buf.put_u32_le(0); // gid
+    buf.put_u32_le(0o40755); // mode = S_IFDIR | 0755
+    buf.put_u64_le(0); // rdev
+    buf.put_u64_le(0); // flags
+    buf.put_u64_le(0); // sequence
+    buf.put_bytes(0, 32); // reserved[4]
 
     // Timestamps: atime, ctime, mtime, otime
-    let ts_off = mem::offset_of!(raw::btrfs_inode_item, atime);
-    let ts_size = mem::size_of::<raw::btrfs_timespec>();
-    for i in 0..4 {
-        write_le_u64(&mut buf, ts_off + i * ts_size, now_sec);
-        write_le_u32(&mut buf, ts_off + i * ts_size + 8, 0);
+    for _ in 0..4 {
+        buf.put_u64_le(now_sec);
+        buf.put_u32_le(0); // nsec
     }
 
     buf
@@ -285,13 +277,10 @@ pub fn inode_item_dir(generation: u64, nbytes: u64, now_sec: u64) -> Vec<u8> {
 /// Contains the directory entry index and the name of the entry
 /// pointing to this inode.
 pub fn inode_ref(index: u64, name: &[u8]) -> Vec<u8> {
-    let size = 8 + 2 + name.len(); // index(8) + name_len(2) + name
-    let mut buf = vec![0u8; size];
-
-    write_le_u64(&mut buf, 0, index);
-    write_le_u16(&mut buf, 8, name.len() as u16);
-    buf[10..10 + name.len()].copy_from_slice(name);
-
+    let mut buf = Vec::with_capacity(8 + 2 + name.len());
+    buf.put_u64_le(index);
+    buf.put_u16_le(name.len() as u16);
+    buf.put_slice(name);
     buf
 }
 
