@@ -18,10 +18,10 @@ build:
     - echo 'experimental-features = nix-command flakes' >> /etc/nix/nix.conf
   script:
     - nix build . -L
-    - cp -r $(readlink result) public
+    - cp -r $(readlink result) build
   artifacts:
     paths:
-      - public/
+      - build/
     expire_in: 1 week
   only:
     - master
@@ -33,6 +33,7 @@ pages:
     - apk add mdbook
     - mdbook build
     - mv target/book public
+    - mv build public/build
   artifacts:
     paths:
       - public
