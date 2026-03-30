@@ -259,7 +259,7 @@ pub enum StreamCommand {
     /// v2: preallocate space or punch a hole.
     Fallocate {
         path: String,
-        /// `FALLOC_FL_*` flags (0=allocate, 1=KEEP_SIZE, 3=PUNCH_HOLE|KEEP_SIZE).
+        /// `FALLOC_FL_*` flags (0=allocate, `1=KEEP_SIZE`, `3=PUNCH_HOLE|KEEP_SIZE`).
         mode: u32,
         offset: u64,
         len: u64,
