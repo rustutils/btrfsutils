@@ -9,7 +9,6 @@ use crate::{
         BlockLayout, ChunkDevice, ChunkLayout, SYSTEM_GROUP_OFFSET,
         SYSTEM_GROUP_SIZE, StripeInfo, TreeId,
     },
-    superblock::SuperblockBuilder,
     tree::{Key, LeafBuilder, LeafHeader},
     write,
 };
@@ -923,16 +922,6 @@ fn build_superblock(
     let mut sys_chunk_array = items::disk_key(&chunk_key);
     sys_chunk_array.extend_from_slice(&chunk_data);
 
-    // Build the dev_item for this device's superblock.
-    let dev_item_bytes = items::dev_item(
-        dev.devid,
-        dev.total_bytes,
-        chunks.dev_bytes_used_for(dev.devid),
-        cfg.sectorsize,
-        &dev.dev_uuid,
-        &cfg.fs_uuid,
-    );
-
     // cache_generation: 0 if free-space-tree is enabled, u64::MAX otherwise.
     let cache_generation = if cfg.has_free_space_tree() {
         0
@@ -940,36 +929,68 @@ fn build_superblock(
         u64::MAX
     };
 
-    let mut sb = SuperblockBuilder::new();
-    sb.set_bytenr(write::SUPER_INFO_OFFSET)
-        .set_magic()
-        .set_fsid(&cfg.fs_uuid)
-        .set_generation(generation)
-        .set_root(layout.block_addr(TreeId::Root))
-        .set_chunk_root(layout.block_addr(TreeId::Chunk))
-        .set_chunk_root_generation(generation)
-        .set_total_bytes(cfg.total_bytes())
-        .set_bytes_used(
-            layout.system_used()
-                + layout.metadata_used(cfg.has_block_group_tree()),
-        )
-        .set_root_dir_objectid(raw::BTRFS_FIRST_FREE_OBJECTID as u64)
-        .set_num_devices(cfg.num_devices())
-        .set_sectorsize(cfg.sectorsize)
-        .set_nodesize(cfg.nodesize)
-        .set_stripesize(cfg.sectorsize)
-        .set_incompat_flags(cfg.incompat_flags)
-        .set_compat_ro_flags(cfg.compat_ro_flags)
-        .set_csum_type(cfg.csum_type.to_raw())
-        .set_cache_generation(cache_generation)
-        .set_dev_item(&dev_item_bytes)
-        .set_sys_chunk_array(&sys_chunk_array);
+    let mut sys_chunk_buf = [0u8; 2048];
+    sys_chunk_buf[..sys_chunk_array.len()].copy_from_slice(&sys_chunk_array);
 
-    if let Some(label) = &cfg.label {
-        sb.set_label(label);
-    }
+    let sb = btrfs_disk::superblock::Superblock {
+        csum: [0; 32],
+        fsid: cfg.fs_uuid,
+        bytenr: write::SUPER_INFO_OFFSET,
+        flags: 0,
+        magic: raw::BTRFS_MAGIC,
+        generation,
+        root: layout.block_addr(TreeId::Root),
+        chunk_root: layout.block_addr(TreeId::Chunk),
+        log_root: 0,
+        log_root_transid: 0,
+        total_bytes: cfg.total_bytes(),
+        bytes_used: layout.system_used()
+            + layout.metadata_used(cfg.has_block_group_tree()),
+        root_dir_objectid: raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+        num_devices: cfg.num_devices(),
+        sectorsize: cfg.sectorsize,
+        nodesize: cfg.nodesize,
+        leafsize: cfg.nodesize,
+        stripesize: cfg.sectorsize,
+        sys_chunk_array_size: sys_chunk_array.len() as u32,
+        chunk_root_generation: generation,
+        compat_flags: 0,
+        compat_ro_flags: cfg.compat_ro_flags,
+        incompat_flags: cfg.incompat_flags,
+        csum_type: btrfs_disk::superblock::ChecksumType::from_raw(
+            cfg.csum_type.to_raw(),
+        ),
+        root_level: 0,
+        chunk_root_level: 0,
+        log_root_level: 0,
+        dev_item: btrfs_disk::items::DeviceItem {
+            devid: dev.devid,
+            total_bytes: dev.total_bytes,
+            bytes_used: chunks.dev_bytes_used_for(dev.devid),
+            io_align: cfg.sectorsize,
+            io_width: cfg.sectorsize,
+            sector_size: cfg.sectorsize,
+            dev_type: 0,
+            generation: 0,
+            start_offset: 0,
+            dev_group: 0,
+            seek_speed: 0,
+            bandwidth: 0,
+            uuid: dev.dev_uuid,
+            fsid: cfg.fs_uuid,
+        },
+        label: cfg.label.clone().unwrap_or_default(),
+        cache_generation,
+        uuid_tree_generation: 0,
+        metadata_uuid: Uuid::nil(),
+        nr_global_roots: 0,
+        backup_roots: std::array::from_fn(|_| {
+            btrfs_disk::superblock::BackupRoot::default()
+        }),
+        sys_chunk_array: sys_chunk_buf,
+    };
 
-    let mut buf = sb.finish();
+    let mut buf = sb.to_bytes();
     write::fill_csum(&mut buf, cfg.csum_type);
     Ok(buf.to_vec())
 }

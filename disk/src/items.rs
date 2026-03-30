@@ -10,7 +10,7 @@ use crate::{
     tree::{DiskKey, ObjectId},
     util::raw_crc32c,
 };
-use bytes::Buf;
+use bytes::{Buf, BufMut};
 use std::{fmt, mem};
 use uuid::Uuid;
 
@@ -1101,6 +1101,24 @@ pub struct DeviceItem {
 }
 
 impl DeviceItem {
+    /// Serialize the device item to a `BufMut`.
+    pub fn write_bytes(&self, buf: &mut impl BufMut) {
+        buf.put_u64_le(self.devid);
+        buf.put_u64_le(self.total_bytes);
+        buf.put_u64_le(self.bytes_used);
+        buf.put_u32_le(self.io_align);
+        buf.put_u32_le(self.io_width);
+        buf.put_u32_le(self.sector_size);
+        buf.put_u64_le(self.dev_type);
+        buf.put_u64_le(self.generation);
+        buf.put_u64_le(self.start_offset);
+        buf.put_u32_le(self.dev_group);
+        buf.put_u8(self.seek_speed);
+        buf.put_u8(self.bandwidth);
+        buf.put_slice(self.uuid.as_bytes());
+        buf.put_slice(self.fsid.as_bytes());
+    }
+
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_dev_item>() {
             return None;

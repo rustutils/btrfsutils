@@ -22,9 +22,9 @@
 //!    optionally block-group tree). Each tree is populated with the items
 //!    serialized by the functions in [`items`].
 //!
-//! 3. **Build superblock** ([`superblock::SuperblockBuilder`]): construct the
-//!    4096-byte superblock with root pointers, device info, feature flags, and
-//!    the `sys_chunk_array` bootstrap.
+//! 3. **Build superblock** ([`btrfs_disk::superblock::Superblock`]): construct
+//!    the superblock with root pointers, device info, feature flags, and the
+//!    `sys_chunk_array` bootstrap, then serialize via `to_bytes()`.
 //!
 //! 4. **Write to disk** ([`write::pwrite_all`]): write each tree block to its
 //!    physical location(s) — DUP/RAID1 blocks are written to multiple stripes.
@@ -44,6 +44,5 @@ pub mod args;
 pub mod items;
 pub mod layout;
 pub mod mkfs;
-pub mod superblock;
 pub mod tree;
 pub mod write;

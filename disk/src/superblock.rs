@@ -6,6 +6,7 @@
 //! of the filesystem.
 
 use crate::{items::DeviceItem, raw, util::raw_crc32c};
+use bytes::BufMut;
 use std::{
     fmt,
     io::{self, Read, Seek, SeekFrom, Write},
@@ -52,7 +53,9 @@ pub enum ChecksumType {
 }
 
 impl ChecksumType {
-    fn from_raw(val: u16) -> ChecksumType {
+    /// Parse from the raw on-disk u16 value.
+    #[must_use]
+    pub fn from_raw(val: u16) -> ChecksumType {
         match u32::from(val) {
             raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 => ChecksumType::Crc32,
             raw::btrfs_csum_type_BTRFS_CSUM_TYPE_XXHASH => ChecksumType::Xxhash,
@@ -76,6 +79,28 @@ impl ChecksumType {
     }
 }
 
+impl ChecksumType {
+    /// Convert to the raw u16 value for on-disk storage.
+    #[must_use]
+    pub fn to_raw(self) -> u16 {
+        match self {
+            ChecksumType::Crc32 => {
+                raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 as u16
+            }
+            ChecksumType::Xxhash => {
+                raw::btrfs_csum_type_BTRFS_CSUM_TYPE_XXHASH as u16
+            }
+            ChecksumType::Sha256 => {
+                raw::btrfs_csum_type_BTRFS_CSUM_TYPE_SHA256 as u16
+            }
+            ChecksumType::Blake2 => {
+                raw::btrfs_csum_type_BTRFS_CSUM_TYPE_BLAKE2 as u16
+            }
+            ChecksumType::Unknown(v) => v,
+        }
+    }
+}
+
 impl fmt::Display for ChecksumType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -89,7 +114,7 @@ impl fmt::Display for ChecksumType {
 }
 
 /// A single backup root entry.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BackupRoot {
     pub tree_root: u64,
     pub tree_root_gen: u64,
@@ -166,6 +191,109 @@ impl Superblock {
             & u64::from(raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID)
             != 0
     }
+
+    /// Serialize the superblock to a 4096-byte buffer.
+    ///
+    /// The checksum field is written as-is from `self.csum`; call
+    /// `csum_superblock` on the result to recompute it.
+    pub fn to_bytes(&self) -> [u8; SUPER_INFO_SIZE] {
+        type S = raw::btrfs_super_block;
+        let mut v = Vec::with_capacity(SUPER_INFO_SIZE);
+
+        v.put_slice(&self.csum); // 32 bytes
+        debug_assert_eq!(v.len(), mem::offset_of!(S, fsid));
+        v.put_slice(self.fsid.as_bytes());
+        v.put_u64_le(self.bytenr);
+        v.put_u64_le(self.flags);
+        v.put_u64_le(self.magic);
+        v.put_u64_le(self.generation);
+        v.put_u64_le(self.root);
+        v.put_u64_le(self.chunk_root);
+        v.put_u64_le(self.log_root);
+        v.put_u64_le(self.log_root_transid);
+        v.put_u64_le(self.total_bytes);
+        v.put_u64_le(self.bytes_used);
+        v.put_u64_le(self.root_dir_objectid);
+        v.put_u64_le(self.num_devices);
+        debug_assert_eq!(v.len(), mem::offset_of!(S, sectorsize));
+        v.put_u32_le(self.sectorsize);
+        v.put_u32_le(self.nodesize);
+        v.put_u32_le(self.leafsize);
+        v.put_u32_le(self.stripesize);
+        v.put_u32_le(self.sys_chunk_array_size);
+        v.put_u64_le(self.chunk_root_generation);
+        v.put_u64_le(self.compat_flags);
+        v.put_u64_le(self.compat_ro_flags);
+        v.put_u64_le(self.incompat_flags);
+        v.put_u16_le(self.csum_type.to_raw());
+        v.put_u8(self.root_level);
+        v.put_u8(self.chunk_root_level);
+        v.put_u8(self.log_root_level);
+        debug_assert_eq!(v.len(), mem::offset_of!(S, dev_item));
+        self.dev_item.write_bytes(&mut v);
+        debug_assert_eq!(v.len(), mem::offset_of!(S, label));
+        v.put_slice(&label_to_bytes(&self.label));
+        debug_assert_eq!(v.len(), mem::offset_of!(S, cache_generation));
+        v.put_u64_le(self.cache_generation);
+        v.put_u64_le(self.uuid_tree_generation);
+        v.put_slice(self.metadata_uuid.as_bytes());
+        debug_assert_eq!(v.len(), mem::offset_of!(S, nr_global_roots));
+        v.put_u64_le(self.nr_global_roots);
+        // Zero-fill through remap_root, remap_root_generation,
+        // remap_root_level, and reserved[] up to sys_chunk_array.
+        let sys_chunk_off = mem::offset_of!(S, sys_chunk_array);
+        v.put_bytes(0, sys_chunk_off - v.len());
+        debug_assert_eq!(v.len(), sys_chunk_off);
+        v.put_slice(&self.sys_chunk_array);
+        // Backup roots come after sys_chunk_array.
+        debug_assert_eq!(v.len(), mem::offset_of!(S, super_roots));
+        for root in &self.backup_roots {
+            root.write_bytes(&mut v);
+        }
+        // Pad with zeros to SUPER_INFO_SIZE (padding field).
+        v.resize(SUPER_INFO_SIZE, 0);
+        v.try_into().unwrap()
+    }
+}
+
+impl BackupRoot {
+    /// Serialize the backup root to a `BufMut`.
+    fn write_bytes(&self, buf: &mut impl BufMut) {
+        buf.put_u64_le(self.tree_root);
+        buf.put_u64_le(self.tree_root_gen);
+        buf.put_u64_le(self.chunk_root);
+        buf.put_u64_le(self.chunk_root_gen);
+        buf.put_u64_le(self.extent_root);
+        buf.put_u64_le(self.extent_root_gen);
+        buf.put_u64_le(self.fs_root);
+        buf.put_u64_le(self.fs_root_gen);
+        buf.put_u64_le(self.dev_root);
+        buf.put_u64_le(self.dev_root_gen);
+        buf.put_u64_le(self.csum_root);
+        buf.put_u64_le(self.csum_root_gen);
+        buf.put_u64_le(self.total_bytes);
+        buf.put_u64_le(self.bytes_used);
+        buf.put_u64_le(self.num_devices);
+        // unused_64[4] — 32 reserved bytes
+        buf.put_bytes(0, 32);
+        buf.put_u8(self.tree_root_level);
+        buf.put_u8(self.chunk_root_level);
+        buf.put_u8(self.extent_root_level);
+        buf.put_u8(self.fs_root_level);
+        buf.put_u8(self.dev_root_level);
+        buf.put_u8(self.csum_root_level);
+        // 10 unused bytes to fill btrfs_root_backup (168 bytes total)
+        buf.put_bytes(0, 10);
+    }
+}
+
+/// Convert a label string to the 256-byte on-disk format (NUL-terminated).
+fn label_to_bytes(label: &str) -> [u8; 256] {
+    let mut out = [0u8; 256];
+    let bytes = label.as_bytes();
+    let len = bytes.len().min(255);
+    out[..len].copy_from_slice(&bytes[..len]);
+    out
 }
 
 /// Read the raw on-disk bytes into a packed bindgen struct.
@@ -684,5 +812,110 @@ mod tests {
             .try_into()
             .unwrap();
         assert!(superblock_is_valid(&mirror1_buf));
+    }
+
+    #[test]
+    fn to_bytes_roundtrip() {
+        // Build a Superblock, serialize, then parse back and compare.
+        let fsid =
+            Uuid::parse_str("deadbeef-dead-beef-dead-beefdeadbeef").unwrap();
+        let dev_uuid =
+            Uuid::parse_str("cafebabe-cafe-babe-cafe-babecafebabe").unwrap();
+
+        let sb = Superblock {
+            csum: [0; 32],
+            fsid,
+            bytenr: SUPER_INFO_OFFSET,
+            flags: 0,
+            magic: raw::BTRFS_MAGIC,
+            generation: 1,
+            root: 0x10_0000,
+            chunk_root: 0x10_8000,
+            log_root: 0,
+            log_root_transid: 0,
+            total_bytes: 512 * 1024 * 1024,
+            bytes_used: 7 * 16384,
+            root_dir_objectid: 6,
+            num_devices: 1,
+            sectorsize: 4096,
+            nodesize: 16384,
+            leafsize: 16384,
+            stripesize: 4096,
+            sys_chunk_array_size: 0,
+            chunk_root_generation: 1,
+            compat_flags: 0,
+            compat_ro_flags: 0,
+            incompat_flags: 0,
+            csum_type: ChecksumType::Crc32,
+            root_level: 0,
+            chunk_root_level: 0,
+            log_root_level: 0,
+            dev_item: DeviceItem {
+                devid: 1,
+                total_bytes: 512 * 1024 * 1024,
+                bytes_used: 4 * 1024 * 1024,
+                io_align: 4096,
+                io_width: 4096,
+                sector_size: 4096,
+                dev_type: 0,
+                generation: 0,
+                start_offset: 0,
+                dev_group: 0,
+                seek_speed: 0,
+                bandwidth: 0,
+                uuid: dev_uuid,
+                fsid,
+            },
+            label: "test-label".to_string(),
+            cache_generation: 0,
+            uuid_tree_generation: 0,
+            metadata_uuid: Uuid::nil(),
+            nr_global_roots: 0,
+            backup_roots: std::array::from_fn(|_| BackupRoot {
+                tree_root: 0,
+                tree_root_gen: 0,
+                chunk_root: 0,
+                chunk_root_gen: 0,
+                extent_root: 0,
+                extent_root_gen: 0,
+                fs_root: 0,
+                fs_root_gen: 0,
+                dev_root: 0,
+                dev_root_gen: 0,
+                csum_root: 0,
+                csum_root_gen: 0,
+                total_bytes: 0,
+                bytes_used: 0,
+                num_devices: 0,
+                tree_root_level: 0,
+                chunk_root_level: 0,
+                extent_root_level: 0,
+                fs_root_level: 0,
+                dev_root_level: 0,
+                csum_root_level: 0,
+            }),
+            sys_chunk_array: [0; 2048],
+        };
+
+        let mut bytes = sb.to_bytes();
+        csum_superblock(&mut bytes).unwrap();
+
+        // Parse back via read_superblock.
+        let mut image = vec![0u8; SUPER_INFO_OFFSET as usize + SUPER_INFO_SIZE];
+        image[SUPER_INFO_OFFSET as usize..].copy_from_slice(&bytes);
+        let parsed = read_superblock(&mut Cursor::new(&image[..]), 0).unwrap();
+
+        assert!(parsed.magic_is_valid());
+        assert_eq!(parsed.fsid, fsid);
+        assert_eq!(parsed.generation, 1);
+        assert_eq!(parsed.root, 0x10_0000);
+        assert_eq!(parsed.chunk_root, 0x10_8000);
+        assert_eq!(parsed.total_bytes, 512 * 1024 * 1024);
+        assert_eq!(parsed.nodesize, 16384);
+        assert_eq!(parsed.sectorsize, 4096);
+        assert_eq!(parsed.label, "test-label");
+        assert_eq!(parsed.num_devices, 1);
+        assert_eq!(parsed.dev_item.devid, 1);
+        assert_eq!(parsed.dev_item.uuid, dev_uuid);
     }
 }
