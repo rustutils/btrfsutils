@@ -407,6 +407,53 @@ fn subvolume_create_over_file_fails() {
     assert_ne!(code, 0, "create over existing file should fail");
 }
 
+// ── subvolume create with mixed valid/invalid paths ─────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_create_mixed_paths() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // One invalid path (parent doesn't exist) and two valid paths.
+    // The command should fail overall, but the valid subvolumes should
+    // still be created.
+    let invalid = format!("{mp}/no-such-dir/sub0");
+    let valid1 = format!("{mp}/sub1");
+    let valid2 = format!("{mp}/sub2");
+
+    let (_, _, code) = btrfs(&["subvolume", "create", &invalid, &valid1, &valid2]);
+    assert_ne!(code, 0, "should fail due to invalid path");
+
+    // The valid subvolumes should exist despite the overall failure.
+    assert!(Path::new(&valid1).is_dir(), "sub1 should have been created");
+    assert!(Path::new(&valid2).is_dir(), "sub2 should have been created");
+    assert!(!Path::new(&invalid).exists(), "invalid path should not exist");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_create_parents_mixed() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // With -p, all paths should succeed (parents created as needed).
+    let deep1 = format!("{mp}/dir1/deep/sub1");
+    let deep2 = format!("{mp}/dir2/sub2");
+    let flat = format!("{mp}/sub3");
+
+    btrfs_ok(&["subvolume", "create", "-p", &deep1, &deep2, &flat]);
+
+    assert!(Path::new(&deep1).is_dir(), "deep1 should exist");
+    assert!(Path::new(&deep2).is_dir(), "deep2 should exist");
+    assert!(Path::new(&flat).is_dir(), "flat should exist");
+
+    let out = btrfs_ok(&["subvolume", "list", mp]);
+    assert!(out.contains("dir1/deep/sub1"), "expected deep1 in list:\n{out}");
+    assert!(out.contains("dir2/sub2"), "expected deep2 in list:\n{out}");
+    assert!(out.contains("sub3"), "expected flat in list:\n{out}");
+}
+
 // ── dry-run ─────────────────────────────────────────────────────────
 
 // TODO: enable when --dry-run is implemented for subvolume delete.
@@ -863,6 +910,55 @@ fn send_receive_v2_compressed() {
     verify_test_data(Path::new(&received), "pattern.bin", 64 * 1024);
 }
 
+// ── send with parent and multiple subvolumes ────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_parent_multi_subvol() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+    let stream = format!("{}/multi.bin", _td.path().to_str().unwrap());
+
+    // Create a parent subvolume with data that changes between snapshots.
+    let parent = format!("{mp}/parent");
+    btrfs_ok(&["subvolume", "create", &parent]);
+    write_test_data(Path::new(&parent), "base.bin", 8192);
+
+    let snap1 = format!("{mp}/snap1");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &parent, &snap1]);
+
+    write_test_data(Path::new(&parent), "added1.bin", 4096);
+    let snap2 = format!("{mp}/snap2");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &parent, &snap2]);
+
+    write_test_data(Path::new(&parent), "added2.bin", 4096);
+    let snap3 = format!("{mp}/snap3");
+    btrfs_ok(&["subvolume", "snapshot", "-r", &parent, &snap3]);
+
+    // Send snap2 and snap3 incrementally using snap1 as the parent.
+    btrfs_ok(&[
+        "send", "-f", &stream, "-p", &snap1, &snap2, &snap3,
+    ]);
+
+    // Receive on a second mount.
+    let (_td2, mnt2) = single_mount();
+    let mp2 = mnt2.path().to_str().unwrap();
+
+    // Must receive the parent snapshot first.
+    let base_stream = format!("{}/base.bin", _td.path().to_str().unwrap());
+    btrfs_ok(&["send", "-f", &base_stream, &snap1]);
+    btrfs_ok(&["receive", "-f", &base_stream, mp2]);
+
+    // Then receive the incremental stream with both snap2 and snap3.
+    btrfs_ok(&["receive", "-f", &stream, mp2]);
+
+    // Verify received subvolumes exist and have the right content.
+    verify_test_data(Path::new(&format!("{mp2}/snap2")), "base.bin", 8192);
+    verify_test_data(Path::new(&format!("{mp2}/snap2")), "added1.bin", 4096);
+    verify_test_data(Path::new(&format!("{mp2}/snap3")), "base.bin", 8192);
+    verify_test_data(Path::new(&format!("{mp2}/snap3")), "added2.bin", 4096);
+}
+
 // ── scrub ────────────────────────────────────────────────────────────
 
 #[test]
@@ -1053,6 +1149,37 @@ fn balance_pause_not_running() {
     );
 }
 
+// ── balance without filters ──────────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn balance_without_filters_warns() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // Balance start without --full-balance and without filters should
+    // warn the user about a full balance. On a small filesystem it
+    // completes immediately, but the warning should still appear.
+    let (stdout, stderr, _code) = btrfs(&["balance", "start", mp]);
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        combined.contains("Full balance")
+            || combined.contains("full balance")
+            || combined.contains("without filters"),
+        "expected full-balance warning:\n{combined}"
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn balance_full_balance_flag() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // --full-balance should succeed without a warning.
+    btrfs_ok(&["balance", "start", "--full-balance", mp]);
+}
+
 // ── inspect-internal ─────────────────────────────────────────────────
 
 #[test]
@@ -1193,6 +1320,56 @@ fn qgroup_limit() {
 
     // Remove the limit.
     btrfs_ok(&["qgroup", "limit", "none", "0/5", mp]);
+
+    btrfs_ok(&["quota", "disable", mp]);
+}
+
+// ── subvolume show with qgroup limits ────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_show_qgroup_limit() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // Create a subvolume before quotas are enabled.
+    let subv_no_quota = format!("{mp}/no_quota");
+    btrfs_ok(&["subvolume", "create", &subv_no_quota]);
+
+    // subvolume show should work without quotas.
+    btrfs_ok(&["subvolume", "show", &subv_no_quota]);
+
+    // Enable quotas.
+    btrfs_ok(&["quota", "enable", mp]);
+
+    // Create a subvolume with quotas active (auto-creates qgroup).
+    let subv_with_limit = format!("{mp}/with_limit");
+    btrfs_ok(&["subvolume", "create", &subv_with_limit]);
+
+    // Get the rootid and set an exclusive limit on it.
+    let rootid_out =
+        btrfs_ok(&["inspect-internal", "rootid", &subv_with_limit]);
+    let rootid = rootid_out.trim();
+    btrfs_ok(&[
+        "qgroup",
+        "limit",
+        "-e",
+        "1G",
+        &format!("0/{rootid}"),
+        mp,
+    ]);
+
+    // subvolume show should succeed for both subvolumes even with
+    // quotas and limits active.
+    btrfs_ok(&["subvolume", "show", &subv_no_quota]);
+    btrfs_ok(&["subvolume", "show", &subv_with_limit]);
+
+    // Verify the qgroup limit is visible via qgroup show.
+    let out = btrfs_ok(&["qgroup", "show", "-re", mp]);
+    assert!(
+        out.contains(&format!("0/{rootid}")),
+        "expected qgroup entry for subvol:\n{out}"
+    );
 
     btrfs_ok(&["quota", "disable", mp]);
 }
