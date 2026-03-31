@@ -12,7 +12,7 @@ and `dump-tree`. The `btrfs-mkfs` crate uses the serialization side
 (raw constants, write helpers, struct sizes/offsets) to construct new
 filesystems from scratch.
 
-Part of the [btrfs-progrs](https://github.com/rustutils/btrfs-progrs) project.
+Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## What's implemented
 

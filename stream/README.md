@@ -7,7 +7,7 @@ parser works on any platform. Enable the `receive` feature to get
 `ReceiveContext`, which applies a stream to a mounted btrfs filesystem on
 Linux.
 
-Part of the [btrfs-progrs](https://github.com/rustutils/btrfs-progrs) project.
+Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## Usage
 

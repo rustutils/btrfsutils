@@ -1,13 +1,13 @@
-name: btrfs-progrs
+name: btrfsutils
 arch: amd64
 platform: linux
 version: ${VERSION}
 section: admin
 priority: optional
-maintainer: btrfs-progrs contributors
+maintainer: btrfsutils contributors
 description: Rust reimplementation of the btrfs command-line tools
-vendor: btrfs-progrs
-homepage: https://github.com/rustutils/btrfs-progrs
+vendor: btrfsutils
+homepage: https://github.com/rustutils/btrfsutils
 license: GPL-2.0-only
 
 depends:

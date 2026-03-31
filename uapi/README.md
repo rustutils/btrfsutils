@@ -9,7 +9,7 @@ with no `unsafe` in the public API.
 
 Requires Linux. Most operations require `CAP_SYS_ADMIN`.
 
-Part of the [btrfs-progrs](https://github.com/rustutils/btrfs-progrs) project.
+Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## What's wrapped
 

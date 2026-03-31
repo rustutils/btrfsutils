@@ -1,6 +1,6 @@
 # Commands
 
-btrfs-progrs implements the same command structure as the upstream `btrfs` tool.
+btrfsutils implements the same command structure as the upstream `btrfs` tool.
 Commands are organized into groups:
 
 ## btrfs filesystem

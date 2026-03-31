@@ -1,6 +1,6 @@
 # How Commands Work
 
-Every command in btrfs-progrs is implemented across two layers: a safe kernel
+Every command in btrfsutils is implemented across two layers: a safe kernel
 interface wrapper in `btrfs-uapi`, and a CLI command in `btrfs-cli`. This page
 walks through a concrete example — `btrfs filesystem label` — to show how the
 two layers fit together and why the split exists.

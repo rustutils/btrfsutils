@@ -1,5 +1,5 @@
 {
-  description = "btrfs-progrs — Rust reimplementation of the btrfs CLI tool";
+  description = "btrfsutils — Rust reimplementation of the btrfs CLI tool";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";

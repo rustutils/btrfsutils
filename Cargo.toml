@@ -10,8 +10,8 @@ name = "btrfs"
 version = "0.6.0"
 edition = "2024"
 license = "GPL-2.0-only"
-repository = "https://github.com/rustutils/btrfs-progrs"
-homepage = "https://github.com/rustutils/btrfs-progrs"
+repository = "https://github.com/rustutils/btrfsutils"
+homepage = "https://github.com/rustutils/btrfsutils"
 
 [workspace.dependencies]
 libc = "0.2"

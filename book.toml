@@ -1,5 +1,5 @@
 [book]
-title = "btrfs-progrs"
+title = "btrfsutils"
 authors = ["Patrick Elsen"]
 language = "en"
 src = "docs"

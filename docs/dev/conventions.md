@@ -1,7 +1,7 @@
 # Conventions
 
 The goal is to write idiomatic Rust code that is consistent across the whole
-codebase. btrfs-progrs spans several crates with different roles (kernel
+codebase. btrfsutils spans several crates with different roles (kernel
 interface wrappers, on-disk parsers, CLI tools) and each has its own patterns.
 Following these conventions makes it easier to navigate unfamiliar code and to
 understand what a function or type is responsible for at a glance.
