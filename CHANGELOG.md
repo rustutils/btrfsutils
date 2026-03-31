@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `btrfs-tune -m` / `-M UUID`: change filesystem UUID via the metadata_uuid
+  mechanism (superblock-only, no tree rewrite needed)
 
 ## [0.6.0] — 2026-03-30
 

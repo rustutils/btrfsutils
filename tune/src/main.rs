@@ -7,6 +7,7 @@ use std::{
     os::unix::fs::FileTypeExt,
     path::{Path, PathBuf},
 };
+use uuid::Uuid;
 
 /// Tune various btrfs filesystem parameters on an unmounted device.
 ///
@@ -29,8 +30,20 @@ struct Args {
     no_holes: bool,
 
     /// Set (1) or clear (0) the seeding flag
-    #[arg(short = 'S', value_parser = parse_seeding_value)]
+    #[arg(short = 'S', value_parser = parse_seeding_value,
+        conflicts_with_all = ["metadata_uuid", "set_metadata_uuid"])]
     seeding: Option<bool>,
+
+    /// Change fsid to a random UUID via the metadata_uuid mechanism
+    #[arg(short = 'm', conflicts_with_all = ["extref", "skinny_metadata",
+        "no_holes", "seeding", "set_metadata_uuid"])]
+    metadata_uuid: bool,
+
+    /// Change fsid to the given UUID via the metadata_uuid mechanism
+    #[arg(short = 'M', value_name = "UUID",
+        conflicts_with_all = ["extref", "skinny_metadata", "no_holes",
+        "seeding", "metadata_uuid"])]
+    set_metadata_uuid: Option<Uuid>,
 
     /// Allow dangerous operations without confirmation
     #[arg(short = 'f', long)]
@@ -74,8 +87,10 @@ fn main() -> Result<()> {
 
     let has_legacy = args.extref || args.skinny_metadata || args.no_holes;
     let has_seeding = args.seeding.is_some();
+    let has_metadata_uuid =
+        args.metadata_uuid || args.set_metadata_uuid.is_some();
 
-    if !has_legacy && !has_seeding {
+    if !has_legacy && !has_seeding && !has_metadata_uuid {
         bail!("at least one option must be specified (see --help)");
     }
 
@@ -119,6 +134,13 @@ fn main() -> Result<()> {
 
     if let Some(set) = args.seeding {
         btrfs_tune::tune::update_seeding_flag(&mut file, set, args.force)?;
+    }
+
+    if let Some(uuid) = args.set_metadata_uuid {
+        btrfs_tune::tune::set_metadata_uuid(&mut file, uuid)?;
+    } else if args.metadata_uuid {
+        let uuid = Uuid::new_v4();
+        btrfs_tune::tune::set_metadata_uuid(&mut file, uuid)?;
     }
 
     Ok(())

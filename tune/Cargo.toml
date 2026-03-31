@@ -21,3 +21,4 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 clap = { workspace = true }
 btrfs-disk = { workspace = true }
+uuid = { workspace = true }

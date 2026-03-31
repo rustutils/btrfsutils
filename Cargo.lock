@@ -219,6 +219,7 @@ dependencies = [
  "anyhow",
  "btrfs-disk",
  "clap",
+ "uuid",
 ]
 
 [[package]]
