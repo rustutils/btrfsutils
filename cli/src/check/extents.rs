@@ -53,7 +53,6 @@ pub fn check_extent_tree<R: Read + Seek>(
         results.report(CheckError::ReadError { logical, detail });
     }
 
-    results.total_extent_tree_bytes = state.extent_tree_bytes;
     results.data_bytes_allocated = state.data_bytes_allocated;
     results.data_bytes_referenced = state.data_bytes_referenced;
 }
@@ -73,7 +72,6 @@ struct ExtentCheckState {
     /// End of the previous extent (for overlap detection).
     prev_end: u64,
     /// Accumulated stats.
-    extent_tree_bytes: u64,
     data_bytes_allocated: u64,
     data_bytes_referenced: u64,
 }

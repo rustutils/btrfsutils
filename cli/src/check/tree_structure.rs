@@ -8,6 +8,27 @@ use btrfs_disk::{
 use std::io::{Read, Seek};
 use uuid::Uuid;
 
+/// Classify a tree by its objectid for byte attribution.
+fn tree_kind(tree_id: u64) -> TreeKind {
+    use btrfs_disk::raw;
+    if tree_id == raw::BTRFS_EXTENT_TREE_OBJECTID as u64 {
+        TreeKind::Extent
+    } else if tree_id == raw::BTRFS_FS_TREE_OBJECTID as u64
+        || tree_id >= raw::BTRFS_FIRST_FREE_OBJECTID as u64
+    {
+        TreeKind::Fs
+    } else {
+        TreeKind::Other
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TreeKind {
+    Extent,
+    Fs,
+    Other,
+}
+
 /// Check tree block structure for all trees in the filesystem.
 ///
 /// Walks every tree discovered in `tree_roots` plus the root and chunk trees.
@@ -37,15 +58,23 @@ pub fn check_all_trees<R: Read + Seek>(
     };
 
     // Check root tree.
-    check_tree(reader, "root tree", sb.root, &ctx, results);
+    check_tree(reader, "root tree", sb.root, TreeKind::Other, &ctx, results);
 
     // Check chunk tree.
-    check_tree(reader, "chunk tree", sb.chunk_root, &ctx, results);
+    check_tree(
+        reader,
+        "chunk tree",
+        sb.chunk_root,
+        TreeKind::Other,
+        &ctx,
+        results,
+    );
 
     // Check all trees discovered in the root tree.
     for (&tree_id, &(bytenr, _gen)) in tree_roots {
         let name = tree_name(tree_id);
-        check_tree(reader, &name, bytenr, &ctx, results);
+        let kind = tree_kind(tree_id);
+        check_tree(reader, &name, bytenr, kind, &ctx, results);
     }
 }
 
@@ -60,6 +89,7 @@ fn check_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     name: &str,
     root_bytenr: u64,
+    kind: TreeKind,
     ctx: &TreeCheckCtx,
     results: &mut CheckResults,
 ) {
@@ -69,7 +99,7 @@ fn check_tree<R: Read + Seek>(
     let mut read_errors: Vec<(u64, String)> = Vec::new();
 
     let mut visitor = |raw: &[u8], block: &TreeBlock| {
-        check_block(raw, block, tree, ctx, results);
+        check_block(raw, block, tree, kind, ctx, results);
     };
 
     let mut on_error = |logical: u64, err: &std::io::Error| {
@@ -98,13 +128,20 @@ fn check_block(
     raw: &[u8],
     block: &TreeBlock,
     tree: &'static str,
+    kind: TreeKind,
     ctx: &TreeCheckCtx,
     results: &mut CheckResults,
 ) {
     let header = block.header();
     let logical = header.bytenr;
 
-    results.total_tree_bytes += u64::from(ctx.nodesize);
+    let nodesize = u64::from(ctx.nodesize);
+    results.total_tree_bytes += nodesize;
+    match kind {
+        TreeKind::Extent => results.total_extent_tree_bytes += nodesize,
+        TreeKind::Fs => results.total_fs_tree_bytes += nodesize,
+        TreeKind::Other => {}
+    }
 
     // Checksum verification (CRC32C only).
     if ctx.csum_supported {
@@ -157,7 +194,6 @@ fn check_block(
             let used = header_size
                 + (items.len() as u64) * item_desc_size
                 + item_data_total;
-            let nodesize = u64::from(ctx.nodesize);
             if used < nodesize {
                 results.btree_space_waste += nodesize - used;
             }

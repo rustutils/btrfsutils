@@ -128,8 +128,6 @@ fn collect_fs_items<R: Read + Seek>(
 ) -> Option<FsItemMap> {
     let mut items: FsItemMap = BTreeMap::new();
     let mut read_errors: Vec<(u64, String)> = Vec::new();
-    let nodesize = u64::from(reader.nodesize());
-    let mut block_count = 0u64;
 
     let mut visitor = |_raw: &[u8], block: &TreeBlock| {
         if let TreeBlock::Leaf {
@@ -147,7 +145,6 @@ fn collect_fs_items<R: Read + Seek>(
                     .push((item.key.key_type, item_data));
             }
         }
-        block_count += 1;
     };
 
     let mut on_error = |logical: u64, err: &std::io::Error| {
@@ -166,8 +163,6 @@ fn collect_fs_items<R: Read + Seek>(
         });
         return None;
     }
-
-    results.total_fs_tree_bytes += block_count * nodesize;
 
     for (logical, detail) in read_errors {
         results.report(CheckError::ReadError { logical, detail });
