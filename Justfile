@@ -82,5 +82,19 @@ check:
     cargo check --target x86_64-unknown-linux-gnu
     cargo check --target x86_64-unknown-linux-musl
 
+# Build deb and rpm packages from the nix build output.
+#
+# Requires: nix, nfpm (available via `nix run nixpkgs#nfpm`)
+package:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    nix build . -L
+    version=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[] | select(.name == "btrfs-cli") | .version')
+    mkdir -p target/package
+    VERSION="$version" nix run nixpkgs#nfpm -- package --packager deb --target target/package/
+    VERSION="$version" nix run nixpkgs#nfpm -- package --packager rpm --target target/package/
+    echo ""
+    ls -lh target/package/
+
 alias fmt := format
 alias lint := check

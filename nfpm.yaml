@@ -1,0 +1,52 @@
+name: btrfs-progrs
+arch: amd64
+platform: linux
+version: ${VERSION}
+section: admin
+priority: optional
+maintainer: btrfs-progrs contributors
+description: Rust reimplementation of the btrfs command-line tools
+vendor: btrfs-progrs
+homepage: https://github.com/rustutils/btrfs-progrs
+license: GPL-2.0-only
+
+depends:
+  - libc6
+
+provides:
+  - btrfs-progs
+
+contents:
+  # Binaries
+  - src: result/bin/btrfs
+    dst: /usr/bin/btrfs
+    file_info:
+      mode: 0755
+
+  - src: result/bin/btrfs-mkfs
+    dst: /usr/sbin/mkfs.btrfs
+    file_info:
+      mode: 0755
+
+  # Man pages
+  - src: result/share/man/man1/*.1.gz
+    dst: /usr/share/man/man1/
+
+  # Shell completions
+  - src: result/share/bash-completion/completions/btrfs.bash
+    dst: /usr/share/bash-completion/completions/btrfs
+
+  - src: result/share/bash-completion/completions/mkfs.btrfs.bash
+    dst: /usr/share/bash-completion/completions/mkfs.btrfs
+
+  - src: result/share/fish/vendor_completions.d/btrfs.fish
+    dst: /usr/share/fish/vendor_completions.d/btrfs.fish
+
+  - src: result/share/fish/vendor_completions.d/mkfs.btrfs.fish
+    dst: /usr/share/fish/vendor_completions.d/mkfs.btrfs.fish
+
+  - src: result/share/zsh/site-functions/_btrfs
+    dst: /usr/share/zsh/vendor-completions/_btrfs
+
+  - src: result/share/zsh/site-functions/_mkfs.btrfs
+    dst: /usr/share/zsh/vendor-completions/_mkfs.btrfs
