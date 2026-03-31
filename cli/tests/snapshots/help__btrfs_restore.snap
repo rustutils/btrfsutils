@@ -53,6 +53,9 @@ Options:
   -l, --list-roots
           List tree roots
 
+  -v, --verbose...
+          Verbose (use twice for extra detail)
+
   -f, --fs-location <FS_LOCATION>
           Filesystem location (bytenr)
 
@@ -63,7 +66,7 @@ Options:
           Tree location (bytenr)
 
   -u, --super <SUPER_MIRROR>
-          Super mirror index
+          Super mirror index (0, 1, or 2)
 
   -h, --help
           Print help (see a summary with '-h')

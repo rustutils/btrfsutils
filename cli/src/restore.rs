@@ -1,11 +1,12 @@
-use crate::{Format, Runnable};
+use crate::{Format, Runnable, util::is_mounted};
 use anyhow::{Context, Result, bail};
 use btrfs_disk::{
     items::{
-        CompressionType, DirItem, FileExtentBody, FileExtentItem, FileType,
-        InodeItem, RootItem,
+        CompressionType, DirItem, FileExtentBody, FileExtentItem,
+        FileExtentType, FileType, InodeItem, RootItem,
     },
     raw, reader,
+    superblock::SUPER_MIRROR_MAX,
     tree::{DiskKey, KeyType, TreeBlock},
 };
 use clap::Parser;
@@ -77,6 +78,10 @@ pub struct RestoreCommand {
     #[clap(short = 'l', long)]
     list_roots: bool,
 
+    /// Verbose (use twice for extra detail)
+    #[clap(short = 'v', long, action = clap::ArgAction::Count)]
+    verbose: u8,
+
     /// Filesystem location (bytenr)
     #[clap(short = 'f', long)]
     fs_location: Option<u64>,
@@ -89,20 +94,62 @@ pub struct RestoreCommand {
     #[clap(short = 't', long)]
     tree_location: Option<u64>,
 
-    /// Super mirror index
+    /// Super mirror index (0, 1, or 2)
     #[clap(short = 'u', long = "super")]
     super_mirror: Option<u64>,
 }
 
 impl Runnable for RestoreCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+        if let Some(m) = self.super_mirror
+            && m >= u64::from(SUPER_MIRROR_MAX)
+        {
+            bail!(
+                "super mirror index {m} is out of range (max {})",
+                SUPER_MIRROR_MAX - 1
+            );
+        }
+
+        if is_mounted(&self.device) {
+            bail!(
+                "'{}' is mounted, refusing to restore (unmount first)",
+                self.device.display()
+            );
+        }
+
         let file = File::open(&self.device).with_context(|| {
             format!("cannot open '{}'", self.device.display())
         })?;
 
-        let mirror = self.super_mirror.unwrap_or(0) as u32;
-        let mut open = reader::filesystem_open_mirror(file, mirror)
-            .context("failed to open filesystem")?;
+        // Open filesystem, trying mirror fallback if no specific mirror given.
+        let mut open = if let Some(m) = self.super_mirror {
+            reader::filesystem_open_mirror(file, m as u32)
+                .context("failed to open filesystem")?
+        } else {
+            let mut result = None;
+            for mirror in 0..SUPER_MIRROR_MAX {
+                match reader::filesystem_open_mirror(file.try_clone()?, mirror)
+                {
+                    Ok(o) => {
+                        if mirror > 0 {
+                            eprintln!(
+                                "using superblock mirror {mirror} \
+                                 (primary was damaged)"
+                            );
+                        }
+                        result = Some(o);
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "warning: superblock mirror {mirror} \
+                             failed: {e}"
+                        );
+                    }
+                }
+            }
+            result.context("all superblock mirrors failed")?
+        };
 
         if self.list_roots {
             let root_bytenr =
@@ -157,6 +204,7 @@ impl Runnable for RestoreCommand {
             snapshots: self.snapshots,
             xattr: self.xattr,
             ignore_errors: self.ignore_errors,
+            verbose: self.verbose,
             path_regex: path_regex.as_ref(),
             tree_roots: &open.tree_roots,
         };
@@ -164,7 +212,11 @@ impl Runnable for RestoreCommand {
         let mut total_errors = 0;
 
         // Restore the primary FS tree.
-        let items = collect_fs_tree_items(&mut block_reader, fs_root_bytenr)?;
+        let items = collect_fs_tree_items(
+            &mut block_reader,
+            fs_root_bytenr,
+            self.ignore_errors,
+        )?;
 
         // Determine the starting objectid.
         let root_ino = if self.find_dir {
@@ -208,8 +260,11 @@ impl Runnable for RestoreCommand {
                     if snap_dest.exists() {
                         continue;
                     }
-                    let snap_items =
-                        collect_fs_tree_items(&mut block_reader, bytenr)?;
+                    let snap_items = collect_fs_tree_items(
+                        &mut block_reader,
+                        bytenr,
+                        self.ignore_errors,
+                    )?;
                     if !opts.dry_run {
                         fs::create_dir_all(&snap_dest).with_context(|| {
                             format!(
@@ -248,6 +303,7 @@ struct RestoreOpts<'a> {
     snapshots: bool,
     xattr: bool,
     ignore_errors: bool,
+    verbose: u8,
     path_regex: Option<&'a Regex>,
     tree_roots: &'a std::collections::BTreeMap<u64, (u64, u64)>,
 }
@@ -286,9 +342,22 @@ impl FsTreeItems {
 fn collect_fs_tree_items<R: Read + Seek>(
     reader: &mut reader::BlockReader<R>,
     root_bytenr: u64,
+    ignore_errors: bool,
 ) -> Result<FsTreeItems> {
     let mut items: HashMap<u64, Vec<(DiskKey, Vec<u8>)>> = HashMap::new();
-    collect_items_dfs(reader, root_bytenr, &mut items)?;
+    let mut errors = 0u64;
+    collect_items_dfs(
+        reader,
+        root_bytenr,
+        &mut items,
+        ignore_errors,
+        &mut errors,
+    )?;
+    if errors > 0 {
+        eprintln!(
+            "warning: {errors} tree block(s) could not be read during scan"
+        );
+    }
     Ok(FsTreeItems { items })
 }
 
@@ -296,10 +365,25 @@ fn collect_items_dfs<R: Read + Seek>(
     reader: &mut reader::BlockReader<R>,
     logical: u64,
     items: &mut HashMap<u64, Vec<(DiskKey, Vec<u8>)>>,
+    ignore_errors: bool,
+    errors: &mut u64,
 ) -> Result<()> {
-    let block = reader
-        .read_tree_block(logical)
-        .with_context(|| format!("failed to read tree block at {logical}"))?;
+    let block = match reader.read_tree_block(logical) {
+        Ok(b) => b,
+        Err(e) => {
+            if ignore_errors {
+                eprintln!(
+                    "warning: skipping unreadable tree block at \
+                     logical {logical}: {e}"
+                );
+                *errors += 1;
+                return Ok(());
+            }
+            return Err(e).with_context(|| {
+                format!("failed to read tree block at {logical}")
+            });
+        }
+    };
 
     match &block {
         TreeBlock::Leaf {
@@ -321,7 +405,13 @@ fn collect_items_dfs<R: Read + Seek>(
         }
         TreeBlock::Node { ptrs, .. } => {
             for ptr in ptrs {
-                collect_items_dfs(reader, ptr.blockptr, items)?;
+                collect_items_dfs(
+                    reader,
+                    ptr.blockptr,
+                    items,
+                    ignore_errors,
+                    errors,
+                )?;
             }
         }
     }
@@ -409,21 +499,26 @@ fn restore_dir<R: Read + Seek>(
                 FileType::Dir => {
                     if opts.dry_run {
                         println!("{}/", child_path.display());
-                    } else if let Err(e) = fs::create_dir_all(&child_path) {
-                        if !opts.ignore_errors {
-                            return Err(e).with_context(|| {
-                                format!(
-                                    "failed to create directory '{}'",
-                                    child_path.display()
-                                )
-                            });
+                    } else {
+                        if opts.verbose >= 1 {
+                            eprintln!("Restoring {}/", child_path.display());
                         }
-                        eprintln!(
-                            "warning: failed to create '{}': {e}",
-                            child_path.display()
-                        );
-                        *errors += 1;
-                        continue;
+                        if let Err(e) = fs::create_dir_all(&child_path) {
+                            if !opts.ignore_errors {
+                                return Err(e).with_context(|| {
+                                    format!(
+                                        "failed to create directory '{}'",
+                                        child_path.display()
+                                    )
+                                });
+                            }
+                            eprintln!(
+                                "warning: failed to create '{}': {e}",
+                                child_path.display()
+                            );
+                            *errors += 1;
+                            continue;
+                        }
                     }
                     restore_dir(
                         reader,
@@ -434,6 +529,8 @@ fn restore_dir<R: Read + Seek>(
                         errors,
                         &rel_path,
                     )?;
+                    // Apply metadata after all children are written so
+                    // timestamps are not clobbered by child writes.
                     if opts.metadata && !opts.dry_run {
                         apply_metadata(
                             items,
@@ -508,7 +605,7 @@ fn restore_snapshot<R: Read + Seek>(
     errors: &mut u64,
     prefix: &str,
 ) -> Result<()> {
-    let snap_items = collect_fs_tree_items(reader, bytenr)?;
+    let snap_items = collect_fs_tree_items(reader, bytenr, opts.ignore_errors)?;
 
     if !opts.dry_run {
         fs::create_dir_all(output_path).with_context(|| {
@@ -549,12 +646,23 @@ fn restore_file<R: Read + Seek>(
         return Ok(());
     }
 
+    if opts.verbose >= 1 {
+        eprintln!("Restoring {}", path.display());
+    }
+
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .open(path)
         .with_context(|| format!("failed to create '{}'", path.display()))?;
+
+    // Get inode size for final truncation.
+    let inode_size = items
+        .get(ino, KeyType::InodeItem)
+        .first()
+        .and_then(|(_, d)| InodeItem::parse(d))
+        .map(|i| i.size);
 
     let extent_items = items.get(ino, KeyType::ExtentData);
 
@@ -563,6 +671,12 @@ fn restore_file<R: Read + Seek>(
             Some(e) => e,
             None => continue,
         };
+
+        // Skip prealloc extents: they represent preallocated but
+        // uninitialized blocks.
+        if extent.extent_type == FileExtentType::Prealloc {
+            continue;
+        }
 
         let file_offset = key.offset;
 
@@ -604,6 +718,32 @@ fn restore_file<R: Read + Seek>(
             } => {
                 if *disk_bytenr == 0 {
                     // Hole — seek past it.
+                    continue;
+                }
+
+                // Validate extent offset bounds.
+                if extent.compression == CompressionType::None
+                    && *offset >= *disk_num_bytes
+                {
+                    eprintln!(
+                        "warning: bogus extent offset {} >= disk_size {} \
+                         in '{}'",
+                        offset,
+                        disk_num_bytes,
+                        path.display()
+                    );
+                    *errors += 1;
+                    continue;
+                }
+                if *offset > extent.ram_bytes {
+                    eprintln!(
+                        "warning: bogus extent offset {} > ram_bytes {} \
+                         in '{}'",
+                        offset,
+                        extent.ram_bytes,
+                        path.display()
+                    );
+                    *errors += 1;
                     continue;
                 }
 
@@ -669,7 +809,15 @@ fn restore_file<R: Read + Seek>(
         }
     }
 
+    // Truncate file to correct inode size (handles sparse files and
+    // files where the last extent doesn't extend to EOF).
+    if let Some(size) = inode_size {
+        file.set_len(size)?;
+    }
+
     if opts.metadata {
+        // Drop the file handle first so metadata applies cleanly.
+        drop(file);
         apply_metadata(items, ino, path, opts, errors);
     }
 
@@ -683,20 +831,6 @@ fn restore_symlink(
     path: &Path,
     opts: &RestoreOpts,
 ) -> Result<()> {
-    if opts.dry_run {
-        println!("{} -> ...", path.display());
-        return Ok(());
-    }
-
-    if path.exists() && !opts.overwrite {
-        return Ok(());
-    }
-
-    // Remove existing entry if overwriting.
-    if path.exists() {
-        fs::remove_file(path).ok();
-    }
-
     let extent_items = items.get(ino, KeyType::ExtentData);
     let (_, data) = extent_items
         .first()
@@ -715,6 +849,24 @@ fn restore_symlink(
 
     let target_str = std::str::from_utf8(target)
         .context("symlink target is not valid UTF-8")?;
+
+    if opts.dry_run {
+        println!("{} -> {}", path.display(), target_str);
+        return Ok(());
+    }
+
+    if path.exists() && !opts.overwrite {
+        return Ok(());
+    }
+
+    if opts.verbose >= 2 {
+        eprintln!("SYMLINK: '{}' => '{}'", path.display(), target_str);
+    }
+
+    // Remove existing entry if overwriting.
+    if path.exists() {
+        fs::remove_file(path).ok();
+    }
 
     symlink(target_str, path).with_context(|| {
         format!("failed to create symlink '{}'", path.display())

@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `btrfs restore`: file recovery from damaged/unmounted filesystems with support
+  for regular files (inline/regular/prealloc extents), directories, symlinks (`-S`),
+  extended attributes (`-x`), metadata restoration (`-m`), compressed extent
+  decompression (zlib/zstd/lzo), path regex filtering, snapshot restoration (`-s`),
+  tree root listing (`-l`), and superblock mirror fallback
 - `btrfs-tune` crate: offline superblock tuning tool with feature flag
   enabling (`-r`, `-x`, `-n`), seeding flag management (`-S`),
   metadata UUID change (`-m`, `-M UUID`), and full fsid rewrite
