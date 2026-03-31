@@ -286,6 +286,54 @@ fn tree_walk_bfs<R: Read + Seek>(
     Ok(())
 }
 
+/// Walk a tree, continuing past individual block read errors.
+///
+/// Unlike [`tree_walk`], this does not stop when a child block cannot be read.
+/// Instead, it calls `on_error` with the logical address and the I/O error,
+/// then continues with remaining siblings. The root block failure still
+/// propagates since there is nothing to walk.
+pub fn tree_walk_tolerant<R: Read + Seek>(
+    reader: &mut BlockReader<R>,
+    root_logical: u64,
+    visitor: &mut dyn FnMut(&[u8], &TreeBlock),
+    on_error: &mut dyn FnMut(u64, &io::Error),
+) -> io::Result<()> {
+    let buf = reader.read_block(root_logical)?;
+    let block = TreeBlock::parse(&buf);
+    visitor(&buf, &block);
+
+    if let TreeBlock::Node { ptrs, .. } = &block {
+        for ptr in ptrs {
+            tree_walk_tolerant_dfs(reader, ptr.blockptr, visitor, on_error);
+        }
+    }
+
+    Ok(())
+}
+
+fn tree_walk_tolerant_dfs<R: Read + Seek>(
+    reader: &mut BlockReader<R>,
+    logical: u64,
+    visitor: &mut dyn FnMut(&[u8], &TreeBlock),
+    on_error: &mut dyn FnMut(u64, &io::Error),
+) {
+    let buf = match reader.read_block(logical) {
+        Ok(b) => b,
+        Err(e) => {
+            on_error(logical, &e);
+            return;
+        }
+    };
+    let block = TreeBlock::parse(&buf);
+    visitor(&buf, &block);
+
+    if let TreeBlock::Node { ptrs, .. } = &block {
+        for ptr in ptrs {
+            tree_walk_tolerant_dfs(reader, ptr.blockptr, visitor, on_error);
+        }
+    }
+}
+
 /// Read a single block and call `visitor` (and optionally walk children with `follow`).
 pub fn block_visit<R: Read + Seek>(
     reader: &mut BlockReader<R>,

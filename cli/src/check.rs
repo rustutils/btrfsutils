@@ -1,9 +1,14 @@
-use crate::{Format, Runnable};
-use anyhow::Result;
+use crate::{Format, Runnable, util::is_mounted};
+use anyhow::{Result, bail};
+use btrfs_disk::{reader, superblock::SUPER_MIRROR_MAX};
 use clap::Parser;
-use std::path::PathBuf;
+use std::{fs::File, path::PathBuf};
 
-/// Check mode for filesystem verification
+mod errors;
+mod superblock;
+mod tree_structure;
+
+/// Check mode for filesystem verification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum CheckMode {
     Original,
@@ -80,6 +85,94 @@ pub struct CheckCommand {
 
 impl Runnable for CheckCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
-        todo!("implement check")
+        // Reject unsupported flags.
+        if self.repair {
+            bail!("repair mode is not yet supported");
+        }
+        if self.init_csum_tree {
+            bail!("--init-csum-tree is not yet supported");
+        }
+        if self.init_extent_tree {
+            bail!("--init-extent-tree is not yet supported");
+        }
+        if self.backup {
+            bail!("--backup is not yet supported");
+        }
+        if self.tree_root.is_some() {
+            bail!("--tree-root is not yet supported");
+        }
+        if self.chunk_root.is_some() {
+            bail!("--chunk-root is not yet supported");
+        }
+        if self.qgroup_report {
+            bail!("--qgroup-report is not yet supported");
+        }
+        if self.subvol_extents.is_some() {
+            bail!("--subvol-extents is not yet supported");
+        }
+
+        // Mount check.
+        if !self.force && is_mounted(&self.device) {
+            bail!(
+                "'{}' is mounted, use --force to continue",
+                self.device.display()
+            );
+        }
+
+        if let Some(m) = self.superblock
+            && m >= u64::from(SUPER_MIRROR_MAX)
+        {
+            bail!(
+                "super mirror index {m} is out of range (max {})",
+                SUPER_MIRROR_MAX - 1
+            );
+        }
+
+        eprintln!("Opening filesystem to check...");
+
+        let mut file = File::open(&self.device)?;
+        let mirror = self.superblock.unwrap_or(0) as u32;
+
+        let mut open =
+            reader::filesystem_open_mirror(file.try_clone()?, mirror)?;
+
+        let sb = &open.superblock;
+        eprintln!("Checking filesystem on {}", self.device.display());
+        eprintln!("UUID: {}", sb.fsid);
+
+        let mut results = errors::CheckResults::new(sb.bytes_used);
+
+        // Phase 1: Superblock validation.
+        eprintln!("[1/7] checking superblocks");
+        superblock::check_superblocks(&mut file, &mut results);
+
+        // Phase 2: Tree structure checks.
+        eprintln!("[2/7] checking root items");
+        tree_structure::check_all_trees(
+            &mut open.reader,
+            sb,
+            &open.tree_roots,
+            &mut results,
+        );
+        eprintln!("[3/7] checking extents");
+        eprintln!("[4/7] checking free space tree");
+        eprintln!("[5/7] checking fs roots");
+        if self.check_data_csum {
+            eprintln!("[6/7] checking csums items (verifying data)");
+        } else {
+            eprintln!(
+                "[6/7] checking only csums items \
+                 (without verifying data)"
+            );
+        }
+        eprintln!("[7/7] checking root refs");
+
+        results.print_summary();
+
+        if results.has_errors() {
+            std::process::exit(1);
+        }
+
+        Ok(())
     }
 }

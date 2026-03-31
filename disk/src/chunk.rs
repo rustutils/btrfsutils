@@ -93,6 +93,11 @@ impl ChunkTreeCache {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
+
+    /// Iterate over all chunk mappings in logical address order.
+    pub fn iter(&self) -> impl Iterator<Item = &ChunkMapping> {
+        self.inner.values()
+    }
 }
 
 /// Parse a chunk item (`btrfs_chunk` + stripes) from a raw byte buffer.
