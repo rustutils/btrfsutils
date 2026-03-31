@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   metadata UUID change (`-m`, `-M UUID`), and full fsid rewrite
   (`-u`, `-U UUID`)
 - Man page generation for `btrfs-tune`
+- `btrfs-disk`: comprehensive rustdoc for all public types, fields, and the
+  crate-level overview (filesystem layout, tree descriptions, usage guide)
+- `btrfs-tune`: crate-level and module-level rustdoc
 - `btrfs-disk`: `BlockReader::write_block` for writing tree blocks by
   logical address, `csum_tree_block` for recomputing tree block checksums
 

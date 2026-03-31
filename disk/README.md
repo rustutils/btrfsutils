@@ -7,10 +7,11 @@ and item payloads from block devices or image files, and writing them back.
 It does not use ioctls or require a mounted filesystem, and works on any
 platform that can read raw bytes.
 
-The `btrfs-cli` crate uses the parsing side for commands like `dump-super`
-and `dump-tree`. The `btrfs-mkfs` crate uses the serialization side
-(raw constants, write helpers, struct sizes/offsets) to construct new
-filesystems from scratch.
+The `btrfs-cli` crate uses the parsing side for commands like `dump-super`,
+`dump-tree`, and `restore`. The `btrfs-mkfs` crate uses the serialization
+side (raw constants, write helpers, struct sizes/offsets) to construct new
+filesystems from scratch. The `btrfs-tune` crate uses both sides to read
+and patch superblocks and tree block headers for offline UUID rewrites.
 
 Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 

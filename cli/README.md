@@ -24,7 +24,7 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 - **balance**: start, pause, cancel, resume, status (with filter string parsing)
 - **device**: add, remove/delete, stats, scan, ready, usage
 - **filesystem**: df, du, show, sync, defrag, resize, label, usage, mkswapfile, commit-stats
-- **inspect-internal**: rootid, inode-resolve, logical-resolve, subvolid-resolve, min-dev-size, list-chunks, dump-super, dump-tree
+- **inspect-internal**: rootid, inode-resolve, logical-resolve, subvolid-resolve, min-dev-size, list-chunks, dump-super, dump-tree, tree-stats, map-swapfile
 - **property**: get, set, list (ro, label, compression)
 - **quota**: enable, disable, rescan, status
 - **qgroup**: create, destroy, assign, remove, limit, show, clear-stale
@@ -32,14 +32,14 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 - **scrub**: start, cancel, resume, status, limit
 - **send**: full and incremental, multi-subvolume, protocol v1/v2, --compressed-data, --no-data
 - **receive**: v1/v2/v3 streams, encoded write with decompression fallback, --dump, --chroot
+- **rescue**: super-recover, zero-log, create-control-device
+- **restore**: file recovery from damaged/unmounted filesystems with metadata, xattrs, snapshots, compression, path filtering
 - **subvolume**: create, delete, snapshot, show, list, get-default, set-default, get-flags, set-flags, find-new, sync
 
 ### Stubs (argument parsing only)
 
 - **check**: full arg parsing scaffolded
-- **restore**: full arg parsing scaffolded
-- **rescue**: all 9 subcommands scaffolded
-- **inspect-internal**: tree-stats, map-swapfile
+- **rescue**: fix-device-size, chunk-recover, clear-space-cache, clear-uuid-tree, clear-ino-cache, clear-free-space-tree
 
 ### Notable missing flags
 

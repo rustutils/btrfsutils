@@ -92,9 +92,9 @@ tests that operate on a real filesystem, without any CLI machinery involved. The
 CLI layer can be tested with argument parsing snapshot tests (no filesystem
 needed at all) and help text snapshot tests.
 
-It also keeps the library crates clean. Because `btrfs-uapi` and `btrfs-disk`
-contain no CLI logic and no GPL-derived code, they can be licensed MIT/Apache-2.0
-and used by other projects independently of the CLI tools.
+It also keeps the library crates clean. Because `btrfs-uapi`, `btrfs-disk`, and
+`btrfs-stream` contain no CLI logic and no GPL-derived code, they can be licensed
+MIT/Apache-2.0 and used by other projects independently of the CLI tools.
 
 ## Routing
 

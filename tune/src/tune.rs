@@ -1,3 +1,8 @@
+//! # Superblock and tree block modification operations
+//!
+//! All functions operate on an unmounted filesystem via direct reads and
+//! writes to the underlying block device or image file.
+
 use anyhow::{Context, Result, bail};
 use btrfs_disk::{
     raw, reader,

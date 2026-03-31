@@ -1,3 +1,5 @@
+//! # CLI argument definitions for `btrfs-tune`
+
 use clap::{ArgGroup, Parser};
 use std::path::PathBuf;
 use uuid::Uuid;

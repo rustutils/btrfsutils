@@ -25,7 +25,8 @@ sudo apt install clang libclang-dev
 cargo build --release
 ```
 
-The resulting binaries are `target/release/btrfs` and `target/release/btrfs-mkfs`.
+The resulting binaries are `target/release/btrfs`, `target/release/btrfs-mkfs`,
+and `target/release/btrfs-tune`.
 
 ## Building with Nix
 
@@ -36,8 +37,8 @@ all dependencies pinned:
 nix build
 ```
 
-Outputs land in `result/bin/btrfs`, `result/bin/btrfs-mkfs`, and
-`result/share/man/man1/`.
+Outputs land in `result/bin/btrfs`, `result/bin/btrfs-mkfs`,
+`result/bin/btrfs-tune`, and `result/share/man/man1/`.
 
 To enter a development shell with all tools available (including nightly rustfmt,
 cargo-insta, and cargo-llvm-cov):

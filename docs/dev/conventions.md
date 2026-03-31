@@ -60,9 +60,9 @@ meanings in the documentation comments.
 Map specific errnos to `Option` or a typed
 error at the call site where appropriate (`ENODEV` → `None`, etc.). 
 
-In `cli/` and `mkfs/`, use `anyhow::Result<T>` and convert at the uapi boundary
-with `.with_context()`. Always include the relevant path or resource in the
-error message.
+In `cli/`, `mkfs/`, and `tune/`, use `anyhow::Result<T>` and convert at the
+uapi boundary with `.with_context()`. Always include the relevant path or
+resource in the error message.
 
 ## Constants
 
@@ -76,6 +76,17 @@ There should not be any stray constants in the code. For example, use
 and sizes, and if there are any magic constants, give them a name.
 
 Don't redefine things that are already defined in `crate::raw::*`.
+
+## Parsing on-disk structures
+
+In `disk/` and `mkfs/`, use `bytes::Buf` for reading and `bytes::BufMut` for
+writing on-disk fields. Sequential `get_u64_le()` / `put_u64_le()` calls
+advance the cursor automatically, eliminating manual offset arithmetic. See the
+[Parsing](parsing.md) page for details.
+
+In `uapi/`, tree search results are parsed with explicit offset-based LE
+readers (`read_le_u64`, `read_le_u32`) from `uapi/src/util.rs`, since those
+buffers are accessed at known offsets rather than sequentially.
 
 ## Style
 

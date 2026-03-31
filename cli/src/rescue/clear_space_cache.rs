@@ -3,6 +3,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
+/// Free space cache version to clear.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SpaceCacheVersion {
     V1,

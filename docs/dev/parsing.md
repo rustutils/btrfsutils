@@ -6,21 +6,25 @@ filesystem images without a running kernel.
 
 ## Reading a filesystem
 
-The typical entry point is `open_filesystem`, which bootstraps from the
+The typical entry point is `filesystem_open`, which bootstraps from the
 superblock:
 
 ```
 superblock → sys_chunk_array → chunk tree → root tree
 ```
 
-From there, `walk_tree` traverses any tree in BFS or DFS order, calling a
-visitor callback for each block:
+The returned `OpenFilesystem` contains a `BlockReader` (for reading tree blocks
+by logical address) and a map of tree root locations. From there, `tree_walk`
+traverses any tree in BFS or DFS order, calling a visitor callback for each
+block:
 
 ```rust
-let (reader, root_tree) = open_filesystem(&mut file)?;
-walk_tree(&mut reader, root_tree, Traversal::Bfs, &mut |block| {
+let open = filesystem_open(file)?;
+let mut reader = open.reader;
+tree_walk(&mut reader, root_bytenr, Traversal::Bfs, &mut |block| {
     // block: &TreeBlock — either a Node (internal) or Leaf
-});
+    Ok(())
+})?;
 ```
 
 ## Item payloads
@@ -30,11 +34,11 @@ raw payload. `parse_item_payload` dispatches to a typed parser based on the key
 type:
 
 ```rust
-let payload = parse_item_payload(key_type, data)?;
+let payload = parse_item_payload(&key, data);
 match payload {
-    ItemPayload::Inode(inode) => { /* ... */ }
+    ItemPayload::InodeItem(inode) => { /* ... */ }
     ItemPayload::RootItem(root) => { /* ... */ }
-    ItemPayload::FileExtent(extent) => { /* ... */ }
+    ItemPayload::FileExtentItem(extent) => { /* ... */ }
     // ...
 }
 ```
@@ -43,14 +47,36 @@ match payload {
 
 On-disk structs are packed and little-endian. Casting a `*const u8` pointer
 directly to a packed struct is undefined behaviour due to potential misalignment.
-Instead, use the LE reader helpers from `disk/src/util.rs`:
+
+### `btrfs-disk`: `bytes::Buf` / `bytes::BufMut`
+
+The `disk` crate uses the `bytes` crate for all parsing and serialization. A
+`&[u8]` implements `Buf`, so you can read fields sequentially with methods like
+`get_u64_le()`, which advances the cursor automatically:
 
 ```rust
-use btrfs_disk::util::{read_le_u64, read_le_u32};
+let mut buf = data;
+let generation = buf.get_u64_le();
+let size = buf.get_u64_le();
+let mode = buf.get_u32_le();
+```
+
+For serialization, `BufMut` provides the inverse (`put_u64_le`, `put_slice`,
+etc.). This approach avoids manual offset arithmetic and makes it impossible to
+read past the end of the buffer (it panics instead of silently producing
+garbage).
+
+### `btrfs-uapi`: offset-based LE readers
+
+The `uapi` crate parses tree search results returned by the kernel, which are
+raw `&[u8]` buffers at known offsets. It uses explicit offset-based helpers from
+`uapi/src/util.rs`:
+
+```rust
+use btrfs_uapi::util::read_le_u64;
 use std::mem::offset_of;
 
 let size = read_le_u64(data, offset_of!(raw::btrfs_inode_item, size));
-let nlink = read_le_u32(data, offset_of!(raw::btrfs_inode_item, nlink));
 ```
 
 Always use `std::mem::offset_of!` and `std::mem::size_of` to derive offsets and

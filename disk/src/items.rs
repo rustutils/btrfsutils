@@ -149,10 +149,12 @@ impl fmt::Display for InodeFlags {
         }
     }
 }
-/// Btrfs timestamp (seconds + nanoseconds since epoch).
+/// Btrfs timestamp (seconds + nanoseconds since Unix epoch).
 #[derive(Debug, Clone, Copy)]
 pub struct Timespec {
+    /// Seconds since 1970-01-01 00:00:00 UTC.
     pub sec: u64,
+    /// Nanosecond component (0..999_999_999).
     pub nsec: u32,
 }
 
@@ -246,7 +248,7 @@ impl FileExtentType {
     }
 }
 
-/// Directory entry file type.
+/// Directory entry file type, stored in `btrfs_dir_item::type`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
     Unknown,
@@ -292,23 +294,43 @@ impl FileType {
     }
 }
 
+/// Inode metadata, stored as `INODE_ITEM` in the FS tree.
+///
+/// Contains POSIX attributes (uid, gid, mode, timestamps) plus btrfs-specific
+/// fields (flags, sequence number, block group hint).
 #[derive(Debug, Clone)]
 pub struct InodeItem {
+    /// Generation when this inode was created.
     pub generation: u64,
+    /// Transaction ID of the last modification.
     pub transid: u64,
+    /// Logical file size in bytes.
     pub size: u64,
+    /// Total on-disk bytes used (including all copies for RAID).
     pub nbytes: u64,
+    /// Block group hint for new allocations.
     pub block_group: u64,
+    /// Hard link count.
     pub nlink: u32,
+    /// Owner user ID.
     pub uid: u32,
+    /// Owner group ID.
     pub gid: u32,
+    /// POSIX file mode (type + permissions).
     pub mode: u32,
+    /// Device number (for character/block device inodes).
     pub rdev: u64,
+    /// Inode flags (NODATASUM, COMPRESS, etc.).
     pub flags: InodeFlags,
+    /// NFS-compatible change sequence number.
     pub sequence: u64,
+    /// Last access time.
     pub atime: Timespec,
+    /// Last change time (inode metadata).
     pub ctime: Timespec,
+    /// Last modification time (file data).
     pub mtime: Timespec,
+    /// Creation time.
     pub otime: Timespec,
 }
 
@@ -343,9 +365,16 @@ impl InodeItem {
     }
 }
 
+/// Hard link reference from an inode to a directory entry.
+///
+/// Key: `(inode_number, INODE_REF, parent_dir_inode)`. Multiple refs can be
+/// packed into a single item when an inode has several hard links in the same
+/// parent directory.
 #[derive(Debug, Clone)]
 pub struct InodeRef {
+    /// Index in the parent directory (matches a `DIR_INDEX` key offset).
     pub index: u64,
+    /// Filename component (raw bytes, typically UTF-8).
     pub name: Vec<u8>,
 }
 
@@ -367,10 +396,18 @@ impl InodeRef {
     }
 }
 
+/// Extended inode reference, used when the `EXTREF` feature is enabled.
+///
+/// Unlike `InodeRef`, the parent directory objectid is stored in the struct
+/// rather than the key offset, allowing references from different parent
+/// directories to coexist.
 #[derive(Debug, Clone)]
 pub struct InodeExtref {
+    /// Parent directory inode number.
     pub parent: u64,
+    /// Index in the parent directory.
     pub index: u64,
+    /// Filename component (raw bytes, typically UTF-8).
     pub name: Vec<u8>,
 }
 
@@ -397,12 +434,22 @@ impl InodeExtref {
     }
 }
 
+/// Directory entry, stored as `DIR_ITEM` (hashed by name) or `DIR_INDEX`
+/// (sequential index) in the FS tree.
+///
+/// Multiple entries can be packed into a single item when names hash to the
+/// same value (for `DIR_ITEM`) or when processing xattrs (`XATTR_ITEM`).
 #[derive(Debug, Clone)]
 pub struct DirItem {
+    /// Key of the target inode (objectid = inode number, type = `INODE_ITEM`).
     pub location: DiskKey,
+    /// Transaction ID when this entry was created.
     pub transid: u64,
+    /// Type of the referenced inode (file, directory, symlink, etc.).
     pub file_type: FileType,
+    /// Filename or xattr name (raw bytes).
     pub name: Vec<u8>,
+    /// Xattr value (empty for regular directory entries).
     pub data: Vec<u8>,
 }
 
@@ -460,30 +507,58 @@ impl fmt::Display for RootItemFlags {
     }
 }
 
+/// Root item describing a tree (subvolume, snapshot, or internal tree).
+///
+/// Stored in the root tree with key `(tree_objectid, ROOT_ITEM, 0)`. Contains
+/// the root block pointer, subvolume UUIDs, and transaction timestamps needed
+/// for snapshot management and send/receive.
 #[derive(Debug, Clone)]
 pub struct RootItem {
+    /// Generation when this root was last modified.
     pub generation: u64,
+    /// Objectid of the root directory inode (always 256 for FS trees).
     pub root_dirid: u64,
+    /// Logical bytenr of this tree's root block.
     pub bytenr: u64,
+    /// Quota byte limit (0 = unlimited).
     pub byte_limit: u64,
+    /// Bytes used by this tree.
     pub bytes_used: u64,
+    /// Generation of the last snapshot taken from this subvolume.
     pub last_snapshot: u64,
+    /// Root flags (RDONLY for read-only snapshots).
     pub flags: RootItemFlags,
+    /// Reference count.
     pub refs: u32,
+    /// Progress key for in-progress drop operations.
     pub drop_progress: DiskKey,
+    /// Tree level of the drop progress.
     pub drop_level: u8,
+    /// B-tree level of this tree's root block.
     pub level: u8,
+    /// Extended generation (v2 root items, matches `generation` in practice).
     pub generation_v2: u64,
+    /// UUID of this subvolume.
     pub uuid: Uuid,
+    /// UUID of the parent subvolume (for snapshots).
     pub parent_uuid: Uuid,
+    /// UUID of the subvolume this was received from (for send/receive).
     pub received_uuid: Uuid,
+    /// Transaction ID of the last change to this subvolume.
     pub ctransid: u64,
+    /// Transaction ID when this subvolume was created.
     pub otransid: u64,
+    /// Transaction ID when this subvolume was sent.
     pub stransid: u64,
+    /// Transaction ID when this subvolume was received.
     pub rtransid: u64,
+    /// Time of the last change.
     pub ctime: Timespec,
+    /// Creation time.
     pub otime: Timespec,
+    /// Time when sent.
     pub stime: Timespec,
+    /// Time when received.
     pub rtime: Timespec,
 }
 
@@ -630,10 +705,17 @@ impl RootItem {
     }
 }
 
+/// Reference linking a subvolume to its parent directory.
+///
+/// `ROOT_REF` keys (parent → child) and `ROOT_BACKREF` keys (child → parent)
+/// use the same on-disk format.
 #[derive(Debug, Clone)]
 pub struct RootRef {
+    /// Inode number of the directory containing the subvolume entry.
     pub dirid: u64,
+    /// Directory sequence number (matches the `DIR_INDEX` offset).
     pub sequence: u64,
+    /// Name of the subvolume entry in the parent directory.
     pub name: Vec<u8>,
 }
 
@@ -660,24 +742,43 @@ impl RootRef {
     }
 }
 
+/// File extent descriptor, stored as `EXTENT_DATA` in the FS tree.
+///
+/// Key: `(inode, EXTENT_DATA, file_offset)`. Describes how a range of file
+/// bytes maps to on-disk storage. Extents can be inline (data embedded in the
+/// item), regular (referencing a disk extent), or prealloc (reserved but
+/// unwritten).
 #[derive(Debug, Clone)]
 pub struct FileExtentItem {
+    /// Generation when this extent was allocated.
     pub generation: u64,
+    /// Uncompressed size of the data in this extent.
     pub ram_bytes: u64,
+    /// Compression algorithm applied to the on-disk data.
     pub compression: CompressionType,
+    /// Whether the extent is inline, regular, or preallocated.
     pub extent_type: FileExtentType,
+    /// Type-specific extent location.
     pub body: FileExtentBody,
 }
 
+/// Body of a file extent: either inline data or a reference to a disk extent.
 #[derive(Debug, Clone)]
 pub enum FileExtentBody {
+    /// Data is stored directly in the tree leaf (small files/tails).
     Inline {
+        /// Number of bytes of inline data following the extent header.
         inline_size: usize,
     },
+    /// Data is stored in a separate disk extent.
     Regular {
+        /// Logical byte address of the extent on disk (0 = hole/sparse).
         disk_bytenr: u64,
+        /// Size of the on-disk extent in bytes (compressed size if compressed).
         disk_num_bytes: u64,
+        /// Byte offset into the extent where this file range starts.
         offset: u64,
+        /// Number of logical file bytes this extent covers.
         num_bytes: u64,
     },
 }
@@ -821,14 +922,26 @@ impl fmt::Display for ExtentFlags {
     }
 }
 
+/// Extent allocation record from the extent tree.
+///
+/// Tracks reference counts, ownership, and backreferences for a contiguous
+/// range of allocated disk space. Used for both data extents (`EXTENT_ITEM`)
+/// and metadata blocks (`METADATA_ITEM` with skinny metadata).
 #[derive(Debug, Clone)]
 pub struct ExtentItem {
+    /// Number of references to this extent.
     pub refs: u64,
+    /// Generation when this extent was allocated.
     pub generation: u64,
+    /// Whether this extent holds data or a tree block.
     pub flags: ExtentFlags,
+    /// For non-skinny tree block extents: the first key in the block.
     pub tree_block_key: Option<DiskKey>,
+    /// For non-skinny tree block extents: the block's tree level.
     pub tree_block_level: Option<u8>,
+    /// For skinny metadata items: the tree level (from the key offset).
     pub skinny_level: Option<u64>,
+    /// Inline backreferences packed after the extent header.
     pub inline_refs: Vec<InlineRef>,
 }
 
@@ -952,11 +1065,19 @@ impl ExtentItem {
     }
 }
 
+/// Standalone data extent backreference (non-inline).
+///
+/// Key: `(extent_bytenr, EXTENT_DATA_REF, hash)`. Records which file inode
+/// references a given data extent.
 #[derive(Debug, Clone)]
 pub struct ExtentDataRef {
+    /// Root tree objectid that owns the referencing inode.
     pub root: u64,
+    /// Inode number that references this extent.
     pub objectid: u64,
+    /// File offset where this extent is referenced.
     pub offset: u64,
+    /// Number of references from this (root, objectid, offset) triple.
     pub count: u32,
 }
 
@@ -975,8 +1096,12 @@ impl ExtentDataRef {
     }
 }
 
+/// Shared data extent backreference (for snapshot-shared extents).
+///
+/// Key: `(extent_bytenr, SHARED_DATA_REF, parent_bytenr)`.
 #[derive(Debug, Clone)]
 pub struct SharedDataRef {
+    /// Number of references from the parent block.
     pub count: u32,
 }
 
@@ -992,10 +1117,16 @@ impl SharedDataRef {
     }
 }
 
+/// Block group descriptor, tracking space usage for a chunk.
+///
+/// Key: `(logical_offset, BLOCK_GROUP_ITEM, length)`.
 #[derive(Debug, Clone)]
 pub struct BlockGroupItem {
+    /// Bytes used within this block group.
     pub used: u64,
+    /// Objectid of the chunk that backs this block group.
     pub chunk_objectid: u64,
+    /// Type and RAID profile flags (DATA, METADATA, SYSTEM, DUP, RAID*, etc.).
     pub flags: BlockGroupFlags,
 }
 
@@ -1013,24 +1144,42 @@ impl BlockGroupItem {
     }
 }
 
+/// Chunk item mapping logical addresses to physical device locations.
+///
+/// Key: `(FIRST_CHUNK_TREE, CHUNK_ITEM, logical_offset)`. Each chunk maps a
+/// contiguous range of logical addresses to one or more device stripes.
 #[derive(Debug, Clone)]
 pub struct ChunkItem {
+    /// Length of this chunk in bytes.
     pub length: u64,
+    /// Owner of this chunk (always `BTRFS_FIRST_CHUNK_TREE_OBJECTID`).
     pub owner: u64,
+    /// Stripe length for striped profiles.
     pub stripe_len: u64,
+    /// Type and RAID profile flags.
     pub chunk_type: BlockGroupFlags,
+    /// I/O alignment requirement.
     pub io_align: u32,
+    /// I/O width requirement.
     pub io_width: u32,
+    /// Sector size of the underlying devices.
     pub sector_size: u32,
+    /// Number of stripes (device copies) for this chunk.
     pub num_stripes: u16,
+    /// Number of sub-stripes (for RAID10).
     pub sub_stripes: u16,
+    /// Physical device locations for each stripe.
     pub stripes: Vec<ChunkStripe>,
 }
 
+/// A single physical stripe within a chunk.
 #[derive(Debug, Clone)]
 pub struct ChunkStripe {
+    /// Device ID where this stripe lives.
     pub devid: u64,
+    /// Physical byte offset on the device.
     pub offset: u64,
+    /// UUID of the device.
     pub dev_uuid: Uuid,
 }
 
@@ -1082,21 +1231,39 @@ impl ChunkItem {
     }
 }
 
+/// Device item describing a single device in the filesystem.
+///
+/// Stored in the device tree and embedded in the superblock. Contains the
+/// device's size, usage, and identifying UUIDs.
 #[derive(Debug, Clone)]
 pub struct DeviceItem {
+    /// Unique device ID within this filesystem.
     pub devid: u64,
+    /// Total size of the device in bytes.
     pub total_bytes: u64,
+    /// Bytes allocated on this device.
     pub bytes_used: u64,
+    /// I/O alignment requirement.
     pub io_align: u32,
+    /// I/O width requirement.
     pub io_width: u32,
+    /// Sector size of this device.
     pub sector_size: u32,
+    /// Device type (reserved, always 0).
     pub dev_type: u64,
+    /// Generation when this device was last updated.
     pub generation: u64,
+    /// Start offset for allocations on this device.
     pub start_offset: u64,
+    /// Device group (reserved, always 0).
     pub dev_group: u32,
+    /// Seek speed hint (0 = not set).
     pub seek_speed: u8,
+    /// Bandwidth hint (0 = not set).
     pub bandwidth: u8,
+    /// UUID of this device.
     pub uuid: Uuid,
+    /// Filesystem UUID that this device belongs to.
     pub fsid: Uuid,
 }
 
@@ -1157,12 +1324,21 @@ impl DeviceItem {
     }
 }
 
+/// Device extent, mapping a physical range on a device to a chunk.
+///
+/// Key: `(devid, DEV_EXTENT, physical_offset)`. The inverse of a chunk
+/// stripe: given a device and physical offset, find the owning chunk.
 #[derive(Debug, Clone)]
 pub struct DeviceExtent {
+    /// Objectid of the chunk tree (always 3).
     pub chunk_tree: u64,
+    /// Objectid of the owning chunk.
     pub chunk_objectid: u64,
+    /// Logical offset of the owning chunk.
     pub chunk_offset: u64,
+    /// Length of this device extent in bytes.
     pub length: u64,
+    /// UUID of the chunk tree.
     pub chunk_tree_uuid: Uuid,
 }
 
@@ -1204,9 +1380,14 @@ impl fmt::Display for FreeSpaceInfoFlags {
     }
 }
 
+/// Free space info for a block group in the free space tree.
+///
+/// Key: `(block_group_offset, FREE_SPACE_INFO, block_group_length)`.
 #[derive(Debug, Clone)]
 pub struct FreeSpaceInfo {
+    /// Number of free extents (or bitmap entries) in this block group.
     pub extent_count: u32,
+    /// Flags indicating whether this block group uses bitmaps.
     pub flags: FreeSpaceInfoFlags,
 }
 
@@ -1223,12 +1404,20 @@ impl FreeSpaceInfo {
     }
 }
 
+/// Quota group status, stored in the quota tree.
+///
+/// Key: `(0, QGROUP_STATUS, 0)`. Tracks the overall state of quota accounting.
 #[derive(Debug, Clone)]
 pub struct QgroupStatus {
+    /// Qgroup on-disk format version.
     pub version: u64,
+    /// Generation when quotas were last consistent.
     pub generation: u64,
+    /// Status flags (e.g. rescan in progress).
     pub flags: u64,
+    /// Progress objectid for an in-progress rescan.
     pub scan: u64,
+    /// Generation when quotas were enabled (kernel 6.8+, absent on older formats).
     pub enable_gen: Option<u64>,
 }
 
@@ -1257,12 +1446,21 @@ impl QgroupStatus {
     }
 }
 
+/// Quota group accounting info.
+///
+/// Key: `(level/subvolid, QGROUP_INFO, 0)`. Tracks how much space a qgroup
+/// references and how much is exclusive to it.
 #[derive(Debug, Clone)]
 pub struct QgroupInfo {
+    /// Generation when this info was last updated.
     pub generation: u64,
+    /// Total bytes referenced by this qgroup (shared + exclusive).
     pub referenced: u64,
+    /// Referenced bytes after compression.
     pub referenced_compressed: u64,
+    /// Bytes used exclusively by this qgroup.
     pub exclusive: u64,
+    /// Exclusive bytes after compression.
     pub exclusive_compressed: u64,
 }
 
@@ -1282,12 +1480,21 @@ impl QgroupInfo {
     }
 }
 
+/// Quota group limits.
+///
+/// Key: `(level/subvolid, QGROUP_LIMIT, 0)`. Caps referenced and/or exclusive
+/// space usage for a qgroup.
 #[derive(Debug, Clone)]
 pub struct QgroupLimit {
+    /// Bitmask of which limits are active.
     pub flags: u64,
+    /// Maximum referenced bytes (0 = unlimited).
     pub max_referenced: u64,
+    /// Maximum exclusive bytes (0 = unlimited).
     pub max_exclusive: u64,
+    /// Reserved referenced bytes.
     pub rsv_referenced: u64,
+    /// Reserved exclusive bytes.
     pub rsv_exclusive: u64,
 }
 
@@ -1307,8 +1514,14 @@ impl QgroupLimit {
     }
 }
 
+/// Per-device I/O error statistics.
+///
+/// Key: `(DEV_STATS, PERSISTENT_ITEM, devid)`. Stored as an array of u64
+/// counters for write errors, read errors, flush errors, corruption errors,
+/// and generation mismatches.
 #[derive(Debug, Clone)]
 pub struct DeviceStats {
+    /// Named counters: `(stat_name, count)`.
     pub values: Vec<(String, u64)>,
 }
 
@@ -1332,8 +1545,12 @@ impl DeviceStats {
     }
 }
 
+/// UUID tree entry mapping a subvolume UUID to its objectid(s).
+///
+/// Key: `(upper_half_of_uuid, UUID_KEY_SUBVOL, lower_half_of_uuid)`.
 #[derive(Debug, Clone)]
 pub struct UuidItem {
+    /// Subvolume objectids associated with this UUID.
     pub subvol_ids: Vec<u64>,
 }
 
@@ -1348,7 +1565,11 @@ impl UuidItem {
     }
 }
 
-/// Parsed item payload — the result of parsing an item's raw data based on its key type.
+/// Parsed item payload: the typed result of parsing a leaf item's raw data
+/// based on its key type.
+///
+/// Returned by [`parse_item_payload`]. Each variant wraps the corresponding
+/// item struct. `Unknown` holds the raw bytes for unrecognized key types.
 pub enum ItemPayload {
     InodeItem(InodeItem),
     InodeRef(Vec<InodeRef>),
@@ -1386,16 +1607,28 @@ pub enum ItemPayload {
     Unknown(Vec<u8>),
 }
 
+/// Device replace status, persisted across reboots.
+///
+/// Key: `(DEV_REPLACE, PERSISTENT_ITEM, 0)`.
 #[derive(Debug, Clone)]
 pub struct DeviceReplaceItem {
+    /// Device ID of the source device being replaced.
     pub src_devid: u64,
+    /// Left cursor position (bytes processed from left).
     pub cursor_left: u64,
+    /// Right cursor position.
     pub cursor_right: u64,
+    /// Replace mode (continuous = 0 or legacy).
     pub replace_mode: u64,
+    /// Current state (not started, started, suspended, etc.).
     pub replace_state: u64,
+    /// Unix timestamp when the replace operation started.
     pub time_started: u64,
+    /// Unix timestamp when the replace operation completed or was cancelled.
     pub time_stopped: u64,
+    /// Number of write errors during replace.
     pub num_write_errors: u64,
+    /// Number of uncorrectable read errors during replace.
     pub num_uncorrectable_read_errors: u64,
 }
 
@@ -1419,15 +1652,23 @@ impl DeviceReplaceItem {
     }
 }
 
+/// RAID stripe extent mapping (for the raid-stripe-tree feature).
+///
+/// Key: `(logical_offset, RAID_STRIPE, length)`.
 #[derive(Debug, Clone)]
 pub struct RaidStripeItem {
+    /// RAID encoding type.
     pub encoding: u64,
+    /// Per-device stripe entries.
     pub stripes: Vec<RaidStripeEntry>,
 }
 
+/// A single device stripe within a RAID stripe item.
 #[derive(Debug, Clone)]
 pub struct RaidStripeEntry {
+    /// Device ID for this stripe.
     pub devid: u64,
+    /// Physical byte offset on the device.
     pub physical: u64,
 }
 

@@ -115,6 +115,8 @@ Low-level inspection tools.
 | `btrfs inspect-internal list-chunks <path>` | List all chunk allocations |
 | `btrfs inspect-internal dump-super <dev>` | Dump the superblock |
 | `btrfs inspect-internal dump-tree <dev>` | Dump raw B-tree contents |
+| `btrfs inspect-internal tree-stats <dev>` | Walk a B-tree and report node/leaf statistics |
+| `btrfs inspect-internal map-swapfile <path>` | Show physical extent map of a swapfile |
 
 `dump-super` and `dump-tree` read directly from a block device or image file and
 do not require a mounted filesystem or elevated privileges.
@@ -150,9 +152,70 @@ Get and set filesystem object properties.
 Supported properties: `ro` (subvolumes), `label` (filesystem/device),
 `compression` (inodes).
 
+## btrfs restore
+
+Recover files from a damaged or unmounted filesystem by reading on-disk
+structures directly.
+
+| Command | Description |
+|---------|-------------|
+| `btrfs restore <dev> <path>` | Restore files to a destination directory |
+| `btrfs restore -l <dev>` | List available tree roots |
+
+Supports regular files, directories, symlinks (`-S`), extended attributes (`-x`),
+metadata (owner/mode/times with `-m`), and compressed extents (zlib/zstd/lzo).
+Use `--path-regex` to filter restored files and `-s` to include snapshots.
+
+## btrfs rescue
+
+Emergency recovery tools for damaged filesystems.
+
+| Command | Description |
+|---------|-------------|
+| `btrfs rescue super-recover <dev>` | Restore superblock from mirrors |
+| `btrfs rescue zero-log <dev>` | Clear the log tree pointer |
+| `btrfs rescue create-control-device` | Create `/dev/btrfs-control` if missing |
+
+Six additional subcommands (`fix-device-size`, `chunk-recover`,
+`clear-space-cache`, `clear-uuid-tree`, `clear-ino-cache`,
+`clear-free-space-tree`) have argument parsing scaffolded but are not yet
+implemented.
+
+## mkfs.btrfs
+
+Create a new btrfs filesystem on a block device or image file.
+
+```
+btrfs-mkfs [options] <device> [device...]
+```
+
+Supports single-device and multi-device filesystems, metadata DUP and RAID1
+profiles, data SINGLE/RAID0/RAID1 profiles, all four checksum algorithms
+(crc32c, xxhash, sha256, blake2b), custom nodesize/sectorsize, labels, UUIDs,
+and feature flags.
+
+## btrfstune
+
+Modify btrfs filesystem parameters on an unmounted device.
+
+```
+btrfs-tune [options] <device>
+```
+
+| Flag | Description |
+|------|-------------|
+| `-r` | Enable extended inode refs (extref) |
+| `-x` | Enable skinny metadata extent refs |
+| `-n` | Enable no-holes feature |
+| `-S 0` / `-S 1` | Clear or set the seeding flag |
+| `-m` | Change fsid to a random UUID (metadata_uuid mechanism) |
+| `-M <uuid>` | Change fsid to a specific UUID (metadata_uuid mechanism) |
+| `-u` | Rewrite fsid to a random UUID (patches all tree blocks) |
+| `-U <uuid>` | Rewrite fsid to a specific UUID (patches all tree blocks) |
+
 ## Global flags
 
-These flags are accepted by all commands:
+These flags are accepted by all `btrfs` commands:
 
 | Flag | Description |
 |------|-------------|

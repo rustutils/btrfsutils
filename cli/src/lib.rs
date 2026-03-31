@@ -35,6 +35,7 @@ pub use crate::{
     scrub::*, send::*, subvolume::*,
 };
 
+/// Output format for commands that support structured output.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Format {
     #[default]
@@ -42,6 +43,7 @@ pub enum Format {
     Json,
 }
 
+/// Log verbosity level, ordered from most to least verbose.
 #[derive(
     Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum,
 )]
@@ -74,6 +76,7 @@ pub struct Arguments {
 
 const GLOBAL_OPTIONS: &str = "Global options";
 
+/// Flags shared across all subcommands (verbosity, dry-run, output format).
 #[derive(Parser, Debug)]
 pub struct GlobalOptions {
     /// Increase verbosity (repeat for more: -v, -vv, -vvv)
@@ -97,6 +100,7 @@ pub struct GlobalOptions {
     pub format: Option<Format>,
 }
 
+/// A CLI subcommand that can be executed.
 pub trait Runnable {
     fn run(&self, format: Format, dry_run: bool) -> Result<()>;
 }

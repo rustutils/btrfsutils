@@ -442,10 +442,16 @@ impl fmt::Display for ObjectId {
 }
 
 /// A parsed btrfs disk key (objectid, type, offset).
+///
+/// Every item and key pointer in a B-tree is addressed by this three-part key.
+/// Keys are sorted lexicographically: first by objectid, then type, then offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiskKey {
+    /// Object this key belongs to (e.g. inode number, tree ID, device ID).
     pub objectid: u64,
+    /// Discriminates what kind of data this key addresses.
     pub key_type: KeyType,
+    /// Type-specific offset (e.g. byte offset for extents, directory index).
     pub offset: u64,
 }
 
@@ -559,16 +565,29 @@ impl fmt::Display for HeaderFlags {
 }
 
 /// Parsed header of a btrfs tree block (shared by nodes and leaves).
+///
+/// Every tree block (node or leaf) begins with this 101-byte header. It
+/// identifies the block's position in the tree, its owning tree, and contains
+/// a checksum covering the entire block.
 #[derive(Debug, Clone)]
 pub struct Header {
+    /// Checksum of everything past this field to the end of the tree block.
     pub csum: [u8; 32],
+    /// Filesystem UUID (must match the superblock's fsid or metadata_uuid).
     pub fsid: Uuid,
+    /// Logical byte offset where this block is stored.
     pub bytenr: u64,
+    /// Header flags (lower 56 bits) and backref revision (upper 8 bits).
     pub flags: HeaderFlags,
+    /// UUID of the chunk tree that maps this block's logical address.
     pub chunk_tree_uuid: Uuid,
+    /// Transaction generation when this block was last written.
     pub generation: u64,
+    /// Objectid of the tree that owns this block (e.g. 1 = root tree, 5 = FS tree).
     pub owner: u64,
+    /// Number of items (leaf) or key pointers (node) in this block.
     pub nritems: u32,
+    /// Tree level: 0 for leaves, >0 for internal nodes.
     pub level: u8,
 }
 
@@ -624,8 +643,11 @@ impl Header {
 /// A key pointer from an internal tree node, pointing to a child block.
 #[derive(Debug, Clone, Copy)]
 pub struct KeyPtr {
+    /// The lowest key in the child subtree.
     pub key: DiskKey,
+    /// Logical byte address of the child tree block.
     pub blockptr: u64,
+    /// Generation of the child block (used for consistency checks).
     pub generation: u64,
 }
 
@@ -675,6 +697,10 @@ impl Item {
 }
 
 /// A parsed btrfs tree block: either an internal node or a leaf.
+///
+/// Nodes (level > 0) contain sorted key pointers to child blocks. Leaves
+/// (level == 0) contain sorted items whose data payloads can be parsed with
+/// [`crate::items::parse_item_payload`].
 pub enum TreeBlock {
     /// Internal node (level > 0): contains key pointers to child blocks.
     Node { header: Header, ptrs: Vec<KeyPtr> },

@@ -42,7 +42,8 @@ pub fn super_mirror_offset(index: u32) -> u64 {
     }
 }
 
-/// Checksum algorithm used by the filesystem.
+/// Checksum algorithm used by the filesystem, stored in the superblock's
+/// `csum_type` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChecksumType {
     Crc32,
@@ -113,69 +114,134 @@ impl fmt::Display for ChecksumType {
     }
 }
 
-/// A single backup root entry.
+/// A single backup root entry from the superblock's `super_roots` array.
+///
+/// The kernel maintains four rotating backup copies of the critical tree root
+/// pointers. On mount failure, these can be used to recover an older consistent
+/// state.
 #[derive(Debug, Clone, Default)]
 pub struct BackupRoot {
+    /// Logical bytenr of the root tree root block.
     pub tree_root: u64,
+    /// Generation of the root tree root.
     pub tree_root_gen: u64,
+    /// Logical bytenr of the chunk tree root block.
     pub chunk_root: u64,
+    /// Generation of the chunk tree root.
     pub chunk_root_gen: u64,
+    /// Logical bytenr of the extent tree root block.
     pub extent_root: u64,
+    /// Generation of the extent tree root.
     pub extent_root_gen: u64,
+    /// Logical bytenr of the FS tree root block.
     pub fs_root: u64,
+    /// Generation of the FS tree root.
     pub fs_root_gen: u64,
+    /// Logical bytenr of the device tree root block.
     pub dev_root: u64,
+    /// Generation of the device tree root.
     pub dev_root_gen: u64,
+    /// Logical bytenr of the checksum tree root block.
     pub csum_root: u64,
+    /// Generation of the checksum tree root.
     pub csum_root_gen: u64,
+    /// Total bytes in the filesystem at backup time.
     pub total_bytes: u64,
+    /// Bytes used at backup time.
     pub bytes_used: u64,
+    /// Number of devices at backup time.
     pub num_devices: u64,
+    /// B-tree level of the root tree root.
     pub tree_root_level: u8,
+    /// B-tree level of the chunk tree root.
     pub chunk_root_level: u8,
+    /// B-tree level of the extent tree root.
     pub extent_root_level: u8,
+    /// B-tree level of the FS tree root.
     pub fs_root_level: u8,
+    /// B-tree level of the device tree root.
     pub dev_root_level: u8,
+    /// B-tree level of the checksum tree root.
     pub csum_root_level: u8,
 }
 
 /// Parsed btrfs superblock.
+///
+/// The superblock is the entry point for reading a btrfs filesystem. It lives
+/// at a fixed offset on each device (see [`super_mirror_offset`]) and contains
+/// the root pointers, feature flags, and embedded system chunk array needed to
+/// bootstrap access to all other on-disk structures.
 #[derive(Debug, Clone)]
 pub struct Superblock {
+    /// Checksum of everything past this field (bytes 32..4096).
     pub csum: [u8; 32],
+    /// Filesystem UUID. Shared by all devices in a multi-device filesystem.
     pub fsid: Uuid,
+    /// Physical byte offset where this superblock is stored on disk.
     pub bytenr: u64,
+    /// Superblock flags (`BTRFS_SUPER_FLAG_*`).
     pub flags: u64,
+    /// Magic number (`_BHRfS_M`). See [`Superblock::magic_is_valid`].
     pub magic: u64,
+    /// Transaction generation of this superblock write.
     pub generation: u64,
+    /// Logical bytenr of the root tree root block.
     pub root: u64,
+    /// Logical bytenr of the chunk tree root block.
     pub chunk_root: u64,
+    /// Logical bytenr of the log tree root block (0 if no log tree).
     pub log_root: u64,
+    /// Transaction ID of the log tree root.
     pub log_root_transid: u64,
+    /// Total usable bytes across all devices.
     pub total_bytes: u64,
+    /// Total bytes used by data and metadata.
     pub bytes_used: u64,
+    /// Objectid of the root directory (always 6).
     pub root_dir_objectid: u64,
+    /// Number of devices in this filesystem.
     pub num_devices: u64,
+    /// Minimum I/O alignment (typically 4096).
     pub sectorsize: u32,
+    /// Size of tree blocks in bytes (typically 16384).
     pub nodesize: u32,
+    /// Legacy field, equal to `nodesize` in modern filesystems.
     pub leafsize: u32,
+    /// Stripe size for RAID (typically 65536).
     pub stripesize: u32,
+    /// Number of valid bytes in the `sys_chunk_array`.
     pub sys_chunk_array_size: u32,
+    /// Generation of the chunk tree root.
     pub chunk_root_generation: u64,
+    /// Compatible feature flags.
     pub compat_flags: u64,
+    /// Compatible read-only feature flags.
     pub compat_ro_flags: u64,
+    /// Incompatible feature flags (e.g. `MIXED_GROUPS`, `SKINNY_METADATA`).
     pub incompat_flags: u64,
+    /// Checksum algorithm for this filesystem.
     pub csum_type: ChecksumType,
+    /// B-tree level of the root tree root.
     pub root_level: u8,
+    /// B-tree level of the chunk tree root.
     pub chunk_root_level: u8,
+    /// B-tree level of the log tree root.
     pub log_root_level: u8,
+    /// Embedded device item describing this device.
     pub dev_item: DeviceItem,
+    /// Filesystem label (up to 255 bytes, NUL-terminated on disk).
     pub label: String,
+    /// Generation when the free space cache was written (v1 cache).
     pub cache_generation: u64,
+    /// Generation when the UUID tree was last updated.
     pub uuid_tree_generation: u64,
+    /// Metadata UUID (differs from `fsid` when `METADATA_UUID` incompat flag is set).
     pub metadata_uuid: Uuid,
+    /// Number of global root entries (extent-tree-v2, not yet used).
     pub nr_global_roots: u64,
+    /// Four rotating backup copies of critical tree root pointers.
     pub backup_roots: [BackupRoot; 4],
+    /// Embedded chunk tree entries for bootstrapping the chunk cache.
     pub sys_chunk_array: [u8; 2048],
 }
 

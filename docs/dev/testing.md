@@ -1,27 +1,34 @@
 # Testing
 
+The goal for this project is to maintain a high test coverage, to make sure
+that these tools function correctly.
+
 ## Running tests
 
-```sh
-just test
-```
+Running the tests for this project is complicated by the fact that many btrfs
+operations talk directly to the kernel and require elevated privileges. 
 
-This runs unit tests (unprivileged, as your normal user) followed by integration
-tests (privileged, via `sudo`). The integration tests build as your user and only
-the test runner is executed with elevated privileges, so no `sudo cargo` is
-involved.
-
-For unit tests only:
+You can run all non-privileged tests with regular `cargo test` commands. This
+will still build the privileged tests, but they are skipped.
 
 ```sh
 cargo test
 ```
 
-For a coverage report (requires `cargo-llvm-cov`):
+In order to run privileged tests, there is a `just` target that will build
+them, and run (only the test binaries, not `cargo` itself) using `sudo`.
+This is the recommended way to run the full test suite on this project.
+
+```sh
+just test
+```
+
+You can build a coverage report (requires `cargo-llvm-cov`) of the full test
+suite similarly, using the `coverage` target.
 
 ```sh
 just coverage
-# open target/llvm-cov/html/index.html
+# open target/coverage/llvm-cov/html/index.html
 ```
 
 ## Unit tests
@@ -29,7 +36,7 @@ just coverage
 Unit tests live as `#[cfg(test)] mod tests` blocks within the module they test.
 They require no privileges and run with `cargo test`.
 
-Coverage spans all pure logic across the four crates: LE readers, struct size
+Coverage spans all pure logic across the crates: LE readers, struct size
 assertions, tree search cursor arithmetic, stream parsing (all 22 v1 command
 types, CRC validation), superblock parsing, B-tree node parsing, size/time
 formatting, argument parsing helpers, balance filter parsing, and property
@@ -90,7 +97,7 @@ Convenience functions:
 CLI output tests use [insta](https://insta.rs/) for snapshot testing. Snapshots
 live in `cli/tests/snapshots/` and are checked in to the repository.
 
-Three snapshot categories:
+Four snapshot categories:
 
 | Pattern | Privileges | Description |
 |---------|-----------|-------------|

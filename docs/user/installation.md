@@ -1,9 +1,14 @@
 # Installation
 
-## From source
+## Cargo
 
-See [Building from Source](building.md) for instructions on compiling btrfsutils
-yourself.
+If you have cargo installed, you can install the utilities with it.
+
+```sh
+cargo install btrfs-cli
+cargo install btrfs-tune
+cargo install btrfs-mkfs
+```
 
 ## Nix
 
@@ -19,6 +24,11 @@ Or install it into your profile:
 ```sh
 nix profile install github:rustprojectprimer/btrfsutils
 ```
+
+## From source
+
+See [Building from Source](building.md) for instructions on compiling btrfsutils
+yourself.
 
 ## Requirements
 

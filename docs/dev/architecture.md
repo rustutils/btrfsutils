@@ -14,20 +14,26 @@ layers above them.
 `btrfs-uapi` wraps kernel ioctls, sysfs reads, and procfs reads into safe Rust
 APIs. It is Linux-only and the only crate that talks directly to the kernel.
 
-`btrfs-disk` parses on-disk structures — superblocks, B-tree nodes, item payloads
-— from raw byte buffers. It is platform-independent and does not depend on
-`btrfs-uapi`, so it can be used to inspect filesystem images on any OS.
+`btrfs-disk` parses on-disk structures — superblocks, B-tree nodes, item
+payloads — from raw byte buffers. It is platform-independent and does not
+depend on `btrfs-uapi`, so it can be used to inspect filesystem images on any
+OS.
 
 `btrfs-stream` parses the btrfs send stream wire format. The core parser is
-platform-independent. The optional `receive` feature is Linux-only and applies a
-parsed stream to a mounted filesystem via `btrfs-uapi`.
+platform-independent. The optional `receive` feature is Linux-only and applies
+a parsed stream to a mounted filesystem via `btrfs-uapi`.
 
-`btrfs-cli` is the `btrfs` tool. It handles argument parsing via clap, calls into
-`btrfs-uapi` and `btrfs-disk` as needed, and formats all output.
+`btrfs-cli` implements the `btrfs` tool. It handles argument parsing via clap,
+calls into `btrfs-uapi` and `btrfs-disk` as needed, and formats all output.
 
-`btrfs-mkfs` is the `mkfs.btrfs` tool. It constructs B-tree nodes as raw byte
-buffers and writes them directly to a block device or image file using `pwrite`.
-It does not use ioctls.
+`btrfs-mkfs` implements the `mkfs.btrfs` tool. It constructs B-tree nodes as
+raw byte buffers and writes them directly to a block device or image file using
+`pwrite`.  It does not use ioctls.
+
+`btrfs-tune` implements the `btrfstune` tool. It modifies on-disk superblock
+parameters (feature flags, seeding, filesystem UUIDs) on unmounted devices. For
+lightweight UUID changes it only rewrites the superblock; for full fsid
+rewrites it traverses every tree block on disk via `btrfs-disk`.
 
 ## The two-layer model
 

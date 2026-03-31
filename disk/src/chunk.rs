@@ -19,23 +19,33 @@ fn get_uuid(buf: &mut &[u8]) -> Uuid {
     Uuid::from_bytes(bytes)
 }
 
-/// A single stripe in a chunk mapping.
+/// A single stripe in a chunk mapping, identifying a physical location on a device.
 #[derive(Debug, Clone)]
 pub struct Stripe {
+    /// Device ID where this stripe resides.
     pub devid: u64,
+    /// Physical byte offset on the device.
     pub offset: u64,
+    /// UUID of the device.
     pub dev_uuid: Uuid,
 }
 
 /// A chunk mapping: maps a range of logical addresses to physical device locations.
 #[derive(Debug, Clone)]
 pub struct ChunkMapping {
+    /// Starting logical byte address of this chunk.
     pub logical: u64,
+    /// Length of this chunk in bytes.
     pub length: u64,
+    /// Stripe length for striped profiles (RAID0/10/5/6).
     pub stripe_len: u64,
+    /// Chunk type flags (DATA/METADATA/SYSTEM + RAID profile).
     pub chunk_type: u64,
+    /// Number of stripes (device copies/segments).
     pub num_stripes: u16,
+    /// Sub-stripes for RAID10.
     pub sub_stripes: u16,
+    /// Physical device locations for each stripe.
     pub stripes: Vec<Stripe>,
 }
 
