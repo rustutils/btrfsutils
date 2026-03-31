@@ -1,0 +1,43 @@
+---
+source: tune/tests/help.rs
+expression: text
+---
+Tune various btrfs filesystem parameters on an unmounted device.
+
+Only one operation group may be specified per invocation. The legacy feature
+flags (-r, -x, -n) can be combined with each other but not with the seeding flag
+(-S).
+
+Usage: btrfs-tune [OPTIONS] <DEVICE>
+
+Arguments:
+  <DEVICE>
+          Path to the btrfs device
+
+Options:
+  -r
+          Enable extended inode refs (extref)
+
+  -x
+          Enable skinny metadata extent refs
+
+  -n
+          Enable no-holes feature
+
+  -S <SEEDING>
+          Set (1) or clear (0) the seeding flag
+
+  -m
+          Change fsid to a random UUID via the metadata_uuid mechanism
+
+  -M <UUID>
+          Change fsid to the given UUID via the metadata_uuid mechanism
+
+  -f, --force
+          Allow dangerous operations without confirmation
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version

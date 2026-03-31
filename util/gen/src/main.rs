@@ -15,10 +15,12 @@ fn main() -> io::Result<()> {
 
     let btrfs = btrfs_cli::Arguments::command().name("btrfs");
     let mkfs = btrfs_mkfs::args::Arguments::command().name("mkfs.btrfs");
+    let tune = btrfs_tune::args::Arguments::command().name("btrfs-tune");
 
     // Man pages.
     clap_mangen::generate_to(btrfs.clone(), &man_dir)?;
     clap_mangen::generate_to(mkfs.clone(), &man_dir)?;
+    clap_mangen::generate_to(tune, &man_dir)?;
     println!("man pages written to {}", man_dir.display());
 
     // Shell completions.

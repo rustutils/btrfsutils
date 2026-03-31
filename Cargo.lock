@@ -169,6 +169,7 @@ version = "0.6.0"
 dependencies = [
  "btrfs-cli",
  "btrfs-mkfs",
+ "btrfs-tune",
  "clap",
  "clap_complete",
  "clap_mangen",
@@ -219,6 +220,7 @@ dependencies = [
  "anyhow",
  "btrfs-disk",
  "clap",
+ "insta",
  "uuid",
 ]
 
