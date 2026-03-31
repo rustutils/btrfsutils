@@ -3,7 +3,7 @@ use btrfs_disk::{
     reader::{self, BlockReader},
     superblock::{ChecksumType, Superblock},
     tree::{DiskKey, TreeBlock},
-    util::raw_crc32c,
+    util::btrfs_csum_data,
 };
 use std::io::{Read, Seek};
 use uuid::Uuid;
@@ -108,7 +108,7 @@ fn check_block(
 
     // Checksum verification (CRC32C only).
     if ctx.csum_supported {
-        let computed = raw_crc32c(0, &raw[32..]);
+        let computed = btrfs_csum_data(&raw[32..]);
         let stored = u32::from_le_bytes(raw[0..4].try_into().unwrap());
         if computed != stored {
             results.report(CheckError::TreeBlockChecksumMismatch {
@@ -246,4 +246,184 @@ fn tree_name(tree_id: u64) -> String {
 /// and bounded, so the leaked memory is negligible.
 fn leak_name(s: &str) -> &'static str {
     Box::leak(s.to_string().into_boxed_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use btrfs_disk::tree::KeyType;
+
+    fn make_key(objectid: u64, key_type: KeyType, offset: u64) -> DiskKey {
+        DiskKey {
+            objectid,
+            key_type,
+            offset,
+        }
+    }
+
+    #[test]
+    fn key_less_by_objectid() {
+        let a = make_key(1, KeyType::InodeItem, 0);
+        let b = make_key(2, KeyType::InodeItem, 0);
+        assert!(key_less(&a, &b));
+        assert!(!key_less(&b, &a));
+    }
+
+    #[test]
+    fn key_less_by_type() {
+        let a = make_key(256, KeyType::InodeItem, 0);
+        let b = make_key(256, KeyType::InodeRef, 0);
+        assert!(key_less(&a, &b));
+        assert!(!key_less(&b, &a));
+    }
+
+    #[test]
+    fn key_less_by_offset() {
+        let a = make_key(256, KeyType::ExtentData, 0);
+        let b = make_key(256, KeyType::ExtentData, 4096);
+        assert!(key_less(&a, &b));
+        assert!(!key_less(&b, &a));
+    }
+
+    #[test]
+    fn key_less_equal_is_false() {
+        let a = make_key(256, KeyType::InodeItem, 0);
+        assert!(!key_less(&a, &a));
+    }
+
+    #[test]
+    fn check_key_order_items_valid() {
+        let items = vec![
+            btrfs_disk::tree::Item {
+                key: make_key(256, KeyType::InodeItem, 0),
+                offset: 0,
+                size: 0,
+            },
+            btrfs_disk::tree::Item {
+                key: make_key(256, KeyType::InodeRef, 256),
+                offset: 0,
+                size: 0,
+            },
+            btrfs_disk::tree::Item {
+                key: make_key(256, KeyType::ExtentData, 0),
+                offset: 0,
+                size: 0,
+            },
+        ];
+        let mut results = CheckResults::new(0);
+        check_key_order_items(&items, "test", 0, &mut results);
+        assert_eq!(results.error_count, 0);
+    }
+
+    #[test]
+    fn check_key_order_items_violation() {
+        let items = vec![
+            btrfs_disk::tree::Item {
+                key: make_key(256, KeyType::InodeRef, 256),
+                offset: 0,
+                size: 0,
+            },
+            btrfs_disk::tree::Item {
+                key: make_key(256, KeyType::InodeItem, 0),
+                offset: 0,
+                size: 0,
+            },
+        ];
+        let mut results = CheckResults::new(0);
+        check_key_order_items(&items, "test", 0, &mut results);
+        assert_eq!(results.error_count, 1);
+    }
+
+    #[test]
+    fn check_key_order_items_duplicate() {
+        let items = vec![
+            btrfs_disk::tree::Item {
+                key: make_key(256, KeyType::InodeItem, 0),
+                offset: 0,
+                size: 0,
+            },
+            btrfs_disk::tree::Item {
+                key: make_key(256, KeyType::InodeItem, 0),
+                offset: 0,
+                size: 0,
+            },
+        ];
+        let mut results = CheckResults::new(0);
+        check_key_order_items(&items, "test", 0, &mut results);
+        assert_eq!(results.error_count, 1);
+    }
+
+    #[test]
+    fn check_key_order_items_single_item_no_error() {
+        let items = vec![btrfs_disk::tree::Item {
+            key: make_key(256, KeyType::InodeItem, 0),
+            offset: 0,
+            size: 0,
+        }];
+        let mut results = CheckResults::new(0);
+        check_key_order_items(&items, "test", 0, &mut results);
+        assert_eq!(results.error_count, 0);
+    }
+
+    #[test]
+    fn check_key_order_items_empty_no_error() {
+        let items: Vec<btrfs_disk::tree::Item> = vec![];
+        let mut results = CheckResults::new(0);
+        check_key_order_items(&items, "test", 0, &mut results);
+        assert_eq!(results.error_count, 0);
+    }
+
+    #[test]
+    fn check_key_order_ptrs_valid() {
+        let ptrs = vec![
+            btrfs_disk::tree::KeyPtr {
+                key: make_key(1, KeyType::RootItem, 0),
+                blockptr: 4096,
+                generation: 1,
+            },
+            btrfs_disk::tree::KeyPtr {
+                key: make_key(2, KeyType::RootItem, 0),
+                blockptr: 8192,
+                generation: 1,
+            },
+        ];
+        let mut results = CheckResults::new(0);
+        check_key_order_ptrs(&ptrs, "test", 0, &mut results);
+        assert_eq!(results.error_count, 0);
+    }
+
+    #[test]
+    fn check_key_order_ptrs_violation() {
+        let ptrs = vec![
+            btrfs_disk::tree::KeyPtr {
+                key: make_key(5, KeyType::RootItem, 0),
+                blockptr: 4096,
+                generation: 1,
+            },
+            btrfs_disk::tree::KeyPtr {
+                key: make_key(2, KeyType::RootItem, 0),
+                blockptr: 8192,
+                generation: 1,
+            },
+        ];
+        let mut results = CheckResults::new(0);
+        check_key_order_ptrs(&ptrs, "test", 0, &mut results);
+        assert_eq!(results.error_count, 1);
+    }
+
+    #[test]
+    fn tree_name_known_objectids() {
+        assert_eq!(tree_name(1), "ROOT_TREE");
+        assert_eq!(tree_name(2), "EXTENT_TREE");
+        assert_eq!(tree_name(3), "CHUNK_TREE");
+        assert_eq!(tree_name(4), "DEV_TREE");
+        assert_eq!(tree_name(5), "FS_TREE");
+    }
+
+    #[test]
+    fn tree_name_subvolume() {
+        // Subvolume trees have IDs >= 256.
+        let name = tree_name(256);
+        assert!(name.contains("256"));
+    }
 }

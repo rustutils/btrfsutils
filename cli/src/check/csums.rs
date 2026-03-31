@@ -3,9 +3,12 @@ use btrfs_disk::{
     reader::{self, BlockReader},
     superblock::{ChecksumType, Superblock},
     tree::{KeyType, TreeBlock},
-    util::raw_crc32c,
+    util::btrfs_csum_data,
 };
 use std::io::{Read, Seek};
+
+/// Header size in a btrfs tree block (bytes before item data area).
+const HEADER_SIZE: usize = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
 
 /// Check the checksum tree structure and optionally verify data checksums.
 pub fn check_csums<R: Read + Seek>(
@@ -40,8 +43,8 @@ pub fn check_csums<R: Read + Seek>(
                 if item.key.key_type != KeyType::ExtentCsum {
                     continue;
                 }
-                let item_data =
-                    &data[item.offset as usize..][..item.size as usize];
+                let start = HEADER_SIZE + item.offset as usize;
+                let item_data = &data[start..][..item.size as usize];
 
                 // Each csum item covers a contiguous range of sectors.
                 // The key offset is the logical byte address of the first
@@ -120,7 +123,7 @@ fn verify_data_csums<R: Read + Seek>(
                     }
                 };
 
-            let computed = raw_crc32c(0, &data);
+            let computed = btrfs_csum_data(&data);
             let expected = u32::from_le_bytes(stored[..4].try_into().unwrap());
             if computed != expected {
                 results.report(CheckError::CsumMismatch { logical });

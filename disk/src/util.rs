@@ -25,16 +25,30 @@ pub fn write_uuid(buf: &mut [u8], off: usize, uuid: &Uuid) {
     buf[off..off + 16].copy_from_slice(uuid.as_bytes());
 }
 
-/// Raw CRC32C matching the kernel's `crc32c()` function.
+/// Raw CRC32C matching the kernel's `crc32c_le()` function.
 ///
 /// The seed is passed through directly with no inversion on input or output,
-/// unlike the standard ISO 3309 CRC32C which inverts both. Use this when
-/// computing btrfs on-disk checksums.
+/// unlike the standard ISO 3309 CRC32C which inverts both. This is NOT the
+/// function used for on-disk checksums (superblocks, tree blocks, data csums).
+/// Use this only for internal hash computations like `extent_data_ref_hash`
+/// where the C code calls `crc32c(seed, data, len)` (which maps to
+/// `crc32c_le`).
 pub fn raw_crc32c(seed: u32, data: &[u8]) -> u32 {
     // crc32c::crc32c_append(seed) computes: !crc32c_hw(!seed, data)
     // We want: crc32c_hw(seed, data)
     // So: !crc32c::crc32c_append(!seed, data)
     !crc32c::crc32c_append(!seed, data)
+}
+
+/// Standard CRC32C matching the kernel's `hash_crc32c()` / btrfs on-disk
+/// checksum format.
+///
+/// This is the function used for all on-disk checksums: superblocks, tree
+/// blocks, and data checksums. The kernel computes these via `hash_crc32c`
+/// which calls `crc32c_le(~0, data, len)` and then inverts the result,
+/// which is equivalent to standard ISO 3309 CRC32C.
+pub fn btrfs_csum_data(data: &[u8]) -> u32 {
+    crc32c::crc32c(data)
 }
 
 /// Recompute the CRC32C checksum of a tree block and write it into the header.
@@ -45,7 +59,7 @@ pub fn raw_crc32c(seed: u32, data: &[u8]) -> u32 {
 /// arbitrary-length tree blocks (nodesize bytes).
 pub fn csum_tree_block(buf: &mut [u8]) {
     assert!(buf.len() > 32, "buffer too small for tree block checksum");
-    let csum = raw_crc32c(0, &buf[32..]);
+    let csum = btrfs_csum_data(&buf[32..]);
     buf[0..4].copy_from_slice(&csum.to_le_bytes());
     buf[4..32].fill(0);
 }

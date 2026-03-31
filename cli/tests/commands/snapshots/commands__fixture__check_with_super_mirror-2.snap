@@ -1,0 +1,15 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs check --super 0 <IMG> (stderr)
+expression: "redact_img(&stderr, &img)"
+---
+Opening filesystem to check...
+Checking filesystem on <IMG>
+UUID: deadbeef-dead-beef-dead-beefdeadbeef
+[1/7] checking superblocks
+[2/7] checking root items
+[3/7] checking extents
+[4/7] checking free space tree
+[5/7] checking fs roots
+[6/7] checking only csums items (without verifying data)
+[7/7] checking root refs

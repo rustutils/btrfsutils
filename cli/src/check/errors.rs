@@ -283,3 +283,236 @@ impl CheckResults {
         self.error_count > 0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_superblock_invalid() {
+        let e = CheckError::SuperblockInvalid {
+            mirror: 1,
+            detail: "invalid checksum or magic".into(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "superblock mirror 1: invalid checksum or magic"
+        );
+    }
+
+    #[test]
+    fn display_checksum_mismatch() {
+        let e = CheckError::TreeBlockChecksumMismatch {
+            tree: "root tree",
+            logical: 65536,
+        };
+        assert_eq!(
+            e.to_string(),
+            "root tree: checksum mismatch at bytenr 65536"
+        );
+    }
+
+    #[test]
+    fn display_ref_mismatch() {
+        let e = CheckError::ExtentRefMismatch {
+            bytenr: 1048576,
+            expected: 2,
+            found: 1,
+        };
+        assert_eq!(
+            e.to_string(),
+            "extent ref mismatch at bytenr 1048576: expected 2 refs, found 1"
+        );
+    }
+
+    #[test]
+    fn display_nlink_mismatch() {
+        let e = CheckError::NlinkMismatch {
+            tree: 5,
+            ino: 257,
+            expected: 2,
+            found: 1,
+        };
+        assert_eq!(
+            e.to_string(),
+            "root 5: inode 257 nlink mismatch: inode says 2, found 1 refs"
+        );
+    }
+
+    #[test]
+    fn results_no_errors() {
+        let r = CheckResults::new(1024);
+        assert!(!r.has_errors());
+        assert_eq!(r.error_count, 0);
+    }
+
+    #[test]
+    fn results_tracks_errors() {
+        let mut r = CheckResults::new(1024);
+        r.report(CheckError::CsumMismatch { logical: 0 });
+        r.report(CheckError::CsumMismatch { logical: 4096 });
+        assert!(r.has_errors());
+        assert_eq!(r.error_count, 2);
+    }
+
+    #[test]
+    fn display_bad_fsid() {
+        let e = CheckError::TreeBlockBadFsid {
+            tree: "chunk tree",
+            logical: 131072,
+        };
+        assert_eq!(e.to_string(), "chunk tree: bad fsid at bytenr 131072");
+    }
+
+    #[test]
+    fn display_bad_bytenr() {
+        let e = CheckError::TreeBlockBadBytenr {
+            tree: "extent tree",
+            logical: 65536,
+            header_bytenr: 99999,
+        };
+        assert_eq!(
+            e.to_string(),
+            "extent tree: header bytenr 99999 does not match logical address 65536"
+        );
+    }
+
+    #[test]
+    fn display_bad_generation() {
+        let e = CheckError::TreeBlockBadGeneration {
+            tree: "root tree",
+            logical: 4096,
+            block_gen: 100,
+            super_gen: 50,
+        };
+        assert_eq!(
+            e.to_string(),
+            "root tree: block generation 100 exceeds superblock generation 50 at bytenr 4096"
+        );
+    }
+
+    #[test]
+    fn display_bad_level() {
+        let e = CheckError::TreeBlockBadLevel {
+            tree: "fs tree",
+            logical: 16384,
+            detail: "leaf has level 5 (expected 0)".into(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "fs tree: bad level at bytenr 16384: leaf has level 5 (expected 0)"
+        );
+    }
+
+    #[test]
+    fn display_key_order_violation() {
+        let e = CheckError::KeyOrderViolation {
+            tree: "root tree",
+            logical: 8192,
+            index: 3,
+        };
+        assert_eq!(
+            e.to_string(),
+            "root tree: key ordering violation at bytenr 8192, item index 3"
+        );
+    }
+
+    #[test]
+    fn display_missing_extent_item() {
+        let e = CheckError::MissingExtentItem { bytenr: 1048576 };
+        assert_eq!(e.to_string(), "missing extent item for bytenr 1048576");
+    }
+
+    #[test]
+    fn display_overlapping_extent() {
+        let e = CheckError::OverlappingExtent {
+            bytenr: 2097152,
+            length: 4096,
+            prev_end: 2097200,
+        };
+        assert_eq!(
+            e.to_string(),
+            "overlapping extent at bytenr 2097152 length 4096, previous extent ends at 2097200"
+        );
+    }
+
+    #[test]
+    fn display_chunk_missing_block_group() {
+        let e = CheckError::ChunkMissingBlockGroup { logical: 1048576 };
+        assert_eq!(
+            e.to_string(),
+            "chunk at 1048576 has no matching block group item"
+        );
+    }
+
+    #[test]
+    fn display_block_group_missing_chunk() {
+        let e = CheckError::BlockGroupMissingChunk { logical: 2097152 };
+        assert_eq!(
+            e.to_string(),
+            "block group at 2097152 has no matching chunk"
+        );
+    }
+
+    #[test]
+    fn display_device_extent_overlap() {
+        let e = CheckError::DeviceExtentOverlap {
+            devid: 1,
+            offset: 524288,
+        };
+        assert_eq!(
+            e.to_string(),
+            "overlapping device extent on devid 1 at offset 524288"
+        );
+    }
+
+    #[test]
+    fn display_inode_missing() {
+        let e = CheckError::InodeMissing { tree: 5, ino: 300 };
+        assert_eq!(
+            e.to_string(),
+            "root 5: inode 300 referenced but has no INODE_ITEM"
+        );
+    }
+
+    #[test]
+    fn display_file_extent_overlap() {
+        let e = CheckError::FileExtentOverlap {
+            tree: 5,
+            ino: 257,
+            offset: 8192,
+        };
+        assert_eq!(
+            e.to_string(),
+            "root 5: inode 257 file extent overlap at offset 8192"
+        );
+    }
+
+    #[test]
+    fn display_dir_item_orphan() {
+        let e = CheckError::DirItemOrphan {
+            tree: 5,
+            parent_ino: 256,
+            name: "lost_file.txt".into(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "root 5: dir item in inode 256 references non-existent inode: 'lost_file.txt'"
+        );
+    }
+
+    #[test]
+    fn display_read_error() {
+        let e = CheckError::ReadError {
+            logical: 32768,
+            detail: "I/O error".into(),
+        };
+        assert_eq!(e.to_string(), "read error at bytenr 32768: I/O error");
+    }
+
+    #[test]
+    fn results_bytes_used_preserved() {
+        let r = CheckResults::new(999999);
+        assert_eq!(r.bytes_used, 999999);
+    }
+}

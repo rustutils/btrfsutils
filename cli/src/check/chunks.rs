@@ -9,6 +9,9 @@ use std::{
     io::{Read, Seek},
 };
 
+/// Header size in a btrfs tree block (bytes before item data area).
+const HEADER_SIZE: usize = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
+
 /// Cross-check chunks, block groups, and device extents.
 pub fn check_chunks<R: Read + Seek>(
     reader: &mut BlockReader<R>,
@@ -58,8 +61,8 @@ fn collect_block_groups<R: Read + Seek>(
                 if item.key.key_type != KeyType::BlockGroupItem {
                     continue;
                 }
-                let item_data =
-                    &data[item.offset as usize..][..item.size as usize];
+                let start = HEADER_SIZE + item.offset as usize;
+                let item_data = &data[start..][..item.size as usize];
                 if let ItemPayload::BlockGroupItem(bg) =
                     parse_item_payload(&item.key, item_data)
                 {
@@ -105,8 +108,8 @@ fn check_device_extents<R: Read + Seek>(
                 if item.key.key_type != KeyType::DeviceExtent {
                     continue;
                 }
-                let item_data =
-                    &data[item.offset as usize..][..item.size as usize];
+                let start = HEADER_SIZE + item.offset as usize;
+                let item_data = &data[start..][..item.size as usize];
                 if let Some(de) = DeviceExtent::parse(item_data) {
                     let devid = item.key.objectid;
                     let offset = item.key.offset;

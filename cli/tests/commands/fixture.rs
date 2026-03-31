@@ -631,6 +631,106 @@ fn restore_subvolume_files() {
     assert!(tmp.path().join("toplevel.txt").exists());
 }
 
+// ── check (no privileges needed — reads raw image) ───────────────────
+
+/// Replace the fixture image path with `<IMG>` in output strings.
+fn redact_img(output: &str, img: &std::path::Path) -> String {
+    output.replace(img.to_str().unwrap(), "<IMG>")
+}
+
+#[test]
+fn check_clean_image() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let (stdout, stderr, code) = super::btrfs(&["check", img_str]);
+    assert_eq!(code, 0, "btrfs check on clean image failed:\n{stderr}");
+    snap!("btrfs check <IMG> (stdout)", stdout);
+    snap!("btrfs check <IMG> (stderr)", redact_img(&stderr, &img));
+}
+
+#[test]
+fn check_with_data_csum() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let (stdout, stderr, code) =
+        super::btrfs(&["check", "--check-data-csum", img_str]);
+    assert_eq!(
+        code, 0,
+        "btrfs check --check-data-csum on clean image failed:\n{stderr}"
+    );
+    snap!("btrfs check --check-data-csum <IMG> (stdout)", stdout);
+    snap!(
+        "btrfs check --check-data-csum <IMG> (stderr)",
+        redact_img(&stderr, &img)
+    );
+}
+
+#[test]
+fn check_with_super_mirror() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let (stdout, stderr, code) =
+        super::btrfs(&["check", "--super", "0", img_str]);
+    assert_eq!(
+        code, 0,
+        "btrfs check --super 0 on clean image failed:\n{stderr}"
+    );
+    snap!("btrfs check --super 0 <IMG> (stdout)", stdout);
+    snap!(
+        "btrfs check --super 0 <IMG> (stderr)",
+        redact_img(&stderr, &img)
+    );
+}
+
+#[test]
+fn check_invalid_super_mirror() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let (_stdout, stderr, code) =
+        super::btrfs(&["check", "--super", "5", img_str]);
+    assert_ne!(code, 0, "expected failure for invalid super mirror index");
+    assert!(
+        stderr.contains("out of range"),
+        "expected 'out of range' in stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_nonexistent_device() {
+    let (_stdout, _stderr, code) =
+        super::btrfs(&["check", "/nonexistent/device"]);
+    assert_ne!(code, 0, "expected failure for nonexistent device");
+}
+
+#[test]
+fn check_unsupported_repair() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let (_stdout, stderr, code) = super::btrfs(&["check", "--repair", img_str]);
+    assert_ne!(code, 0, "expected failure for --repair");
+    assert!(
+        stderr.contains("not yet supported"),
+        "expected 'not yet supported' in stderr: {stderr}"
+    );
+}
+
+#[test]
+fn check_readonly_flag() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let (stdout, stderr, code) =
+        super::btrfs(&["check", "--readonly", img_str]);
+    assert_eq!(
+        code, 0,
+        "btrfs check --readonly on clean image failed:\n{stderr}"
+    );
+    // --readonly is the default, so output should match the basic check.
+    assert!(
+        stdout.contains("no error found"),
+        "expected 'no error found' in stdout: {stdout}"
+    );
+}
+
 // ── quota ────────────────────────────────────────────────────────────
 
 #[test]

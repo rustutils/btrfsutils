@@ -1,0 +1,13 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs check <IMG> (stdout)
+expression: stdout
+---
+found 1564672 bytes used, no error found
+total csum bytes: 1000
+total tree bytes: 540672
+total fs tree bytes: 409600
+total extent tree bytes: 0
+btree space waste bytes: 211251
+file data blocks allocated: 1024000
+ referenced 32768

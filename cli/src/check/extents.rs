@@ -6,6 +6,9 @@ use btrfs_disk::{
 };
 use std::io::{Read, Seek};
 
+/// Header size in a btrfs tree block (bytes before item data area).
+const HEADER_SIZE: usize = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
+
 /// Check extent tree: verify reference counts and detect overlapping extents.
 pub fn check_extent_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
@@ -19,8 +22,8 @@ pub fn check_extent_tree<R: Read + Seek>(
     let mut visitor = |_raw: &[u8], block: &TreeBlock| {
         if let TreeBlock::Leaf { items, data, .. } = block {
             for item in items {
-                let item_data =
-                    &data[item.offset as usize..][..item.size as usize];
+                let start = HEADER_SIZE + item.offset as usize;
+                let item_data = &data[start..][..item.size as usize];
                 process_extent_item(&item.key, item_data, &mut state, results);
             }
         }
@@ -217,4 +220,143 @@ fn count_inline_refs(ei: &ExtentItem) -> u64 {
         }
     }
     count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use btrfs_disk::items::{ExtentFlags, ExtentItem, InlineRef};
+
+    fn make_extent_item(
+        refs: u64,
+        flags: ExtentFlags,
+        inline_refs: Vec<InlineRef>,
+    ) -> ExtentItem {
+        ExtentItem {
+            refs,
+            generation: 1,
+            flags,
+            tree_block_key: None,
+            tree_block_level: None,
+            skinny_level: None,
+            inline_refs,
+        }
+    }
+
+    #[test]
+    fn count_inline_refs_tree_block_backrefs() {
+        let ei = make_extent_item(
+            2,
+            ExtentFlags::TREE_BLOCK,
+            vec![
+                InlineRef::TreeBlockBackref {
+                    ref_offset: 0,
+                    root: 1,
+                },
+                InlineRef::SharedBlockBackref {
+                    ref_offset: 0,
+                    parent: 4096,
+                },
+            ],
+        );
+        assert_eq!(count_inline_refs(&ei), 2);
+    }
+
+    #[test]
+    fn count_inline_refs_data_backrefs_with_counts() {
+        let ei = make_extent_item(
+            5,
+            ExtentFlags::DATA,
+            vec![
+                InlineRef::ExtentDataBackref {
+                    ref_offset: 0,
+                    root: 5,
+                    objectid: 256,
+                    offset: 0,
+                    count: 3,
+                },
+                InlineRef::SharedDataBackref {
+                    ref_offset: 0,
+                    parent: 8192,
+                    count: 2,
+                },
+            ],
+        );
+        assert_eq!(count_inline_refs(&ei), 5);
+    }
+
+    #[test]
+    fn count_inline_refs_empty() {
+        let ei = make_extent_item(0, ExtentFlags::DATA, vec![]);
+        assert_eq!(count_inline_refs(&ei), 0);
+    }
+
+    #[test]
+    fn count_inline_refs_owner_ref() {
+        let ei = make_extent_item(
+            1,
+            ExtentFlags::TREE_BLOCK,
+            vec![InlineRef::ExtentOwnerRef {
+                ref_offset: 0,
+                root: 2,
+            }],
+        );
+        assert_eq!(count_inline_refs(&ei), 1);
+    }
+
+    #[test]
+    fn flush_pending_no_op_when_empty() {
+        let mut state = ExtentCheckState::default();
+        let mut results = CheckResults::new(0);
+        flush_pending(&mut state, &mut results);
+        assert_eq!(results.error_count, 0);
+    }
+
+    #[test]
+    fn flush_pending_matching_refs() {
+        let mut state = ExtentCheckState {
+            pending_bytenr: 1048576,
+            pending_length: 4096,
+            pending_refs: 1,
+            pending_counted: 1,
+            pending_is_data: true,
+            ..Default::default()
+        };
+        let mut results = CheckResults::new(0);
+        flush_pending(&mut state, &mut results);
+        assert_eq!(results.error_count, 0);
+        // Should reset pending_bytenr.
+        assert_eq!(state.pending_bytenr, 0);
+    }
+
+    #[test]
+    fn flush_pending_ref_mismatch_reports_error() {
+        let mut state = ExtentCheckState {
+            pending_bytenr: 1048576,
+            pending_length: 4096,
+            pending_refs: 2,
+            pending_counted: 1,
+            pending_is_data: false,
+            ..Default::default()
+        };
+        let mut results = CheckResults::new(0);
+        flush_pending(&mut state, &mut results);
+        assert_eq!(results.error_count, 1);
+    }
+
+    #[test]
+    fn flush_pending_accounts_data_referenced_bytes() {
+        let mut state = ExtentCheckState {
+            pending_bytenr: 1048576,
+            pending_length: 4096,
+            pending_refs: 1,
+            pending_counted: 1,
+            pending_is_data: true,
+            data_bytes_referenced: 0,
+            ..Default::default()
+        };
+        let mut results = CheckResults::new(0);
+        flush_pending(&mut state, &mut results);
+        assert_eq!(state.data_bytes_referenced, 4096);
+    }
 }

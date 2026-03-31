@@ -5,7 +5,7 @@
 //! the root pointers and metadata needed to bootstrap access to the rest
 //! of the filesystem.
 
-use crate::{items::DeviceItem, raw, util::raw_crc32c};
+use crate::{items::DeviceItem, raw, util::btrfs_csum_data};
 use bytes::BufMut;
 use std::{
     fmt,
@@ -575,7 +575,7 @@ pub fn superblock_is_valid(buf: &[u8; SUPER_INFO_SIZE]) -> bool {
         return false;
     }
     let expected = u32::from_le_bytes(buf[0..4].try_into().unwrap());
-    let actual = raw_crc32c(0, &buf[32..]);
+    let actual = btrfs_csum_data(&buf[32..]);
     expected == actual
 }
 
@@ -601,7 +601,7 @@ pub fn csum_superblock(buf: &mut [u8; SUPER_INFO_SIZE]) -> io::Result<()> {
             format!("unsupported checksum type {csum_type}"),
         ));
     }
-    let csum = raw_crc32c(0, &buf[32..]);
+    let csum = btrfs_csum_data(&buf[32..]);
     buf[0..4].copy_from_slice(&csum.to_le_bytes());
     buf[4..32].fill(0);
     Ok(())

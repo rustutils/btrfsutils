@@ -10,6 +10,9 @@ use std::{
     io::{Read, Seek},
 };
 
+/// Header size in a btrfs tree block (bytes before item data area).
+const HEADER_SIZE: usize = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
+
 /// Check all filesystem trees (subvolumes) for inode consistency.
 pub fn check_fs_roots<R: Read + Seek>(
     reader: &mut BlockReader<R>,
@@ -136,8 +139,8 @@ fn collect_fs_items<R: Read + Seek>(
         } = block
         {
             for item in leaf_items {
-                let item_data =
-                    data[item.offset as usize..][..item.size as usize].to_vec();
+                let start = HEADER_SIZE + item.offset as usize;
+                let item_data = data[start..][..item.size as usize].to_vec();
                 items
                     .entry(item.key.objectid)
                     .or_default()
