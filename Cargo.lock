@@ -143,13 +143,16 @@ dependencies = [
  "chrono",
  "clap",
  "env_logger",
+ "flate2",
  "insta",
  "libc",
  "log",
+ "lzokay",
  "nix",
  "regex-lite",
  "tempfile",
  "uuid",
+ "zstd",
 ]
 
 [[package]]

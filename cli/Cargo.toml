@@ -27,8 +27,11 @@ btrfs-uapi = { workspace = true }
 btrfs-disk = { workspace = true }
 btrfs-stream = { workspace = true, features = ["receive"] }
 chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
+flate2 = "1"
+zstd = "0.13"
+lzokay = "2"
+regex-lite = "0.1"
 
 [dev-dependencies]
 insta = "1"
-regex-lite = "0.1"
 tempfile = "3"

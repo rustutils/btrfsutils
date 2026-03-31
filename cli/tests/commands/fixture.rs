@@ -579,6 +579,58 @@ fn inspect_tree_stats_single_tree() {
     );
 }
 
+// ── restore (no privileges needed — reads raw image) ─────────────────
+
+#[test]
+fn restore_list_roots() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    snap!(
+        "btrfs restore --list-roots <IMG>",
+        btrfs_ok(&["restore", "--list-roots", img_str])
+    );
+}
+
+#[test]
+fn restore_dry_run() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let out_str = tmp.path().to_str().unwrap();
+    let output = btrfs_ok(&["restore", "-D", "-S", img_str, out_str]);
+    // Redact the temp path for determinism.
+    let redacted = output.replace(out_str, "<OUTPUT>");
+    snap!("btrfs restore -D -S <IMG> <OUTPUT>", redacted);
+}
+
+#[test]
+fn restore_toplevel_file() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let out_str = tmp.path().to_str().unwrap();
+    btrfs_ok(&["restore", "-S", img_str, out_str]);
+
+    // Verify toplevel.txt was restored with correct content.
+    let content =
+        std::fs::read_to_string(tmp.path().join("toplevel.txt")).unwrap();
+    assert_eq!(content.trim(), "top level file");
+}
+
+#[test]
+fn restore_subvolume_files() {
+    let img = common::cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let out_str = tmp.path().to_str().unwrap();
+    btrfs_ok(&["restore", "-S", img_str, out_str]);
+
+    // The default root (FS tree objectid 5) contains the top-level
+    // subvolume. Subvolume contents live in separate trees and are
+    // NOT restored unless --root points to them.
+    assert!(tmp.path().join("toplevel.txt").exists());
+}
+
 // ── quota ────────────────────────────────────────────────────────────
 
 #[test]

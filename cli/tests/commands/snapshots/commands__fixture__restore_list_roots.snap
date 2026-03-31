@@ -1,0 +1,16 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs restore --list-roots <IMG>
+expression: "btrfs_ok(&[\"restore\", \"--list-roots\", img_str])"
+---
+ tree key (2 ROOT_ITEM 0) 31162368 level 0
+ tree key (4 ROOT_ITEM 0) 31031296 level 0
+ tree key (5 ROOT_ITEM 0) 31096832 level 1
+ tree key (7 ROOT_ITEM 0) 31145984 level 0
+ tree key (9 ROOT_ITEM 0) 31080448 level 0
+ tree key (10 ROOT_ITEM 0) 31178752 level 0
+ tree key (11 ROOT_ITEM 0) 31195136 level 0
+ tree key (256 ROOT_ITEM 0) 30949376 level 0
+ tree key (257 ROOT_ITEM 9) 31014912 level 0
+ tree key (258 ROOT_ITEM 0) 31047680 level 0
+ tree key (18446744073709551607 ROOT_ITEM 0) 30556160 level 0

@@ -60,6 +60,27 @@ impl<R: Read + Seek> BlockReader<R> {
         self.nodesize
     }
 
+    /// Read arbitrary data at a logical address (not limited to nodesize).
+    ///
+    /// Unlike `read_block` which always reads `nodesize` bytes, this reads
+    /// exactly `len` bytes. Used for reading file data extents.
+    pub fn read_data(
+        &mut self,
+        logical: u64,
+        len: usize,
+    ) -> io::Result<Vec<u8>> {
+        let physical = self.chunk_cache.resolve(logical).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("logical address {logical} not mapped in chunk cache"),
+            )
+        })?;
+        let mut buf = vec![0u8; len];
+        self.reader.seek(SeekFrom::Start(physical))?;
+        self.reader.read_exact(&mut buf)?;
+        Ok(buf)
+    }
+
     /// Return a mutable reference to the underlying I/O handle.
     pub fn inner_mut(&mut self) -> &mut R {
         &mut self.reader
@@ -106,10 +127,18 @@ pub struct OpenFilesystem<R> {
 pub fn filesystem_open<R: Read + Seek>(
     reader: R,
 ) -> io::Result<OpenFilesystem<R>> {
+    filesystem_open_mirror(reader, 0)
+}
+
+/// Open a btrfs filesystem using a specific superblock mirror (0, 1, or 2).
+pub fn filesystem_open_mirror<R: Read + Seek>(
+    reader: R,
+    mirror: u32,
+) -> io::Result<OpenFilesystem<R>> {
     let mut reader = reader;
 
     // Step 1: read the superblock
-    let sb = superblock::read_superblock(&mut reader, 0)?;
+    let sb = superblock::read_superblock(&mut reader, mirror)?;
 
     // Step 2: seed chunk cache from sys_chunk_array
     let chunk_cache = chunk::seed_from_sys_chunk_array(
