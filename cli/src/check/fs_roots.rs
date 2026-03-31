@@ -1,0 +1,174 @@
+use super::errors::{CheckError, CheckResults};
+use btrfs_disk::{
+    items::{DirItem, InodeExtref, InodeItem, InodeRef},
+    raw,
+    reader::{self, BlockReader},
+    tree::{KeyType, TreeBlock},
+};
+use std::{
+    collections::{BTreeMap, HashSet},
+    io::{Read, Seek},
+};
+
+/// Check all filesystem trees (subvolumes) for inode consistency.
+pub fn check_fs_roots<R: Read + Seek>(
+    reader: &mut BlockReader<R>,
+    tree_roots: &BTreeMap<u64, (u64, u64)>,
+    results: &mut CheckResults,
+) {
+    for (&tree_id, &(bytenr, _gen)) in tree_roots {
+        // FS trees have objectid >= FIRST_FREE_OBJECTID (256) or are the
+        // default FS tree (objectid 5).
+        let is_fs_tree = tree_id == raw::BTRFS_FS_TREE_OBJECTID as u64
+            || tree_id >= raw::BTRFS_FIRST_FREE_OBJECTID as u64;
+        if !is_fs_tree {
+            continue;
+        }
+
+        check_one_fs_tree(reader, tree_id, bytenr, results);
+    }
+}
+
+fn check_one_fs_tree<R: Read + Seek>(
+    reader: &mut BlockReader<R>,
+    tree_id: u64,
+    root_bytenr: u64,
+    results: &mut CheckResults,
+) {
+    // Collect all items from this FS tree, grouped by inode number.
+    let items = match collect_fs_items(reader, root_bytenr, results) {
+        Some(items) => items,
+        None => return,
+    };
+
+    // Set of all inodes that have an INODE_ITEM.
+    let inodes_with_item: HashSet<u64> = items
+        .iter()
+        .filter(|(_, entries)| {
+            entries.iter().any(|(kt, _)| *kt == KeyType::InodeItem)
+        })
+        .map(|(&ino, _)| ino)
+        .collect();
+
+    for (&ino, entries) in &items {
+        let mut has_inode_item = false;
+        let mut inode_nlink: u32 = 0;
+        let mut ref_count: u32 = 0;
+
+        for (key_type, data) in entries {
+            match key_type {
+                KeyType::InodeItem => {
+                    has_inode_item = true;
+                    if let Some(ii) = InodeItem::parse(data) {
+                        inode_nlink = ii.nlink;
+                    }
+                }
+                KeyType::InodeRef => {
+                    for _r in InodeRef::parse_all(data) {
+                        ref_count += 1;
+                    }
+                }
+                KeyType::InodeExtref => {
+                    for _r in InodeExtref::parse_all(data) {
+                        ref_count += 1;
+                    }
+                }
+                KeyType::DirItem | KeyType::DirIndex => {
+                    let dir_items = DirItem::parse_all(data);
+                    for di in &dir_items {
+                        let child_ino = di.location.objectid;
+                        // Check that the target inode exists (for non-root refs).
+                        if di.location.key_type == KeyType::InodeItem
+                            && child_ino
+                                >= raw::BTRFS_FIRST_FREE_OBJECTID as u64
+                            && !inodes_with_item.contains(&child_ino)
+                        {
+                            let name =
+                                String::from_utf8_lossy(&di.name).into_owned();
+                            results.report(CheckError::DirItemOrphan {
+                                tree: tree_id,
+                                parent_ino: ino,
+                                name,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Nlink check: skip the root dir inode (256) which has special nlink
+        // handling, and skip inodes without an inode item (already reported).
+        if has_inode_item
+            && ino >= raw::BTRFS_FIRST_FREE_OBJECTID as u64
+            && inode_nlink != ref_count
+            && ref_count > 0
+        {
+            results.report(CheckError::NlinkMismatch {
+                tree: tree_id,
+                ino,
+                expected: inode_nlink,
+                found: ref_count,
+            });
+        }
+    }
+}
+
+/// Collected items for one FS tree, grouped by objectid (inode number).
+/// Each entry is (key_type, raw_data).
+type FsItemMap = BTreeMap<u64, Vec<(KeyType, Vec<u8>)>>;
+
+fn collect_fs_items<R: Read + Seek>(
+    reader: &mut BlockReader<R>,
+    root_bytenr: u64,
+    results: &mut CheckResults,
+) -> Option<FsItemMap> {
+    let mut items: FsItemMap = BTreeMap::new();
+    let mut read_errors: Vec<(u64, String)> = Vec::new();
+    let nodesize = u64::from(reader.nodesize());
+    let mut block_count = 0u64;
+
+    let mut visitor = |_raw: &[u8], block: &TreeBlock| {
+        if let TreeBlock::Leaf {
+            items: leaf_items,
+            data,
+            ..
+        } = block
+        {
+            for item in leaf_items {
+                let item_data =
+                    data[item.offset as usize..][..item.size as usize].to_vec();
+                items
+                    .entry(item.key.objectid)
+                    .or_default()
+                    .push((item.key.key_type, item_data));
+            }
+        }
+        block_count += 1;
+    };
+
+    let mut on_error = |logical: u64, err: &std::io::Error| {
+        read_errors.push((logical, err.to_string()));
+    };
+
+    if let Err(e) = reader::tree_walk_tolerant(
+        reader,
+        root_bytenr,
+        &mut visitor,
+        &mut on_error,
+    ) {
+        results.report(CheckError::ReadError {
+            logical: root_bytenr,
+            detail: format!("fs tree root: {e}"),
+        });
+        return None;
+    }
+
+    results.total_fs_tree_bytes += block_count * nodesize;
+
+    for (logical, detail) in read_errors {
+        results.report(CheckError::ReadError { logical, detail });
+    }
+
+    Some(items)
+}

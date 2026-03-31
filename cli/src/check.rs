@@ -1,10 +1,14 @@
 use crate::{Format, Runnable, util::is_mounted};
 use anyhow::{Result, bail};
-use btrfs_disk::{reader, superblock::SUPER_MIRROR_MAX};
+use btrfs_disk::{raw, reader, superblock::SUPER_MIRROR_MAX};
 use clap::Parser;
 use std::{fs::File, path::PathBuf};
 
+mod chunks;
+mod csums;
 mod errors;
+mod extents;
+mod fs_roots;
 mod superblock;
 mod tree_structure;
 
@@ -146,7 +150,7 @@ impl Runnable for CheckCommand {
         eprintln!("[1/7] checking superblocks");
         superblock::check_superblocks(&mut file, &mut results);
 
-        // Phase 2: Tree structure checks.
+        // Phase 2: Tree structure checks (all trees).
         eprintln!("[2/7] checking root items");
         tree_structure::check_all_trees(
             &mut open.reader,
@@ -154,9 +158,56 @@ impl Runnable for CheckCommand {
             &open.tree_roots,
             &mut results,
         );
+
+        // Phase 3: Extent tree cross-checks.
         eprintln!("[3/7] checking extents");
+        let extent_root = open
+            .tree_roots
+            .get(&(raw::BTRFS_EXTENT_TREE_OBJECTID as u64))
+            .map(|&(bytenr, _)| bytenr);
+        if let Some(extent_root) = extent_root {
+            extents::check_extent_tree(
+                &mut open.reader,
+                extent_root,
+                &mut results,
+            );
+        }
+
+        // Phase 4: Chunk / block group / device extent cross-checks.
         eprintln!("[4/7] checking free space tree");
+        let block_group_tree_root = if sb.compat_ro_flags
+            & u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE)
+            != 0
+        {
+            open.tree_roots
+                .get(&(raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64))
+                .map(|&(bytenr, _)| bytenr)
+        } else {
+            None
+        };
+        let dev_tree_root = open
+            .tree_roots
+            .get(&(raw::BTRFS_DEV_TREE_OBJECTID as u64))
+            .map(|&(bytenr, _)| bytenr);
+        if let (Some(er), Some(dr)) = (extent_root, dev_tree_root) {
+            chunks::check_chunks(
+                &mut open.reader,
+                er,
+                block_group_tree_root,
+                dr,
+                &mut results,
+            );
+        }
+
+        // Phase 5: FS tree checks.
         eprintln!("[5/7] checking fs roots");
+        fs_roots::check_fs_roots(
+            &mut open.reader,
+            &open.tree_roots,
+            &mut results,
+        );
+
+        // Phase 6: Checksum tree verification.
         if self.check_data_csum {
             eprintln!("[6/7] checking csums items (verifying data)");
         } else {
@@ -165,7 +216,23 @@ impl Runnable for CheckCommand {
                  (without verifying data)"
             );
         }
+        let csum_root = open
+            .tree_roots
+            .get(&(raw::BTRFS_CSUM_TREE_OBJECTID as u64))
+            .map(|&(bytenr, _)| bytenr);
+        if let Some(csum_root) = csum_root {
+            csums::check_csums(
+                &mut open.reader,
+                sb,
+                csum_root,
+                self.check_data_csum,
+                &mut results,
+            );
+        }
+
         eprintln!("[7/7] checking root refs");
+        // Root ref checking (ROOT_REF/ROOT_BACKREF consistency) is a
+        // follow-up — placeholder for now.
 
         results.print_summary();
 
