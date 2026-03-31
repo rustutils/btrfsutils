@@ -37,6 +37,19 @@ pub fn raw_crc32c(seed: u32, data: &[u8]) -> u32 {
     !crc32c::crc32c_append(!seed, data)
 }
 
+/// Recompute the CRC32C checksum of a tree block and write it into the header.
+///
+/// The checksum covers `buf[32..]` (everything after the csum field).
+/// The 4-byte LE result is written to `buf[0..4]` and `buf[4..32]` is zeroed.
+/// This is the same algorithm as `superblock::csum_superblock` but for
+/// arbitrary-length tree blocks (nodesize bytes).
+pub fn csum_tree_block(buf: &mut [u8]) {
+    assert!(buf.len() > 32, "buffer too small for tree block checksum");
+    let csum = raw_crc32c(0, &buf[32..]);
+    buf[0..4].copy_from_slice(&csum.to_le_bytes());
+    buf[4..32].fill(0);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

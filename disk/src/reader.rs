@@ -13,7 +13,7 @@ use crate::{
 use bytes::Buf;
 use std::{
     collections::BTreeMap,
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
     mem,
 };
 
@@ -58,6 +58,31 @@ impl<R: Read + Seek> BlockReader<R> {
     /// Return the nodesize.
     pub fn nodesize(&self) -> u32 {
         self.nodesize
+    }
+
+    /// Return a mutable reference to the underlying I/O handle.
+    pub fn inner_mut(&mut self) -> &mut R {
+        &mut self.reader
+    }
+
+    /// Consume the reader and return the underlying I/O handle.
+    pub fn into_inner(self) -> R {
+        self.reader
+    }
+}
+
+impl<R: Read + Write + Seek> BlockReader<R> {
+    /// Write raw bytes to a logical address, resolving to physical via the chunk cache.
+    pub fn write_block(&mut self, logical: u64, buf: &[u8]) -> io::Result<()> {
+        let physical = self.chunk_cache.resolve(logical).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("logical address {logical} not mapped in chunk cache"),
+            )
+        })?;
+        self.reader.seek(SeekFrom::Start(physical))?;
+        self.reader.write_all(buf)?;
+        Ok(())
     }
 }
 

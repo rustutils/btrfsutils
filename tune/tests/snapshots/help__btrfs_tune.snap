@@ -2,11 +2,16 @@
 source: tune/tests/help.rs
 expression: text
 ---
-Tune various btrfs filesystem parameters on an unmounted device.
+Modify btrfs filesystem parameters on an unmounted device by writing directly to
+the on-disk superblock and tree structures.
 
-Only one operation group may be specified per invocation. The legacy feature
-flags (-r, -x, -n) can be combined with each other but not with the seeding flag
-(-S).
+Operations are grouped into feature flags, UUID changes, and seeding. Only one
+group may be used per invocation. The legacy feature flags (-r, -x, -n) can be
+combined with each other but not with other groups.
+
+The legacy feature flags enable on-disk format features that were once optional
+but are now enabled by default on all new filesystems created by mkfs.btrfs.
+They exist for upgrading old filesystems in place.
 
 Usage: btrfs-tune [OPTIONS] <DEVICE>
 
@@ -15,6 +20,16 @@ Arguments:
           Path to the btrfs device
 
 Options:
+  -f, --force
+          Allow dangerous operations without confirmation
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Legacy feature flags:
   -r
           Enable extended inode refs (extref)
 
@@ -24,20 +39,19 @@ Options:
   -n
           Enable no-holes feature
 
-  -S <SEEDING>
-          Set (1) or clear (0) the seeding flag
-
+UUID:
   -m
           Change fsid to a random UUID via the metadata_uuid mechanism
 
   -M <UUID>
           Change fsid to the given UUID via the metadata_uuid mechanism
 
-  -f, --force
-          Allow dangerous operations without confirmation
+  -u
+          Rewrite fsid to a random UUID (rewrites all tree block headers)
 
-  -h, --help
-          Print help (see a summary with '-h')
+  -U <UUID>
+          Rewrite fsid to the given UUID (rewrites all tree block headers)
 
-  -V, --version
-          Print version
+Seeding:
+  -S <SEEDING>
+          Set (1) or clear (0) the seeding flag

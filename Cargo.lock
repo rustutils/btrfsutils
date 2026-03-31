@@ -219,8 +219,10 @@ version = "0.6.0"
 dependencies = [
  "anyhow",
  "btrfs-disk",
+ "btrfs-mkfs",
  "clap",
  "insta",
+ "tempfile",
  "uuid",
 ]
 

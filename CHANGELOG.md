@@ -7,8 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- `btrfs-tune -m` / `-M UUID`: change filesystem UUID via the metadata_uuid
-  mechanism (superblock-only, no tree rewrite needed)
+- `btrfs-tune` crate: offline superblock tuning tool with feature flag
+  enabling (`-r`, `-x`, `-n`), seeding flag management (`-S`),
+  metadata UUID change (`-m`, `-M UUID`), and full fsid rewrite
+  (`-u`, `-U UUID`)
+- Man page generation for `btrfs-tune`
+- `btrfs-disk`: `BlockReader::write_block` for writing tree blocks by
+  logical address, `csum_tree_block` for recomputing tree block checksums
 
 ## [0.6.0] — 2026-03-30
 

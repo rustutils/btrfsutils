@@ -38,8 +38,9 @@ fn main() -> Result<()> {
     let has_seeding = args.seeding.is_some();
     let has_metadata_uuid =
         args.metadata_uuid || args.set_metadata_uuid.is_some();
+    let has_uuid_rewrite = args.random_uuid || args.set_uuid.is_some();
 
-    if !has_legacy && !has_seeding && !has_metadata_uuid {
+    if !has_legacy && !has_seeding && !has_metadata_uuid && !has_uuid_rewrite {
         bail!("at least one option must be specified (see --help)");
     }
 
@@ -90,6 +91,13 @@ fn main() -> Result<()> {
     } else if args.metadata_uuid {
         let uuid = Uuid::new_v4();
         btrfs_tune::tune::set_metadata_uuid(&mut file, uuid)?;
+    }
+
+    if let Some(uuid) = args.set_uuid {
+        btrfs_tune::tune::change_uuid(&mut file, uuid)?;
+    } else if args.random_uuid {
+        let uuid = Uuid::new_v4();
+        btrfs_tune::tune::change_uuid(&mut file, uuid)?;
     }
 
     Ok(())
