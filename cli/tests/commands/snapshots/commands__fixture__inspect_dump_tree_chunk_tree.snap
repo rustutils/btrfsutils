@@ -3,6 +3,7 @@ source: cli/tests/commands/fixture.rs
 description: btrfs inspect-internal dump-tree -t chunk <IMG>
 expression: "btrfs_ok(&[\"inspect-internal\", \"dump-tree\", \"-t\", \"chunk\", img_str])"
 ---
+btrfs-cli v0.7.0
 leaf 22036480 items 4 free space 15781 generation 8 owner CHUNK_TREE
 leaf 22036480 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef

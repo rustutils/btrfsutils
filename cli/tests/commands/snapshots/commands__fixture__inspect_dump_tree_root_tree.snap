@@ -3,6 +3,7 @@ source: cli/tests/commands/fixture.rs
 description: btrfs inspect-internal dump-tree -t root <IMG>
 expression: "btrfs_ok(&[\"inspect-internal\", \"dump-tree\", \"-t\", \"root\", img_str])"
 ---
+btrfs-cli v0.7.0
 leaf 31064064 items 21 free space 10557 generation 10 owner ROOT_TREE
 leaf 31064064 flags 0x1(WRITTEN) backref revision 1
 fs uuid deadbeef-dead-beef-dead-beefdeadbeef

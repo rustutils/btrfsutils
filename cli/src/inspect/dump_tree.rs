@@ -84,6 +84,8 @@ pub struct DumpTreeCommand {
 
 impl Runnable for DumpTreeCommand {
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+        println!("btrfs-cli v{}", env!("CARGO_PKG_VERSION"));
+
         let file = open_path(&self.path)?;
 
         let open = reader::filesystem_open(file).with_context(|| {

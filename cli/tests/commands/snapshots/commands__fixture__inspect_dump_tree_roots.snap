@@ -3,6 +3,7 @@ source: cli/tests/commands/fixture.rs
 description: btrfs inspect-internal dump-tree --roots <IMG>
 expression: "btrfs_ok(&[\"inspect-internal\", \"dump-tree\", \"--roots\", img_str])"
 ---
+btrfs-cli v0.7.0
 root tree bytenr 31064064 level 0
 chunk tree bytenr 22036480 level 0
 tree EXTENT_TREE (id 2) bytenr 31162368
