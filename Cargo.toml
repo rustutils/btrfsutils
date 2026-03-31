@@ -11,7 +11,7 @@ version = "0.7.0"
 edition = "2024"
 license = "GPL-2.0-only"
 repository = "https://github.com/rustutils/btrfsutils"
-homepage = "https://github.com/rustutils/btrfsutils"
+homepage = "https://rustutils.gitlab.io/btrfsutils"
 
 [workspace.dependencies]
 libc = "0.2"
