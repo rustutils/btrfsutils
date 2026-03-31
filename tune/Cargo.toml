@@ -1,0 +1,23 @@
+[package]
+name = "btrfs-tune"
+version.workspace = true
+edition.workspace = true
+description = "Tune btrfs filesystem parameters"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+categories = ["command-line-utilities", "filesystem"]
+keywords = ["btrfs", "filesystem", "tune", "linux", "storage"]
+
+[lib]
+name = "btrfs_tune"
+path = "src/lib.rs"
+
+[[bin]]
+name = "btrfs-tune"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+btrfs-disk = { workspace = true }

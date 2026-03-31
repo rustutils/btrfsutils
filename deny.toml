@@ -21,6 +21,10 @@ allow = ["GPL-2.0-only"]
 name = "btrfs-mkfs"
 allow = ["GPL-2.0-only"]
 
+[[licenses.exceptions]]
+name = "btrfs-tune"
+allow = ["GPL-2.0-only"]
+
 [licenses.private]
 ignore = true
 

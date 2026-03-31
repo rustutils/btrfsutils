@@ -1,6 +1,6 @@
 [workspace]
-members = ["uapi", "disk", "stream", "cli", "mkfs", "util/gen"]
-default-members = ["uapi", "disk", "stream", "cli", "mkfs"]
+members = ["uapi", "disk", "stream", "cli", "mkfs", "tune", "util/gen"]
+default-members = ["uapi", "disk", "stream", "cli", "mkfs", "tune"]
 resolver = "2"
 
 [workspace.metadata.crane]

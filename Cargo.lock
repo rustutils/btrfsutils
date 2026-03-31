@@ -213,6 +213,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "btrfs-tune"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "btrfs-disk",
+ "clap",
+]
+
+[[package]]
 name = "btrfs-uapi"
 version = "0.6.0"
 dependencies = [
