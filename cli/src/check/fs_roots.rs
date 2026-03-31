@@ -1,6 +1,9 @@
 use super::errors::{CheckError, CheckResults};
 use btrfs_disk::{
-    items::{DirItem, InodeExtref, InodeItem, InodeRef},
+    items::{
+        DirItem, FileExtentBody, FileExtentItem, InodeExtref, InodeItem,
+        InodeRef,
+    },
     raw,
     reader::{self, BlockReader},
     tree::{KeyType, TreeBlock},
@@ -48,7 +51,7 @@ fn check_one_fs_tree<R: Read + Seek>(
     let inodes_with_item: HashSet<u64> = items
         .iter()
         .filter(|(_, entries)| {
-            entries.iter().any(|(kt, _)| *kt == KeyType::InodeItem)
+            entries.iter().any(|(kt, _, _)| *kt == KeyType::InodeItem)
         })
         .map(|(&ino, _)| ino)
         .collect();
@@ -57,8 +60,10 @@ fn check_one_fs_tree<R: Read + Seek>(
         let mut has_inode_item = false;
         let mut inode_nlink: u32 = 0;
         let mut ref_count: u32 = 0;
+        // Track file extent ranges for overlap detection: (file_offset, end).
+        let mut extent_ranges: Vec<(u64, u64)> = Vec::new();
 
-        for (key_type, data) in entries {
+        for (key_type, key_offset, data) in entries {
             match key_type {
                 KeyType::InodeItem => {
                     has_inode_item = true;
@@ -74,6 +79,22 @@ fn check_one_fs_tree<R: Read + Seek>(
                 KeyType::InodeExtref => {
                     for _r in InodeExtref::parse_all(data) {
                         ref_count += 1;
+                    }
+                }
+                KeyType::ExtentData => {
+                    if let Some(fe) = FileExtentItem::parse(data) {
+                        let len = match &fe.body {
+                            FileExtentBody::Regular { num_bytes, .. } => {
+                                *num_bytes
+                            }
+                            FileExtentBody::Inline { inline_size } => {
+                                *inline_size as u64
+                            }
+                        };
+                        if len > 0 {
+                            extent_ranges
+                                .push((*key_offset, *key_offset + len));
+                        }
                     }
                 }
                 KeyType::DirItem | KeyType::DirIndex => {
@@ -100,6 +121,21 @@ fn check_one_fs_tree<R: Read + Seek>(
             }
         }
 
+        // File extent overlap detection. Items arrive sorted by key
+        // (objectid, type, offset), so EXTENT_DATA items for one inode are
+        // already in file-offset order.
+        for i in 1..extent_ranges.len() {
+            let prev_end = extent_ranges[i - 1].1;
+            let cur_start = extent_ranges[i].0;
+            if cur_start < prev_end {
+                results.report(CheckError::FileExtentOverlap {
+                    tree: tree_id,
+                    ino,
+                    offset: cur_start,
+                });
+            }
+        }
+
         // Nlink check: skip the root dir inode (256) which has special nlink
         // handling, and skip inodes without an inode item (already reported).
         if has_inode_item
@@ -118,8 +154,8 @@ fn check_one_fs_tree<R: Read + Seek>(
 }
 
 /// Collected items for one FS tree, grouped by objectid (inode number).
-/// Each entry is (key_type, raw_data).
-type FsItemMap = BTreeMap<u64, Vec<(KeyType, Vec<u8>)>>;
+/// Each entry is (key_type, key_offset, raw_data).
+type FsItemMap = BTreeMap<u64, Vec<(KeyType, u64, Vec<u8>)>>;
 
 fn collect_fs_items<R: Read + Seek>(
     reader: &mut BlockReader<R>,
@@ -139,10 +175,11 @@ fn collect_fs_items<R: Read + Seek>(
             for item in leaf_items {
                 let start = HEADER_SIZE + item.offset as usize;
                 let item_data = data[start..][..item.size as usize].to_vec();
-                items
-                    .entry(item.key.objectid)
-                    .or_default()
-                    .push((item.key.key_type, item_data));
+                items.entry(item.key.objectid).or_default().push((
+                    item.key.key_type,
+                    item.key.offset,
+                    item_data,
+                ));
             }
         }
     };
