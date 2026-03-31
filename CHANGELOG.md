@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `btrfs check`: read-only filesystem verification with all 7 phases:
+  superblock validation, tree structure checks, extent reference verification,
+  chunk/block group cross-checks, FS tree inode consistency, checksum tree
+  validation (with optional `--check-data-csum`), and ROOT_REF/ROOT_BACKREF
+  consistency checking
+
+### Fixed
+- `btrfs-disk`: CRC32C checksum computation for superblocks and tree blocks
+  now uses standard CRC32C (matching the kernel's `hash_crc32c`) instead of
+  raw CRC32C with seed=0
+- `btrfs check`: item data extraction now correctly accounts for the tree
+  block header offset
+
 ## [0.7.0] — 2026-03-31
 
 ### Added

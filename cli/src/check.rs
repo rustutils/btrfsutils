@@ -9,6 +9,7 @@ mod csums;
 mod errors;
 mod extents;
 mod fs_roots;
+mod root_refs;
 mod superblock;
 mod tree_structure;
 
@@ -231,8 +232,7 @@ impl Runnable for CheckCommand {
         }
 
         eprintln!("[7/7] checking root refs");
-        // Root ref checking (ROOT_REF/ROOT_BACKREF consistency) is a
-        // follow-up — placeholder for now.
+        root_refs::check_root_refs(&mut open.reader, sb.root, &mut results);
 
         results.print_summary();
 

@@ -83,6 +83,19 @@ pub enum CheckError {
     CsumMismatch {
         logical: u64,
     },
+    RootRefMissing {
+        child: u64,
+        parent: u64,
+    },
+    RootBackrefMissing {
+        child: u64,
+        parent: u64,
+    },
+    RootRefMismatch {
+        child: u64,
+        parent: u64,
+        detail: String,
+    },
     ReadError {
         logical: u64,
         detail: String,
@@ -219,6 +232,29 @@ impl fmt::Display for CheckError {
             }
             Self::CsumMismatch { logical } => {
                 write!(f, "data checksum mismatch at bytenr {logical}")
+            }
+            Self::RootRefMissing { child, parent } => {
+                write!(
+                    f,
+                    "missing ROOT_REF for child {child} in parent {parent}"
+                )
+            }
+            Self::RootBackrefMissing { child, parent } => {
+                write!(
+                    f,
+                    "missing ROOT_BACKREF for child {child} from parent {parent}"
+                )
+            }
+            Self::RootRefMismatch {
+                child,
+                parent,
+                detail,
+            } => {
+                write!(
+                    f,
+                    "ROOT_REF/ROOT_BACKREF mismatch for child {child}, \
+                     parent {parent}: {detail}"
+                )
             }
             Self::ReadError { logical, detail } => {
                 write!(f, "read error at bytenr {logical}: {detail}")
@@ -508,6 +544,40 @@ mod tests {
             detail: "I/O error".into(),
         };
         assert_eq!(e.to_string(), "read error at bytenr 32768: I/O error");
+    }
+
+    #[test]
+    fn display_root_ref_missing() {
+        let e = CheckError::RootRefMissing {
+            child: 257,
+            parent: 5,
+        };
+        assert_eq!(e.to_string(), "missing ROOT_REF for child 257 in parent 5");
+    }
+
+    #[test]
+    fn display_root_backref_missing() {
+        let e = CheckError::RootBackrefMissing {
+            child: 257,
+            parent: 5,
+        };
+        assert_eq!(
+            e.to_string(),
+            "missing ROOT_BACKREF for child 257 from parent 5"
+        );
+    }
+
+    #[test]
+    fn display_root_ref_mismatch() {
+        let e = CheckError::RootRefMismatch {
+            child: 257,
+            parent: 5,
+            detail: "dirid mismatch".into(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "ROOT_REF/ROOT_BACKREF mismatch for child 257, parent 5: dirid mismatch"
+        );
     }
 
     #[test]
