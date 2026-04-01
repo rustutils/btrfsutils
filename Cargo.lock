@@ -187,6 +187,7 @@ dependencies = [
  "anyhow",
  "blake2",
  "btrfs-disk",
+ "btrfs-uapi",
  "bytes",
  "clap",
  "crc32c",

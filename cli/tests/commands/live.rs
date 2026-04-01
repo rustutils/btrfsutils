@@ -9,7 +9,10 @@ use common::{
     write_compressible_data, write_test_data,
 };
 use std::{
-    os::unix::fs::{FileTypeExt, MetadataExt},
+    os::unix::{
+        fs::{FileTypeExt, MetadataExt},
+        io::AsFd,
+    },
     path::Path,
 };
 
@@ -37,6 +40,10 @@ fn filesystem_label_get_set() {
         out.contains("test-label"),
         "expected label in output:\n{out}"
     );
+
+    // Verify via uapi
+    let label = btrfs_uapi::filesystem::label_get(mnt.fd()).unwrap();
+    assert_eq!(label.to_str().unwrap(), "test-label");
 }
 
 #[test]
@@ -55,7 +62,27 @@ fn filesystem_resize_grow_shrink() {
         "expected usage output:\n{out}"
     );
 
+    // Verify via uapi: after resize max, device should be close to 768MB
+    let fs_info = btrfs_uapi::filesystem::filesystem_info(mnt.fd()).unwrap();
+    let devices =
+        btrfs_uapi::device::device_info_all(mnt.fd(), &fs_info).unwrap();
+    let total: u64 = devices.iter().map(|d| d.total_bytes).sum();
+    assert!(
+        total > 700_000_000,
+        "expected >700MB after resize max, got {total}"
+    );
+
     btrfs_ok(&["filesystem", "resize", "512m", mp]);
+
+    // Verify via uapi: after resize 512m
+    let fs_info = btrfs_uapi::filesystem::filesystem_info(mnt.fd()).unwrap();
+    let devices =
+        btrfs_uapi::device::device_info_all(mnt.fd(), &fs_info).unwrap();
+    let total: u64 = devices.iter().map(|d| d.total_bytes).sum();
+    assert!(
+        total <= 512 * 1024 * 1024,
+        "expected <=512MiB after resize 512m, got {total}"
+    );
 }
 
 #[test]
@@ -262,6 +289,13 @@ fn subvolume_create_show_delete() {
     btrfs_ok(&["subvolume", "create", &subvol]);
     assert!(Path::new(&subvol).is_dir());
 
+    // Verify via uapi: subvolume appears in list
+    let list = btrfs_uapi::subvolume::subvolume_list(mnt.fd()).unwrap();
+    assert!(
+        list.iter().any(|s| s.name.contains("testvol")),
+        "subvolume should appear in uapi list"
+    );
+
     let out = btrfs_ok(&["subvolume", "show", &subvol]);
     assert!(
         out.contains("testvol"),
@@ -270,6 +304,13 @@ fn subvolume_create_show_delete() {
 
     btrfs_ok(&["subvolume", "delete", &subvol]);
     assert!(!Path::new(&subvol).exists());
+
+    // Verify via uapi: subvolume gone from list
+    let list = btrfs_uapi::subvolume::subvolume_list(mnt.fd()).unwrap();
+    assert!(
+        !list.iter().any(|s| s.name.contains("testvol")),
+        "subvolume should not appear in uapi list after delete"
+    );
 }
 
 #[test]
@@ -320,9 +361,22 @@ fn subvolume_get_set_default() {
     let out = btrfs_ok(&["subvolume", "get-default", mp]);
     assert!(!out.contains("ID 5"), "expected non-5 default:\n{out}");
 
+    // Verify via uapi: default should no longer be 5
+    let default_id =
+        btrfs_uapi::subvolume::subvolume_default_get(mnt.fd()).unwrap();
+    assert_ne!(
+        default_id, 5,
+        "default subvol should not be 5 after set-default"
+    );
+
     btrfs_ok(&["subvolume", "set-default", "5", mp]);
     let out = btrfs_ok(&["subvolume", "get-default", mp]);
     assert!(out.contains("5"), "expected ID 5 restored:\n{out}");
+
+    // Verify via uapi: default restored to 5
+    let default_id =
+        btrfs_uapi::subvolume::subvolume_default_get(mnt.fd()).unwrap();
+    assert_eq!(default_id, 5, "default subvol should be 5 after restore");
 }
 
 #[test]
@@ -507,9 +561,20 @@ fn property_get_set_ro() {
     let out = btrfs_ok(&["property", "get", "-t", "subvol", &subvol, "ro"]);
     assert!(out.contains("true"), "expected ro=true:\n{out}");
 
+    // Verify via uapi: RDONLY flag should be set
+    let subvol_file = std::fs::File::open(&subvol).unwrap();
+    let flags = btrfs_uapi::subvolume::subvolume_flags_get(subvol_file.as_fd())
+        .unwrap();
+    assert!(flags.contains(btrfs_uapi::subvolume::SubvolumeFlags::RDONLY));
+
     btrfs_ok(&["property", "set", "-t", "subvol", &subvol, "ro", "false"]);
     let out = btrfs_ok(&["property", "get", "-t", "subvol", &subvol, "ro"]);
     assert!(out.contains("false"), "expected ro=false:\n{out}");
+
+    // Verify via uapi: RDONLY flag should be cleared
+    let flags = btrfs_uapi::subvolume::subvolume_flags_get(subvol_file.as_fd())
+        .unwrap();
+    assert!(!flags.contains(btrfs_uapi::subvolume::SubvolumeFlags::RDONLY));
 }
 
 #[test]
@@ -1002,10 +1067,18 @@ fn device_add_remove() {
         "expected new device in show output:\n{out}"
     );
 
+    // Verify via uapi: should have 2 devices
+    let fs_info = btrfs_uapi::filesystem::filesystem_info(mnt.fd()).unwrap();
+    assert_eq!(fs_info.num_devices, 2, "expected 2 devices after add");
+
     btrfs_ok(&["device", "remove", dev2_path, mp]);
 
     let out = btrfs_ok(&["filesystem", "show", mp]);
     assert!(!out.contains(dev2_path), "device should be removed:\n{out}");
+
+    // Verify via uapi: should be back to 1 device
+    let fs_info = btrfs_uapi::filesystem::filesystem_info(mnt.fd()).unwrap();
+    assert_eq!(fs_info.num_devices, 1, "expected 1 device after remove");
 }
 
 #[test]
@@ -1223,7 +1296,17 @@ fn quota_enable_disable() {
         "expected enabled status:\n{out}"
     );
 
+    // Verify via uapi/sysfs
+    let fs_info = btrfs_uapi::filesystem::filesystem_info(mnt.fd()).unwrap();
+    let sysfs = btrfs_uapi::sysfs::SysfsBtrfs::new(&fs_info.uuid);
+    let status = sysfs.quota_status().unwrap();
+    assert!(status.enabled, "quota should be enabled via sysfs");
+
     btrfs_ok(&["quota", "disable", mp]);
+
+    // Verify disabled via uapi/sysfs
+    let status = sysfs.quota_status().unwrap();
+    assert!(!status.enabled, "quota should be disabled via sysfs");
 }
 
 #[test]
@@ -1322,6 +1405,15 @@ fn qgroup_limit() {
 
     let out = btrfs_ok(&["qgroup", "show", "-re", mp]);
     assert!(out.contains("0/5"), "expected qgroup entry:\n{out}");
+
+    // Verify via uapi: qgroup 0/5 should have a max_rfer limit
+    let qlist = btrfs_uapi::quota::qgroup_list(mnt.fd()).unwrap();
+    let qg = qlist.qgroups.iter().find(|g| g.qgroupid == 5).unwrap();
+    assert!(
+        qg.max_rfer > 0 && qg.max_rfer != u64::MAX,
+        "expected max_rfer limit to be set, got {}",
+        qg.max_rfer
+    );
 
     // Remove the limit.
     btrfs_ok(&["qgroup", "limit", "none", "0/5", mp]);
