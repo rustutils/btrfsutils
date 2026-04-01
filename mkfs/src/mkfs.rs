@@ -938,9 +938,9 @@ pub fn make_btrfs_with_rootdir(
         chunk_tree_addr,
         root_tree_addr,
         dev_tree_addr,
-        chunk_tree_buf,
-        root_tree_buf,
-        dev_tree_buf,
+        &chunk_tree_buf,
+        &root_tree_buf,
+        &dev_tree_buf,
         &mut extent_tree,
         &mut fs_tree,
         &mut csum_tree,
@@ -996,7 +996,9 @@ pub fn make_btrfs_with_rootdir(
 /// the number of blocks needed to hold all extent items (including the
 /// extent tree's own self-referential entries) stabilizes.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // convergence loop is a single logical operation
 #[allow(clippy::cast_possible_truncation)] // key type fits in u8
+#[allow(clippy::cast_sign_loss)] // bindgen objectid constants are i32, but values are positive
 fn converge_extent_tree_block_count(
     chunks: &ChunkLayout,
     tb: &TreeBuilder,
@@ -1159,9 +1161,9 @@ fn write_rootdir_trees(
     chunk_tree_addr: u64,
     root_tree_addr: u64,
     dev_tree_addr: u64,
-    chunk_tree_buf: Vec<u8>,
-    root_tree_buf: Vec<u8>,
-    dev_tree_buf: Vec<u8>,
+    chunk_tree_buf: &[u8],
+    root_tree_buf: &[u8],
+    dev_tree_buf: &[u8],
     extent_tree: &mut crate::treebuilder::TreeBlocks,
     fs_tree: &mut crate::treebuilder::TreeBlocks,
     csum_tree: &mut crate::treebuilder::TreeBlocks,
@@ -1195,9 +1197,9 @@ fn write_rootdir_trees(
             Ok(())
         };
 
-    write_block(&mut chunk_tree_buf.clone(), chunk_tree_addr)?;
-    write_block(&mut root_tree_buf.clone(), root_tree_addr)?;
-    write_block(&mut dev_tree_buf.clone(), dev_tree_addr)?;
+    write_block(&mut chunk_tree_buf.to_vec(), chunk_tree_addr)?;
+    write_block(&mut root_tree_buf.to_vec(), root_tree_addr)?;
+    write_block(&mut dev_tree_buf.to_vec(), dev_tree_addr)?;
     write_tree_blocks(extent_tree)?;
     write_tree_blocks(fs_tree)?;
     write_tree_blocks(csum_tree)?;

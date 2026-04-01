@@ -18,6 +18,9 @@
 //!   tree block header and device item on disk, with crash-safety via
 //!   `BTRFS_SUPER_FLAG_CHANGING_FSID`.
 
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+
 /// Argument parsing for the `btrfs-tune` binary.
 pub mod args;
 /// Entry point logic, callable from both standalone binary and CLI subcommand.

@@ -40,6 +40,9 @@
 //! - Free-space-tree, block-group-tree feature flags
 //! - Device validation (mounted check, existing FS detection, TRIM)
 
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+
 pub mod args;
 pub mod items;
 pub mod layout;

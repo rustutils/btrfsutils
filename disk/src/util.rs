@@ -7,6 +7,10 @@ use bytes::Buf;
 use uuid::Uuid;
 
 /// Read a UUID (16 bytes) from a `Buf`, advancing the cursor.
+///
+/// # Panics
+///
+/// Panics if `buf` has fewer than 16 bytes remaining.
 pub fn get_uuid(buf: &mut &[u8]) -> Uuid {
     let bytes: [u8; 16] = buf[..16].try_into().unwrap();
     buf.advance(16);

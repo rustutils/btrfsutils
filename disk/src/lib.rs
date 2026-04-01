@@ -61,6 +61,9 @@
 //! on [`tree::TreeBlock`]. Parse leaf item payloads with
 //! [`items::parse_item_payload`] or the individual struct `parse` methods.
 
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+
 // Note: missing_docs is not enabled as a warning because bitflags! generates
 // undocumentable `const _ = !0` associated constants. All public items are
 // documented — this was verified manually.

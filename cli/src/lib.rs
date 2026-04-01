@@ -9,6 +9,11 @@
 //! see what is available. Most commands require root privileges or
 //! `CAP_SYS_ADMIN`.
 
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::struct_excessive_bools)]
+
 use anyhow::Result;
 use clap::{ArgAction, Parser, ValueEnum};
 

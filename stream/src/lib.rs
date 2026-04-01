@@ -29,6 +29,9 @@
 //! This feature depends on `btrfs-uapi` for ioctl access and requires
 //! `CAP_SYS_ADMIN` on Linux.
 
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+
 mod stream;
 
 #[cfg(feature = "receive")]

@@ -37,6 +37,8 @@
 //! work.
 
 #![warn(missing_docs)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
 
 pub mod balance;
 pub mod blkdev;

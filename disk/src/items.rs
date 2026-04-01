@@ -888,7 +888,7 @@ fn extent_data_ref_hash(root: u64, objectid: u64, offset: u64) -> u64 {
 #[derive(Debug, Clone)]
 pub enum InlineRef {
     /// Direct backref from a metadata extent to the tree that owns it.
-    /// The `root` field is the tree objectid (e.g. 5 for FS_TREE).
+    /// The `root` field is the tree objectid (e.g. 5 for `FS_TREE`).
     TreeBlockBackref {
         /// Raw offset value from the inline ref header (equals `root`).
         ref_offset: u64,
@@ -927,7 +927,7 @@ pub enum InlineRef {
         /// Number of references from the parent block.
         count: u32,
     },
-    /// Simple ownership reference for an extent (simple_quota feature).
+    /// Simple ownership reference for an extent (`simple_quota` feature).
     /// Records which tree root owns the extent.
     ExtentOwnerRef {
         /// Raw offset value from the inline ref header (equals `root`).
@@ -1634,7 +1634,7 @@ pub struct DeviceStats {
 
 impl DeviceStats {
     /// Parse device statistics from a raw byte buffer. Reads up to 5 u64
-    /// counters (write_errs, read_errs, flush_errs, corruption_errs, generation).
+    /// counters (`write_errs`, `read_errs`, `flush_errs`, `corruption_errs`, generation).
     #[must_use]
     pub fn parse(data: &[u8]) -> Self {
         let stat_names = [
@@ -1700,7 +1700,7 @@ pub enum ItemPayload {
     OrphanItem,
     /// Tree root descriptor (subvolume, snapshot, or internal tree).
     RootItem(RootItem),
-    /// Root forward or back reference (ROOT_REF / ROOT_BACKREF).
+    /// Root forward or back reference (`ROOT_REF` / `ROOT_BACKREF`).
     RootRef(RootRef),
     /// File extent descriptor.
     FileExtentItem(FileExtentItem),
@@ -1709,7 +1709,7 @@ pub enum ItemPayload {
         /// Raw checksum bytes (array of per-sector checksums).
         data: Vec<u8>,
     },
-    /// Extent allocation record (EXTENT_ITEM or METADATA_ITEM).
+    /// Extent allocation record (`EXTENT_ITEM` or `METADATA_ITEM`).
     ExtentItem(ExtentItem),
     /// Standalone tree block backref (no data payload; the key offset is the root).
     TreeBlockRef,

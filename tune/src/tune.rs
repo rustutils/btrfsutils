@@ -254,10 +254,15 @@ pub fn set_metadata_uuid(
 /// The operation is crash-safe: `BTRFS_SUPER_FLAG_CHANGING_FSID` is set
 /// before any writes and cleared only after all blocks are updated.
 ///
+/// # Panics
+///
+/// Panics if an on-disk extent item is too short to contain the expected flags field.
+///
 /// # Errors
 ///
 /// Returns an error if the filesystem cannot be opened, the extent tree root
 /// is missing, or any block read/write fails.
+#[allow(clippy::too_many_lines)] // fsid rewrite is a single logical operation
 pub fn change_uuid<R: Read + Write + Seek>(
     file: R,
     new_fsid: Uuid,
