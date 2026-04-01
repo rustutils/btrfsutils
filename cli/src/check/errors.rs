@@ -45,6 +45,15 @@ pub enum CheckError {
     MissingExtentItem {
         bytenr: u64,
     },
+    BackrefOwnerMismatch {
+        bytenr: u64,
+        actual_owner: u64,
+        claimed_owners: Vec<u64>,
+    },
+    BackrefOrphan {
+        bytenr: u64,
+        claimed_owner: u64,
+    },
     OverlappingExtent {
         bytenr: u64,
         length: u64,
@@ -180,6 +189,27 @@ impl fmt::Display for CheckError {
             }
             Self::MissingExtentItem { bytenr } => {
                 write!(f, "missing extent item for bytenr {bytenr}")
+            }
+            Self::BackrefOwnerMismatch {
+                bytenr,
+                actual_owner,
+                claimed_owners,
+            } => {
+                write!(
+                    f,
+                    "tree extent at bytenr {bytenr}: actual owner {actual_owner} \
+                     has no backref (extent tree claims owner(s) {claimed_owners:?})"
+                )
+            }
+            Self::BackrefOrphan {
+                bytenr,
+                claimed_owner,
+            } => {
+                write!(
+                    f,
+                    "tree extent at bytenr {bytenr}: extent tree claims \
+                     owner {claimed_owner} but no tree block found for that tree"
+                )
             }
             Self::OverlappingExtent {
                 bytenr,

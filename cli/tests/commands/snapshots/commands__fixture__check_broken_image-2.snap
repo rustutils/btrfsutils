@@ -9,6 +9,18 @@ UUID: d0918564-9de7-4eb9-b88d-13b656efc866
 [1/7] checking superblocks
 [2/7] checking root items
 [3/7] checking extents
+ERROR: tree extent at bytenr 5259264: actual owner 2 has no backref (extent tree claims owner(s) [5])
+ERROR: tree extent at bytenr 5275648: actual owner 4 has no backref (extent tree claims owner(s) [7])
+ERROR: tree extent at bytenr 5292032: actual owner 5 has no backref (extent tree claims owner(s) [4])
+ERROR: tree extent at bytenr 5308416: actual owner 7 has no backref (extent tree claims owner(s) [18446744073709551607])
+ERROR: tree extent at bytenr 5341184: actual owner 18446744073709551607 has no backref (extent tree claims owner(s) [11])
+ERROR: tree extent at bytenr 5357568: actual owner 11 has no backref (extent tree claims owner(s) [2])
+ERROR: tree extent at bytenr 5259264: extent tree claims owner 5 but no tree block found for that tree
+ERROR: tree extent at bytenr 5275648: extent tree claims owner 7 but no tree block found for that tree
+ERROR: tree extent at bytenr 5292032: extent tree claims owner 4 but no tree block found for that tree
+ERROR: tree extent at bytenr 5308416: extent tree claims owner 18446744073709551607 but no tree block found for that tree
+ERROR: tree extent at bytenr 5341184: extent tree claims owner 11 but no tree block found for that tree
+ERROR: tree extent at bytenr 5357568: extent tree claims owner 2 but no tree block found for that tree
 [4/7] checking free space tree
 [5/7] checking fs roots
 ERROR: root 5: inode 257 dir isize wrong: inode says 0, expected 12

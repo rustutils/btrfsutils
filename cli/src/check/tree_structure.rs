@@ -6,7 +6,7 @@ use btrfs_disk::{
     util::btrfs_csum_data,
 };
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     io::{Read, Seek},
 };
 use uuid::Uuid;
@@ -36,13 +36,14 @@ enum TreeKind {
 ///
 /// Walks every tree discovered in `tree_roots` plus the root and chunk trees.
 /// For each block, verifies checksum, header fields, and key ordering.
-/// Returns the set of all tree block logical addresses visited.
+/// Returns a map of tree block logical address → owner tree objectid
+/// for all blocks visited during the walks.
 pub fn check_all_trees<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     sb: &Superblock,
     tree_roots: &std::collections::BTreeMap<u64, (u64, u64)>,
     results: &mut CheckResults,
-) -> HashSet<u64> {
+) -> HashMap<u64, u64> {
     let fsid = effective_fsid(sb);
     let csum_supported = sb.csum_type == ChecksumType::Crc32;
 
@@ -61,13 +62,15 @@ pub fn check_all_trees<R: Read + Seek>(
         csum_supported,
     };
 
-    let mut visited = HashSet::new();
+    let mut visited: HashMap<u64, u64> = HashMap::new();
 
     // Check root tree.
+    let root_oid = btrfs_disk::raw::BTRFS_ROOT_TREE_OBJECTID as u64;
     check_tree(
         reader,
         "root tree",
         sb.root,
+        root_oid,
         TreeKind::Other,
         &ctx,
         results,
@@ -75,10 +78,12 @@ pub fn check_all_trees<R: Read + Seek>(
     );
 
     // Check chunk tree.
+    let chunk_oid = btrfs_disk::raw::BTRFS_CHUNK_TREE_OBJECTID as u64;
     check_tree(
         reader,
         "chunk tree",
         sb.chunk_root,
+        chunk_oid,
         TreeKind::Other,
         &ctx,
         results,
@@ -89,7 +94,16 @@ pub fn check_all_trees<R: Read + Seek>(
     for (&tree_id, &(bytenr, _gen)) in tree_roots {
         let name = tree_name(tree_id);
         let kind = tree_kind(tree_id);
-        check_tree(reader, &name, bytenr, kind, &ctx, results, &mut visited);
+        check_tree(
+            reader,
+            &name,
+            bytenr,
+            tree_id,
+            kind,
+            &ctx,
+            results,
+            &mut visited,
+        );
     }
 
     visited
@@ -102,22 +116,23 @@ struct TreeCheckCtx {
     csum_supported: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     name: &str,
     root_bytenr: u64,
+    tree_objectid: u64,
     kind: TreeKind,
     ctx: &TreeCheckCtx,
     results: &mut CheckResults,
-    visited: &mut HashSet<u64>,
+    visited: &mut HashMap<u64, u64>,
 ) {
     let tree: &'static str = leak_name(name);
 
-    // Collect read errors separately to avoid two mutable borrows of results.
     let mut read_errors: Vec<(u64, String)> = Vec::new();
 
     let mut visitor = |raw: &[u8], block: &TreeBlock| {
-        visited.insert(block.header().bytenr);
+        visited.insert(block.header().bytenr, tree_objectid);
         check_block(raw, block, tree, kind, ctx, results);
     };
 

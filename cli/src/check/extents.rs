@@ -1,11 +1,11 @@
 use super::errors::{CheckError, CheckResults};
 use btrfs_disk::{
-    items::{ExtentItem, ItemPayload, parse_item_payload},
+    items::{ExtentItem, InlineRef, ItemPayload, parse_item_payload},
     reader::{self, BlockReader},
     tree::{KeyType, TreeBlock},
 };
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     io::{Read, Seek},
 };
 
@@ -13,12 +13,14 @@ use std::{
 const HEADER_SIZE: usize = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
 
 /// Check extent tree: verify reference counts, detect overlapping extents,
-/// and cross-check that every tree block address from tree walks has a
-/// corresponding METADATA_ITEM or EXTENT_ITEM entry.
+/// and cross-check tree block ownership against extent tree backrefs.
+///
+/// `tree_block_owners` maps each tree block logical address to the tree
+/// objectid that actually owns it (collected during tree walks).
 pub fn check_extent_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     extent_root: u64,
-    tree_block_addrs: &HashSet<u64>,
+    tree_block_owners: &HashMap<u64, u64>,
     results: &mut CheckResults,
 ) {
     let mut state = ExtentCheckState::default();
@@ -59,11 +61,45 @@ pub fn check_extent_tree<R: Read + Seek>(
         results.report(CheckError::ReadError { logical, detail });
     }
 
-    // Cross-check: every tree block found during tree walks must have a
-    // corresponding METADATA_ITEM or EXTENT_ITEM in the extent tree.
-    for &addr in tree_block_addrs {
+    // Cross-check tree block ownership against extent tree backrefs.
+    // Sort by address for deterministic error ordering.
+    let mut sorted_addrs: Vec<u64> =
+        tree_block_owners.keys().copied().collect();
+    sorted_addrs.sort();
+
+    // Direction 1: every tree block from walks must have a backref in the
+    // extent tree claiming the correct owner.
+    for &addr in &sorted_addrs {
+        let actual_owner = tree_block_owners[&addr];
         if !state.extent_item_addrs.contains(&addr) {
             results.report(CheckError::MissingExtentItem { bytenr: addr });
+        } else if let Some(claimed_owners) =
+            state.extent_backref_owners.get(&addr)
+            && !claimed_owners.contains(&actual_owner)
+        {
+            results.report(CheckError::BackrefOwnerMismatch {
+                bytenr: addr,
+                actual_owner,
+                claimed_owners: claimed_owners.clone(),
+            });
+        }
+    }
+
+    // Direction 2: every tree block backref in the extent tree must
+    // correspond to an actual tree block owned by that tree.
+    let mut extent_addrs: Vec<u64> =
+        state.extent_backref_owners.keys().copied().collect();
+    extent_addrs.sort();
+    for &addr in &extent_addrs {
+        let claimed_owners = &state.extent_backref_owners[&addr];
+        for &claimed in claimed_owners {
+            let actual = tree_block_owners.get(&addr).copied();
+            if actual != Some(claimed) {
+                results.report(CheckError::BackrefOrphan {
+                    bytenr: addr,
+                    claimed_owner: claimed,
+                });
+            }
         }
     }
 
@@ -90,6 +126,9 @@ struct ExtentCheckState {
     data_bytes_referenced: u64,
     /// All bytenrs that have a METADATA_ITEM or EXTENT_ITEM entry.
     extent_item_addrs: HashSet<u64>,
+    /// For tree block extents: address → list of claimed owner roots
+    /// (from TREE_BLOCK_REF inline backrefs and standalone backrefs).
+    extent_backref_owners: HashMap<u64, Vec<u64>>,
 }
 
 fn process_extent_item(
@@ -131,6 +170,21 @@ fn process_extent_item(
             let payload = parse_item_payload(key, data);
             let (refs, inline_count, is_data) = match &payload {
                 ItemPayload::ExtentItem(ei) => {
+                    // Collect tree block backref owners from inline refs.
+                    if !ei.is_data() {
+                        for iref in &ei.inline_refs {
+                            if let InlineRef::TreeBlockBackref {
+                                root, ..
+                            } = iref
+                            {
+                                state
+                                    .extent_backref_owners
+                                    .entry(bytenr)
+                                    .or_default()
+                                    .push(*root);
+                            }
+                        }
+                    }
                     let count = count_inline_refs(ei);
                     (ei.refs, count, ei.is_data())
                 }
@@ -149,9 +203,18 @@ fn process_extent_item(
         }
 
         // Standalone backref items: add to the count of the current extent.
-        KeyType::TreeBlockRef
-        | KeyType::SharedBlockRef
-        | KeyType::ExtentOwnerRef => {
+        KeyType::TreeBlockRef => {
+            if key.objectid == state.pending_bytenr {
+                state.pending_counted += 1;
+                // key.offset is the root objectid for standalone TreeBlockRef.
+                state
+                    .extent_backref_owners
+                    .entry(key.objectid)
+                    .or_default()
+                    .push(key.offset);
+            }
+        }
+        KeyType::SharedBlockRef | KeyType::ExtentOwnerRef => {
             if key.objectid == state.pending_bytenr {
                 state.pending_counted += 1;
             }

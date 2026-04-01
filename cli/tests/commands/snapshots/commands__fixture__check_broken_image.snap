@@ -3,7 +3,7 @@ source: cli/tests/commands/fixture.rs
 description: btrfs check <BROKEN_IMG> (stdout)
 expression: stdout
 ---
-found 147456 bytes used, 6 error(s) found
+found 147456 bytes used, 18 error(s) found
 total csum bytes: 2048
 total tree bytes: 163840
 total fs tree bytes: 32768
