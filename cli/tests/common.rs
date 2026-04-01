@@ -61,6 +61,16 @@ impl BackingFile {
         run("mkfs.btrfs", &["-f", self.path.to_str().unwrap()]);
     }
 
+    /// Run our `btrfs-mkfs --rootdir` on this file.
+    pub fn mkfs_rootdir(&self, rootdir: &Path, extra_args: &[&str]) {
+        let mkfs_bin = our_mkfs_bin();
+        let mut args: Vec<&str> =
+            vec!["-f", "--rootdir", rootdir.to_str().unwrap()];
+        args.extend_from_slice(extra_args);
+        args.push(self.path.to_str().unwrap());
+        run(&mkfs_bin, &args);
+    }
+
     /// Run `mkfs.btrfs -f` with a fixed UUID and label for deterministic output.
     pub fn mkfs_with_options(&self, uuid: &str, label: &str) {
         run(
@@ -231,6 +241,21 @@ impl Drop for Mount {
         );
         let _ = fs::remove_dir(&self.mountpoint);
     }
+}
+
+/// Path to our `btrfs-mkfs` binary (in the same target dir as the test binary).
+fn our_mkfs_bin() -> String {
+    // CARGO_BIN_EXE_btrfs points to e.g. target/debug/btrfs.
+    // btrfs-mkfs is in the same directory.
+    let btrfs = env!("CARGO_BIN_EXE_btrfs");
+    let dir = Path::new(btrfs).parent().unwrap();
+    let mkfs = dir.join("btrfs-mkfs");
+    assert!(
+        mkfs.exists(),
+        "btrfs-mkfs not found at {}; run `cargo build -p btrfs-mkfs` first",
+        mkfs.display()
+    );
+    mkfs.to_str().unwrap().to_string()
 }
 
 fn run(cmd: &str, args: &[&str]) {

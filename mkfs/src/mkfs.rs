@@ -862,6 +862,47 @@ pub fn make_btrfs_with_rootdir(
         bytenr,
     };
 
+    // If shrinking, compute the final device size now and create a config
+    // with updated total_bytes so the chunk tree DEV_ITEM and superblock agree.
+    let effective_cfg;
+    let cfg = if shrink && cfg.devices.len() == 1 {
+        let dev = &cfg.devices[0];
+        let mut phys_end = SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
+        for s in &chunks.meta_stripes {
+            if s.devid == dev.devid {
+                phys_end = phys_end.max(s.offset + chunks.meta_size);
+            }
+        }
+        for s in &chunks.data_stripes {
+            if s.devid == dev.devid {
+                phys_end = phys_end.max(s.offset + chunks.data_size);
+            }
+        }
+        let shrunk = rootdir::align_up(phys_end, cfg.sectorsize as u64);
+        effective_cfg = MkfsConfig {
+            devices: vec![DeviceInfo {
+                devid: dev.devid,
+                path: dev.path.clone(),
+                total_bytes: shrunk,
+                dev_uuid: dev.dev_uuid,
+            }],
+            nodesize: cfg.nodesize,
+            sectorsize: cfg.sectorsize,
+            label: cfg.label.clone(),
+            fs_uuid: cfg.fs_uuid,
+            chunk_tree_uuid: cfg.chunk_tree_uuid,
+            incompat_flags: cfg.incompat_flags,
+            compat_ro_flags: cfg.compat_ro_flags,
+            data_profile: cfg.data_profile,
+            metadata_profile: cfg.metadata_profile,
+            csum_type: cfg.csum_type,
+            creation_time: cfg.creation_time,
+        };
+        &effective_cfg
+    } else {
+        cfg
+    };
+
     let chunk_tree_buf = build_chunk_tree(
         cfg,
         &BlockLayout::new(cfg.nodesize, chunks.meta_logical),
@@ -986,66 +1027,13 @@ pub fn make_btrfs_with_rootdir(
         }
     }
 
-    // Shrink: truncate image to actual used physical size.
+    // Shrink: truncate image to the device total_bytes (already computed
+    // above if --shrink was requested).
     if shrink && cfg.devices.len() == 1 {
-        let dev = &cfg.devices[0];
-        // The physical end is the highest used offset on the device.
-        // Data stripes are the last thing physically: data_stripe_offset + data_used.
-        let data_stripe_offset = chunks
-            .data_stripes
-            .iter()
-            .filter(|s| s.devid == dev.devid)
-            .map(|s| s.offset)
-            .next()
-            .unwrap_or(0);
-        let shrunk_size = data_stripe_offset + data_output.data_used;
-        // Align to sectorsize.
-        let shrunk_size = rootdir::align_up(shrunk_size, cfg.sectorsize as u64);
-
-        if shrunk_size < dev.total_bytes {
-            files[0]
-                .set_len(shrunk_size)
-                .context("failed to truncate image for --shrink")?;
-
-            // Rewrite superblock with updated total_bytes and dev_item.bytes_used.
-            let sb = build_superblock_rootdir(
-                &MkfsConfig {
-                    devices: vec![DeviceInfo {
-                        devid: dev.devid,
-                        path: dev.path.clone(),
-                        total_bytes: shrunk_size,
-                        dev_uuid: dev.dev_uuid,
-                    }],
-                    ..MkfsConfig {
-                        nodesize: cfg.nodesize,
-                        sectorsize: cfg.sectorsize,
-                        devices: vec![], // replaced above
-                        label: cfg.label.clone(),
-                        fs_uuid: cfg.fs_uuid,
-                        chunk_tree_uuid: cfg.chunk_tree_uuid,
-                        incompat_flags: cfg.incompat_flags,
-                        compat_ro_flags: cfg.compat_ro_flags,
-                        data_profile: cfg.data_profile,
-                        metadata_profile: cfg.metadata_profile,
-                        csum_type: cfg.csum_type,
-                        creation_time: cfg.creation_time,
-                    }
-                },
-                &chunks,
-                &DeviceInfo {
-                    devid: dev.devid,
-                    path: dev.path.clone(),
-                    total_bytes: shrunk_size,
-                    dev_uuid: dev.dev_uuid,
-                },
-                root_tree_addr,
-                chunk_tree_addr,
-                0,
-                bytes_used,
-            )?;
-            write::pwrite_all(&files[0], &sb, write::SUPER_INFO_OFFSET)?;
-            files[0].sync_all().context("fsync after shrink failed")?;
-        }
+        let shrunk_size = cfg.devices[0].total_bytes;
+        files[0]
+            .set_len(shrunk_size)
+            .context("failed to truncate image for --shrink")?;
     }
 
     for file in &files {

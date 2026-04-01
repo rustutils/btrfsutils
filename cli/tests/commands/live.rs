@@ -5,8 +5,8 @@
 
 use super::{btrfs, btrfs_ok, common, redact};
 use common::{
-    BackingFile, LoopbackDevice, single_mount, verify_test_data,
-    write_test_data,
+    BackingFile, LoopbackDevice, Mount, single_mount, verify_test_data,
+    write_compressible_data, write_test_data,
 };
 use std::{
     os::unix::fs::{FileTypeExt, MetadataExt},
@@ -2039,4 +2039,107 @@ fn send_receive_fallocate() {
     let mut hole = vec![0u8; 65536];
     f.read_exact(&mut hole).unwrap();
     assert!(hole.iter().all(|&b| b == 0), "punched hole should be zeros");
+}
+
+// ── mkfs --rootdir (end-to-end) ─────────────────────────────────────
+
+/// Create a directory with various file types, run our mkfs --rootdir,
+/// mount the resulting image, and verify all data is intact.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mkfs_rootdir_end_to_end() {
+    let td = tempfile::tempdir().unwrap();
+    let rootdir = td.path().join("rootdir");
+    std::fs::create_dir_all(&rootdir).unwrap();
+
+    // Regular files: small (inline) and large (regular extent).
+    write_test_data(&rootdir, "small.bin", 100);
+    write_test_data(&rootdir, "large.bin", 2 * 1024 * 1024);
+
+    // Subdirectory with a file.
+    let sub = rootdir.join("subdir");
+    std::fs::create_dir_all(&sub).unwrap();
+    write_test_data(&sub, "nested.bin", 8192);
+
+    // Symlink.
+    std::os::unix::fs::symlink("small.bin", rootdir.join("link.txt")).unwrap();
+
+    // Empty file.
+    std::fs::File::create(rootdir.join("empty")).unwrap();
+
+    // Create image, format with --rootdir, mount.
+    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
+    file.mkfs_rootdir(&rootdir, &[]);
+    let lo = LoopbackDevice::new(file);
+    let mnt = Mount::new(lo, td.path());
+    let mp = mnt.path();
+
+    // Verify data integrity.
+    verify_test_data(mp, "small.bin", 100);
+    verify_test_data(mp, "large.bin", 2 * 1024 * 1024);
+    verify_test_data(&mp.join("subdir"), "nested.bin", 8192);
+
+    // Verify symlink.
+    let link_target = std::fs::read_link(mp.join("link.txt")).unwrap();
+    assert_eq!(link_target.to_str().unwrap(), "small.bin");
+
+    // Verify empty file exists and is empty.
+    let empty_meta = std::fs::metadata(mp.join("empty")).unwrap();
+    assert_eq!(empty_meta.len(), 0);
+
+    // Verify subdirectory exists.
+    assert!(mp.join("subdir").is_dir());
+}
+
+/// Test --rootdir with zstd compression: data should still be readable.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mkfs_rootdir_compressed() {
+    let td = tempfile::tempdir().unwrap();
+    let rootdir = td.path().join("rootdir");
+    std::fs::create_dir_all(&rootdir).unwrap();
+
+    // Compressible data (zeros compress well).
+    write_compressible_data(&rootdir, "zeros.bin", 1024 * 1024);
+    // Incompressible data (random pattern).
+    write_test_data(&rootdir, "random.bin", 64 * 1024);
+
+    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
+    file.mkfs_rootdir(&rootdir, &["--compress", "zstd"]);
+    let lo = LoopbackDevice::new(file);
+    let mnt = Mount::new(lo, td.path());
+    let mp = mnt.path();
+
+    // Verify data reads back correctly (kernel handles decompression).
+    let zeros = std::fs::read(mp.join("zeros.bin")).unwrap();
+    assert_eq!(zeros.len(), 1024 * 1024);
+    assert!(zeros.iter().all(|&b| b == 0), "decompressed zeros mismatch");
+
+    verify_test_data(mp, "random.bin", 64 * 1024);
+}
+
+/// Test --rootdir with --shrink: image should be smaller than the full device size.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mkfs_rootdir_shrink() {
+    let td = tempfile::tempdir().unwrap();
+    let rootdir = td.path().join("rootdir");
+    std::fs::create_dir_all(&rootdir).unwrap();
+
+    write_test_data(&rootdir, "data.bin", 4096);
+
+    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
+    file.mkfs_rootdir(&rootdir, &["--shrink"]);
+
+    // Image should be much smaller than 512 MB.
+    let img_size = std::fs::metadata(td.path().join("disk.img")).unwrap().len();
+    assert!(
+        img_size < 200_000_000,
+        "shrunk image should be < 200 MB, got {img_size}"
+    );
+
+    // Should still mount and have the data.
+    let lo = LoopbackDevice::new(file);
+    let mnt = Mount::new(lo, td.path());
+    verify_test_data(mnt.path(), "data.bin", 4096);
 }
