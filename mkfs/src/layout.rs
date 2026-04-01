@@ -418,9 +418,107 @@ impl ChunkLayout {
     }
 }
 
+/// Dynamic block address allocator for rootdir mode.
+///
+/// Unlike `BlockLayout` which assigns a fixed address per `TreeId`,
+/// `BlockAllocator` hands out sequential addresses from the system and
+/// metadata chunks. This supports trees that need multiple blocks.
+pub struct BlockAllocator {
+    nodesize: u32,
+    system_start: u64,
+    next_system: u64,
+    system_end: u64,
+    meta_start: u64,
+    next_meta: u64,
+    meta_end: u64,
+}
+
+impl BlockAllocator {
+    /// Create an allocator for the given chunk layout.
+    pub fn new(nodesize: u32, meta_logical: u64, meta_size: u64) -> Self {
+        Self {
+            nodesize,
+            system_start: SYSTEM_GROUP_OFFSET,
+            next_system: SYSTEM_GROUP_OFFSET,
+            system_end: SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE,
+            meta_start: meta_logical,
+            next_meta: meta_logical,
+            meta_end: meta_logical + meta_size,
+        }
+    }
+
+    /// Allocate a block in the system chunk (for the chunk tree).
+    pub fn alloc_system(&mut self) -> anyhow::Result<u64> {
+        let addr = self.next_system;
+        if addr + self.nodesize as u64 > self.system_end {
+            anyhow::bail!(
+                "system chunk full: cannot allocate more tree blocks"
+            );
+        }
+        self.next_system += self.nodesize as u64;
+        Ok(addr)
+    }
+
+    /// Allocate a block in the metadata chunk (for all non-chunk trees).
+    pub fn alloc_metadata(&mut self) -> anyhow::Result<u64> {
+        let addr = self.next_meta;
+        if addr + self.nodesize as u64 > self.meta_end {
+            anyhow::bail!(
+                "metadata chunk full: cannot allocate more tree blocks"
+            );
+        }
+        self.next_meta += self.nodesize as u64;
+        Ok(addr)
+    }
+
+    /// Total bytes used in the system chunk.
+    pub fn system_used(&self) -> u64 {
+        self.next_system - self.system_start
+    }
+
+    /// Total bytes used in the metadata chunk.
+    pub fn metadata_used(&self) -> u64 {
+        self.next_meta - self.meta_start
+    }
+
+    /// Reset the allocator to reuse from the beginning.
+    /// Used during the convergence loop when block counts change.
+    pub fn reset(&mut self) {
+        self.next_system = self.system_start;
+        self.next_meta = self.meta_start;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn block_allocator_basic() {
+        let mut alloc =
+            BlockAllocator::new(16384, CHUNK_START, 32 * 1024 * 1024);
+        let a1 = alloc.alloc_system().unwrap();
+        assert_eq!(a1, SYSTEM_GROUP_OFFSET);
+        let a2 = alloc.alloc_metadata().unwrap();
+        assert_eq!(a2, CHUNK_START);
+        let a3 = alloc.alloc_metadata().unwrap();
+        assert_eq!(a3, CHUNK_START + 16384);
+        assert_eq!(alloc.system_used(), 16384);
+        assert_eq!(alloc.metadata_used(), 32768);
+    }
+
+    #[test]
+    fn block_allocator_reset() {
+        let mut alloc =
+            BlockAllocator::new(16384, CHUNK_START, 32 * 1024 * 1024);
+        alloc.alloc_system().unwrap();
+        alloc.alloc_metadata().unwrap();
+        alloc.reset();
+        assert_eq!(alloc.system_used(), 0);
+        assert_eq!(alloc.metadata_used(), 0);
+        let a1 = alloc.alloc_system().unwrap();
+        assert_eq!(a1, SYSTEM_GROUP_OFFSET);
+    }
 
     #[test]
     fn block_addresses() {

@@ -196,7 +196,17 @@ fn main() -> Result<()> {
         }
     }
 
-    mkfs::make_btrfs(&cfg)?;
+    if let Some(ref rootdir) = args.rootdir {
+        if !rootdir.is_dir() {
+            bail!("'{}' is not a directory", rootdir.display());
+        }
+        if !args.quiet {
+            eprintln!("  Rootdir:        {}", rootdir.display());
+        }
+        mkfs::make_btrfs_with_rootdir(&cfg, rootdir)?;
+    } else {
+        mkfs::make_btrfs(&cfg)?;
+    }
 
     if !args.quiet {
         eprintln!("Done.");

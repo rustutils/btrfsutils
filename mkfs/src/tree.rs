@@ -213,6 +213,98 @@ impl std::fmt::Display for LeafError {
 
 impl std::error::Error for LeafError {}
 
+/// Size of a key-pointer entry in an internal node (17 + 8 + 8 = 33 bytes).
+const KEY_PTR_SIZE: usize = 17 + mem::size_of::<u64>() + mem::size_of::<u64>();
+
+/// Parameters for constructing an internal node header.
+pub struct NodeHeader {
+    pub fsid: Uuid,
+    pub chunk_tree_uuid: Uuid,
+    pub generation: u64,
+    pub owner: u64,
+    pub bytenr: u64,
+    pub level: u8,
+}
+
+/// Builds a btrfs internal node (level > 0) from key-pointer pairs.
+///
+/// Each entry maps a key to a child block pointer and generation.
+/// Entries must be pushed in ascending key order.
+pub struct NodeBuilder {
+    buf: Vec<u8>,
+    nritems: u32,
+    ptr_offset: usize,
+    last_key: Option<Key>,
+}
+
+impl NodeBuilder {
+    /// Create a new node builder for a block of `nodesize` bytes at the given level.
+    pub fn new(nodesize: u32, header: &NodeHeader) -> Self {
+        let mut buf = vec![0u8; nodesize as usize];
+
+        let flags = (raw::BTRFS_MIXED_BACKREF_REV as u64)
+            << raw::BTRFS_BACKREF_REV_SHIFT
+            | raw::BTRFS_HEADER_FLAG_WRITTEN as u64;
+
+        write_uuid(&mut buf, 32, &header.fsid);
+        write_le_u64(&mut buf, 48, header.bytenr);
+        write_le_u64(&mut buf, 56, flags);
+        write_uuid(&mut buf, 64, &header.chunk_tree_uuid);
+        write_le_u64(&mut buf, 80, header.generation);
+        write_le_u64(&mut buf, 88, header.owner);
+        // nritems at offset 96: written in finish()
+        buf[100] = header.level;
+
+        Self {
+            buf,
+            nritems: 0,
+            ptr_offset: HEADER_SIZE,
+            last_key: None,
+        }
+    }
+
+    /// Available space for more key-pointer entries.
+    pub fn space_left(&self) -> usize {
+        (self.buf.len() - self.ptr_offset) / KEY_PTR_SIZE
+    }
+
+    /// Push a key-pointer entry pointing to a child block.
+    pub fn push(
+        &mut self,
+        key: Key,
+        blockptr: u64,
+        generation: u64,
+    ) -> Result<(), LeafError> {
+        if let Some(last) = self.last_key
+            && key <= last
+        {
+            return Err(LeafError::KeyOrder { last, got: key });
+        }
+
+        if self.ptr_offset + KEY_PTR_SIZE > self.buf.len() {
+            return Err(LeafError::Full {
+                needed: KEY_PTR_SIZE,
+                available: self.buf.len() - self.ptr_offset,
+            });
+        }
+
+        key.write_to(&mut self.buf, self.ptr_offset);
+        write_le_u64(&mut self.buf, self.ptr_offset + 17, blockptr);
+        write_le_u64(&mut self.buf, self.ptr_offset + 25, generation);
+
+        self.ptr_offset += KEY_PTR_SIZE;
+        self.nritems += 1;
+        self.last_key = Some(key);
+        Ok(())
+    }
+
+    /// Finalize the node: write nritems and return the raw block bytes.
+    pub fn finish(mut self) -> Vec<u8> {
+        write_le_u32(&mut self.buf, 96, self.nritems);
+        self.buf
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +464,51 @@ mod tests {
         assert_eq!(parsed.bytenr, 0x100000);
         assert_eq!(parsed.level, 0);
         assert_eq!(parsed.backref_rev(), raw::BTRFS_MIXED_BACKREF_REV as u64);
+    }
+
+    fn test_node_header(level: u8) -> NodeHeader {
+        NodeHeader {
+            fsid: Uuid::parse_str("deadbeef-dead-beef-dead-beefdeadbeef")
+                .unwrap(),
+            chunk_tree_uuid: Uuid::parse_str(
+                "cafebabe-cafe-babe-cafe-babecafebabe",
+            )
+            .unwrap(),
+            generation: 1,
+            owner: raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+            bytenr: 0x200000,
+            level,
+        }
+    }
+
+    #[test]
+    fn node_builder_basic() {
+        let mut node = NodeBuilder::new(4096, &test_node_header(1));
+        node.push(Key::new(1, 132, 0), 0x100000, 1).unwrap();
+        node.push(Key::new(100, 132, 0), 0x104000, 1).unwrap();
+        let buf = node.finish();
+
+        let block = TreeBlock::parse(&buf);
+        match block {
+            TreeBlock::Node { header, ptrs, .. } => {
+                assert_eq!(header.level, 1);
+                assert_eq!(header.nritems, 2);
+                assert_eq!(header.bytenr, 0x200000);
+                assert_eq!(ptrs.len(), 2);
+                assert_eq!(ptrs[0].key.objectid, 1);
+                assert_eq!(ptrs[0].blockptr, 0x100000);
+                assert_eq!(ptrs[1].key.objectid, 100);
+                assert_eq!(ptrs[1].blockptr, 0x104000);
+            }
+            TreeBlock::Leaf { .. } => panic!("expected node"),
+        }
+    }
+
+    #[test]
+    fn node_builder_key_order_enforced() {
+        let mut node = NodeBuilder::new(4096, &test_node_header(1));
+        node.push(Key::new(10, 132, 0), 0x100000, 1).unwrap();
+        let err = node.push(Key::new(5, 132, 0), 0x104000, 1).unwrap_err();
+        assert!(matches!(err, LeafError::KeyOrder { .. }));
     }
 }

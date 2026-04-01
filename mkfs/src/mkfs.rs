@@ -6,10 +6,12 @@
 use crate::{
     items,
     layout::{
-        BlockLayout, ChunkDevice, ChunkLayout, SYSTEM_GROUP_OFFSET,
-        SYSTEM_GROUP_SIZE, StripeInfo, TreeId,
+        BlockAllocator, BlockLayout, ChunkDevice, ChunkLayout,
+        SYSTEM_GROUP_OFFSET, SYSTEM_GROUP_SIZE, StripeInfo, TreeId,
     },
+    rootdir,
     tree::{Key, LeafBuilder, LeafHeader},
+    treebuilder::TreeBuilder,
     write,
 };
 use anyhow::{Context, Result, bail};
@@ -351,6 +353,1024 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         file.sync_all().context("fsync failed")?;
     }
     Ok(())
+}
+
+/// Create a btrfs filesystem populated from a source directory.
+pub fn make_btrfs_with_rootdir(cfg: &MkfsConfig, rootdir: &Path) -> Result<()> {
+    if !cfg.sectorsize.is_power_of_two() || cfg.sectorsize < 4096 {
+        bail!(
+            "invalid sectorsize {}: must be a power of 2 >= 4096",
+            cfg.sectorsize
+        );
+    }
+    if !cfg.nodesize.is_power_of_two()
+        || cfg.nodesize < cfg.sectorsize
+        || cfg.nodesize > 65536
+    {
+        bail!(
+            "invalid nodesize {}: must be a power of 2, >= sectorsize ({}), and <= 64K",
+            cfg.nodesize,
+            cfg.sectorsize
+        );
+    }
+
+    let generation = 1u64;
+    let now = cfg.now_secs();
+    let skinny = cfg.skinny_metadata();
+    let has_free_space = cfg.has_free_space_tree();
+    let has_block_group = cfg.has_block_group_tree();
+    let root_ino = raw::BTRFS_FIRST_FREE_OBJECTID as u64;
+
+    // Walk rootdir to plan all items and compute data needs.
+    let mut plan = rootdir::walk_directory(
+        rootdir,
+        cfg.sectorsize,
+        cfg.nodesize,
+        generation,
+        now,
+    )?;
+
+    // Compute chunk layout.
+    let chunk_devs: Vec<ChunkDevice> = cfg
+        .devices
+        .iter()
+        .map(|d| ChunkDevice {
+            devid: d.devid,
+            total_bytes: d.total_bytes,
+            dev_uuid: d.dev_uuid,
+        })
+        .collect();
+    let chunks =
+        ChunkLayout::new(&chunk_devs, cfg.metadata_profile, cfg.data_profile)
+            .ok_or_else(|| {
+            anyhow::anyhow!("device too small: {} bytes", cfg.total_bytes())
+        })?;
+
+    if plan.data_bytes_needed > chunks.data_size {
+        bail!(
+            "rootdir requires {} bytes of data but data chunk is only {} bytes; \
+             use a larger device or --byte-count",
+            plan.data_bytes_needed,
+            chunks.data_size
+        );
+    }
+
+    // Open device files.
+    let files: Vec<File> = cfg
+        .devices
+        .iter()
+        .map(|dev| {
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&dev.path)
+                .with_context(|| {
+                    format!("failed to open {}", dev.path.display())
+                })
+        })
+        .collect::<Result<_>>()?;
+
+    // Write file data and get extent/csum items.
+    let data_output = rootdir::write_file_data(
+        &plan,
+        chunks.data_logical,
+        cfg.sectorsize,
+        generation,
+        cfg.csum_type,
+        &files,
+        &chunks,
+    )?;
+
+    // Apply nbytes updates to INODE_ITEMs for files with regular extents.
+    rootdir::apply_nbytes_updates(
+        &mut plan.fs_items,
+        &data_output.nbytes_updates,
+    );
+
+    // Merge root dir inode (ino 256) + rootdir items + data extent file items.
+    let mut all_fs_items: Vec<(Key, Vec<u8>)> = Vec::new();
+    all_fs_items.push((
+        Key::new(root_ino, raw::BTRFS_INODE_ITEM_KEY as u8, 0),
+        items::inode_item(&items::InodeItemArgs {
+            generation,
+            transid: generation,
+            size: plan.root_dir_size,
+            nbytes: 0, // nbytes=0 for dirs
+            nlink: plan.root_dir_nlink,
+            uid: 0,
+            gid: 0,
+            mode: 0o40755,
+            rdev: 0,
+            flags: 0,
+            atime: (now, 0),
+            ctime: (now, 0),
+            mtime: (now, 0),
+            otime: (now, 0),
+        }),
+    ));
+    all_fs_items.push((
+        Key::new(root_ino, raw::BTRFS_INODE_REF_KEY as u8, root_ino),
+        items::inode_ref(0, b".."),
+    ));
+    all_fs_items.append(&mut plan.fs_items);
+    all_fs_items.extend(data_output.fs_items);
+    all_fs_items.sort_by_key(|(k, _)| *k);
+
+    // Data-reloc tree items (same as normal mkfs).
+    let data_reloc_items: Vec<(Key, Vec<u8>)> = vec![
+        (
+            Key::new(root_ino, raw::BTRFS_INODE_ITEM_KEY as u8, 0),
+            items::inode_item_dir(generation, cfg.nodesize as u64, now),
+        ),
+        (
+            Key::new(root_ino, raw::BTRFS_INODE_REF_KEY as u8, root_ino),
+            items::inode_ref(0, b".."),
+        ),
+    ];
+
+    let tb = TreeBuilder {
+        nodesize: cfg.nodesize,
+        owner: 0,
+        fsid: cfg.fs_uuid,
+        chunk_tree_uuid: cfg.chunk_tree_uuid,
+        generation,
+    };
+
+    // Build variable-size trees to determine their block counts.
+    let fs_tree = tb
+        .clone_with_owner(raw::BTRFS_FS_TREE_OBJECTID as u64)
+        .build(&all_fs_items);
+    let csum_tree = tb
+        .clone_with_owner(raw::BTRFS_CSUM_TREE_OBJECTID as u64)
+        .build(&data_output.csum_items);
+    let data_reloc_tree = tb
+        .clone_with_owner(raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64)
+        .build(&data_reloc_items);
+
+    // Fixed allocation order: chunk(sys), root, extent(...), dev, fs(...),
+    // csum(...), free_space, data_reloc(...), block_group.
+
+    // Convergence: compute extent tree block count until stable.
+    let ns = cfg.nodesize as u64;
+    let mut extent_tree_block_count = 1usize;
+    loop {
+        // Simulate address allocation in the fixed order.
+        let mut addr = chunks.meta_logical;
+        let mut trial_items: Vec<(Key, Vec<u8>)> = Vec::new();
+
+        // Chunk tree (system)
+        trial_items.push(metadata_extent_item(
+            SYSTEM_GROUP_OFFSET,
+            skinny,
+            generation,
+            raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
+            cfg.nodesize,
+        ));
+
+        // Root tree
+        trial_items.push(metadata_extent_item(
+            addr,
+            skinny,
+            generation,
+            raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+            cfg.nodesize,
+        ));
+        addr += ns;
+
+        // Extent tree blocks (placeholders)
+        for _ in 0..extent_tree_block_count {
+            trial_items.push(metadata_extent_item(
+                addr,
+                skinny,
+                generation,
+                raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
+                cfg.nodesize,
+            ));
+            addr += ns;
+        }
+
+        // Dev tree
+        trial_items.push(metadata_extent_item(
+            addr,
+            skinny,
+            generation,
+            raw::BTRFS_DEV_TREE_OBJECTID as u64,
+            cfg.nodesize,
+        ));
+        addr += ns;
+
+        // FS tree blocks
+        for _ in 0..fs_tree.blocks.len() {
+            trial_items.push(metadata_extent_item(
+                addr,
+                skinny,
+                generation,
+                raw::BTRFS_FS_TREE_OBJECTID as u64,
+                cfg.nodesize,
+            ));
+            addr += ns;
+        }
+
+        // Csum tree blocks
+        for _ in 0..csum_tree.blocks.len() {
+            trial_items.push(metadata_extent_item(
+                addr,
+                skinny,
+                generation,
+                raw::BTRFS_CSUM_TREE_OBJECTID as u64,
+                cfg.nodesize,
+            ));
+            addr += ns;
+        }
+
+        if has_free_space {
+            trial_items.push(metadata_extent_item(
+                addr,
+                skinny,
+                generation,
+                raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64,
+                cfg.nodesize,
+            ));
+            addr += ns;
+        }
+
+        for _ in 0..data_reloc_tree.blocks.len() {
+            trial_items.push(metadata_extent_item(
+                addr,
+                skinny,
+                generation,
+                raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64,
+                cfg.nodesize,
+            ));
+            addr += ns;
+        }
+
+        if has_block_group {
+            trial_items.push(metadata_extent_item(
+                addr,
+                skinny,
+                generation,
+                raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64,
+                cfg.nodesize,
+            ));
+        }
+
+        trial_items.extend(data_output.extent_items.iter().cloned());
+
+        if !has_block_group {
+            // Placeholder block group items (just for item count/sizing).
+            for &(logical, size) in &[
+                (SYSTEM_GROUP_OFFSET, SYSTEM_GROUP_SIZE),
+                (chunks.meta_logical, chunks.meta_size),
+                (chunks.data_logical, chunks.data_size),
+            ] {
+                trial_items.push((
+                    Key::new(
+                        logical,
+                        raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+                        size,
+                    ),
+                    items::block_group_item(
+                        0,
+                        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+                        0,
+                    ),
+                ));
+            }
+        }
+
+        trial_items.sort_by_key(|(k, _)| *k);
+        let trial = tb
+            .clone_with_owner(raw::BTRFS_EXTENT_TREE_OBJECTID as u64)
+            .build(&trial_items);
+
+        if trial.blocks.len() == extent_tree_block_count {
+            break;
+        }
+        extent_tree_block_count = trial.blocks.len();
+    }
+
+    // Allocate real addresses in the fixed order.
+    let mut alloc = BlockAllocator::new(
+        cfg.nodesize,
+        chunks.meta_logical,
+        chunks.meta_size,
+    );
+    let chunk_tree_addr = alloc.alloc_system()?;
+    let root_tree_addr = alloc.alloc_metadata()?;
+
+    let mut extent_addrs = Vec::with_capacity(extent_tree_block_count);
+    for _ in 0..extent_tree_block_count {
+        extent_addrs.push(alloc.alloc_metadata()?);
+    }
+
+    let dev_tree_addr = alloc.alloc_metadata()?;
+
+    let mut fs_addrs = Vec::with_capacity(fs_tree.blocks.len());
+    for _ in 0..fs_tree.blocks.len() {
+        fs_addrs.push(alloc.alloc_metadata()?);
+    }
+
+    let mut csum_addrs = Vec::with_capacity(csum_tree.blocks.len());
+    for _ in 0..csum_tree.blocks.len() {
+        csum_addrs.push(alloc.alloc_metadata()?);
+    }
+
+    let free_space_addr = if has_free_space {
+        Some(alloc.alloc_metadata()?)
+    } else {
+        None
+    };
+
+    let mut data_reloc_addrs = Vec::with_capacity(data_reloc_tree.blocks.len());
+    for _ in 0..data_reloc_tree.blocks.len() {
+        data_reloc_addrs.push(alloc.alloc_metadata()?);
+    }
+
+    let block_group_addr = if has_block_group {
+        Some(alloc.alloc_metadata()?)
+    } else {
+        None
+    };
+
+    // Build the REAL extent tree with actual addresses.
+    let mut extent_items: Vec<(Key, Vec<u8>)> = Vec::new();
+
+    extent_items.push(metadata_extent_item(
+        chunk_tree_addr,
+        skinny,
+        generation,
+        raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
+        cfg.nodesize,
+    ));
+    extent_items.push(metadata_extent_item(
+        root_tree_addr,
+        skinny,
+        generation,
+        raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+        cfg.nodesize,
+    ));
+    for &a in &extent_addrs {
+        extent_items.push(metadata_extent_item(
+            a,
+            skinny,
+            generation,
+            raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
+            cfg.nodesize,
+        ));
+    }
+    extent_items.push(metadata_extent_item(
+        dev_tree_addr,
+        skinny,
+        generation,
+        raw::BTRFS_DEV_TREE_OBJECTID as u64,
+        cfg.nodesize,
+    ));
+    for &a in &fs_addrs {
+        extent_items.push(metadata_extent_item(
+            a,
+            skinny,
+            generation,
+            raw::BTRFS_FS_TREE_OBJECTID as u64,
+            cfg.nodesize,
+        ));
+    }
+    for &a in &csum_addrs {
+        extent_items.push(metadata_extent_item(
+            a,
+            skinny,
+            generation,
+            raw::BTRFS_CSUM_TREE_OBJECTID as u64,
+            cfg.nodesize,
+        ));
+    }
+    if let Some(a) = free_space_addr {
+        extent_items.push(metadata_extent_item(
+            a,
+            skinny,
+            generation,
+            raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64,
+            cfg.nodesize,
+        ));
+    }
+    for &a in &data_reloc_addrs {
+        extent_items.push(metadata_extent_item(
+            a,
+            skinny,
+            generation,
+            raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64,
+            cfg.nodesize,
+        ));
+    }
+    if let Some(a) = block_group_addr {
+        extent_items.push(metadata_extent_item(
+            a,
+            skinny,
+            generation,
+            raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64,
+            cfg.nodesize,
+        ));
+    }
+    extent_items.extend(data_output.extent_items.iter().cloned());
+    if !has_block_group {
+        add_block_group_items(
+            &mut extent_items,
+            cfg,
+            &alloc,
+            &chunks,
+            data_output.data_used,
+        );
+    }
+    extent_items.sort_by_key(|(k, _)| *k);
+
+    let mut extent_tree = tb
+        .clone_with_owner(raw::BTRFS_EXTENT_TREE_OBJECTID as u64)
+        .build(&extent_items);
+    assert_eq!(
+        extent_tree.blocks.len(),
+        extent_addrs.len(),
+        "extent tree block count changed after convergence"
+    );
+
+    // Assign addresses to all multi-block trees.
+    let mut ei = 0;
+    TreeBuilder::assign_addresses(&mut extent_tree, || {
+        let a = extent_addrs[ei];
+        ei += 1;
+        a
+    });
+    let extent_root_addr = u64::from_le_bytes(
+        extent_tree.blocks.last().unwrap().buf[48..56]
+            .try_into()
+            .unwrap(),
+    );
+
+    let mut fs_tree = fs_tree;
+    let mut fi = 0;
+    TreeBuilder::assign_addresses(&mut fs_tree, || {
+        let a = fs_addrs[fi];
+        fi += 1;
+        a
+    });
+    let fs_root_addr = u64::from_le_bytes(
+        fs_tree.blocks.last().unwrap().buf[48..56]
+            .try_into()
+            .unwrap(),
+    );
+
+    let mut csum_tree = csum_tree;
+    let mut ci = 0;
+    TreeBuilder::assign_addresses(&mut csum_tree, || {
+        let a = csum_addrs[ci];
+        ci += 1;
+        a
+    });
+    let csum_root_addr = u64::from_le_bytes(
+        csum_tree.blocks.last().unwrap().buf[48..56]
+            .try_into()
+            .unwrap(),
+    );
+
+    let mut data_reloc_tree = data_reloc_tree;
+    let mut di = 0;
+    TreeBuilder::assign_addresses(&mut data_reloc_tree, || {
+        let a = data_reloc_addrs[di];
+        di += 1;
+        a
+    });
+    let data_reloc_addr = u64::from_le_bytes(
+        data_reloc_tree.blocks.last().unwrap().buf[48..56]
+            .try_into()
+            .unwrap(),
+    );
+
+    // Build single-leaf trees.
+    let leaf_hdr = |owner: u64, bytenr: u64| LeafHeader {
+        fsid: cfg.fs_uuid,
+        chunk_tree_uuid: cfg.chunk_tree_uuid,
+        generation,
+        owner,
+        bytenr,
+    };
+
+    let chunk_tree_buf = build_chunk_tree(
+        cfg,
+        &BlockLayout::new(cfg.nodesize, chunks.meta_logical),
+        &chunks,
+        &|_| leaf_hdr(raw::BTRFS_CHUNK_TREE_OBJECTID as u64, chunk_tree_addr),
+    )?;
+    let dev_tree_buf = build_dev_tree(cfg, &chunks, &|_| {
+        leaf_hdr(raw::BTRFS_DEV_TREE_OBJECTID as u64, dev_tree_addr)
+    })?;
+
+    let free_space_buf = free_space_addr
+        .map(|addr| {
+            build_free_space_tree_rootdir(
+                cfg,
+                &alloc,
+                &chunks,
+                data_output.data_used,
+                addr,
+            )
+        })
+        .transpose()?;
+    let block_group_buf = block_group_addr
+        .map(|addr| {
+            build_block_group_tree_rootdir(
+                cfg,
+                &alloc,
+                &chunks,
+                data_output.data_used,
+                addr,
+            )
+        })
+        .transpose()?;
+
+    let root_tree_buf = build_root_tree_rootdir(&RootTreeRootdirArgs {
+        cfg,
+        generation,
+        now,
+        addr: root_tree_addr,
+        trees: &[
+            (
+                raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
+                extent_root_addr,
+                extent_tree.root_level,
+            ),
+            (raw::BTRFS_CHUNK_TREE_OBJECTID as u64, chunk_tree_addr, 0),
+            (raw::BTRFS_DEV_TREE_OBJECTID as u64, dev_tree_addr, 0),
+            (
+                raw::BTRFS_FS_TREE_OBJECTID as u64,
+                fs_root_addr,
+                fs_tree.root_level,
+            ),
+            (
+                raw::BTRFS_CSUM_TREE_OBJECTID as u64,
+                csum_root_addr,
+                csum_tree.root_level,
+            ),
+        ],
+        free_space_addr,
+        data_reloc_addr,
+        data_reloc_level: data_reloc_tree.root_level,
+        block_group_addr,
+    })?;
+
+    // Write helper.
+    let write_block = |buf: &mut Vec<u8>, logical: u64| -> Result<()> {
+        write::fill_csum(buf, cfg.csum_type);
+        for (devid, phys) in chunks.logical_to_physical(logical) {
+            write::pwrite_all(&files[(devid - 1) as usize], buf, phys)?;
+        }
+        Ok(())
+    };
+    let write_tree_blocks =
+        |tree: &mut crate::treebuilder::TreeBlocks| -> Result<()> {
+            for block in &mut tree.blocks {
+                let addr =
+                    u64::from_le_bytes(block.buf[48..56].try_into().unwrap());
+                write::fill_csum(&mut block.buf, cfg.csum_type);
+                for (devid, phys) in chunks.logical_to_physical(addr) {
+                    write::pwrite_all(
+                        &files[(devid - 1) as usize],
+                        &block.buf,
+                        phys,
+                    )?;
+                }
+            }
+            Ok(())
+        };
+
+    write_block(&mut chunk_tree_buf.clone(), chunk_tree_addr)?;
+    write_block(&mut root_tree_buf.clone(), root_tree_addr)?;
+    write_block(&mut dev_tree_buf.clone(), dev_tree_addr)?;
+    write_tree_blocks(&mut extent_tree)?;
+    write_tree_blocks(&mut fs_tree)?;
+    write_tree_blocks(&mut csum_tree)?;
+    write_tree_blocks(&mut data_reloc_tree)?;
+    if let Some(mut buf) = free_space_buf {
+        write_block(&mut buf, free_space_addr.unwrap())?;
+    }
+    if let Some(mut buf) = block_group_buf {
+        write_block(&mut buf, block_group_addr.unwrap())?;
+    }
+
+    // Superblock.
+    let bytes_used = alloc.system_used() + alloc.metadata_used();
+    for dev in &cfg.devices {
+        let sb = build_superblock_rootdir(
+            cfg,
+            &chunks,
+            dev,
+            root_tree_addr,
+            chunk_tree_addr,
+            0,
+            bytes_used,
+        )?;
+        let fidx = (dev.devid - 1) as usize;
+        for mirror in 0..btrfs_disk::superblock::SUPER_MIRROR_MAX {
+            let offset = btrfs_disk::superblock::super_mirror_offset(mirror);
+            if offset + write::SUPER_INFO_SIZE as u64 > dev.total_bytes {
+                break;
+            }
+            write::pwrite_all(&files[fidx], &sb, offset)?;
+        }
+    }
+
+    for file in &files {
+        file.sync_all().context("fsync failed")?;
+    }
+    Ok(())
+}
+
+fn metadata_extent_item(
+    addr: u64,
+    skinny: bool,
+    generation: u64,
+    owner: u64,
+    nodesize: u32,
+) -> (Key, Vec<u8>) {
+    let (item_type, offset) = if skinny {
+        (raw::BTRFS_METADATA_ITEM_KEY as u8, 0u64)
+    } else {
+        (raw::BTRFS_EXTENT_ITEM_KEY as u8, nodesize as u64)
+    };
+    (
+        Key::new(addr, item_type, offset),
+        items::extent_item(1, generation, skinny, owner),
+    )
+}
+
+fn add_block_group_items(
+    v: &mut Vec<(Key, Vec<u8>)>,
+    cfg: &MkfsConfig,
+    alloc: &BlockAllocator,
+    chunks: &ChunkLayout,
+    data_used: u64,
+) {
+    v.push((
+        Key::new(
+            SYSTEM_GROUP_OFFSET,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            SYSTEM_GROUP_SIZE,
+        ),
+        items::block_group_item(
+            alloc.system_used(),
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+        ),
+    ));
+    v.push((
+        Key::new(
+            chunks.meta_logical,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            chunks.meta_size,
+        ),
+        items::block_group_item(
+            alloc.metadata_used(),
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_BLOCK_GROUP_METADATA as u64
+                | cfg.metadata_profile.block_group_flag(),
+        ),
+    ));
+    v.push((
+        Key::new(
+            chunks.data_logical,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            chunks.data_size,
+        ),
+        items::block_group_item(
+            data_used,
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_BLOCK_GROUP_DATA as u64
+                | cfg.data_profile.block_group_flag(),
+        ),
+    ));
+}
+
+struct RootTreeRootdirArgs<'a> {
+    cfg: &'a MkfsConfig,
+    generation: u64,
+    now: u64,
+    addr: u64,
+    trees: &'a [(u64, u64, u8)],
+    free_space_addr: Option<u64>,
+    data_reloc_addr: u64,
+    data_reloc_level: u8,
+    block_group_addr: Option<u64>,
+}
+
+fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
+    let cfg = args.cfg;
+    let header = LeafHeader {
+        fsid: cfg.fs_uuid,
+        chunk_tree_uuid: cfg.chunk_tree_uuid,
+        generation: args.generation,
+        owner: raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+        bytenr: args.addr,
+    };
+    let mut leaf = LeafBuilder::new(cfg.nodesize, &header);
+
+    struct E {
+        oid: u64,
+        addr: u64,
+        level: u8,
+        is_fs: bool,
+    }
+    let mut entries: Vec<E> = args
+        .trees
+        .iter()
+        .map(|&(o, a, l)| E {
+            oid: o,
+            addr: a,
+            level: l,
+            is_fs: o == raw::BTRFS_FS_TREE_OBJECTID as u64,
+        })
+        .collect();
+    if let Some(a) = args.free_space_addr {
+        entries.push(E {
+            oid: raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64,
+            addr: a,
+            level: 0,
+            is_fs: false,
+        });
+    }
+    entries.push(E {
+        oid: raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64,
+        addr: args.data_reloc_addr,
+        level: args.data_reloc_level,
+        is_fs: false,
+    });
+    if let Some(a) = args.block_group_addr {
+        entries.push(E {
+            oid: raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64,
+            addr: a,
+            level: 0,
+            is_fs: false,
+        });
+    }
+    entries.sort_by_key(|e| e.oid);
+
+    for e in &entries {
+        let key = Key::new(e.oid, raw::BTRFS_ROOT_ITEM_KEY as u8, 0);
+        let mut data = items::root_item(
+            args.generation,
+            e.addr,
+            raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+            cfg.nodesize,
+        );
+        data[mem::offset_of!(raw::btrfs_root_item, level)] = e.level;
+
+        if e.is_fs {
+            let mut ub = *cfg.fs_uuid.as_bytes();
+            for b in &mut ub {
+                *b ^= 0xFF;
+            }
+            let uo = mem::offset_of!(raw::btrfs_root_item, uuid);
+            data[uo..uo + 16].copy_from_slice(&ub);
+            let fo = mem::offset_of!(raw::btrfs_inode_item, flags);
+            data[fo..fo + 8].copy_from_slice(
+                &(raw::BTRFS_INODE_ROOT_ITEM_INIT as u64).to_le_bytes(),
+            );
+            data[16..24].copy_from_slice(&3u64.to_le_bytes());
+            data[24..32].copy_from_slice(&(cfg.nodesize as u64).to_le_bytes());
+            for off in [
+                mem::offset_of!(raw::btrfs_root_item, ctime),
+                mem::offset_of!(raw::btrfs_root_item, otime),
+            ] {
+                data[off..off + 8].copy_from_slice(&args.now.to_le_bytes());
+                data[off + 8..off + 12].copy_from_slice(&0u32.to_le_bytes());
+            }
+        }
+        leaf.push(key, &data)
+            .map_err(|e| anyhow::anyhow!("root tree: {e}"))?;
+    }
+    Ok(leaf.finish())
+}
+
+fn build_free_space_tree_rootdir(
+    cfg: &MkfsConfig,
+    alloc: &BlockAllocator,
+    chunks: &ChunkLayout,
+    data_used: u64,
+    addr: u64,
+) -> Result<Vec<u8>> {
+    let header = LeafHeader {
+        fsid: cfg.fs_uuid,
+        chunk_tree_uuid: cfg.chunk_tree_uuid,
+        generation: 1,
+        owner: raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64,
+        bytenr: addr,
+    };
+    let mut leaf = LeafBuilder::new(cfg.nodesize, &header);
+
+    let sfs = SYSTEM_GROUP_OFFSET + alloc.system_used();
+    let sfl = SYSTEM_GROUP_SIZE - alloc.system_used();
+    leaf.push(
+        Key::new(
+            SYSTEM_GROUP_OFFSET,
+            raw::BTRFS_FREE_SPACE_INFO_KEY as u8,
+            SYSTEM_GROUP_SIZE,
+        ),
+        &items::free_space_info(1, 0),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    leaf.push_empty(Key::new(sfs, raw::BTRFS_FREE_SPACE_EXTENT_KEY as u8, sfl))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let mfs = chunks.meta_logical + alloc.metadata_used();
+    let mfl = chunks.meta_size - alloc.metadata_used();
+    leaf.push(
+        Key::new(
+            chunks.meta_logical,
+            raw::BTRFS_FREE_SPACE_INFO_KEY as u8,
+            chunks.meta_size,
+        ),
+        &items::free_space_info(1, 0),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    leaf.push_empty(Key::new(mfs, raw::BTRFS_FREE_SPACE_EXTENT_KEY as u8, mfl))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let dfs = chunks.data_logical + data_used;
+    let dfl = chunks.data_size - data_used;
+    let dc = if dfl > 0 { 1u32 } else { 0 };
+    leaf.push(
+        Key::new(
+            chunks.data_logical,
+            raw::BTRFS_FREE_SPACE_INFO_KEY as u8,
+            chunks.data_size,
+        ),
+        &items::free_space_info(dc, 0),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    if dfl > 0 {
+        leaf.push_empty(Key::new(
+            dfs,
+            raw::BTRFS_FREE_SPACE_EXTENT_KEY as u8,
+            dfl,
+        ))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    }
+    Ok(leaf.finish())
+}
+
+fn build_block_group_tree_rootdir(
+    cfg: &MkfsConfig,
+    alloc: &BlockAllocator,
+    chunks: &ChunkLayout,
+    data_used: u64,
+    addr: u64,
+) -> Result<Vec<u8>> {
+    let header = LeafHeader {
+        fsid: cfg.fs_uuid,
+        chunk_tree_uuid: cfg.chunk_tree_uuid,
+        generation: 1,
+        owner: raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64,
+        bytenr: addr,
+    };
+    let mut leaf = LeafBuilder::new(cfg.nodesize, &header);
+    leaf.push(
+        Key::new(
+            SYSTEM_GROUP_OFFSET,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            SYSTEM_GROUP_SIZE,
+        ),
+        &items::block_group_item(
+            alloc.system_used(),
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+        ),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    leaf.push(
+        Key::new(
+            chunks.meta_logical,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            chunks.meta_size,
+        ),
+        &items::block_group_item(
+            alloc.metadata_used(),
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_BLOCK_GROUP_METADATA as u64
+                | cfg.metadata_profile.block_group_flag(),
+        ),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    leaf.push(
+        Key::new(
+            chunks.data_logical,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            chunks.data_size,
+        ),
+        &items::block_group_item(
+            data_used,
+            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            raw::BTRFS_BLOCK_GROUP_DATA as u64
+                | cfg.data_profile.block_group_flag(),
+        ),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(leaf.finish())
+}
+
+fn build_superblock_rootdir(
+    cfg: &MkfsConfig,
+    chunks: &ChunkLayout,
+    dev: &DeviceInfo,
+    root_addr: u64,
+    chunk_root_addr: u64,
+    root_level: u8,
+    bytes_used: u64,
+) -> Result<Vec<u8>> {
+    // Reuse the same superblock construction as the normal path.
+    let generation = 1u64;
+    let dev1 = cfg.primary_device();
+    let chunk_key = Key::new(
+        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        raw::BTRFS_CHUNK_ITEM_KEY as u8,
+        SYSTEM_GROUP_OFFSET,
+    );
+    let chunk_data = items::chunk_item_bootstrap(
+        SYSTEM_GROUP_SIZE,
+        raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
+        raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+        cfg.sectorsize,
+        &StripeInfo {
+            devid: dev1.devid,
+            offset: SYSTEM_GROUP_OFFSET,
+            dev_uuid: dev1.dev_uuid,
+        },
+    );
+    let mut sca = items::disk_key(&chunk_key);
+    sca.extend_from_slice(&chunk_data);
+    let cg = if cfg.has_free_space_tree() {
+        0
+    } else {
+        u64::MAX
+    };
+    let mut scb = [0u8; 2048];
+    scb[..sca.len()].copy_from_slice(&sca);
+
+    let sb = btrfs_disk::superblock::Superblock {
+        csum: [0; 32],
+        fsid: cfg.fs_uuid,
+        bytenr: write::SUPER_INFO_OFFSET,
+        flags: 0,
+        magic: raw::BTRFS_MAGIC,
+        generation,
+        root: root_addr,
+        chunk_root: chunk_root_addr,
+        log_root: 0,
+        log_root_transid: 0,
+        total_bytes: cfg.total_bytes(),
+        bytes_used,
+        root_dir_objectid: raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+        num_devices: cfg.num_devices(),
+        sectorsize: cfg.sectorsize,
+        nodesize: cfg.nodesize,
+        leafsize: cfg.nodesize,
+        stripesize: cfg.sectorsize,
+        sys_chunk_array_size: sca.len() as u32,
+        chunk_root_generation: generation,
+        compat_flags: 0,
+        compat_ro_flags: cfg.compat_ro_flags,
+        incompat_flags: cfg.incompat_flags,
+        csum_type: btrfs_disk::superblock::ChecksumType::from_raw(
+            cfg.csum_type.to_raw(),
+        ),
+        root_level,
+        chunk_root_level: 0,
+        log_root_level: 0,
+        dev_item: btrfs_disk::items::DeviceItem {
+            devid: dev.devid,
+            total_bytes: dev.total_bytes,
+            bytes_used: chunks.dev_bytes_used_for(dev.devid),
+            io_align: cfg.sectorsize,
+            io_width: cfg.sectorsize,
+            sector_size: cfg.sectorsize,
+            dev_type: 0,
+            generation: 0,
+            start_offset: 0,
+            dev_group: 0,
+            seek_speed: 0,
+            bandwidth: 0,
+            uuid: dev.dev_uuid,
+            fsid: cfg.fs_uuid,
+        },
+        label: cfg.label.clone().unwrap_or_default(),
+        cache_generation: cg,
+        uuid_tree_generation: 0,
+        metadata_uuid: Uuid::nil(),
+        nr_global_roots: 0,
+        backup_roots: std::array::from_fn(|_| {
+            btrfs_disk::superblock::BackupRoot::default()
+        }),
+        sys_chunk_array: scb,
+    };
+    let mut buf = sb.to_bytes();
+    write::fill_csum(&mut buf, cfg.csum_type);
+    Ok(buf.to_vec())
 }
 
 fn build_root_tree(
