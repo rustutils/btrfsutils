@@ -375,16 +375,15 @@ impl<R: Read> StreamReader<R> {
             .read_exact(&mut self.buf)
             .map_err(StreamError::TruncatedPayload)?;
 
-        // Validate CRC32C: compute over header (with crc field zeroed) + payload.
-        // The btrfs send stream uses a raw CRC-32C (init=0, xorout=0), not the
-        // standard ISO 3309 convention (init=0xFFFFFFFF, xorout=0xFFFFFFFF).
-        // The crc32c crate only exposes the standard version, so we recover the
-        // raw value: raw_crc32c(0, data) == !crc32c_append(!0, data).
-        let mut crc_buf = Vec::with_capacity(CMD_HEADER_LEN + payload_len);
-        crc_buf.extend_from_slice(&cmd_hdr[0..6]); // len + cmd
-        crc_buf.extend_from_slice(&[0u8; 4]); // zeroed crc field
-        crc_buf.extend_from_slice(&self.buf);
-        let computed_crc = !crc32c::crc32c_append(!0, &crc_buf);
+        // Validate CRC32C over header (with crc field zeroed) + payload.
+        // The btrfs send stream uses raw CRC-32C (init=0, xorout=0), not
+        // the standard ISO 3309 convention. We compute incrementally to
+        // avoid allocating a contiguous buffer for the entire command.
+        // raw_crc32c(seed, data) == !crc32c_append(!seed, data)
+        let crc = crc32c::crc32c_append(!0, &cmd_hdr[0..6]); // len + cmd
+        let crc = crc32c::crc32c_append(crc, &[0u8; 4]); // zeroed crc field
+        let crc = crc32c::crc32c_append(crc, &self.buf); // payload
+        let computed_crc = !crc;
         if computed_crc != expected_crc {
             return Err(StreamError::CrcMismatch {
                 cmd,
