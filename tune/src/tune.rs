@@ -51,25 +51,24 @@ pub fn set_incompat_flags(
     file: &mut (impl Read + Write + Seek),
     flags: u64,
 ) -> Result<()> {
-    let mut buf =
-        read_superblock_bytes(file).context("failed to read superblock")?;
+    let offset = mem::offset_of!(raw::btrfs_super_block, incompat_flags);
 
+    // Pre-check: read to see if already set (avoids unnecessary write).
+    let buf =
+        read_superblock_bytes(file).context("failed to read superblock")?;
     if !superblock_is_valid(&buf) {
         bail!("superblock is invalid (bad magic or checksum)");
     }
-
-    let offset = mem::offset_of!(raw::btrfs_super_block, incompat_flags);
     let current = read_u64(&buf, offset);
-
     if current & flags == flags {
         println!("feature flags are already set");
         return Ok(());
     }
 
-    write_u64(&mut buf, offset, current | flags);
-
-    write_superblock_all_mirrors(file, &buf)
-        .context("failed to write superblock")?;
+    read_validate_mutate_write(file, |sb| {
+        let current = read_u64(sb, offset);
+        write_u64(sb, offset, current | flags);
+    })?;
 
     println!("incompat feature flags updated successfully");
     Ok(())
@@ -276,9 +275,7 @@ pub fn change_uuid<R: Read + Write + Seek>(
     }
 
     let new_chunk_tree_uuid = Uuid::new_v4();
-    // nodesize is always small (e.g. 16384), safe to cast to usize.
-    #[allow(clippy::cast_possible_truncation)]
-    let nodesize = reader.nodesize() as usize;
+    let header_size = mem::size_of::<raw::btrfs_header>();
     let header_fsid_off = mem::offset_of!(raw::btrfs_header, fsid);
     let header_chunk_uuid_off =
         mem::offset_of!(raw::btrfs_header, chunk_tree_uuid);
@@ -287,7 +284,7 @@ pub fn change_uuid<R: Read + Write + Seek>(
     println!("new fsid:     {new_fsid}");
 
     // Step 1: set CHANGING_FSID flag and write new fsid to superblock.
-    set_superblock_fields(reader.inner_mut(), |sb_buf| {
+    read_validate_mutate_write(reader.inner_mut(), |sb_buf| {
         let flags_off = mem::offset_of!(raw::btrfs_super_block, flags);
         let fsid_off = mem::offset_of!(raw::btrfs_super_block, fsid);
         let changing = raw::BTRFS_SUPER_FLAG_CHANGING_FSID;
@@ -306,7 +303,35 @@ pub fn change_uuid<R: Read + Write + Seek>(
         .context("extent tree root not found")?;
 
     let mut tree_block_addrs = Vec::new();
-    collect_tree_block_addrs(&mut reader, extent_root, &mut tree_block_addrs)?;
+    let tree_block_flag = u64::from(raw::BTRFS_EXTENT_FLAG_TREE_BLOCK);
+    let flags_off = mem::offset_of!(raw::btrfs_extent_item, flags);
+    reader::tree_walk(
+        &mut reader,
+        extent_root,
+        reader::Traversal::Dfs,
+        &mut |block| {
+            if let TreeBlock::Leaf { items, data, .. } = block {
+                for item in items {
+                    let is_extent = item.key.key_type == KeyType::ExtentItem
+                        || item.key.key_type == KeyType::MetadataItem;
+                    if !is_extent {
+                        continue;
+                    }
+                    let start = header_size + item.offset as usize + flags_off;
+                    if start + 8 > data.len() {
+                        continue;
+                    }
+                    let flags = u64::from_le_bytes(
+                        data[start..start + 8].try_into().unwrap(),
+                    );
+                    if flags & tree_block_flag != 0 {
+                        tree_block_addrs.push(item.key.objectid);
+                    }
+                }
+            }
+        },
+    )
+    .context("failed to walk extent tree")?;
 
     println!("patching {} tree block headers...", tree_block_addrs.len());
 
@@ -323,11 +348,28 @@ pub fn change_uuid<R: Read + Write + Seek>(
     }
 
     // Step 3: patch device fsid in chunk tree DEV_ITEM entries.
-    let chunk_root = sb.chunk_root;
-    patch_chunk_tree_dev_fsid(&mut reader, chunk_root, nodesize, &new_fsid)?;
+    let dev_fsid_off = mem::offset_of!(raw::btrfs_dev_item, fsid);
+    reader::tree_walk_mut(&mut reader, sb.chunk_root, &mut |buf, block| {
+        let TreeBlock::Leaf { items, .. } = block else {
+            return false;
+        };
+        let mut modified = false;
+        for item in items {
+            if item.key.key_type != KeyType::DeviceItem {
+                continue;
+            }
+            let start = header_size + item.offset as usize + dev_fsid_off;
+            if start + 16 <= buf.len() {
+                disk_write_uuid(buf, start, &new_fsid);
+                modified = true;
+            }
+        }
+        modified
+    })
+    .context("failed to patch chunk tree DEV_ITEMs")?;
 
     // Step 4: patch superblock dev_item fsid and clear CHANGING_FSID.
-    set_superblock_fields(reader.inner_mut(), |sb_buf| {
+    read_validate_mutate_write(reader.inner_mut(), |sb_buf| {
         let dev_item_fsid_off =
             mem::offset_of!(raw::btrfs_super_block, dev_item)
                 + mem::offset_of!(raw::btrfs_dev_item, fsid);
@@ -344,125 +386,21 @@ pub fn change_uuid<R: Read + Write + Seek>(
     Ok(())
 }
 
-/// Read the superblock, apply a mutation, and write it back to all mirrors.
-fn set_superblock_fields(
+/// Read the superblock, validate it, apply a mutation, and write it back
+/// to all mirrors. Returns the buffer so callers can inspect it after.
+fn read_validate_mutate_write(
     file: &mut (impl Read + Write + Seek),
     f: impl FnOnce(&mut [u8; 4096]),
-) -> Result<()> {
+) -> Result<[u8; 4096]> {
     let mut sb_buf =
         read_superblock_bytes(file).context("failed to read superblock")?;
+    if !superblock_is_valid(&sb_buf) {
+        bail!("superblock is invalid (bad magic or checksum)");
+    }
     f(&mut sb_buf);
     write_superblock_all_mirrors(file, &sb_buf)
         .context("failed to write superblock")?;
-    Ok(())
-}
-
-/// Walk the extent tree (DFS) and collect the logical addresses of all tree
-/// blocks on the filesystem.
-///
-/// Tree blocks are identified by `EXTENT_ITEM` or `METADATA_ITEM` keys whose
-/// `extent_item` flags include `TREE_BLOCK`.
-fn collect_tree_block_addrs<R: Read + Seek>(
-    reader: &mut reader::BlockReader<R>,
-    logical: u64,
-    addrs: &mut Vec<u64>,
-) -> Result<()> {
-    let buf = reader.read_block(logical).with_context(|| {
-        format!("failed to read extent tree block at {logical}")
-    })?;
-    let block = TreeBlock::parse(&buf);
-
-    match &block {
-        TreeBlock::Leaf { items, data, .. } => {
-            let header_size = mem::size_of::<raw::btrfs_header>();
-            let extent_item_flags_off =
-                mem::offset_of!(raw::btrfs_extent_item, flags);
-            let tree_block_flag = u64::from(raw::BTRFS_EXTENT_FLAG_TREE_BLOCK);
-
-            for item in items {
-                let is_extent = item.key.key_type == KeyType::ExtentItem
-                    || item.key.key_type == KeyType::MetadataItem;
-                if !is_extent {
-                    continue;
-                }
-
-                // Parse the flags field from the extent item data.
-                let item_data_start = header_size + item.offset as usize;
-                let flags_start = item_data_start + extent_item_flags_off;
-                if flags_start + 8 > data.len() {
-                    continue;
-                }
-                let flags = u64::from_le_bytes(
-                    data[flags_start..flags_start + 8].try_into().unwrap(),
-                );
-
-                if flags & tree_block_flag != 0 {
-                    // The key's objectid is the logical byte address of the
-                    // tree block.
-                    addrs.push(item.key.objectid);
-                }
-            }
-        }
-        TreeBlock::Node { ptrs, .. } => {
-            for ptr in ptrs {
-                collect_tree_block_addrs(reader, ptr.blockptr, addrs)?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Walk the chunk tree (DFS) and patch the device fsid in all `DEV_ITEM`
-/// entries.
-fn patch_chunk_tree_dev_fsid<R: Read + Write + Seek>(
-    reader: &mut reader::BlockReader<R>,
-    logical: u64,
-    nodesize: usize,
-    new_fsid: &Uuid,
-) -> Result<()> {
-    let mut buf = reader.read_block(logical).with_context(|| {
-        format!("failed to read chunk tree block at {logical}")
-    })?;
-    let block = TreeBlock::parse(&buf);
-
-    match &block {
-        TreeBlock::Leaf { items, .. } => {
-            let header_size = mem::size_of::<raw::btrfs_header>();
-            let dev_fsid_off = mem::offset_of!(raw::btrfs_dev_item, fsid);
-            let mut modified = false;
-
-            for item in items {
-                if item.key.key_type != KeyType::DeviceItem {
-                    continue;
-                }
-                let fsid_start =
-                    header_size + item.offset as usize + dev_fsid_off;
-                if fsid_start + 16 > nodesize {
-                    continue;
-                }
-                disk_write_uuid(&mut buf, fsid_start, new_fsid);
-                modified = true;
-            }
-
-            if modified {
-                csum_tree_block(&mut buf);
-                reader.write_block(logical, &buf).with_context(|| {
-                    format!("failed to write chunk tree leaf at {logical}")
-                })?;
-            }
-        }
-        TreeBlock::Node { ptrs, .. } => {
-            let ptrs: Vec<_> = ptrs.iter().map(|p| p.blockptr).collect();
-            for blockptr in ptrs {
-                patch_chunk_tree_dev_fsid(
-                    reader, blockptr, nodesize, new_fsid,
-                )?;
-            }
-        }
-    }
-
-    Ok(())
+    Ok(sb_buf)
 }
 
 #[cfg(test)]

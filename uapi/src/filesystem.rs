@@ -289,3 +289,23 @@ mod tests {
         assert_eq!(args.format_name(), "1:999");
     }
 }
+
+/// Check whether a device path appears as a mount source in `/proc/mounts`.
+///
+/// Canonicalizes both the given path and each mount source before comparing,
+/// so symlinks and relative paths are handled correctly. Returns `false` if
+/// the path cannot be canonicalized or `/proc/mounts` cannot be read.
+pub fn is_mounted(device: &std::path::Path) -> bool {
+    let Ok(canonical) = std::fs::canonicalize(device) else {
+        return false;
+    };
+    let Ok(contents) = std::fs::read_to_string("/proc/mounts") else {
+        return false;
+    };
+    contents.lines().any(|line| {
+        line.split_whitespace()
+            .next()
+            .and_then(|src| std::fs::canonicalize(src).ok())
+            .is_some_and(|src_canon| src_canon == canonical)
+    })
+}

@@ -19,26 +19,11 @@ pub fn open_path(path: &Path) -> Result<File> {
 /// Return `true` if `device` appears as a source in `/proc/mounts`.
 ///
 /// Compares canonical paths so symlinks in `/dev/disk/by-*` are handled
-/// correctly. Returns `false` if `/proc/mounts` cannot be read or if the
-/// canonical path of `device` cannot be resolved.
+/// Check whether a device path appears as a mount source in `/proc/mounts`.
+///
+/// Delegates to [`btrfs_uapi::filesystem::is_mounted`].
 pub fn is_mounted(device: &Path) -> bool {
-    let Ok(canon) = fs::canonicalize(device) else {
-        return false;
-    };
-    let Ok(f) = File::open("/proc/mounts") else {
-        return false;
-    };
-    let reader = std::io::BufReader::new(f);
-    for line in reader.lines().map_while(std::result::Result::ok) {
-        let mut fields = line.split_whitespace();
-        if let Some(src) = fields.next()
-            && let Ok(src_canon) = fs::canonicalize(src)
-            && src_canon == canon
-        {
-            return true;
-        }
-    }
-    false
+    btrfs_uapi::filesystem::is_mounted(device)
 }
 
 /// Resolved size display mode.

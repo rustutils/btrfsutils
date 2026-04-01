@@ -6,34 +6,12 @@
 use crate::args::Arguments;
 use anyhow::{Context, Result, bail};
 use btrfs_disk::raw;
+use btrfs_uapi::filesystem::is_mounted;
 use std::{
-    fs::{self, File, OpenOptions},
-    io::BufRead,
+    fs::{self, OpenOptions},
     os::unix::fs::FileTypeExt,
-    path::Path,
 };
 use uuid::Uuid;
-
-/// Return `true` if `device` appears as a source in `/proc/mounts`.
-fn is_mounted(device: &Path) -> bool {
-    let Ok(canon) = fs::canonicalize(device) else {
-        return false;
-    };
-    let Ok(f) = File::open("/proc/mounts") else {
-        return false;
-    };
-    let reader = std::io::BufReader::new(f);
-    for line in reader.lines().map_while(Result::ok) {
-        let mut fields = line.split_whitespace();
-        if let Some(src) = fields.next()
-            && let Ok(src_canon) = fs::canonicalize(src)
-            && src_canon == canon
-        {
-            return true;
-        }
-    }
-    false
-}
 
 /// Run btrfs-tune with the given parsed arguments.
 ///
