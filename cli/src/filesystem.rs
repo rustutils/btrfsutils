@@ -68,6 +68,7 @@ pub enum FilesystemSubcommand {
 /// format with base 1024 (KiB, MiB, GiB, TiB) is used. You can specify
 /// exact units or enable base 1000 (kB, MB, GB, TB) with --si.
 #[derive(Args, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct UnitMode {
     /// Show raw numbers in bytes
     #[clap(long, overrides_with_all = ["human_readable", "iec", "si", "kbytes", "mbytes", "gbytes", "tbytes"])]

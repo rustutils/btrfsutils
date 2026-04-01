@@ -196,8 +196,8 @@ fn set_compression_property(
     let result = unsafe {
         fsetxattr(
             fd,
-            xattr_name.as_ptr() as *const i8,
-            value.as_ptr() as *const std::ffi::c_void,
+            xattr_name.as_ptr().cast(),
+            value.as_ptr().cast(),
             value.len(),
             0,
         )

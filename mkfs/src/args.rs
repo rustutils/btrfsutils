@@ -14,6 +14,7 @@ use uuid::Uuid;
 /// RAID1 for metadata.
 #[derive(Parser, Debug)]
 #[command(name = "mkfs.btrfs", version)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Arguments {
     /// Data block group profile.
     ///
@@ -228,19 +229,20 @@ impl std::fmt::Display for Profile {
 }
 
 impl Profile {
-    /// The block group flag bits for this profile (ORed with type flags).
+    /// The block group flag bits for this profile (OR-ed with type flags).
+    #[must_use]
     pub fn block_group_flag(self) -> u64 {
         use btrfs_disk::raw;
         match self {
             Profile::Single => 0,
-            Profile::Dup => raw::BTRFS_BLOCK_GROUP_DUP as u64,
-            Profile::Raid0 => raw::BTRFS_BLOCK_GROUP_RAID0 as u64,
-            Profile::Raid1 => raw::BTRFS_BLOCK_GROUP_RAID1 as u64,
-            Profile::Raid1c3 => raw::BTRFS_BLOCK_GROUP_RAID1C3 as u64,
-            Profile::Raid1c4 => raw::BTRFS_BLOCK_GROUP_RAID1C4 as u64,
-            Profile::Raid5 => raw::BTRFS_BLOCK_GROUP_RAID5 as u64,
-            Profile::Raid6 => raw::BTRFS_BLOCK_GROUP_RAID6 as u64,
-            Profile::Raid10 => raw::BTRFS_BLOCK_GROUP_RAID10 as u64,
+            Profile::Dup => u64::from(raw::BTRFS_BLOCK_GROUP_DUP),
+            Profile::Raid0 => u64::from(raw::BTRFS_BLOCK_GROUP_RAID0),
+            Profile::Raid1 => u64::from(raw::BTRFS_BLOCK_GROUP_RAID1),
+            Profile::Raid1c3 => u64::from(raw::BTRFS_BLOCK_GROUP_RAID1C3),
+            Profile::Raid1c4 => u64::from(raw::BTRFS_BLOCK_GROUP_RAID1C4),
+            Profile::Raid5 => u64::from(raw::BTRFS_BLOCK_GROUP_RAID5),
+            Profile::Raid6 => u64::from(raw::BTRFS_BLOCK_GROUP_RAID6),
+            Profile::Raid10 => u64::from(raw::BTRFS_BLOCK_GROUP_RAID10),
         }
     }
 
@@ -248,6 +250,8 @@ impl Profile {
     ///
     /// For mirror-based profiles (DUP, RAID1, RAID1C3, RAID1C4) this is
     /// fixed. For striping profiles (RAID0) it equals the device count.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)] // device count fits in u16
     pub fn num_stripes(self, n_devices: usize) -> u16 {
         match self {
             Profile::Single => 1,
@@ -263,6 +267,7 @@ impl Profile {
     }
 
     /// Minimum number of devices required for this profile.
+    #[must_use]
     pub fn min_devices(self) -> usize {
         match self {
             Profile::Single | Profile::Dup => 1,

@@ -100,6 +100,14 @@ impl Runnable for FilesystemUsageCommand {
     }
 }
 
+const MIN_UNALLOCATED_THRESH: u64 = 16 * 1024 * 1024;
+
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 fn print_usage(
     path: &std::path::Path,
     _tabular: bool,
@@ -176,24 +184,36 @@ fn print_usage(
         .map(|d| d.total_bytes)
         .sum();
 
+    #[allow(clippy::cast_precision_loss)]
     let data_ratio = if l_data_chunks > 0 {
         r_data_chunks as f64 / l_data_chunks as f64
     } else {
         1.0
     };
+    #[allow(clippy::cast_precision_loss)]
     let meta_ratio = if l_meta_chunks > 0 {
         r_meta_chunks as f64 / l_meta_chunks as f64
     } else {
         1.0
     };
+    #[allow(clippy::cast_precision_loss)]
     let max_data_ratio = max_ncopies as f64;
 
-    const MIN_UNALLOCATED_THRESH: u64 = 16 * 1024 * 1024;
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let free_base = if data_ratio > 0.0 {
         ((r_data_chunks.saturating_sub(r_data_used)) as f64 / data_ratio) as u64
     } else {
         0
     };
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     let (free_estimated, free_min) = if r_total_unused >= MIN_UNALLOCATED_THRESH
     {
         (
@@ -204,6 +224,7 @@ fn print_usage(
         (free_base, free_base)
     };
 
+    #[allow(clippy::cast_sign_loss)]
     let free_statfs = nix::sys::statfs::statfs(path)
         .map(|st| st.blocks_available() * st.block_size() as u64)
         .unwrap_or(0);
@@ -258,6 +279,7 @@ fn print_usage(
         if s.flags.contains(BlockGroupFlags::GLOBAL_RSV) {
             continue;
         }
+        #[allow(clippy::cast_precision_loss)]
         let pct = if s.total_bytes > 0 {
             100.0 * s.used_bytes as f64 / s.total_bytes as f64
         } else {

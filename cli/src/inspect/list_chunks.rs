@@ -43,6 +43,7 @@ use std::{cmp::Ordering, os::unix::io::AsFd, path::PathBuf};
 /// Usage%: percentage of the chunk's logical space currently occupied
 /// (used / length * 100), sourced from the extent tree.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct ListChunksCommand {
     #[clap(flatten)]
     pub units: UnitMode,
@@ -72,6 +73,7 @@ struct Row {
 }
 
 impl Runnable for ListChunksCommand {
+    #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         let mode = self.units.resolve();
         let fmt = |bytes| fmt_size(bytes, &mode);

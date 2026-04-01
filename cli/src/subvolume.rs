@@ -25,6 +25,7 @@ pub use self::{
 /// Snapshots are read-only or read-write copies of subvolumes at a point in time.
 /// Most operations require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct SubvolumeCommand {
     #[clap(subcommand)]
     pub subcommand: SubvolumeSubcommand,

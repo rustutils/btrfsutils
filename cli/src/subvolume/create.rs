@@ -9,6 +9,7 @@ use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
 /// The parent directory must already exist and be on a btrfs filesystem
 /// (unless -p is given). Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct SubvolumeCreateCommand {
     /// Add the newly created subvolume to a qgroup (can be given multiple times)
     #[clap(short = 'i', value_name = "QGROUPID", action = clap::ArgAction::Append)]

@@ -15,13 +15,13 @@ pub fn check_superblocks<R: Read + Seek>(
         let offset = super_mirror_offset(mirror);
         match superblock::read_superblock_bytes_at(reader, offset) {
             Ok(buf) => {
-                if !superblock::superblock_is_valid(&buf) {
+                if superblock::superblock_is_valid(&buf) {
+                    valid_count += 1;
+                } else {
                     results.report(CheckError::SuperblockInvalid {
                         mirror,
                         detail: "invalid checksum or magic".into(),
                     });
-                } else {
-                    valid_count += 1;
                 }
             }
             Err(e) => {

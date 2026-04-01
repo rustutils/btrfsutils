@@ -1,6 +1,6 @@
 //! # Layout: block address assignment for mkfs tree blocks
 //!
-//! The chunk tree block lives in the system chunk (at SYSTEM_GROUP_OFFSET).
+//! The chunk tree block lives in the system chunk (at `SYSTEM_GROUP_OFFSET`).
 //! All other tree blocks (root, extent, dev, fs, csum, free-space, data-reloc)
 //! live in the metadata chunk and are written with DUP (two physical copies).
 
@@ -8,11 +8,11 @@ use crate::args::Profile;
 use btrfs_disk::raw;
 
 /// Byte offset where the system block group starts (1 MiB).
-/// From kernel-shared/ctree.h: BTRFS_BLOCK_RESERVED_1M_FOR_SUPER
+/// From kernel-shared/ctree.h: `BTRFS_BLOCK_RESERVED_1M_FOR_SUPER`
 pub const SYSTEM_GROUP_OFFSET: u64 = 1024 * 1024;
 
 /// Size of the system block group (4 MiB).
-/// From mkfs/common.h: BTRFS_MKFS_SYSTEM_GROUP_SIZE
+/// From mkfs/common.h: `BTRFS_MKFS_SYSTEM_GROUP_SIZE`
 pub const SYSTEM_GROUP_SIZE: u64 = 4 * 1024 * 1024;
 
 /// Identifies a tree block allocated during mkfs.
@@ -31,17 +31,22 @@ pub enum TreeId {
 
 impl TreeId {
     /// The btrfs objectid for this tree.
+    #[must_use]
     pub fn objectid(self) -> u64 {
         match self {
-            TreeId::Root => raw::BTRFS_ROOT_TREE_OBJECTID as u64,
-            TreeId::Extent => raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
-            TreeId::Chunk => raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
-            TreeId::Dev => raw::BTRFS_DEV_TREE_OBJECTID as u64,
-            TreeId::Fs => raw::BTRFS_FS_TREE_OBJECTID as u64,
-            TreeId::Csum => raw::BTRFS_CSUM_TREE_OBJECTID as u64,
-            TreeId::FreeSpace => raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64,
+            TreeId::Root => u64::from(raw::BTRFS_ROOT_TREE_OBJECTID),
+            TreeId::Extent => u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
+            TreeId::Chunk => u64::from(raw::BTRFS_CHUNK_TREE_OBJECTID),
+            TreeId::Dev => u64::from(raw::BTRFS_DEV_TREE_OBJECTID),
+            TreeId::Fs => u64::from(raw::BTRFS_FS_TREE_OBJECTID),
+            TreeId::Csum => u64::from(raw::BTRFS_CSUM_TREE_OBJECTID),
+            TreeId::FreeSpace => u64::from(raw::BTRFS_FREE_SPACE_TREE_OBJECTID),
+            #[allow(clippy::cast_sign_loss)]
+            // bindgen produces i32, but value is a valid u64
             TreeId::DataReloc => raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64,
-            TreeId::BlockGroup => raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64,
+            TreeId::BlockGroup => {
+                u64::from(raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID)
+            }
         }
     }
 
@@ -57,9 +62,9 @@ impl TreeId {
         TreeId::DataReloc,
     ];
 
-    /// Trees that get a ROOT_ITEM in the root tree.
+    /// Trees that get a `ROOT_ITEM` in the root tree.
     /// Excludes Root (can't reference itself) and Chunk (handled specially
-    /// by the superblock's chunk_root pointer).
+    /// by the superblock's `chunk_root` pointer).
     pub const ROOT_ITEM_TREES: [TreeId; 6] = [
         TreeId::Extent,
         TreeId::Dev,
@@ -83,7 +88,7 @@ pub const NON_CHUNK_TREES: [TreeId; 7] = [
 
 /// Computed block layout for all mkfs tree blocks.
 ///
-/// The chunk tree block is placed at SYSTEM_GROUP_OFFSET (in the system
+/// The chunk tree block is placed at `SYSTEM_GROUP_OFFSET` (in the system
 /// chunk). The remaining 7 trees are placed sequentially starting at the
 /// metadata chunk's logical address.
 pub struct BlockLayout {
@@ -93,6 +98,7 @@ pub struct BlockLayout {
 
 impl BlockLayout {
     /// Create a layout with the given nodesize and metadata chunk logical address.
+    #[must_use]
     pub fn new(nodesize: u32, meta_logical: u64) -> Self {
         Self {
             nodesize,
@@ -101,6 +107,11 @@ impl BlockLayout {
     }
 
     /// Logical byte address of the given tree block.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `tree` is not in `NON_CHUNK_TREES` and is not `Chunk` or `BlockGroup`.
+    #[must_use]
     pub fn block_addr(&self, tree: TreeId) -> u64 {
         if tree == TreeId::Chunk {
             SYSTEM_GROUP_OFFSET
@@ -117,12 +128,14 @@ impl BlockLayout {
     }
 
     /// Bytes used in the system chunk (just the chunk tree block).
+    #[must_use]
     pub fn system_used(&self) -> u64 {
         u64::from(self.nodesize)
     }
 
     /// Bytes used in the metadata chunk by the base trees (7 tree blocks).
     /// When block-group-tree is enabled, add nodesize for the extra tree.
+    #[must_use]
     pub fn metadata_used(&self, has_block_group_tree: bool) -> u64 {
         let count = if has_block_group_tree {
             NON_CHUNK_TREES.len() as u64 + 1
@@ -134,7 +147,7 @@ impl BlockLayout {
 }
 
 /// 64 KiB -- default stripe length for btrfs chunks.
-/// From kernel-shared/volumes.h: BTRFS_STRIPE_LEN
+/// From kernel-shared/volumes.h: `BTRFS_STRIPE_LEN`
 pub const STRIPE_LEN: u64 = 64 * 1024;
 
 /// A physical stripe location in a chunk.
@@ -180,6 +193,13 @@ impl ChunkLayout {
     /// For SINGLE data: one stripe on device 1.
     ///
     /// Returns `None` if the devices are too small.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `devices` is empty.
+    #[must_use]
+    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::similar_names)]
     pub fn new(
         devices: &[ChunkDevice],
         metadata_profile: Profile,
@@ -363,6 +383,7 @@ impl ChunkLayout {
     ///
     /// Device 1 always has the system group. Metadata and data stripes
     /// contribute their stripe size for each stripe on this device.
+    #[must_use]
     pub fn dev_bytes_used_for(&self, devid: u64) -> u64 {
         let mut used = if devid == 1 { SYSTEM_GROUP_SIZE } else { 0 };
         for s in &self.meta_stripes {
@@ -379,6 +400,7 @@ impl ChunkLayout {
     }
 
     /// Total physical bytes used across all devices (sum of all stripes).
+    #[must_use]
     pub fn total_bytes_used(&self) -> u64 {
         SYSTEM_GROUP_SIZE
             + (self.meta_stripes.len() as u64 * self.meta_size)
@@ -391,6 +413,11 @@ impl ChunkLayout {
     /// System chunk: always device 1, logical == physical.
     /// Metadata chunk: one pair per stripe.
     /// Data chunk: one pair per stripe.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the logical address is not in any known chunk.
+    #[must_use]
     pub fn logical_to_physical(&self, logical: u64) -> Vec<(u64, u64)> {
         let sys_range =
             SYSTEM_GROUP_OFFSET..SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
@@ -435,6 +462,7 @@ pub struct BlockAllocator {
 
 impl BlockAllocator {
     /// Create an allocator for the given chunk layout.
+    #[must_use]
     pub fn new(nodesize: u32, meta_logical: u64, meta_size: u64) -> Self {
         Self {
             nodesize,
@@ -448,35 +476,45 @@ impl BlockAllocator {
     }
 
     /// Allocate a block in the system chunk (for the chunk tree).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the system chunk is full.
     pub fn alloc_system(&mut self) -> anyhow::Result<u64> {
         let addr = self.next_system;
-        if addr + self.nodesize as u64 > self.system_end {
+        if addr + u64::from(self.nodesize) > self.system_end {
             anyhow::bail!(
                 "system chunk full: cannot allocate more tree blocks"
             );
         }
-        self.next_system += self.nodesize as u64;
+        self.next_system += u64::from(self.nodesize);
         Ok(addr)
     }
 
     /// Allocate a block in the metadata chunk (for all non-chunk trees).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the metadata chunk is full.
     pub fn alloc_metadata(&mut self) -> anyhow::Result<u64> {
         let addr = self.next_meta;
-        if addr + self.nodesize as u64 > self.meta_end {
+        if addr + u64::from(self.nodesize) > self.meta_end {
             anyhow::bail!(
                 "metadata chunk full: cannot allocate more tree blocks"
             );
         }
-        self.next_meta += self.nodesize as u64;
+        self.next_meta += u64::from(self.nodesize);
         Ok(addr)
     }
 
     /// Total bytes used in the system chunk.
+    #[must_use]
     pub fn system_used(&self) -> u64 {
         self.next_system - self.system_start
     }
 
     /// Total bytes used in the metadata chunk.
+    #[must_use]
     pub fn metadata_used(&self) -> u64 {
         self.next_meta - self.meta_start
     }

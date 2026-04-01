@@ -46,7 +46,7 @@ pub fn check_chunks<R: Read + Seek>(
     check_device_extents(reader, dev_tree_root, results);
 }
 
-/// Walk a tree and collect all BlockGroupItem entries.
+/// Walk a tree and collect all `BlockGroupItem` entries.
 fn collect_block_groups<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root: u64,

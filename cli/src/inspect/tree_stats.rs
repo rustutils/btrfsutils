@@ -47,6 +47,7 @@ fn parse_tree_id(s: &str) -> Result<u64> {
             Ok(u64::from(raw::BTRFS_FREE_SPACE_TREE_OBJECTID))
         }
         "data-reloc" | "data_reloc" => {
+            #[allow(clippy::cast_sign_loss)] // known constant
             Ok(raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64)
         }
         _ => s.parse::<u64>().with_context(|| {
@@ -55,6 +56,7 @@ fn parse_tree_id(s: &str) -> Result<u64> {
     }
 }
 
+#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
 fn tree_name(id: u64) -> String {
     match id as u32 {
         x if x == raw::BTRFS_ROOT_TREE_OBJECTID => "root tree".to_string(),
@@ -75,6 +77,7 @@ fn tree_name(id: u64) -> String {
     }
 }
 
+#[allow(clippy::similar_names)] // elapsed_secs and elapsed_usecs are distinct
 fn print_stats(
     name: &str,
     stats: &TreeStats,

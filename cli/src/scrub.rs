@@ -21,6 +21,7 @@ pub use self::{cancel::*, limit::*, resume::*, start::*, status::*};
 /// operation and can be paused, resumed, or cancelled. Progress and status can
 /// be queried, and speed limits can be configured. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct ScrubCommand {
     #[clap(subcommand)]
     pub subcommand: ScrubSubcommand,

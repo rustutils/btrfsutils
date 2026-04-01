@@ -19,6 +19,7 @@ use std::{
 /// numeric device ID. The target device will be used to replace the source. The
 /// filesystem must be mounted at mount_point.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown, clippy::struct_excessive_bools)]
 pub struct ReplaceStartCommand {
     /// Source device path or devid to replace
     pub source: String,
@@ -51,6 +52,7 @@ pub struct ReplaceStartCommand {
 }
 
 impl Runnable for ReplaceStartCommand {
+    #[allow(clippy::too_many_lines)]
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         // Validate the target device before opening the filesystem.
         check_device_for_overwrite(&self.target, self.force)?;
@@ -164,6 +166,7 @@ impl Runnable for ReplaceStartCommand {
                     )
                 })?;
 
+                #[allow(clippy::cast_precision_loss)]
                 let pct = status.progress_1000 as f64 / 10.0;
                 eprint!(
                     "\r{pct:.1}% done, {} write errs, {} uncorr. read errs",

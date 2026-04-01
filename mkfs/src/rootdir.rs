@@ -32,7 +32,7 @@ pub struct CompressConfig {
 }
 
 impl CompressConfig {
-    /// On-disk compression type byte for FILE_EXTENT_ITEM.
+    /// On-disk compression type byte for `FILE_EXTENT_ITEM`.
     fn extent_type_byte(self) -> u8 {
         match self.algorithm {
             CompressAlgorithm::No => 0,
@@ -50,6 +50,7 @@ impl CompressConfig {
 
 /// Try to compress `data`. Returns `Some(compressed)` if the result is
 /// smaller than the original, `None` otherwise (incompressible data).
+#[allow(clippy::cast_possible_wrap)] // zstd level fits in i32
 fn try_compress(data: &[u8], cfg: CompressConfig) -> Option<Vec<u8>> {
     if !cfg.is_enabled() || data.is_empty() {
         return None;
@@ -82,13 +83,15 @@ fn try_compress(data: &[u8], cfg: CompressConfig) -> Option<Vec<u8>> {
 
 /// Btrfs name hash: `crc32c((u32)~1, name)`.
 ///
-/// Used for DIR_ITEM key offsets. The seed `~1` in C unsigned 32-bit is
+/// Used for `DIR_ITEM` key offsets. The seed `~1` in C unsigned 32-bit is
 /// `0xFFFFFFFE` (bitwise NOT of 1).
+#[must_use]
 pub fn btrfs_name_hash(name: &[u8]) -> u64 {
-    raw_crc32c(!1u32, name) as u64
+    u64::from(raw_crc32c(!1u32, name))
 }
 
 /// Convert a POSIX file mode (from stat) to a btrfs file type constant.
+#[allow(clippy::cast_possible_truncation)] // file type constants fit in u8
 fn mode_to_btrfs_type(mode: u32) -> u8 {
     let fmt = mode & libc::S_IFMT;
     match fmt {
@@ -117,8 +120,8 @@ pub struct FileAllocation {
 
 /// Output of the directory walk: items for the FS tree plus file allocations.
 pub struct RootdirPlan {
-    /// Sorted FS tree items (INODE_ITEM, INODE_REF, DIR_ITEM, DIR_INDEX,
-    /// FILE_EXTENT_ITEM for inline files, XATTR_ITEM).
+    /// Sorted FS tree items (`INODE_ITEM`, `INODE_REF`, `DIR_ITEM`, `DIR_INDEX`,
+    /// `FILE_EXTENT_ITEM` for inline files, `XATTR_ITEM`).
     pub fs_items: Vec<(Key, Vec<u8>)>,
     /// Files that need regular (non-inline) data extents.
     pub file_extents: Vec<FileAllocation>,
@@ -136,6 +139,17 @@ pub struct RootdirPlan {
 ///
 /// Assigns inode numbers starting at 257 (256 = root directory, handled
 /// separately). Detects hardlinks via host `(dev, ino)`. Collects xattrs.
+///
+/// # Errors
+///
+/// Returns an error if any file cannot be stat'd, read, or is otherwise inaccessible.
+///
+/// # Panics
+///
+/// Panics if a directory entry has no filename.
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::cast_possible_truncation)] // key types fit in u8, name lengths fit in u64
+#[allow(clippy::cast_sign_loss)] // stat timestamps are non-negative in practice
 pub fn walk_directory(
     rootdir: &Path,
     sectorsize: u32,
@@ -153,8 +167,8 @@ pub fn walk_directory(
         .map(|f| (f.path.clone(), (f.nodatacow, f.nodatasum)))
         .collect();
 
-    let mut next_ino: u64 = raw::BTRFS_FIRST_FREE_OBJECTID as u64 + 1; // 257
-    let root_ino: u64 = raw::BTRFS_FIRST_FREE_OBJECTID as u64; // 256
+    let mut next_ino: u64 = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID) + 1; // 257
+    let root_ino: u64 = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID); // 256
 
     // Maps host (dev, ino) → btrfs ino for hardlink detection.
     let mut hardlink_map: HashMap<(u64, u64), u64> = HashMap::new();
@@ -302,10 +316,10 @@ pub fn walk_directory(
         let nodatasum = nodatasum || (nodatacow && meta.is_file());
         let mut iflags = 0u64;
         if nodatacow {
-            iflags |= raw::BTRFS_INODE_NODATACOW as u64;
+            iflags |= u64::from(raw::BTRFS_INODE_NODATACOW);
         }
         if nodatasum {
-            iflags |= raw::BTRFS_INODE_NODATASUM as u64;
+            iflags |= u64::from(raw::BTRFS_INODE_NODATASUM);
         }
 
         let inode_data = items::inode_item(&items::InodeItemArgs {
@@ -391,7 +405,7 @@ pub fn walk_directory(
                 // Regular extent: defer data writing.
                 // The FILE_EXTENT_ITEM will be created during the data write phase
                 // once we know the disk_bytenr.
-                let aligned_size = align_up(size, sectorsize as u64);
+                let aligned_size = align_up(size, u64::from(sectorsize));
                 data_bytes_needed += aligned_size;
                 file_extents.push(FileAllocation {
                     host_path: host_path.clone(),
@@ -432,10 +446,17 @@ pub fn walk_directory(
 
 /// Write file data to the data chunk and create extent/csum items.
 ///
-/// Returns additional FS tree items (FILE_EXTENT_ITEM for regular extents),
-/// extent tree items (EXTENT_ITEM + EXTENT_DATA_REF), and csum tree items.
-/// Also returns a map of inode → nbytes for patching INODE_ITEMs.
+/// Returns additional FS tree items (`FILE_EXTENT_ITEM` for regular extents),
+/// extent tree items (`EXTENT_ITEM` + `EXTENT_DATA_REF`), and csum tree items.
+/// Also returns a map of inode to nbytes for patching `INODE_ITEM` entries.
+///
+/// # Errors
+///
+/// Returns an error if file data cannot be read or written.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::cast_possible_truncation)] // key types fit in u8, devid-1 fits usize, sector counts fit
+#[allow(clippy::cast_sign_loss)] // EXTENT_CSUM_OBJECTID is positive
 pub fn write_file_data(
     plan: &RootdirPlan,
     data_logical: u64,
@@ -481,7 +502,7 @@ pub fn write_file_data(
 
             // Pad to sectorsize alignment for on-disk storage.
             let aligned_disk =
-                align_up(disk_data.len() as u64, sectorsize as u64);
+                align_up(disk_data.len() as u64, u64::from(sectorsize));
             let mut padded = disk_data;
             padded.resize(aligned_disk as usize, 0);
 
@@ -498,7 +519,7 @@ pub fn write_file_data(
 
             // Compute checksums (skip for NODATASUM files).
             if !alloc.nodatasum {
-                let num_csums = (aligned_disk / sectorsize as u64) as usize;
+                let num_csums = (aligned_disk / u64::from(sectorsize)) as usize;
                 let mut csums = Vec::with_capacity(num_csums * csum_size);
                 for i in 0..num_csums {
                     let start = i * sectorsize as usize;
@@ -543,7 +564,7 @@ pub fn write_file_data(
                 items::data_extent_item(
                     1,
                     generation,
-                    raw::BTRFS_FS_TREE_OBJECTID as u64,
+                    u64::from(raw::BTRFS_FS_TREE_OBJECTID),
                     alloc.ino,
                     file_offset,
                     1,
@@ -574,11 +595,11 @@ pub fn write_file_data(
 
 /// Output of the data writing phase.
 pub struct DataOutput {
-    /// FILE_EXTENT_ITEM entries for regular extents (to merge into FS tree).
+    /// `FILE_EXTENT_ITEM` entries for regular extents (to merge into FS tree).
     pub fs_items: Vec<(Key, Vec<u8>)>,
-    /// EXTENT_ITEM entries for data extents (to merge into extent tree).
+    /// `EXTENT_ITEM` entries for data extents (to merge into extent tree).
     pub extent_items: Vec<(Key, Vec<u8>)>,
-    /// EXTENT_CSUM entries (for csum tree).
+    /// `EXTENT_CSUM` entries (for csum tree).
     pub csum_items: Vec<(Key, Vec<u8>)>,
     /// Total data bytes allocated (aligned).
     pub data_used: u64,
@@ -589,7 +610,7 @@ pub struct DataOutput {
 /// Maximum inline data size for files.
 ///
 /// The C reference uses `min(sectorsize - 1, BTRFS_MAX_INLINE_DATA_SIZE)`.
-/// MAX_INLINE_DATA_SIZE = max_item_size - FILE_EXTENT_INLINE_DATA_START
+/// `MAX_INLINE_DATA_SIZE` = `max_item_size` - `FILE_EXTENT_INLINE_DATA_START`
 ///                      = (nodesize - 101 - 25) - 21
 ///                      = nodesize - 147
 fn max_inline_data_size(sectorsize: u32, nodesize: u32) -> usize {
@@ -598,6 +619,7 @@ fn max_inline_data_size(sectorsize: u32, nodesize: u32) -> usize {
 }
 
 /// Align `val` up to the next multiple of `align`.
+#[must_use]
 pub fn align_up(val: u64, align: u64) -> u64 {
     val.div_ceil(align) * align
 }
@@ -611,7 +633,7 @@ fn is_special_file(mode: u32) -> bool {
 fn read_dir_sorted(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut entries: Vec<PathBuf> = fs::read_dir(dir)
         .with_context(|| format!("cannot read directory '{}'", dir.display()))?
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .map(|e| e.path())
         .collect();
     entries.sort();
@@ -619,6 +641,8 @@ fn read_dir_sorted(dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 /// Read extended attributes from a path.
+#[allow(clippy::cast_sign_loss)] // llistxattr/lgetxattr return non-negative on success
+#[allow(clippy::ptr_cast_constness)]
 fn read_xattrs(path: &Path) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
     let mut result = Vec::new();
 
@@ -645,7 +669,7 @@ fn read_xattrs(path: &Path) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
     let ret = unsafe {
         libc::llistxattr(
             c_path.as_ptr(),
-            list_buf.as_mut_ptr() as *mut libc::c_char,
+            list_buf.as_mut_ptr().cast::<libc::c_char>(),
             list_buf.len(),
         )
     };
@@ -687,7 +711,7 @@ fn read_xattrs(path: &Path) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
             libc::lgetxattr(
                 c_path.as_ptr(),
                 c_name.as_ptr(),
-                val_buf.as_mut_ptr() as *mut libc::c_void,
+                val_buf.as_mut_ptr().cast::<libc::c_void>(),
                 val_buf.len(),
             )
         };
@@ -704,6 +728,7 @@ fn read_xattrs(path: &Path) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
 }
 
 /// Fix up nlink for a specific inode (used for hardlinks).
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn fixup_inode_nlink(fs_items: &mut [(Key, Vec<u8>)], ino: u64, nlink: u32) {
     for (key, data) in fs_items.iter_mut() {
         if key.objectid == ino
@@ -717,6 +742,7 @@ fn fixup_inode_nlink(fs_items: &mut [(Key, Vec<u8>)], ino: u64, nlink: u32) {
 }
 
 /// Fix up inode size for a directory.
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn fixup_inode_size(fs_items: &mut [(Key, Vec<u8>)], ino: u64, size: u64) {
     for (key, data) in fs_items.iter_mut() {
         if key.objectid == ino
@@ -733,6 +759,7 @@ fn fixup_inode_size(fs_items: &mut [(Key, Vec<u8>)], ino: u64, size: u64) {
 /// Fix up nbytes for files with inline extents and symlinks.
 ///
 /// For inline file extents and symlinks, nbytes = data size (not aligned).
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn fixup_inline_nbytes(fs_items: &mut [(Key, Vec<u8>)]) {
     let mut inline_sizes: HashMap<u64, u64> = HashMap::new();
     for (key, data) in fs_items.iter() {
@@ -754,7 +781,9 @@ fn fixup_inline_nbytes(fs_items: &mut [(Key, Vec<u8>)]) {
     }
 }
 
-/// Apply nbytes updates from data writing to INODE_ITEM entries.
+/// Apply nbytes updates from data writing to `INODE_ITEM` entries.
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
+#[allow(clippy::implicit_hasher)]
 pub fn apply_nbytes_updates(
     fs_items: &mut [(Key, Vec<u8>)],
     updates: &HashMap<u64, u64>,

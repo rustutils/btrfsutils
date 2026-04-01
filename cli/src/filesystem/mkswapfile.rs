@@ -40,6 +40,8 @@ pub struct FilesystemMkswapfileCommand {
 fn system_page_size() -> Result<u64> {
     let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
     anyhow::ensure!(size > 0, "failed to get system page size");
+    #[allow(clippy::cast_sign_loss)]
+    // sysconf returns positive value after ensure check
     Ok(size as u64)
 }
 
@@ -49,10 +51,12 @@ fn write_swap_header(
     uuid: &Uuid,
     page_size: u64,
 ) -> Result<()> {
+    #[allow(clippy::cast_possible_truncation)] // page_size fits in usize
     let mut header = vec![0u8; page_size as usize];
     header[0x400] = 0x01;
     header[0x404..0x408].copy_from_slice(&page_count.to_le_bytes());
     header[0x40c..0x41c].copy_from_slice(uuid.as_bytes());
+    #[allow(clippy::cast_possible_truncation)] // page_size fits in usize
     let sig_offset = page_size as usize - 10;
     header[sig_offset..].copy_from_slice(b"SWAPSPACE2");
     file.write_at(&header, 0)
@@ -104,9 +108,12 @@ impl Runnable for FilesystemMkswapfileCommand {
         nix::errno::Errno::result(ret)
             .context("failed to set NOCOW attribute")?;
 
+        #[allow(clippy::cast_possible_wrap)] // size fits in off_t
         fallocate(&file, FallocateFlags::empty(), 0, size as libc::off_t)
             .context("failed to allocate space for swapfile")?;
 
+        #[allow(clippy::cast_possible_truncation)]
+        // validated above with try_from
         write_swap_header(&file, page_count as u32, &uuid, page_size)?;
 
         println!(

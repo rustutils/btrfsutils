@@ -12,6 +12,7 @@ use std::{os::unix::io::AsFd, path::PathBuf};
 /// resized to without losing data. The device id 1 is used by default.
 /// Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct MinDevSizeCommand {
     /// Specify the device id to query
     #[arg(long = "id", default_value = "1")]

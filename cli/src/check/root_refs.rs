@@ -12,17 +12,17 @@ use std::{
 /// Header size in a btrfs tree block (bytes before item data area).
 const HEADER_SIZE: usize = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
 
-/// A collected ROOT_REF or ROOT_BACKREF entry.
+/// A collected `ROOT_REF` or `ROOT_BACKREF` entry.
 struct RefEntry {
     dirid: u64,
     sequence: u64,
     name: Vec<u8>,
 }
 
-/// Check ROOT_REF/ROOT_BACKREF consistency in the root tree.
+/// Check `ROOT_REF`/`ROOT_BACKREF` consistency in the root tree.
 ///
-/// For every ROOT_REF (parent → child) there must be a matching
-/// ROOT_BACKREF (child → parent) with identical dirid, sequence, and
+/// For every `ROOT_REF` (parent → child) there must be a matching
+/// `ROOT_BACKREF` (child → parent) with identical dirid, sequence, and
 /// name, and vice versa.
 pub fn check_root_refs<R: Read + Seek>(
     reader: &mut BlockReader<R>,
@@ -154,8 +154,7 @@ fn check_fields_match(
             child,
             parent,
             detail: format!(
-                "name mismatch: ROOT_REF has '{}', ROOT_BACKREF has '{}'",
-                fwd_name, back_name
+                "name mismatch: ROOT_REF has '{fwd_name}', ROOT_BACKREF has '{back_name}'"
             ),
         });
     }

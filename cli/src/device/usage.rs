@@ -17,6 +17,7 @@ use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 /// chunk allocations (Data, Metadata, System), and unallocated space. Requires
 /// CAP_SYS_ADMIN for the chunk tree walk.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown, clippy::struct_excessive_bools)]
 pub struct DeviceUsageCommand {
     /// Path(s) to a mounted btrfs filesystem
     #[clap(required = true)]

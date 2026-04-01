@@ -18,6 +18,7 @@ type Filters = String;
 /// long operation and the user is warned before this start, with
 /// a delay to stop it.
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct BalanceStartCommand {
     /// Act on data chunks with optional filters
     #[clap(long, short)]

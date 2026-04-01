@@ -15,6 +15,7 @@ use std::{os::unix::io::AsFd, path::PathBuf};
 ///
 /// The operation requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct DeviceStatsCommand {
     /// Return a non-zero exit code if any error counter is greater than zero
     #[clap(long, short)]

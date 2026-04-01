@@ -9,7 +9,7 @@ use btrfs_disk::{
 use std::mem;
 
 /// Format block group flags in dump-tree style: `DATA|DUP`, `METADATA|single`.
-fn fmt_block_group_flags(flags: &BlockGroupFlags) -> String {
+fn fmt_block_group_flags(flags: BlockGroupFlags) -> String {
     let mut parts: Vec<&str> = Vec::new();
     if flags.contains(BlockGroupFlags::DATA) {
         parts.push("DATA");
@@ -82,6 +82,7 @@ pub fn print_tree_block(block: &TreeBlock, nodesize: u32, opts: &PrintOptions) {
     }
 }
 
+#[allow(clippy::cast_possible_truncation)] // struct sizes always fit in u32
 fn print_node_header(header: &Header, nodesize: u32, opts: &PrintOptions) {
     let key_ptr_size = mem::size_of::<raw::btrfs_key_ptr>() as u32;
     let header_size = mem::size_of::<raw::btrfs_header>() as u32;
@@ -101,6 +102,7 @@ fn print_node_header(header: &Header, nodesize: u32, opts: &PrintOptions) {
     print_header_flags_line("node", header, opts);
 }
 
+#[allow(clippy::cast_possible_truncation)] // struct sizes always fit in u32
 fn print_leaf_header(
     header: &Header,
     items: &[btrfs_disk::tree::Item],
@@ -157,7 +159,8 @@ fn escape_bytes(data: &[u8]) -> String {
         } else if b.is_ascii_graphic() || b == b' ' {
             s.push(b as char);
         } else {
-            s.push_str(&format!("\\{b:03o}"));
+            use std::fmt::Write;
+            let _ = write!(s, "\\{b:03o}");
         }
     }
     s
@@ -171,6 +174,7 @@ fn name_or_hidden(data: &[u8], hide: bool) -> String {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn print_payload(
     key: &btrfs_disk::tree::DiskKey,
     payload: &ItemPayload,
@@ -450,7 +454,7 @@ fn print_payload(
                 "\t\tblock group used {} chunk_objectid {} flags {}",
                 v.used,
                 v.chunk_objectid,
-                fmt_block_group_flags(&v.flags)
+                fmt_block_group_flags(v.flags)
             );
         }
         ItemPayload::FreeSpaceInfo(v) => {
@@ -467,7 +471,7 @@ fn print_payload(
                 v.length,
                 v.owner,
                 v.stripe_len,
-                fmt_block_group_flags(&v.chunk_type)
+                fmt_block_group_flags(v.chunk_type)
             );
             println!(
                 "\t\tio_align {} io_width {} sector_size {}",

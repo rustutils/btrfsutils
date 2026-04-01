@@ -73,7 +73,11 @@ impl Runnable for FilesystemDefragCommand {
             args = args.len(len);
         }
         if let Some(thresh) = self.target {
-            args = args.extent_thresh(thresh as u32);
+            #[allow(clippy::cast_possible_truncation)]
+            // user-provided threshold fits u32
+            {
+                args = args.extent_thresh(thresh as u32);
+            }
         }
         if self.flush {
             args = args.flush();
@@ -205,6 +209,7 @@ impl FilesystemDefragCommand {
     /// Process a file in fixed-size steps, flushing between each step.
     ///
     /// Matches `defrag_range_in_steps` from the C reference.
+    #[allow(clippy::unused_self)] // method kept on the command struct for consistency
     fn defrag_in_steps(
         &self,
         file: &File,

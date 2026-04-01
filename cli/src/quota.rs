@@ -15,6 +15,7 @@ pub use self::{disable::*, enable::*, rescan::*, status::*};
 /// quota status. Quotas allow enforcing limits on filesystem usage by
 /// subvolume or quota group. Quota operations require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct QuotaCommand {
     #[clap(subcommand)]
     pub subcommand: QuotaSubcommand,

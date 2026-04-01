@@ -24,6 +24,7 @@ use std::{
 /// /sys/power/resume_offset, this depends on the page size that is
 /// detected on this system.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct MapSwapfileCommand {
     /// Print only the value of resume_offset
     #[arg(short = 'r', long)]
@@ -52,17 +53,21 @@ impl Runnable for MapSwapfileCommand {
         let physical_start =
             map_physical_start(fd, tree_id, stat.st_ino, &chunks)?;
 
+        #[allow(clippy::cast_sign_loss)] // sysconf returns positive page size
         let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
         if self.resume_offset {
             println!("{}", physical_start / page_size);
         } else {
-            println!("Physical start: {:12}", physical_start);
+            println!("Physical start: {physical_start:12}");
             println!("Resume offset:  {:12}", physical_start / page_size);
         }
 
         Ok(())
     }
 }
+
+const FS_NOCOW_FL: libc::c_long = 0x0080_0000;
+const FS_COMPR_FL: libc::c_long = 0x0000_0004;
 
 /// Validate that the file is on btrfs, is a regular file, is NOCOW,
 /// and is not compressed.
@@ -89,8 +94,6 @@ fn validate_file(file: &File, path: &std::path::Path) -> Result<()> {
             std::io::Error::last_os_error()
         );
     }
-    const FS_NOCOW_FL: libc::c_long = 0x0080_0000;
-    const FS_COMPR_FL: libc::c_long = 0x0000_0004;
     if flags & FS_NOCOW_FL == 0 {
         bail!("file is not NOCOW");
     }
@@ -234,14 +237,11 @@ fn map_physical_start(
                 return Ok(());
             }
 
-            let chunk = match find_chunk(chunks, logical_offset) {
-                Some(c) => c,
-                None => {
-                    error = Some(format!(
-                        "cannot find chunk containing {logical_offset}"
-                    ));
-                    return Ok(());
-                }
+            let Some(chunk) = find_chunk(chunks, logical_offset) else {
+                error = Some(format!(
+                    "cannot find chunk containing {logical_offset}"
+                ));
+                return Ok(());
             };
 
             if chunk.type_flags & u64::from(BTRFS_BLOCK_GROUP_PROFILE_MASK) != 0

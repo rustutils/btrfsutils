@@ -64,6 +64,7 @@ pub fn fmt_size(bytes: u64, mode: &SizeFormat) -> String {
 }
 
 /// Format a byte count as a human-readable string using binary prefixes.
+#[allow(clippy::cast_precision_loss)]
 pub fn human_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
     let mut value = bytes as f64;
@@ -80,6 +81,7 @@ pub fn human_bytes(bytes: u64) -> String {
 }
 
 /// Format a byte count as a human-readable string using SI (base-1000) prefixes.
+#[allow(clippy::cast_precision_loss)]
 pub fn human_bytes_si(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "kB", "MB", "GB", "TB", "PB"];
     let mut value = bytes as f64;
@@ -120,6 +122,7 @@ pub fn format_time_short(t: &SystemTime) -> String {
 
 /// Format a unix timestamp (sec, nsec) as `sec.nsec (YYYY-MM-DD HH:MM:SS)`.
 pub fn format_timespec(sec: u64, nsec: u32) -> String {
+    #[allow(clippy::cast_possible_wrap)] // timestamps fit in i64
     let sec_i64 = sec as i64;
     match DateTime::from_timestamp(sec_i64, nsec) {
         Some(utc) => {

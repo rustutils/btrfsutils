@@ -14,9 +14,16 @@ use std::os::unix::fs::FileTypeExt;
 use uuid::Uuid;
 
 /// Run mkfs with the given parsed arguments.
+///
+/// # Errors
+///
+/// Returns an error if argument validation fails or filesystem creation fails.
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::cast_possible_truncation)] // nodesize/sectorsize/devid fit in u32/u64
+#[allow(clippy::cast_precision_loss)] // f64 display of byte sizes
 pub fn run(args: &Arguments) -> Result<()> {
-    let nodesize = args.nodesize.map(|s| s.0 as u32).unwrap_or(16384);
-    let sectorsize = args.sectorsize.map(|s| s.0 as u32).unwrap_or(4096);
+    let nodesize = args.nodesize.map_or(16384, |s| s.0 as u32);
+    let sectorsize = args.sectorsize.map_or(4096, |s| s.0 as u32);
 
     if !nodesize.is_power_of_two() || nodesize < sectorsize || nodesize > 65536
     {
@@ -195,8 +202,7 @@ pub fn run(args: &Arguments) -> Result<()> {
         let algorithm = args
             .compress
             .as_ref()
-            .map(|c| c.algorithm)
-            .unwrap_or(CompressAlgorithm::No);
+            .map_or(CompressAlgorithm::No, |c| c.algorithm);
         if algorithm == CompressAlgorithm::Lzo {
             bail!(
                 "LZO compression is not yet supported for --rootdir \
@@ -231,18 +237,19 @@ pub fn run(args: &Arguments) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::cast_precision_loss)] // display formatting, precision loss is acceptable
 fn human_size(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
     let mut value = bytes as f64;
     for &unit in UNITS {
         if value < 1024.0 {
             return if value.fract() == 0.0 {
-                format!("{:.0} {unit}", value)
+                format!("{value:.0} {unit}")
             } else {
-                format!("{:.2} {unit}", value)
+                format!("{value:.2} {unit}")
             };
         }
         value /= 1024.0;
     }
-    format!("{:.2} EiB", value)
+    format!("{value:.2} EiB")
 }

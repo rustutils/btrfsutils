@@ -33,6 +33,7 @@ pub enum PropertyObjectType {
 /// and labels. Most property operations require CAP_SYS_ADMIN or appropriate
 /// filesystem permissions.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct PropertyCommand {
     #[clap(subcommand)]
     pub subcommand: PropertySubcommand,
@@ -56,6 +57,7 @@ pub enum PropertySubcommand {
 }
 
 /// Metadata attributes used to classify a filesystem object.
+#[allow(clippy::struct_excessive_bools)]
 struct ObjectAttrs {
     /// Whether the path could be stat'd at all.
     exists: bool,

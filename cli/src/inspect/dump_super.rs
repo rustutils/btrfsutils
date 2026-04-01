@@ -12,6 +12,7 @@ use std::{fs::File, path::PathBuf};
 /// at offset 64 KiB) is printed. Use -a to print all mirrors, or -s to
 /// select a specific one.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct DumpSuperCommand {
     /// Path to a btrfs block device or image file
     path: PathBuf,

@@ -124,6 +124,7 @@ pub enum CheckError {
 }
 
 impl fmt::Display for CheckError {
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::SuperblockInvalid { mirror, detail } => {
@@ -358,6 +359,7 @@ impl CheckResults {
     }
 
     /// Record an error, printing it to stderr immediately.
+    #[allow(clippy::needless_pass_by_value)] // intentional: CheckError is consumed after printing
     pub fn report(&mut self, error: CheckError) {
         eprintln!("ERROR: {error}");
         self.error_count += 1;

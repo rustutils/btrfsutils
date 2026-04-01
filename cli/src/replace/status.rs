@@ -25,6 +25,7 @@ pub struct ReplaceStatusCommand {
 }
 
 impl Runnable for ReplaceStatusCommand {
+    #[allow(clippy::cast_precision_loss)]
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         let file = open_path(&self.mount_point)?;
         let fd = file.as_fd();

@@ -13,6 +13,7 @@ use std::{fs::File, io, path::PathBuf};
 /// apply changes. Multiple streams can be received in sequence. The destination
 /// filesystem must be mounted and writable. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown, clippy::struct_excessive_bools)]
 pub struct ReceiveCommand {
     /// Mount point of the destination filesystem (not required with --dump)
     mount: Option<PathBuf>,

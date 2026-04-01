@@ -6,6 +6,7 @@ use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Show commit statistics for a mounted filesystem
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct FilesystemCommitStatsCommand {
     /// Print stats then reset the max_commit_ms counter (requires root)
     #[clap(long, short = 'z')]

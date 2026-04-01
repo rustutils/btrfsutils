@@ -15,11 +15,12 @@ fn put_uuid(buf: &mut impl BufMut, uuid: &Uuid) {
     buf.put_slice(uuid.as_bytes());
 }
 
-/// Serialize a ROOT_ITEM.
+/// Serialize a `ROOT_ITEM`.
 ///
 /// A root item describes a tree root: its block address, generation, and
-/// metadata. The item starts with an embedded inode_item (for the root
+/// metadata. The item starts with an embedded `inode_item` (for the root
 /// directory inode), followed by the tree-specific fields.
+#[must_use]
 pub fn root_item(
     generation: u64,
     bytenr: u64,
@@ -43,7 +44,7 @@ pub fn root_item(
     buf.put_u64_le(root_dirid); // root_dirid
     buf.put_u64_le(bytenr); // bytenr
     buf.put_u64_le(0); // byte_limit
-    buf.put_u64_le(nodesize as u64); // bytes_used
+    buf.put_u64_le(u64::from(nodesize)); // bytes_used
     buf.put_u64_le(0); // last_snapshot
     buf.put_u64_le(0); // flags
     buf.put_u32_le(1); // refs = 1
@@ -61,11 +62,12 @@ pub fn root_item(
     buf
 }
 
-/// Serialize a ROOT_ITEM for the chunk tree.
+/// Serialize a `ROOT_ITEM` for the chunk tree.
 ///
 /// The chunk tree root item is special: it stores the chunk tree generation
 /// in its `generation` field and sets the `bytenr` to the chunk tree block.
 /// Same structure as a normal root item otherwise.
+#[must_use]
 pub fn chunk_tree_root_item(
     generation: u64,
     bytenr: u64,
@@ -74,20 +76,21 @@ pub fn chunk_tree_root_item(
     root_item(
         generation,
         bytenr,
-        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
         nodesize,
     )
 }
 
-/// Serialize an EXTENT_ITEM for a tree block (metadata extent) with an
-/// inline TREE_BLOCK_REF.
+/// Serialize an `EXTENT_ITEM` for a tree block (metadata extent) with an
+/// inline `TREE_BLOCK_REF`.
 ///
 /// For skinny metadata (the default), the layout is:
-///   24 bytes btrfs_extent_item + 9 bytes inline ref (type + root_objectid)
-/// For non-skinny, it also includes btrfs_tree_block_info before the ref.
+///   24 bytes `btrfs_extent_item` + 9 bytes inline ref (type + `root_objectid`)
+/// For non-skinny, it also includes `btrfs_tree_block_info` before the ref.
 ///
-/// The inline ref eliminates the need for a separate TREE_BLOCK_REF item
+/// The inline ref eliminates the need for a separate `TREE_BLOCK_REF` item
 /// and is required by `btrfs check`.
+#[must_use]
 pub fn extent_item(
     refs: u64,
     generation: u64,
@@ -103,19 +106,21 @@ pub fn extent_item(
 
     buf.put_u64_le(refs);
     buf.put_u64_le(generation);
-    buf.put_u64_le(raw::BTRFS_EXTENT_FLAG_TREE_BLOCK as u64);
+    buf.put_u64_le(u64::from(raw::BTRFS_EXTENT_FLAG_TREE_BLOCK));
 
     // Zero-fill tree_block_info (non-skinny only)
     buf.put_bytes(0, tree_block_info_size);
 
     // Inline TREE_BLOCK_REF
+    #[allow(clippy::cast_possible_truncation)] // key type fits in u8
     buf.put_u8(raw::BTRFS_TREE_BLOCK_REF_KEY as u8);
     buf.put_u64_le(owner_root);
 
     buf
 }
 
-/// Serialize a BLOCK_GROUP_ITEM.
+/// Serialize a `BLOCK_GROUP_ITEM`.
+#[must_use]
 pub fn block_group_item(used: u64, chunk_objectid: u64, flags: u64) -> Vec<u8> {
     let mut buf =
         Vec::with_capacity(mem::size_of::<raw::btrfs_block_group_item>());
@@ -125,7 +130,8 @@ pub fn block_group_item(used: u64, chunk_objectid: u64, flags: u64) -> Vec<u8> {
     buf
 }
 
-/// Serialize a DEV_ITEM.
+/// Serialize a `DEV_ITEM`.
+#[must_use]
 pub fn dev_item(
     devid: u64,
     total_bytes: u64,
@@ -152,11 +158,13 @@ pub fn dev_item(
 
 use crate::layout::StripeInfo;
 
-/// Serialize a CHUNK_ITEM with the given stripes.
+/// Serialize a `CHUNK_ITEM` with the given stripes.
 ///
 /// For non-bootstrap chunks, `io_align` and `io_width` should be
 /// `STRIPE_LEN` (64K). The bootstrap system chunk uses `sector_size`
 /// instead (see `chunk_item_bootstrap`).
+#[must_use]
+#[allow(clippy::cast_possible_truncation)] // stripe count fits in u16
 pub fn chunk_item(
     length: u64,
     owner: u64,
@@ -187,7 +195,8 @@ pub fn chunk_item(
     buf
 }
 
-/// Serialize the bootstrap system CHUNK_ITEM (uses sectorsize for io_align/io_width).
+/// Serialize the bootstrap system `CHUNK_ITEM` (uses sectorsize for `io_align`/`io_width`).
+#[must_use]
 pub fn chunk_item_bootstrap(
     length: u64,
     owner: u64,
@@ -210,7 +219,8 @@ pub fn chunk_item_bootstrap(
     )
 }
 
-/// Serialize a DEV_EXTENT.
+/// Serialize a `DEV_EXTENT`.
+#[must_use]
 pub fn dev_extent(
     chunk_tree: u64,
     chunk_objectid: u64,
@@ -227,13 +237,15 @@ pub fn dev_extent(
     buf
 }
 
-/// Serialize a DEV_STATS_ITEM (all counters zero).
+/// Serialize a `DEV_STATS_ITEM` (all counters zero).
+#[must_use]
 pub fn dev_stats_zeroed() -> Vec<u8> {
     // 5 u64 counters: write_errs, read_errs, flush_errs, corruption_errs, generation
     vec![0u8; 5 * 8]
 }
 
-/// Serialize a FREE_SPACE_INFO.
+/// Serialize a `FREE_SPACE_INFO`.
+#[must_use]
 pub fn free_space_info(extent_count: u32, flags: u32) -> Vec<u8> {
     let mut buf = Vec::with_capacity(8);
     buf.put_u32_le(extent_count);
@@ -241,10 +253,11 @@ pub fn free_space_info(extent_count: u32, flags: u32) -> Vec<u8> {
     buf
 }
 
-/// Serialize an INODE_ITEM for a root directory.
+/// Serialize an `INODE_ITEM` for a root directory.
 ///
 /// Creates a directory inode (mode 040755) with nlink=1 and the given
 /// generation and timestamps.
+#[must_use]
 pub fn inode_item_dir(generation: u64, nbytes: u64, now_sec: u64) -> Vec<u8> {
     let size = mem::size_of::<raw::btrfs_inode_item>();
     let mut buf = Vec::with_capacity(size);
@@ -272,10 +285,12 @@ pub fn inode_item_dir(generation: u64, nbytes: u64, now_sec: u64) -> Vec<u8> {
     buf
 }
 
-/// Serialize an INODE_REF item.
+/// Serialize an `INODE_REF` item.
 ///
 /// Contains the directory entry index and the name of the entry
 /// pointing to this inode.
+#[must_use]
+#[allow(clippy::cast_possible_truncation)] // name length fits in u16
 pub fn inode_ref(index: u64, name: &[u8]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(8 + 2 + name.len());
     buf.put_u64_le(index);
@@ -284,7 +299,7 @@ pub fn inode_ref(index: u64, name: &[u8]) -> Vec<u8> {
     buf
 }
 
-/// Parameters for serializing an INODE_ITEM.
+/// Parameters for serializing an `INODE_ITEM`.
 pub struct InodeItemArgs {
     pub generation: u64,
     pub transid: u64,
@@ -302,11 +317,12 @@ pub struct InodeItemArgs {
     pub otime: (u64, u32),
 }
 
-/// Serialize a general INODE_ITEM from host file metadata.
+/// Serialize a general `INODE_ITEM` from host file metadata.
 ///
 /// Unlike `inode_item_dir` which creates a fixed root-directory inode,
 /// this creates an inode with arbitrary metadata copied from the host
 /// filesystem (for `--rootdir` population).
+#[must_use]
 pub fn inode_item(args: &InodeItemArgs) -> Vec<u8> {
     let item_size = mem::size_of::<raw::btrfs_inode_item>();
     let mut buf = Vec::with_capacity(item_size);
@@ -333,11 +349,13 @@ pub fn inode_item(args: &InodeItemArgs) -> Vec<u8> {
     buf
 }
 
-/// Serialize a DIR_ITEM or DIR_INDEX.
+/// Serialize a `DIR_ITEM` or `DIR_INDEX`.
 ///
-/// The on-disk format is: location disk_key (17 bytes) + transid (8) +
-/// data_len (2) + name_len (2) + type (1) + name bytes. DIR_ITEM and
-/// DIR_INDEX share the same item format (different key type selects which).
+/// The on-disk format is: location `disk_key` (17 bytes) + transid (8) +
+/// `data_len` (2) + `name_len` (2) + type (1) + name bytes. `DIR_ITEM` and
+/// `DIR_INDEX` share the same item format (different key type selects which).
+#[must_use]
+#[allow(clippy::cast_possible_truncation)] // name length fits in u16
 pub fn dir_item(
     location: &Key,
     transid: u64,
@@ -354,10 +372,12 @@ pub fn dir_item(
     buf
 }
 
-/// Serialize an XATTR_ITEM.
+/// Serialize an `XATTR_ITEM`.
 ///
-/// Same layout as a dir_item but with a zeroed location key, data_len set
+/// Same layout as a `dir_item` but with a zeroed location key, `data_len` set
 /// to the xattr value length, and value bytes appended after the name.
+#[must_use]
+#[allow(clippy::cast_possible_truncation)] // name/value lengths fit in u16, type fits in u8
 pub fn xattr_item(name: &[u8], value: &[u8]) -> Vec<u8> {
     let zeroed_location = Key::new(0, 0, 0);
     let mut buf = Vec::with_capacity(30 + name.len() + value.len());
@@ -371,10 +391,12 @@ pub fn xattr_item(name: &[u8], value: &[u8]) -> Vec<u8> {
     buf
 }
 
-/// Serialize an inline FILE_EXTENT_ITEM.
+/// Serialize an inline `FILE_EXTENT_ITEM`.
 ///
 /// Stores file data directly in the tree leaf. Used for small files
 /// (size < sectorsize). Layout: 21-byte header + inline data.
+#[must_use]
+#[allow(clippy::cast_possible_truncation)] // extent type fits in u8
 pub fn file_extent_inline(
     generation: u64,
     ram_bytes: u64,
@@ -392,10 +414,12 @@ pub fn file_extent_inline(
     buf
 }
 
-/// Serialize a regular FILE_EXTENT_ITEM.
+/// Serialize a regular `FILE_EXTENT_ITEM`.
 ///
 /// References data stored in a separate extent in the data chunk.
 /// Layout: 21-byte header + 32 bytes of extent pointers = 53 bytes.
+#[must_use]
+#[allow(clippy::cast_possible_truncation)] // extent type fits in u8
 pub fn file_extent_reg(
     generation: u64,
     disk_bytenr: u64,
@@ -419,11 +443,13 @@ pub fn file_extent_reg(
     buf
 }
 
-/// Serialize an EXTENT_ITEM for a data extent with inline EXTENT_DATA_REF.
+/// Serialize an `EXTENT_ITEM` for a data extent with inline `EXTENT_DATA_REF`.
 ///
-/// Layout: 24-byte btrfs_extent_item (refs, generation, flags=DATA) +
-/// 1-byte inline ref type (EXTENT_DATA_REF_KEY) +
-/// 28-byte btrfs_extent_data_ref (root, objectid, offset, count).
+/// Layout: 24-byte `btrfs_extent_item` (refs, generation, flags=DATA) +
+/// 1-byte inline ref type (`EXTENT_DATA_REF_KEY`) +
+/// 28-byte `btrfs_extent_data_ref` (root, objectid, offset, count).
+#[must_use]
+#[allow(clippy::cast_possible_truncation)] // ref type key fits in u8
 pub fn data_extent_item(
     refs: u64,
     generation: u64,
@@ -436,7 +462,7 @@ pub fn data_extent_item(
     // btrfs_extent_item
     buf.put_u64_le(refs);
     buf.put_u64_le(generation);
-    buf.put_u64_le(raw::BTRFS_EXTENT_FLAG_DATA as u64);
+    buf.put_u64_le(u64::from(raw::BTRFS_EXTENT_FLAG_DATA));
     // inline EXTENT_DATA_REF
     buf.put_u8(raw::BTRFS_EXTENT_DATA_REF_KEY as u8);
     buf.put_u64_le(root);
@@ -446,7 +472,8 @@ pub fn data_extent_item(
     buf
 }
 
-/// Serialize a DiskKey into 17 bytes (for embedding in other items).
+/// Serialize a `DiskKey` into 17 bytes (for embedding in other items).
+#[must_use]
 pub fn disk_key(key: &Key) -> Vec<u8> {
     let mut buf = vec![0u8; 17];
     key.write_to(&mut buf, 0);
@@ -462,14 +489,14 @@ mod tests {
     fn roundtrip_block_group_item() {
         let data = block_group_item(
             4096,
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
         );
         let parsed = items::BlockGroupItem::parse(&data).unwrap();
         assert_eq!(parsed.used, 4096);
         assert_eq!(
             parsed.chunk_objectid,
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID)
         );
         assert_eq!(parsed.flags, items::BlockGroupFlags::SYSTEM);
     }
@@ -503,14 +530,14 @@ mod tests {
         };
         let data = chunk_item_bootstrap(
             4 * 1024 * 1024,
-            raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+            u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
             4096,
             &stripe,
         );
         let parsed = items::ChunkItem::parse(&data).unwrap();
         assert_eq!(parsed.length, 4 * 1024 * 1024);
-        assert_eq!(parsed.owner, raw::BTRFS_EXTENT_TREE_OBJECTID as u64);
+        assert_eq!(parsed.owner, u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID));
         assert_eq!(parsed.chunk_type, items::BlockGroupFlags::SYSTEM);
         assert_eq!(parsed.num_stripes, 1);
         assert_eq!(parsed.stripes.len(), 1);
@@ -524,17 +551,20 @@ mod tests {
         let uuid =
             Uuid::parse_str("deadbeef-dead-beef-dead-beefdeadbeef").unwrap();
         let data = dev_extent(
-            raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
             0x100000,
             4 * 1024 * 1024,
             &uuid,
         );
         let parsed = items::DeviceExtent::parse(&data).unwrap();
-        assert_eq!(parsed.chunk_tree, raw::BTRFS_CHUNK_TREE_OBJECTID as u64);
+        assert_eq!(
+            parsed.chunk_tree,
+            u64::from(raw::BTRFS_CHUNK_TREE_OBJECTID)
+        );
         assert_eq!(
             parsed.chunk_objectid,
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID)
         );
         assert_eq!(parsed.chunk_offset, 0x100000);
         assert_eq!(parsed.length, 4 * 1024 * 1024);
@@ -554,13 +584,16 @@ mod tests {
         let data = root_item(
             1,
             0x100000,
-            raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
             16384,
         );
         let parsed = items::RootItem::parse(&data).unwrap();
         assert_eq!(parsed.generation, 1);
         assert_eq!(parsed.bytenr, 0x100000);
-        assert_eq!(parsed.root_dirid, raw::BTRFS_FIRST_FREE_OBJECTID as u64);
+        assert_eq!(
+            parsed.root_dirid,
+            u64::from(raw::BTRFS_FIRST_FREE_OBJECTID)
+        );
         assert_eq!(parsed.refs, 1);
         assert_eq!(parsed.generation_v2, 1);
     }
@@ -592,6 +625,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_possible_truncation)]
     fn roundtrip_chunk_item_dup() {
         let uuid =
             Uuid::parse_str("deadbeef-dead-beef-dead-beefdeadbeef").unwrap();
@@ -609,9 +643,9 @@ mod tests {
         ];
         let data = chunk_item(
             32 * 1024 * 1024,
-            raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_METADATA as u64
-                | raw::BTRFS_BLOCK_GROUP_DUP as u64,
+            u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_METADATA)
+                | u64::from(raw::BTRFS_BLOCK_GROUP_DUP),
             crate::layout::STRIPE_LEN as u32,
             crate::layout::STRIPE_LEN as u32,
             4096,
@@ -633,6 +667,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_possible_truncation)]
     fn roundtrip_chunk_item_non_bootstrap_single() {
         let uuid =
             Uuid::parse_str("deadbeef-dead-beef-dead-beefdeadbeef").unwrap();
@@ -643,8 +678,8 @@ mod tests {
         }];
         let data = chunk_item(
             64 * 1024 * 1024,
-            raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_DATA as u64,
+            u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_DATA),
             crate::layout::STRIPE_LEN as u32,
             crate::layout::STRIPE_LEN as u32,
             4096,
@@ -679,6 +714,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_possible_truncation)]
     fn roundtrip_dir_item() {
         let location = Key::new(257, raw::BTRFS_INODE_ITEM_KEY as u8, 0);
         let data =

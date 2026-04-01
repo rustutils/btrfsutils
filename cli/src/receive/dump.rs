@@ -10,6 +10,7 @@ fn fmt_uuid(uuid: &uuid::Uuid) -> String {
     uuid.as_hyphenated().to_string()
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn dump_stream<R: Read>(input: R) -> Result<()> {
     let mut reader = StreamReader::new(input)?;
 

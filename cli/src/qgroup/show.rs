@@ -8,7 +8,7 @@ use btrfs_uapi::quota::{
     qgroupid_subvolid,
 };
 use clap::Parser;
-use std::{os::unix::io::AsFd, path::PathBuf};
+use std::{fmt::Write as _, os::unix::io::AsFd, path::PathBuf};
 
 const HEADING_COLUMN_SELECTION: &str = "Column selection";
 const HEADING_FILTERING: &str = "Filtering";
@@ -16,6 +16,7 @@ const HEADING_SIZE_UNITS: &str = "Size units";
 
 /// List subvolume quota groups
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools, clippy::doc_markdown)]
 pub struct QgroupShowCommand {
     /// Path to a mounted btrfs filesystem
     pub path: PathBuf,
@@ -165,6 +166,7 @@ fn format_qgroupid(qgroupid: u64) -> String {
 }
 
 impl Runnable for QgroupShowCommand {
+    #[allow(clippy::too_many_lines)]
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         // filter_all / filter_direct: not implemented, ignored
         let _ = self.filter_all;
@@ -251,16 +253,16 @@ impl Runnable for QgroupShowCommand {
         let mut header =
             format!("{:<16} {:>12} {:>12}", "qgroupid", "rfer", "excl");
         if self.print_rfer_limit {
-            header.push_str(&format!(" {:>12}", "max_rfer"));
+            let _ = write!(header, " {:>12}", "max_rfer");
         }
         if self.print_excl_limit {
-            header.push_str(&format!(" {:>12}", "max_excl"));
+            let _ = write!(header, " {:>12}", "max_excl");
         }
         if self.print_parent {
-            header.push_str(&format!("  {:<20}", "parent"));
+            let _ = write!(header, "  {:<20}", "parent");
         }
         if self.print_child {
-            header.push_str(&format!("  {:<20}", "child"));
+            let _ = write!(header, "  {:<20}", "child");
         }
         println!("{header}");
 
@@ -279,7 +281,7 @@ impl Runnable for QgroupShowCommand {
                     QgroupLimitFlags::MAX_RFER,
                     &mode,
                 );
-                line.push_str(&format!(" {s:>12}"));
+                let _ = write!(line, " {s:>12}");
             }
 
             if self.print_excl_limit {
@@ -289,19 +291,19 @@ impl Runnable for QgroupShowCommand {
                     QgroupLimitFlags::MAX_EXCL,
                     &mode,
                 );
-                line.push_str(&format!(" {s:>12}"));
+                let _ = write!(line, " {s:>12}");
             }
 
             if self.print_parent {
                 let parents: Vec<String> =
                     q.parents.iter().map(|&id| format_qgroupid(id)).collect();
-                line.push_str(&format!("  {:<20}", parents.join(",")));
+                let _ = write!(line, "  {:<20}", parents.join(","));
             }
 
             if self.print_child {
                 let children: Vec<String> =
                     q.children.iter().map(|&id| format_qgroupid(id)).collect();
-                line.push_str(&format!("  {:<20}", children.join(",")));
+                let _ = write!(line, "  {:<20}", children.join(","));
             }
 
             println!("{line}");

@@ -336,6 +336,7 @@ fn format_magic(magic: u64) -> String {
         .collect()
 }
 
+#[allow(clippy::cast_possible_truncation)] // csum type values fit in u16
 fn csum_type_raw(ct: ChecksumType) -> u16 {
     match ct {
         ChecksumType::Crc32 => {

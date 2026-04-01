@@ -14,6 +14,7 @@ use std::{os::unix::io::AsFd, path::PathBuf};
 /// Scrubs all devices sequentially. This command blocks until the scrub
 /// completes; use Ctrl-C to cancel.
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ScrubResumeCommand {
     /// Do not background (default behavior, accepted for compatibility)
     #[clap(short = 'B')]

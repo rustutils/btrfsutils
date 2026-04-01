@@ -22,6 +22,7 @@ pub use self::{
 /// provide flexible quota management that can be applied at different levels
 /// in the subvolume hierarchy. Most operations require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct QgroupCommand {
     #[clap(subcommand)]
     pub subcommand: QgroupSubcommand,

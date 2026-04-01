@@ -19,6 +19,7 @@ pub use self::{cancel::*, pause::*, resume::*, start::*, status::*};
 /// pause, resume, or cancel a balance in progress. Progress and status can
 /// be queried at any time. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct BalanceCommand {
     #[clap(subcommand)]
     pub subcommand: BalanceSubcommand,

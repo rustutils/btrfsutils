@@ -17,6 +17,7 @@ pub use self::{add::*, ready::*, remove::*, scan::*, stats::*, usage::*};
 /// including adding and removing devices, viewing device statistics, and
 /// checking device readiness. Most operations require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct DeviceCommand {
     #[clap(subcommand)]
     pub subcommand: DeviceSubcommand,

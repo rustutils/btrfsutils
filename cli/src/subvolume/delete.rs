@@ -251,7 +251,7 @@ impl SubvolumeDeleteCommand {
     }
 }
 
-/// Initiate a sync and wait for it to complete (start_sync + wait_sync).
+/// Initiate a sync and wait for it to complete (`start_sync` + `wait_sync`).
 fn wait_for_commit(fd: std::os::unix::io::BorrowedFd) -> Result<()> {
     let transid = start_sync(fd).context("start_sync failed")?;
     wait_sync(fd, transid).context("wait_sync failed")?;

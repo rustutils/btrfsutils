@@ -10,6 +10,7 @@ use std::{os::unix::io::AsFd, path::PathBuf};
 /// mount_point, it is cancelled. The target device is left in an undefined
 /// state and should not be used further without reformatting.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct ReplaceCancelCommand {
     /// Path to the mounted btrfs filesystem
     pub mount_point: PathBuf,

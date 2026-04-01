@@ -58,6 +58,11 @@ impl TreeBuilder {
     /// the caller must patch after assigning logical addresses.
     ///
     /// If `items` is empty, returns a single empty leaf.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a single item is too large to fit in an empty leaf.
+    #[must_use]
     pub fn build(&self, items: &[(Key, Vec<u8>)]) -> TreeBlocks {
         if items.is_empty() {
             let leaf = LeafBuilder::new(self.nodesize, &self.leaf_header());
@@ -208,6 +213,7 @@ impl TreeBuilder {
     }
 
     /// Create a copy of this builder with a different owner tree objectid.
+    #[must_use]
     pub fn clone_with_owner(&self, owner: u64) -> Self {
         Self {
             nodesize: self.nodesize,

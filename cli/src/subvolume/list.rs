@@ -4,7 +4,10 @@ use btrfs_uapi::subvolume::{
     SubvolumeFlags, SubvolumeListItem, subvolume_list,
 };
 use clap::Parser;
-use std::{cmp::Ordering, os::unix::io::AsFd, path::PathBuf, str::FromStr};
+use std::{
+    cmp::Ordering, fmt::Write as _, os::unix::io::AsFd, path::PathBuf,
+    str::FromStr,
+};
 
 const HEADING_PATH_FILTERING: &str = "Path filtering";
 const HEADING_FIELD_SELECTION: &str = "Field selection";
@@ -18,6 +21,7 @@ const HEADING_SORTING: &str = "Sorting";
 ///
 /// Optional flags enable additional columns or filter the results.
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct SubvolumeListCommand {
     /// Print only subvolumes below the given path
     #[clap(short = 'o', long, help_heading = HEADING_PATH_FILTERING)]
@@ -187,33 +191,35 @@ impl SubvolumeListCommand {
                 format!("ID {} gen {}", item.root_id, item.generation);
 
             if self.ogeneration {
-                line.push_str(&format!(" cgen {}", item.otransid));
+                let _ = write!(line, " cgen {}", item.otransid);
             }
 
-            line.push_str(&format!(" top level {}", item.parent_id));
+            let _ = write!(line, " top level {}", item.parent_id);
 
             if self.parent {
-                line.push_str(&format!(" parent {}", item.parent_id));
+                let _ = write!(line, " parent {}", item.parent_id);
             }
 
-            line.push_str(&format!(" path {name}"));
+            let _ = write!(line, " path {name}");
 
             if self.uuid {
-                line.push_str(&format!(" uuid {}", fmt_uuid(&item.uuid)));
+                let _ = write!(line, " uuid {}", fmt_uuid(&item.uuid));
             }
 
             if self.parent_uuid {
-                line.push_str(&format!(
+                let _ = write!(
+                    line,
                     " parent_uuid {}",
                     fmt_uuid(&item.parent_uuid)
-                ));
+                );
             }
 
             if self.received_uuid {
-                line.push_str(&format!(
+                let _ = write!(
+                    line,
                     " received_uuid {}",
                     fmt_uuid(&item.received_uuid)
-                ));
+                );
             }
 
             println!("{line}");

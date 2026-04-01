@@ -59,6 +59,7 @@ pub fn check_csums<R: Read + Seek>(
                         num_csums,
                         sectorsize,
                         csum_data: item_data.to_vec(),
+                        #[allow(clippy::cast_possible_truncation)] // csum_size always small
                         csum_size: csum_size as usize,
                     });
                 }
@@ -111,17 +112,17 @@ fn verify_data_csums<R: Read + Seek>(
     for entry in entries {
         for i in 0..entry.num_csums {
             let logical = entry.logical_start + i * entry.sectorsize;
+            #[allow(clippy::cast_possible_truncation)] // index fits in usize
             let csum_off = (i as usize) * entry.csum_size;
             let stored = &entry.csum_data[csum_off..csum_off + entry.csum_size];
 
-            let data =
-                match reader.read_data(logical, entry.sectorsize as usize) {
-                    Ok(d) => d,
-                    Err(_) => {
-                        results.report(CheckError::CsumMismatch { logical });
-                        continue;
-                    }
-                };
+            #[allow(clippy::cast_possible_truncation)]
+            // sectorsize fits in usize
+            let Ok(data) = reader.read_data(logical, entry.sectorsize as usize)
+            else {
+                results.report(CheckError::CsumMismatch { logical });
+                continue;
+            };
 
             let computed = btrfs_csum_data(&data);
             let expected = u32::from_le_bytes(stored[..4].try_into().unwrap());

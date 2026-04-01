@@ -5,8 +5,7 @@ use std::{env, fs, io, path::PathBuf};
 fn main() -> io::Result<()> {
     let out_dir = env::args_os()
         .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("target/gen"));
+        .map_or_else(|| PathBuf::from("target/gen"), PathBuf::from);
 
     let man_dir = out_dir.join("man");
     let completions_dir = out_dir.join("completions");

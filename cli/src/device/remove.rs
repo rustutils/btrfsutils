@@ -16,6 +16,7 @@ use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
 ///
 /// The operation requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct DeviceRemoveCommand {
     /// One or more devices to remove (path, devid, "missing", or "cancel"),
     /// followed by the filesystem mount point

@@ -30,6 +30,7 @@ pub struct Key {
 }
 
 impl Key {
+    #[must_use]
     pub fn new(objectid: u64, key_type: u8, offset: u64) -> Self {
         Self {
             objectid,
@@ -62,7 +63,7 @@ pub struct LeafBuilder {
     buf: Vec<u8>,
     /// Number of items inserted so far.
     nritems: u32,
-    /// Byte offset of the next item descriptor (grows forward from HEADER_SIZE).
+    /// Byte offset of the next item descriptor (grows forward from `HEADER_SIZE`).
     item_offset: usize,
     /// Byte offset of the next item's data end (grows backward from nodesize).
     data_end: usize,
@@ -75,7 +76,7 @@ pub struct LeafHeader {
     pub fsid: Uuid,
     pub chunk_tree_uuid: Uuid,
     pub generation: u64,
-    /// Tree that owns this block (e.g. BTRFS_ROOT_TREE_OBJECTID).
+    /// Tree that owns this block (e.g. `BTRFS_ROOT_TREE_OBJECTID`).
     pub owner: u64,
     /// Logical byte address of this block on disk.
     pub bytenr: u64,
@@ -83,13 +84,14 @@ pub struct LeafHeader {
 
 impl LeafBuilder {
     /// Create a new leaf builder for a block of `nodesize` bytes.
+    #[must_use]
     pub fn new(nodesize: u32, header: &LeafHeader) -> Self {
         let mut buf = vec![0u8; nodesize as usize];
 
         // Write header fields (csum and nritems are finalized in finish()).
-        let flags = (raw::BTRFS_MIXED_BACKREF_REV as u64)
+        let flags = u64::from(raw::BTRFS_MIXED_BACKREF_REV)
             << raw::BTRFS_BACKREF_REV_SHIFT
-            | raw::BTRFS_HEADER_FLAG_WRITTEN as u64;
+            | u64::from(raw::BTRFS_HEADER_FLAG_WRITTEN);
 
         write_uuid(&mut buf, 32, &header.fsid);
         write_le_u64(&mut buf, 48, header.bytenr);
@@ -110,14 +112,18 @@ impl LeafBuilder {
     }
 
     /// Available space for more items (item descriptors + data payloads).
+    #[must_use]
     pub fn space_left(&self) -> usize {
         self.data_end.saturating_sub(self.item_offset + ITEM_SIZE)
     }
 
     /// Push an item with the given key and data payload.
     ///
+    /// # Errors
+    ///
     /// Returns an error if the key is not greater than the previous key,
     /// or if there is not enough space in the leaf.
+    #[allow(clippy::cast_possible_truncation)] // data offsets/sizes fit in u32
     pub fn push(&mut self, key: Key, data: &[u8]) -> Result<(), LeafError> {
         if let Some(last) = self.last_key
             && key <= last
@@ -151,7 +157,11 @@ impl LeafBuilder {
         Ok(())
     }
 
-    /// Push an item with an empty data payload (e.g. TREE_BLOCK_REF_KEY).
+    /// Push an item with an empty data payload (e.g. `TREE_BLOCK_REF_KEY`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key is out of order or the leaf is full.
     pub fn push_empty(&mut self, key: Key) -> Result<(), LeafError> {
         self.push(key, &[])
     }
@@ -159,19 +169,22 @@ impl LeafBuilder {
     /// Finalize the leaf block: write nritems to the header and return the
     /// raw block bytes.
     ///
-    /// The checksum field (bytes 0..32) is left zeroed — the caller must
+    /// The checksum field (bytes 0..32) is left zeroed -- the caller must
     /// compute and fill it before writing to disk.
+    #[must_use]
     pub fn finish(mut self) -> Vec<u8> {
         write_le_u32(&mut self.buf, 96, self.nritems);
         self.buf
     }
 
     /// Number of items inserted so far.
+    #[must_use]
     pub fn len(&self) -> u32 {
         self.nritems
     }
 
     /// Whether no items have been inserted.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nritems == 0
     }
@@ -239,12 +252,13 @@ pub struct NodeBuilder {
 
 impl NodeBuilder {
     /// Create a new node builder for a block of `nodesize` bytes at the given level.
+    #[must_use]
     pub fn new(nodesize: u32, header: &NodeHeader) -> Self {
         let mut buf = vec![0u8; nodesize as usize];
 
-        let flags = (raw::BTRFS_MIXED_BACKREF_REV as u64)
+        let flags = u64::from(raw::BTRFS_MIXED_BACKREF_REV)
             << raw::BTRFS_BACKREF_REV_SHIFT
-            | raw::BTRFS_HEADER_FLAG_WRITTEN as u64;
+            | u64::from(raw::BTRFS_HEADER_FLAG_WRITTEN);
 
         write_uuid(&mut buf, 32, &header.fsid);
         write_le_u64(&mut buf, 48, header.bytenr);
@@ -264,11 +278,16 @@ impl NodeBuilder {
     }
 
     /// Available space for more key-pointer entries.
+    #[must_use]
     pub fn space_left(&self) -> usize {
         (self.buf.len() - self.ptr_offset) / KEY_PTR_SIZE
     }
 
     /// Push a key-pointer entry pointing to a child block.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key is out of order or the node is full.
     pub fn push(
         &mut self,
         key: Key,
@@ -299,6 +318,7 @@ impl NodeBuilder {
     }
 
     /// Finalize the node: write nritems and return the raw block bytes.
+    #[must_use]
     pub fn finish(mut self) -> Vec<u8> {
         write_le_u32(&mut self.buf, 96, self.nritems);
         self.buf

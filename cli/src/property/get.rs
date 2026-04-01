@@ -111,12 +111,7 @@ fn get_compression_property(file: &File, path: &Path) -> Result<()> {
 
     // SAFETY: fgetxattr is safe to call with a valid fd and valid string pointer
     let result = unsafe {
-        fgetxattr(
-            fd,
-            xattr_name.as_ptr() as *const i8,
-            std::ptr::null_mut(),
-            0,
-        )
+        fgetxattr(fd, xattr_name.as_ptr().cast(), std::ptr::null_mut(), 0)
     };
 
     if result < 0 {
@@ -132,17 +127,13 @@ fn get_compression_property(file: &File, path: &Path) -> Result<()> {
         ));
     }
 
+    #[allow(clippy::cast_sign_loss)] // result is positive after the check above
     let len = result as usize;
     let mut buf = vec![0u8; len];
 
     // SAFETY: fgetxattr is safe to call with a valid fd, valid buffer, and valid string pointer
     let result = unsafe {
-        fgetxattr(
-            fd,
-            xattr_name.as_ptr() as *const i8,
-            buf.as_mut_ptr() as *mut std::ffi::c_void,
-            len,
-        )
+        fgetxattr(fd, xattr_name.as_ptr().cast(), buf.as_mut_ptr().cast(), len)
     };
 
     if result < 0 {

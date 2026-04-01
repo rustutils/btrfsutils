@@ -27,6 +27,7 @@ use std::{
 /// normally. Recovery options allow selective restoration of files, metadata,
 /// and extended attributes. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown, clippy::struct_excessive_bools)]
 pub struct RestoreCommand {
     /// Block device containing the damaged filesystem
     device: PathBuf,
@@ -100,6 +101,7 @@ pub struct RestoreCommand {
 }
 
 impl Runnable for RestoreCommand {
+    #[allow(clippy::too_many_lines)]
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         if let Some(m) = self.super_mirror
             && m >= u64::from(SUPER_MIRROR_MAX)
@@ -123,6 +125,7 @@ impl Runnable for RestoreCommand {
 
         // Open filesystem, trying mirror fallback if no specific mirror given.
         let mut open = if let Some(m) = self.super_mirror {
+            #[allow(clippy::cast_possible_truncation)] // mirror index fits u32
             reader::filesystem_open_mirror(file, m as u32)
                 .context("failed to open filesystem")?
         } else {
@@ -180,7 +183,7 @@ impl Runnable for RestoreCommand {
 
         // Determine which FS tree to restore from.
         let fs_tree_oid =
-            self.root.unwrap_or(raw::BTRFS_FS_TREE_OBJECTID as u64);
+            self.root.unwrap_or(u64::from(raw::BTRFS_FS_TREE_OBJECTID));
 
         // Determine the FS tree root bytenr.
         let fs_root_bytenr = if let Some(loc) = self.fs_location {
@@ -224,7 +227,7 @@ impl Runnable for RestoreCommand {
             println!("Using objectid {oid} for first dir");
             oid
         } else {
-            raw::BTRFS_FIRST_FREE_OBJECTID as u64
+            u64::from(raw::BTRFS_FIRST_FREE_OBJECTID)
         };
 
         if !opts.dry_run {
@@ -251,8 +254,10 @@ impl Runnable for RestoreCommand {
         // that weren't reachable from the FS tree's directory structure).
         if self.snapshots {
             for (&oid, &(bytenr, _)) in &open.tree_roots {
-                if oid >= raw::BTRFS_FIRST_FREE_OBJECTID as u64
-                    && oid <= raw::BTRFS_LAST_FREE_OBJECTID as u64
+                #[allow(clippy::cast_sign_loss)]
+                let last_free = raw::BTRFS_LAST_FREE_OBJECTID as u64;
+                if oid >= u64::from(raw::BTRFS_FIRST_FREE_OBJECTID)
+                    && oid <= last_free
                     && oid != fs_tree_oid
                 {
                     let snap_dest = output_path.join(format!("snapshot.{oid}"));
@@ -273,7 +278,7 @@ impl Runnable for RestoreCommand {
                             )
                         })?;
                     }
-                    let snap_root = raw::BTRFS_FIRST_FREE_OBJECTID as u64;
+                    let snap_root = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID);
                     restore_dir(
                         &mut block_reader,
                         &snap_items,
@@ -295,6 +300,7 @@ impl Runnable for RestoreCommand {
     }
 }
 
+#[allow(clippy::struct_excessive_bools)]
 struct RestoreOpts<'a> {
     dry_run: bool,
     overwrite: bool,
@@ -419,7 +425,7 @@ fn collect_items_dfs<R: Read + Seek>(
     Ok(())
 }
 
-/// Find the first DIR_INDEX item in the tree, returning its objectid.
+/// Find the first `DIR_INDEX` item in the tree, returning its objectid.
 fn find_first_dir(items: &FsTreeItems) -> Result<u64> {
     items
         .has_key_type(KeyType::DirIndex)
@@ -427,6 +433,7 @@ fn find_first_dir(items: &FsTreeItems) -> Result<u64> {
 }
 
 /// Recursively restore a directory and its contents.
+#[allow(clippy::too_many_lines)]
 fn restore_dir<R: Read + Seek>(
     reader: &mut reader::BlockReader<R>,
     items: &FsTreeItems,
@@ -490,7 +497,7 @@ fn restore_dir<R: Read + Seek>(
                         *errors += 1;
                     }
                 } else {
-                    eprintln!("Skipping snapshot {} (use -s to restore)", name);
+                    eprintln!("Skipping snapshot {name} (use -s to restore)");
                 }
                 continue;
             }
@@ -616,7 +623,7 @@ fn restore_snapshot<R: Read + Seek>(
         })?;
     }
 
-    let snap_root = raw::BTRFS_FIRST_FREE_OBJECTID as u64;
+    let snap_root = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID);
     restore_dir(
         reader,
         &snap_items,
@@ -628,7 +635,8 @@ fn restore_snapshot<R: Read + Seek>(
     )
 }
 
-/// Restore a regular file from its EXTENT_DATA items.
+/// Restore a regular file from its `EXTENT_DATA` items.
+#[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
 fn restore_file<R: Read + Seek>(
     reader: &mut reader::BlockReader<R>,
     items: &FsTreeItems,
@@ -667,9 +675,8 @@ fn restore_file<R: Read + Seek>(
     let extent_items = items.get(ino, KeyType::ExtentData);
 
     for (key, data) in &extent_items {
-        let extent = match FileExtentItem::parse(data) {
-            Some(e) => e,
-            None => continue,
+        let Some(extent) = FileExtentItem::parse(data) else {
+            continue;
         };
 
         // Skip prealloc extents: they represent preallocated but
@@ -686,11 +693,13 @@ fn restore_file<R: Read + Seek>(
                 let header_len = data.len() - inline_size;
                 let inline_data = &data[header_len..];
 
-                let output = if extent.compression != CompressionType::None {
+                let output = if extent.compression == CompressionType::None {
+                    inline_data.to_vec()
+                } else {
                     decompress(
                         inline_data,
                         extent.ram_bytes as usize,
-                        &extent.compression,
+                        extent.compression,
                     )
                     .with_context(|| {
                         format!(
@@ -698,8 +707,6 @@ fn restore_file<R: Read + Seek>(
                             path.display()
                         )
                     })?
-                } else {
-                    inline_data.to_vec()
                 };
 
                 file.seek(io::SeekFrom::Start(file_offset))?;
@@ -747,21 +754,37 @@ fn restore_file<R: Read + Seek>(
                     continue;
                 }
 
-                if extent.compression != CompressionType::None {
+                if extent.compression == CompressionType::None {
+                    // Uncompressed: read directly from disk at the right offset.
+                    let data_buf = reader
+                        .read_data(disk_bytenr + offset, *num_bytes as usize)
+                        .with_context(|| {
+                            format!(
+                                "failed to read extent at logical {disk_bytenr}"
+                            )
+                        })?;
+
+                    file.seek(io::SeekFrom::Start(file_offset))?;
+                    file.write_all(&data_buf).with_context(|| {
+                        format!(
+                            "failed to write extent to '{}'",
+                            path.display()
+                        )
+                    })?;
+                } else {
                     // Read the full compressed extent from disk.
                     let compressed = reader
                         .read_data(*disk_bytenr, *disk_num_bytes as usize)
                         .with_context(|| {
                             format!(
-                                "failed to read compressed extent at logical {}",
-                                disk_bytenr
+                                "failed to read compressed extent at logical {disk_bytenr}"
                             )
                         })?;
 
                     let decompressed = decompress(
                         &compressed,
                         extent.ram_bytes as usize,
-                        &extent.compression,
+                        extent.compression,
                     )
                     .with_context(|| {
                         format!(
@@ -781,24 +804,6 @@ fn restore_file<R: Read + Seek>(
 
                     file.seek(io::SeekFrom::Start(file_offset))?;
                     file.write_all(slice).with_context(|| {
-                        format!(
-                            "failed to write extent to '{}'",
-                            path.display()
-                        )
-                    })?;
-                } else {
-                    // Uncompressed: read directly from disk at the right offset.
-                    let data_buf = reader
-                        .read_data(disk_bytenr + offset, *num_bytes as usize)
-                        .with_context(|| {
-                            format!(
-                                "failed to read extent at logical {}",
-                                disk_bytenr
-                            )
-                        })?;
-
-                    file.seek(io::SeekFrom::Start(file_offset))?;
-                    file.write_all(&data_buf).with_context(|| {
                         format!(
                             "failed to write extent to '{}'",
                             path.display()
@@ -824,7 +829,7 @@ fn restore_file<R: Read + Seek>(
     Ok(())
 }
 
-/// Restore a symbolic link from its inline EXTENT_DATA item.
+/// Restore a symbolic link from its inline `EXTENT_DATA` item.
 fn restore_symlink(
     items: &FsTreeItems,
     ino: u64,
@@ -844,7 +849,7 @@ fn restore_symlink(
             let header_len = data.len() - inline_size;
             &data[header_len..]
         }
-        _ => bail!("symlink extent is not inline"),
+        FileExtentBody::Regular { .. } => bail!("symlink extent is not inline"),
     };
 
     let target_str = std::str::from_utf8(target)
@@ -886,19 +891,16 @@ fn restore_xattrs(
     for (_, data) in &xattr_items {
         let entries = DirItem::parse_all(data);
         for entry in entries {
-            let name = match std::str::from_utf8(&entry.name) {
-                Ok(s) => s,
-                Err(_) => continue,
+            let Ok(name) = std::str::from_utf8(&entry.name) else {
+                continue;
             };
-            let c_path = match std::ffi::CString::new(
-                path.as_os_str().as_encoded_bytes(),
-            ) {
-                Ok(p) => p,
-                Err(_) => continue,
+            let Ok(c_path) =
+                std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+            else {
+                continue;
             };
-            let c_name = match std::ffi::CString::new(name) {
-                Ok(n) => n,
-                Err(_) => continue,
+            let Ok(c_name) = std::ffi::CString::new(name) else {
+                continue;
             };
             // SAFETY: calling lsetxattr with valid C strings and data pointer.
             let ret = unsafe {
@@ -938,11 +940,11 @@ fn apply_metadata(
         return;
     };
 
-    let c_path =
-        match std::ffi::CString::new(path.as_os_str().as_encoded_bytes()) {
-            Ok(p) => p,
-            Err(_) => return,
-        };
+    let Ok(c_path) =
+        std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+    else {
+        return;
+    };
 
     // SAFETY: calling POSIX functions with valid C string path.
     unsafe {
@@ -966,14 +968,15 @@ fn apply_metadata(
             }
         }
 
+        #[allow(clippy::cast_possible_wrap)] // timestamps fit in i64
         let times = [
             libc::timespec {
                 tv_sec: inode.atime.sec as i64,
-                tv_nsec: inode.atime.nsec as i64,
+                tv_nsec: i64::from(inode.atime.nsec),
             },
             libc::timespec {
                 tv_sec: inode.mtime.sec as i64,
-                tv_nsec: inode.mtime.nsec as i64,
+                tv_nsec: i64::from(inode.mtime.nsec),
             },
         ];
         if libc::utimensat(
@@ -997,7 +1000,7 @@ fn apply_metadata(
 fn decompress(
     data: &[u8],
     output_len: usize,
-    compression: &CompressionType,
+    compression: CompressionType,
 ) -> Result<Vec<u8>> {
     match compression {
         CompressionType::None => Ok(data.to_vec()),

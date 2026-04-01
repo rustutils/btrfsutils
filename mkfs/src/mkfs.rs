@@ -47,22 +47,26 @@ pub struct MkfsConfig {
     pub metadata_profile: crate::args::Profile,
     pub csum_type: crate::write::ChecksumType,
     /// Override for the current time (seconds since epoch). Used for
-    /// deterministic output in tests. None means use SystemTime::now().
+    /// deterministic output in tests. None means use `SystemTime::now()`.
     pub creation_time: Option<u64>,
 }
 
 impl MkfsConfig {
     /// Total bytes across all devices.
+    #[must_use]
     pub fn total_bytes(&self) -> u64 {
         self.devices.iter().map(|d| d.total_bytes).sum()
     }
 
     /// Number of devices.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)] // device count fits in u64
     pub fn num_devices(&self) -> u64 {
         self.devices.len() as u64
     }
 
     /// The primary device (devid 1).
+    #[must_use]
     pub fn primary_device(&self) -> &DeviceInfo {
         &self.devices[0]
     }
@@ -80,22 +84,28 @@ impl MkfsConfig {
 
 impl MkfsConfig {
     /// Default feature flags matching current btrfs-progs defaults.
+    #[must_use]
     pub fn default_incompat_flags() -> u64 {
-        raw::BTRFS_FEATURE_INCOMPAT_MIXED_BACKREF as u64
-            | raw::BTRFS_FEATURE_INCOMPAT_BIG_METADATA as u64
-            | raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF as u64
-            | raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64
-            | raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES as u64
+        u64::from(raw::BTRFS_FEATURE_INCOMPAT_MIXED_BACKREF)
+            | u64::from(raw::BTRFS_FEATURE_INCOMPAT_BIG_METADATA)
+            | u64::from(raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF)
+            | u64::from(raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA)
+            | u64::from(raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES)
     }
 
-    /// Default compat_ro feature flags (free-space-tree + block-group-tree).
+    /// Default `compat_ro` feature flags (free-space-tree + block-group-tree).
+    #[must_use]
     pub fn default_compat_ro_flags() -> u64 {
-        raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64
-            | raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID as u64
-            | raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE as u64
+        u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE)
+            | u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID)
+            | u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE)
     }
 
     /// Apply user-specified feature flags (`-O` arguments) on top of defaults.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an unsupported feature is requested.
     pub fn apply_features(
         &mut self,
         features: &[crate::args::FeatureArg],
@@ -119,42 +129,40 @@ impl MkfsConfig {
             let (incompat_bit, compat_ro_bit): (Option<u64>, Option<u64>) =
                 match f.feature {
                     Feature::MixedBg => (
-                        Some(raw::BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS as u64),
+                        Some(u64::from(raw::BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS)),
                         None,
                     ),
                     Feature::Extref => (
                         Some(
-                            raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF as u64,
+                            u64::from(raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF),
                         ),
                         None,
                     ),
                     Feature::Raid56 => (
-                        Some(raw::BTRFS_FEATURE_INCOMPAT_RAID56 as u64),
+                        Some(u64::from(raw::BTRFS_FEATURE_INCOMPAT_RAID56)),
                         None,
                     ),
                     Feature::SkinnyMetadata => (
                         Some(
-                            raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64,
+                            u64::from(raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA),
                         ),
                         None,
                     ),
                     Feature::NoHoles => (
-                        Some(raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES as u64),
+                        Some(u64::from(raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES)),
                         None,
                     ),
                     Feature::FreeSpaceTree => (
                         None,
                         Some(
-                            raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64
-                                | raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID
-                                    as u64,
+                            u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE)
+                                | u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID),
                         ),
                     ),
                     Feature::BlockGroupTree => (
                         None,
                         Some(
-                            raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE
-                                as u64,
+                            u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE),
                         ),
                     ),
                     Feature::Zoned
@@ -189,27 +197,42 @@ impl MkfsConfig {
     }
 
     /// Whether the skinny-metadata incompat feature is enabled.
+    #[must_use]
     pub fn skinny_metadata(&self) -> bool {
-        self.incompat_flags & raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64
+        self.incompat_flags
+            & u64::from(raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA)
             != 0
     }
 
-    /// Whether the free-space-tree compat_ro feature is enabled.
+    /// Whether the free-space-tree `compat_ro` feature is enabled.
+    #[must_use]
     pub fn has_free_space_tree(&self) -> bool {
         self.compat_ro_flags
-            & raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64
+            & u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE)
             != 0
     }
 
-    /// Whether the block-group-tree compat_ro feature is enabled.
+    /// Whether the block-group-tree `compat_ro` feature is enabled.
+    #[must_use]
     pub fn has_block_group_tree(&self) -> bool {
         self.compat_ro_flags
-            & raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE as u64
+            & u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE)
             != 0
     }
 }
 
 /// Create a btrfs filesystem on one or more devices.
+///
+/// # Errors
+///
+/// Returns an error if validation fails, the device is too small, or I/O fails.
+///
+/// # Panics
+///
+/// Panics if chunk layout computation succeeds but returns `None` unexpectedly.
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::cast_possible_truncation)] // key types fit in u8, devid-1 fits usize
+#[allow(clippy::cast_sign_loss)] // DATA_RELOC_TREE_OBJECTID is positive
 pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
     // Validate nodesize/sectorsize.
     if !cfg.sectorsize.is_power_of_two() || cfg.sectorsize < 4096 {
@@ -230,7 +253,8 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         );
     }
     // Mixed block groups require nodesize == sectorsize.
-    if cfg.incompat_flags & raw::BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS as u64 != 0
+    if cfg.incompat_flags & u64::from(raw::BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS)
+        != 0
         && cfg.nodesize != cfg.sectorsize
     {
         bail!(
@@ -356,6 +380,19 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
 }
 
 /// Create a btrfs filesystem populated from a source directory.
+///
+/// # Errors
+///
+/// Returns an error if validation fails, the device is too small, or I/O fails.
+///
+/// # Panics
+///
+/// Panics if internal consistency checks fail (e.g. extent tree block count
+/// changes after convergence).
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::cast_possible_truncation)] // key types fit in u8, devid-1 fits usize
+#[allow(clippy::cast_sign_loss)] // DATA_RELOC_TREE_OBJECTID is positive
+#[allow(clippy::similar_names)]
 pub fn make_btrfs_with_rootdir(
     cfg: &MkfsConfig,
     rootdir: &Path,
@@ -385,7 +422,7 @@ pub fn make_btrfs_with_rootdir(
     let skinny = cfg.skinny_metadata();
     let has_free_space = cfg.has_free_space_tree();
     let has_block_group = cfg.has_block_group_tree();
-    let root_ino = raw::BTRFS_FIRST_FREE_OBJECTID as u64;
+    let root_ino = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID);
 
     // Walk rootdir to plan all items and compute data needs.
     let mut plan = rootdir::walk_directory(
@@ -489,7 +526,7 @@ pub fn make_btrfs_with_rootdir(
     let data_reloc_items: Vec<(Key, Vec<u8>)> = vec![
         (
             Key::new(root_ino, raw::BTRFS_INODE_ITEM_KEY as u8, 0),
-            items::inode_item_dir(generation, cfg.nodesize as u64, now),
+            items::inode_item_dir(generation, u64::from(cfg.nodesize), now),
         ),
         (
             Key::new(root_ino, raw::BTRFS_INODE_REF_KEY as u8, root_ino),
@@ -507,10 +544,10 @@ pub fn make_btrfs_with_rootdir(
 
     // Build variable-size trees to determine their block counts.
     let fs_tree = tb
-        .clone_with_owner(raw::BTRFS_FS_TREE_OBJECTID as u64)
+        .clone_with_owner(u64::from(raw::BTRFS_FS_TREE_OBJECTID))
         .build(&all_fs_items);
     let csum_tree = tb
-        .clone_with_owner(raw::BTRFS_CSUM_TREE_OBJECTID as u64)
+        .clone_with_owner(u64::from(raw::BTRFS_CSUM_TREE_OBJECTID))
         .build(&data_output.csum_items);
     let data_reloc_tree = tb
         .clone_with_owner(raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64)
@@ -520,7 +557,7 @@ pub fn make_btrfs_with_rootdir(
     // csum(...), free_space, data_reloc(...), block_group.
 
     // Convergence: compute extent tree block count until stable.
-    let ns = cfg.nodesize as u64;
+    let ns = u64::from(cfg.nodesize);
     let mut extent_tree_block_count = 1usize;
     loop {
         // Simulate address allocation in the fixed order.
@@ -532,7 +569,7 @@ pub fn make_btrfs_with_rootdir(
             SYSTEM_GROUP_OFFSET,
             skinny,
             generation,
-            raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_CHUNK_TREE_OBJECTID),
             cfg.nodesize,
         ));
 
@@ -541,7 +578,7 @@ pub fn make_btrfs_with_rootdir(
             addr,
             skinny,
             generation,
-            raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_ROOT_TREE_OBJECTID),
             cfg.nodesize,
         ));
         addr += ns;
@@ -552,7 +589,7 @@ pub fn make_btrfs_with_rootdir(
                 addr,
                 skinny,
                 generation,
-                raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
+                u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
                 cfg.nodesize,
             ));
             addr += ns;
@@ -563,7 +600,7 @@ pub fn make_btrfs_with_rootdir(
             addr,
             skinny,
             generation,
-            raw::BTRFS_DEV_TREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_DEV_TREE_OBJECTID),
             cfg.nodesize,
         ));
         addr += ns;
@@ -574,7 +611,7 @@ pub fn make_btrfs_with_rootdir(
                 addr,
                 skinny,
                 generation,
-                raw::BTRFS_FS_TREE_OBJECTID as u64,
+                u64::from(raw::BTRFS_FS_TREE_OBJECTID),
                 cfg.nodesize,
             ));
             addr += ns;
@@ -586,7 +623,7 @@ pub fn make_btrfs_with_rootdir(
                 addr,
                 skinny,
                 generation,
-                raw::BTRFS_CSUM_TREE_OBJECTID as u64,
+                u64::from(raw::BTRFS_CSUM_TREE_OBJECTID),
                 cfg.nodesize,
             ));
             addr += ns;
@@ -597,7 +634,7 @@ pub fn make_btrfs_with_rootdir(
                 addr,
                 skinny,
                 generation,
-                raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64,
+                u64::from(raw::BTRFS_FREE_SPACE_TREE_OBJECTID),
                 cfg.nodesize,
             ));
             addr += ns;
@@ -619,7 +656,7 @@ pub fn make_btrfs_with_rootdir(
                 addr,
                 skinny,
                 generation,
-                raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64,
+                u64::from(raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID),
                 cfg.nodesize,
             ));
         }
@@ -641,7 +678,7 @@ pub fn make_btrfs_with_rootdir(
                     ),
                     items::block_group_item(
                         0,
-                        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+                        u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
                         0,
                     ),
                 ));
@@ -650,7 +687,7 @@ pub fn make_btrfs_with_rootdir(
 
         trial_items.sort_by_key(|(k, _)| *k);
         let trial = tb
-            .clone_with_owner(raw::BTRFS_EXTENT_TREE_OBJECTID as u64)
+            .clone_with_owner(u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID))
             .build(&trial_items);
 
         if trial.blocks.len() == extent_tree_block_count {
@@ -709,14 +746,14 @@ pub fn make_btrfs_with_rootdir(
         chunk_tree_addr,
         skinny,
         generation,
-        raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_CHUNK_TREE_OBJECTID),
         cfg.nodesize,
     ));
     extent_items.push(metadata_extent_item(
         root_tree_addr,
         skinny,
         generation,
-        raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_ROOT_TREE_OBJECTID),
         cfg.nodesize,
     ));
     for &a in &extent_addrs {
@@ -724,7 +761,7 @@ pub fn make_btrfs_with_rootdir(
             a,
             skinny,
             generation,
-            raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
             cfg.nodesize,
         ));
     }
@@ -732,7 +769,7 @@ pub fn make_btrfs_with_rootdir(
         dev_tree_addr,
         skinny,
         generation,
-        raw::BTRFS_DEV_TREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_DEV_TREE_OBJECTID),
         cfg.nodesize,
     ));
     for &a in &fs_addrs {
@@ -740,7 +777,7 @@ pub fn make_btrfs_with_rootdir(
             a,
             skinny,
             generation,
-            raw::BTRFS_FS_TREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_FS_TREE_OBJECTID),
             cfg.nodesize,
         ));
     }
@@ -749,7 +786,7 @@ pub fn make_btrfs_with_rootdir(
             a,
             skinny,
             generation,
-            raw::BTRFS_CSUM_TREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_CSUM_TREE_OBJECTID),
             cfg.nodesize,
         ));
     }
@@ -758,7 +795,7 @@ pub fn make_btrfs_with_rootdir(
             a,
             skinny,
             generation,
-            raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_FREE_SPACE_TREE_OBJECTID),
             cfg.nodesize,
         ));
     }
@@ -776,7 +813,7 @@ pub fn make_btrfs_with_rootdir(
             a,
             skinny,
             generation,
-            raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID),
             cfg.nodesize,
         ));
     }
@@ -793,7 +830,7 @@ pub fn make_btrfs_with_rootdir(
     extent_items.sort_by_key(|(k, _)| *k);
 
     let mut extent_tree = tb
-        .clone_with_owner(raw::BTRFS_EXTENT_TREE_OBJECTID as u64)
+        .clone_with_owner(u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID))
         .build(&extent_items);
     assert_eq!(
         extent_tree.blocks.len(),
@@ -878,7 +915,7 @@ pub fn make_btrfs_with_rootdir(
                 phys_end = phys_end.max(s.offset + chunks.data_size);
             }
         }
-        let shrunk = rootdir::align_up(phys_end, cfg.sectorsize as u64);
+        let shrunk = rootdir::align_up(phys_end, u64::from(cfg.sectorsize));
         effective_cfg = MkfsConfig {
             devices: vec![DeviceInfo {
                 devid: dev.devid,
@@ -907,10 +944,12 @@ pub fn make_btrfs_with_rootdir(
         cfg,
         &BlockLayout::new(cfg.nodesize, chunks.meta_logical),
         &chunks,
-        &|_| leaf_hdr(raw::BTRFS_CHUNK_TREE_OBJECTID as u64, chunk_tree_addr),
+        &|_| {
+            leaf_hdr(u64::from(raw::BTRFS_CHUNK_TREE_OBJECTID), chunk_tree_addr)
+        },
     )?;
     let dev_tree_buf = build_dev_tree(cfg, &chunks, &|_| {
-        leaf_hdr(raw::BTRFS_DEV_TREE_OBJECTID as u64, dev_tree_addr)
+        leaf_hdr(u64::from(raw::BTRFS_DEV_TREE_OBJECTID), dev_tree_addr)
     })?;
 
     let free_space_buf = free_space_addr
@@ -943,18 +982,18 @@ pub fn make_btrfs_with_rootdir(
         addr: root_tree_addr,
         trees: &[
             (
-                raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
+                u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
                 extent_root_addr,
                 extent_tree.root_level,
             ),
-            (raw::BTRFS_DEV_TREE_OBJECTID as u64, dev_tree_addr, 0),
+            (u64::from(raw::BTRFS_DEV_TREE_OBJECTID), dev_tree_addr, 0),
             (
-                raw::BTRFS_FS_TREE_OBJECTID as u64,
+                u64::from(raw::BTRFS_FS_TREE_OBJECTID),
                 fs_root_addr,
                 fs_tree.root_level,
             ),
             (
-                raw::BTRFS_CSUM_TREE_OBJECTID as u64,
+                u64::from(raw::BTRFS_CSUM_TREE_OBJECTID),
                 csum_root_addr,
                 csum_tree.root_level,
             ),
@@ -1042,6 +1081,7 @@ pub fn make_btrfs_with_rootdir(
     Ok(())
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn metadata_extent_item(
     addr: u64,
     skinny: bool,
@@ -1052,7 +1092,7 @@ fn metadata_extent_item(
     let (item_type, offset) = if skinny {
         (raw::BTRFS_METADATA_ITEM_KEY as u8, 0u64)
     } else {
-        (raw::BTRFS_EXTENT_ITEM_KEY as u8, nodesize as u64)
+        (raw::BTRFS_EXTENT_ITEM_KEY as u8, u64::from(nodesize))
     };
     (
         Key::new(addr, item_type, offset),
@@ -1060,6 +1100,7 @@ fn metadata_extent_item(
     )
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn add_block_group_items(
     v: &mut Vec<(Key, Vec<u8>)>,
     cfg: &MkfsConfig,
@@ -1075,8 +1116,8 @@ fn add_block_group_items(
         ),
         items::block_group_item(
             alloc.system_used(),
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
         ),
     ));
     v.push((
@@ -1087,8 +1128,8 @@ fn add_block_group_items(
         ),
         items::block_group_item(
             alloc.metadata_used(),
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_METADATA as u64
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_METADATA)
                 | cfg.metadata_profile.block_group_flag(),
         ),
     ));
@@ -1100,8 +1141,8 @@ fn add_block_group_items(
         ),
         items::block_group_item(
             data_used,
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_DATA as u64
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_DATA)
                 | cfg.data_profile.block_group_flag(),
         ),
     ));
@@ -1119,13 +1160,16 @@ struct RootTreeRootdirArgs<'a> {
     block_group_addr: Option<u64>,
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
+#[allow(clippy::cast_sign_loss)] // DATA_RELOC_TREE_OBJECTID is positive
+#[allow(clippy::items_after_statements)]
 fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
     let cfg = args.cfg;
     let header = LeafHeader {
         fsid: cfg.fs_uuid,
         chunk_tree_uuid: cfg.chunk_tree_uuid,
         generation: args.generation,
-        owner: raw::BTRFS_ROOT_TREE_OBJECTID as u64,
+        owner: u64::from(raw::BTRFS_ROOT_TREE_OBJECTID),
         bytenr: args.addr,
     };
     let mut leaf = LeafBuilder::new(cfg.nodesize, &header);
@@ -1143,12 +1187,12 @@ fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
             oid: o,
             addr: a,
             level: l,
-            is_fs: o == raw::BTRFS_FS_TREE_OBJECTID as u64,
+            is_fs: o == u64::from(raw::BTRFS_FS_TREE_OBJECTID),
         })
         .collect();
     if let Some(a) = args.free_space_addr {
         entries.push(E {
-            oid: raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64,
+            oid: u64::from(raw::BTRFS_FREE_SPACE_TREE_OBJECTID),
             addr: a,
             level: 0,
             is_fs: false,
@@ -1162,7 +1206,7 @@ fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
     });
     if let Some(a) = args.block_group_addr {
         entries.push(E {
-            oid: raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64,
+            oid: u64::from(raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID),
             addr: a,
             level: 0,
             is_fs: false,
@@ -1175,7 +1219,7 @@ fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
         let mut data = items::root_item(
             args.generation,
             e.addr,
-            raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
             cfg.nodesize,
         );
         data[mem::offset_of!(raw::btrfs_root_item, level)] = e.level;
@@ -1189,10 +1233,11 @@ fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
             data[uo..uo + 16].copy_from_slice(&ub);
             let fo = mem::offset_of!(raw::btrfs_inode_item, flags);
             data[fo..fo + 8].copy_from_slice(
-                &(raw::BTRFS_INODE_ROOT_ITEM_INIT as u64).to_le_bytes(),
+                &(u64::from(raw::BTRFS_INODE_ROOT_ITEM_INIT)).to_le_bytes(),
             );
             data[16..24].copy_from_slice(&3u64.to_le_bytes());
-            data[24..32].copy_from_slice(&(cfg.nodesize as u64).to_le_bytes());
+            data[24..32]
+                .copy_from_slice(&(u64::from(cfg.nodesize)).to_le_bytes());
             for off in [
                 mem::offset_of!(raw::btrfs_root_item, ctime),
                 mem::offset_of!(raw::btrfs_root_item, otime),
@@ -1207,6 +1252,7 @@ fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
     Ok(leaf.finish())
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn build_free_space_tree_rootdir(
     cfg: &MkfsConfig,
     alloc: &BlockAllocator,
@@ -1218,7 +1264,7 @@ fn build_free_space_tree_rootdir(
         fsid: cfg.fs_uuid,
         chunk_tree_uuid: cfg.chunk_tree_uuid,
         generation: 1,
-        owner: raw::BTRFS_FREE_SPACE_TREE_OBJECTID as u64,
+        owner: u64::from(raw::BTRFS_FREE_SPACE_TREE_OBJECTID),
         bytenr: addr,
     };
     let mut leaf = LeafBuilder::new(cfg.nodesize, &header);
@@ -1253,7 +1299,7 @@ fn build_free_space_tree_rootdir(
 
     let dfs = chunks.data_logical + data_used;
     let dfl = chunks.data_size - data_used;
-    let dc = if dfl > 0 { 1u32 } else { 0 };
+    let dc = u32::from(dfl > 0);
     leaf.push(
         Key::new(
             chunks.data_logical,
@@ -1274,6 +1320,7 @@ fn build_free_space_tree_rootdir(
     Ok(leaf.finish())
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn build_block_group_tree_rootdir(
     cfg: &MkfsConfig,
     alloc: &BlockAllocator,
@@ -1285,7 +1332,7 @@ fn build_block_group_tree_rootdir(
         fsid: cfg.fs_uuid,
         chunk_tree_uuid: cfg.chunk_tree_uuid,
         generation: 1,
-        owner: raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64,
+        owner: u64::from(raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID),
         bytenr: addr,
     };
     let mut leaf = LeafBuilder::new(cfg.nodesize, &header);
@@ -1297,8 +1344,8 @@ fn build_block_group_tree_rootdir(
         ),
         &items::block_group_item(
             alloc.system_used(),
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
         ),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -1310,8 +1357,8 @@ fn build_block_group_tree_rootdir(
         ),
         &items::block_group_item(
             alloc.metadata_used(),
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_METADATA as u64
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_METADATA)
                 | cfg.metadata_profile.block_group_flag(),
         ),
     )
@@ -1324,8 +1371,8 @@ fn build_block_group_tree_rootdir(
         ),
         &items::block_group_item(
             data_used,
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_DATA as u64
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_DATA)
                 | cfg.data_profile.block_group_flag(),
         ),
     )
@@ -1333,6 +1380,9 @@ fn build_block_group_tree_rootdir(
     Ok(leaf.finish())
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8, sizes fit in u32
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::unnecessary_wraps)]
 fn build_superblock_rootdir(
     cfg: &MkfsConfig,
     chunks: &ChunkLayout,
@@ -1346,14 +1396,14 @@ fn build_superblock_rootdir(
     let generation = 1u64;
     let dev1 = cfg.primary_device();
     let chunk_key = Key::new(
-        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
         raw::BTRFS_CHUNK_ITEM_KEY as u8,
         SYSTEM_GROUP_OFFSET,
     );
     let chunk_data = items::chunk_item_bootstrap(
         SYSTEM_GROUP_SIZE,
-        raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
-        raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+        u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
+        u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
         cfg.sectorsize,
         &StripeInfo {
             devid: dev1.devid,
@@ -1384,7 +1434,7 @@ fn build_superblock_rootdir(
         log_root_transid: 0,
         total_bytes: cfg.total_bytes(),
         bytes_used,
-        root_dir_objectid: raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+        root_dir_objectid: u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
         num_devices: cfg.num_devices(),
         sectorsize: cfg.sectorsize,
         nodesize: cfg.nodesize,
@@ -1432,11 +1482,20 @@ fn build_superblock_rootdir(
     Ok(buf.to_vec())
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
+#[allow(clippy::cast_sign_loss)] // DATA_RELOC_TREE_OBJECTID is positive
+#[allow(clippy::too_many_lines)]
 fn build_root_tree(
     cfg: &MkfsConfig,
     layout: &BlockLayout,
     leaf_header: &dyn Fn(TreeId) -> LeafHeader,
 ) -> Result<Vec<u8>> {
+    struct RootEntry {
+        objectid: u64,
+        bytenr: u64,
+        is_fs_tree: bool,
+    }
+
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Root));
     let generation = 1u64;
 
@@ -1446,12 +1505,6 @@ fn build_root_tree(
     // ROOT_ITEM for it).
 
     // Collect entries sorted by objectid.
-    struct RootEntry {
-        objectid: u64,
-        bytenr: u64,
-        is_fs_tree: bool,
-    }
-
     let mut entries: Vec<RootEntry> = TreeId::ROOT_ITEM_TREES
         .iter()
         .map(|&tree| RootEntry {
@@ -1477,7 +1530,7 @@ fn build_root_tree(
         let mut data = items::root_item(
             generation,
             entry.bytenr,
-            raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
             cfg.nodesize,
         );
 
@@ -1498,13 +1551,14 @@ fn build_root_tree(
             // Set inode flags = BTRFS_INODE_ROOT_ITEM_INIT
             let flags_off = mem::offset_of!(raw::btrfs_inode_item, flags);
             data[flags_off..flags_off + 8].copy_from_slice(
-                &(raw::BTRFS_INODE_ROOT_ITEM_INIT as u64).to_le_bytes(),
+                &(u64::from(raw::BTRFS_INODE_ROOT_ITEM_INIT)).to_le_bytes(),
             );
 
             // Set inode.size = 3 (C reference convention)
             data[16..24].copy_from_slice(&3u64.to_le_bytes());
             // Set inode.nbytes = nodesize
-            data[24..32].copy_from_slice(&(cfg.nodesize as u64).to_le_bytes());
+            data[24..32]
+                .copy_from_slice(&(u64::from(cfg.nodesize)).to_le_bytes());
 
             // Set timestamps: otime and ctime
             let now = cfg.now_secs();
@@ -1525,6 +1579,8 @@ fn build_root_tree(
     Ok(leaf.finish())
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
+#[allow(clippy::too_many_lines)]
 fn build_extent_tree(
     cfg: &MkfsConfig,
     layout: &BlockLayout,
@@ -1555,7 +1611,7 @@ fn build_extent_tree(
         } else {
             raw::BTRFS_EXTENT_ITEM_KEY as u8
         };
-        let offset = if skinny { 0 } else { cfg.nodesize as u64 };
+        let offset = if skinny { 0 } else { u64::from(cfg.nodesize) };
         let key = Key::new(addr, item_type, offset);
         let data = items::extent_item(1, generation, skinny, tree.objectid());
         extent_items.push((key, data));
@@ -1572,8 +1628,8 @@ fn build_extent_tree(
             ),
             items::block_group_item(
                 layout.system_used(),
-                raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-                raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+                u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+                u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
             ),
         ));
 
@@ -1586,8 +1642,8 @@ fn build_extent_tree(
             ),
             items::block_group_item(
                 layout.metadata_used(cfg.has_block_group_tree()),
-                raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-                raw::BTRFS_BLOCK_GROUP_METADATA as u64
+                u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+                u64::from(raw::BTRFS_BLOCK_GROUP_METADATA)
                     | cfg.metadata_profile.block_group_flag(),
             ),
         ));
@@ -1601,8 +1657,8 @@ fn build_extent_tree(
             ),
             items::block_group_item(
                 0,
-                raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-                raw::BTRFS_BLOCK_GROUP_DATA as u64
+                u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+                u64::from(raw::BTRFS_BLOCK_GROUP_DATA)
                     | cfg.data_profile.block_group_flag(),
             ),
         ));
@@ -1619,6 +1675,7 @@ fn build_extent_tree(
     Ok(leaf.finish())
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn build_chunk_tree(
     cfg: &MkfsConfig,
     _layout: &BlockLayout,
@@ -1638,7 +1695,7 @@ fn build_chunk_tree(
             &cfg.fs_uuid,
         );
         let dev_key = Key::new(
-            raw::BTRFS_DEV_ITEMS_OBJECTID as u64,
+            u64::from(raw::BTRFS_DEV_ITEMS_OBJECTID),
             raw::BTRFS_DEV_ITEM_KEY as u8,
             dev.devid,
         );
@@ -1655,13 +1712,13 @@ fn build_chunk_tree(
     };
     let sys_chunk_data = items::chunk_item_bootstrap(
         SYSTEM_GROUP_SIZE,
-        raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
-        raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+        u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
+        u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
         cfg.sectorsize,
         &sys_stripe,
     );
     let sys_chunk_key = Key::new(
-        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
         raw::BTRFS_CHUNK_ITEM_KEY as u8,
         SYSTEM_GROUP_OFFSET,
     );
@@ -1671,8 +1728,8 @@ fn build_chunk_tree(
     // CHUNK_ITEM for metadata chunk
     let meta_chunk_data = items::chunk_item(
         chunks.meta_size,
-        raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
-        raw::BTRFS_BLOCK_GROUP_METADATA as u64
+        u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
+        u64::from(raw::BTRFS_BLOCK_GROUP_METADATA)
             | cfg.metadata_profile.block_group_flag(),
         crate::layout::STRIPE_LEN as u32,
         crate::layout::STRIPE_LEN as u32,
@@ -1680,7 +1737,7 @@ fn build_chunk_tree(
         &chunks.meta_stripes,
     );
     let meta_chunk_key = Key::new(
-        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
         raw::BTRFS_CHUNK_ITEM_KEY as u8,
         chunks.meta_logical,
     );
@@ -1690,8 +1747,8 @@ fn build_chunk_tree(
     // CHUNK_ITEM for data chunk
     let data_chunk_data = items::chunk_item(
         chunks.data_size,
-        raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
-        raw::BTRFS_BLOCK_GROUP_DATA as u64
+        u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
+        u64::from(raw::BTRFS_BLOCK_GROUP_DATA)
             | cfg.data_profile.block_group_flag(),
         crate::layout::STRIPE_LEN as u32,
         crate::layout::STRIPE_LEN as u32,
@@ -1699,7 +1756,7 @@ fn build_chunk_tree(
         &chunks.data_stripes,
     );
     let data_chunk_key = Key::new(
-        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
         raw::BTRFS_CHUNK_ITEM_KEY as u8,
         chunks.data_logical,
     );
@@ -1709,6 +1766,7 @@ fn build_chunk_tree(
     Ok(leaf.finish())
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn build_dev_tree(
     cfg: &MkfsConfig,
     chunks: &ChunkLayout,
@@ -1724,7 +1782,7 @@ fn build_dev_tree(
     // DEV_STATS (PERSISTENT_ITEM) for each device
     for dev in &cfg.devices {
         let stats_key = Key::new(
-            raw::BTRFS_DEV_STATS_OBJECTID as u64,
+            u64::from(raw::BTRFS_DEV_STATS_OBJECTID),
             raw::BTRFS_PERSISTENT_ITEM_KEY as u8,
             dev.devid,
         );
@@ -1733,8 +1791,8 @@ fn build_dev_tree(
 
     // DEV_EXTENT for the system chunk (always device 1)
     let sys_extent = items::dev_extent(
-        raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
-        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_CHUNK_TREE_OBJECTID),
+        u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
         SYSTEM_GROUP_OFFSET,
         SYSTEM_GROUP_SIZE,
         &cfg.chunk_tree_uuid,
@@ -1747,8 +1805,8 @@ fn build_dev_tree(
     // DEV_EXTENT for each metadata stripe
     for stripe in &chunks.meta_stripes {
         let ext = items::dev_extent(
-            raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
             chunks.meta_logical,
             chunks.meta_size,
             &cfg.chunk_tree_uuid,
@@ -1766,8 +1824,8 @@ fn build_dev_tree(
     // DEV_EXTENT for each data stripe
     for stripe in &chunks.data_stripes {
         let ext = items::dev_extent(
-            raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+            u64::from(raw::BTRFS_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
             chunks.data_logical,
             chunks.data_size,
             &cfg.chunk_tree_uuid,
@@ -1799,8 +1857,9 @@ fn build_empty_tree(nodesize: u32, header: &LeafHeader) -> Vec<u8> {
 
 /// Build a tree with a root directory inode (objectid 256).
 ///
-/// Used for FS_TREE and DATA_RELOC_TREE — the kernel requires both to
+/// Used for `FS_TREE` and `DATA_RELOC_TREE` -- the kernel requires both to
 /// have at least an inode item for the root directory.
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn build_root_dir_tree(
     cfg: &MkfsConfig,
     header: &LeafHeader,
@@ -1812,20 +1871,20 @@ fn build_root_dir_tree(
 
     // INODE_ITEM for objectid 256 (BTRFS_FIRST_FREE_OBJECTID)
     let inode_key = Key::new(
-        raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
         raw::BTRFS_INODE_ITEM_KEY as u8,
         0,
     );
     let inode_data =
-        items::inode_item_dir(generation, cfg.nodesize as u64, now);
+        items::inode_item_dir(generation, u64::from(cfg.nodesize), now);
     leaf.push(inode_key, &inode_data)
         .map_err(|e| anyhow::anyhow!("root dir tree: {e}"))?;
 
     // INODE_REF for objectid 256, parent 256, name ".."
     let ref_key = Key::new(
-        raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
         raw::BTRFS_INODE_REF_KEY as u8,
-        raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
     );
     let ref_data = items::inode_ref(0, b"..");
     leaf.push(ref_key, &ref_data)
@@ -1834,6 +1893,7 @@ fn build_root_dir_tree(
     Ok(leaf.finish())
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn build_free_space_tree(
     cfg: &MkfsConfig,
     layout: &BlockLayout,
@@ -1913,6 +1973,7 @@ fn build_free_space_tree(
     Ok(leaf.finish())
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn build_block_group_tree(
     cfg: &MkfsConfig,
     layout: &BlockLayout,
@@ -1931,8 +1992,8 @@ fn build_block_group_tree(
         ),
         &items::block_group_item(
             layout.system_used(),
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
         ),
     )
     .map_err(|e| anyhow::anyhow!("block group tree: {e}"))?;
@@ -1946,8 +2007,8 @@ fn build_block_group_tree(
         ),
         &items::block_group_item(
             layout.metadata_used(cfg.has_block_group_tree()),
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_METADATA as u64
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_METADATA)
                 | cfg.metadata_profile.block_group_flag(),
         ),
     )
@@ -1962,8 +2023,8 @@ fn build_block_group_tree(
         ),
         &items::block_group_item(
             0,
-            raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
-            raw::BTRFS_BLOCK_GROUP_DATA as u64
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_DATA)
                 | cfg.data_profile.block_group_flag(),
         ),
     )
@@ -1972,6 +2033,9 @@ fn build_block_group_tree(
     Ok(leaf.finish())
 }
 
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8, sizes fit in u32
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::unnecessary_wraps)]
 fn build_superblock(
     cfg: &MkfsConfig,
     layout: &BlockLayout,
@@ -1982,15 +2046,15 @@ fn build_superblock(
 
     // Build the sys_chunk_array: disk_key + chunk_item bytes.
     let chunk_key = Key::new(
-        raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID as u64,
+        u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
         raw::BTRFS_CHUNK_ITEM_KEY as u8,
         SYSTEM_GROUP_OFFSET,
     );
     let dev1 = cfg.primary_device();
     let chunk_data = items::chunk_item_bootstrap(
         SYSTEM_GROUP_SIZE,
-        raw::BTRFS_EXTENT_TREE_OBJECTID as u64,
-        raw::BTRFS_BLOCK_GROUP_SYSTEM as u64,
+        u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
+        u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
         cfg.sectorsize,
         &StripeInfo {
             devid: dev1.devid,
@@ -2025,7 +2089,7 @@ fn build_superblock(
         total_bytes: cfg.total_bytes(),
         bytes_used: layout.system_used()
             + layout.metadata_used(cfg.has_block_group_tree()),
-        root_dir_objectid: raw::BTRFS_FIRST_FREE_OBJECTID as u64,
+        root_dir_objectid: u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
         num_devices: cfg.num_devices(),
         sectorsize: cfg.sectorsize,
         nodesize: cfg.nodesize,
@@ -2081,6 +2145,10 @@ nix::ioctl_read!(blk_getsize64, 0x12, 114, u64);
 nix::ioctl_write_ptr!(blk_discard, 0x12, 119, [u64; 2]);
 
 /// Get the size of a device or file in bytes.
+///
+/// # Errors
+///
+/// Returns an error if the path cannot be stat'd or the ioctl fails.
 pub fn device_size(path: &Path) -> Result<u64> {
     let metadata = std::fs::metadata(path)
         .with_context(|| format!("failed to stat {}", path.display()))?;
@@ -2092,7 +2160,7 @@ pub fn device_size(path: &Path) -> Result<u64> {
         unsafe {
             blk_getsize64(
                 std::os::unix::io::AsRawFd::as_raw_fd(&file),
-                &mut size,
+                std::ptr::from_mut(&mut size),
             )
         }
         .with_context(|| {
@@ -2105,6 +2173,7 @@ pub fn device_size(path: &Path) -> Result<u64> {
 }
 
 /// Check if the device already contains a btrfs filesystem.
+#[must_use]
 pub fn has_btrfs_superblock(path: &Path) -> bool {
     let Ok(mut file) = File::open(path) else {
         return false;
@@ -2116,6 +2185,10 @@ pub fn has_btrfs_superblock(path: &Path) -> bool {
 }
 
 /// Check if a device is currently mounted (appears in /proc/mounts).
+///
+/// # Errors
+///
+/// Returns an error if the path cannot be resolved or /proc/mounts cannot be read.
 pub fn is_device_mounted(path: &Path) -> Result<bool> {
     let canonical = std::fs::canonicalize(path)
         .with_context(|| format!("cannot resolve path '{}'", path.display()))?;
@@ -2128,6 +2201,10 @@ pub fn is_device_mounted(path: &Path) -> Result<bool> {
 }
 
 /// Issue BLKDISCARD (TRIM) on the entire device.
+///
+/// # Errors
+///
+/// Returns an error if the device cannot be opened or the ioctl fails.
 pub fn discard_device(path: &Path, size: u64) -> Result<()> {
     let file =
         OpenOptions::new().write(true).open(path).with_context(|| {
@@ -2135,7 +2212,10 @@ pub fn discard_device(path: &Path, size: u64) -> Result<()> {
         })?;
     let range: [u64; 2] = [0, size];
     unsafe {
-        blk_discard(std::os::unix::io::AsRawFd::as_raw_fd(&file), &range)
+        blk_discard(
+            std::os::unix::io::AsRawFd::as_raw_fd(&file),
+            std::ptr::from_ref(&range),
+        )
     }
     .with_context(|| format!("BLKDISCARD failed on {}", path.display()))?;
     Ok(())
@@ -2145,6 +2225,7 @@ pub fn discard_device(path: &Path, size: u64) -> Result<()> {
 ///
 /// Must fit the system group (5 MiB), metadata DUP (2 x 32 MiB minimum),
 /// and data SINGLE (64 MiB minimum): 5 + 64 + 64 = 133 MiB.
+#[must_use]
 pub fn minimum_device_size(nodesize: u32) -> u64 {
     let _ = nodesize;
     // System (5M) + 2 * min_meta (32M) + min_data (64M) = 133M.

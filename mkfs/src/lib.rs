@@ -36,7 +36,7 @@
 //! - Single and multi-device (up to N devices)
 //! - Metadata profiles: SINGLE, DUP, RAID1, RAID1C3, RAID1C4
 //! - Data profiles: SINGLE, DUP, RAID0, RAID1, RAID1C3, RAID1C4
-//! - Checksum algorithms: CRC32C, xxhash64, SHA256, BLAKE2b
+//! - Checksum algorithms: CRC32C, xxhash64, SHA256, `BLAKE2b`
 //! - Free-space-tree, block-group-tree feature flags
 //! - Device validation (mounted check, existing FS detection, TRIM)
 

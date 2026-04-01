@@ -65,7 +65,7 @@ pub fn check_extent_tree<R: Read + Seek>(
     // Sort by address for deterministic error ordering.
     let mut sorted_addrs: Vec<u64> =
         tree_block_owners.keys().copied().collect();
-    sorted_addrs.sort();
+    sorted_addrs.sort_unstable();
 
     // Direction 1: every tree block from walks must have a backref in the
     // extent tree claiming the correct owner.
@@ -89,7 +89,7 @@ pub fn check_extent_tree<R: Read + Seek>(
     // correspond to an actual tree block owned by that tree.
     let mut extent_addrs: Vec<u64> =
         state.extent_backref_owners.keys().copied().collect();
-    extent_addrs.sort();
+    extent_addrs.sort_unstable();
     for &addr in &extent_addrs {
         let claimed_owners = &state.extent_backref_owners[&addr];
         for &claimed in claimed_owners {
@@ -111,9 +111,9 @@ pub fn check_extent_tree<R: Read + Seek>(
 struct ExtentCheckState {
     /// Currently tracked extent bytenr (0 = none pending).
     pending_bytenr: u64,
-    /// Length of the pending extent (from the key offset for EXTENT_ITEM).
+    /// Length of the pending extent (from the key offset for `EXTENT_ITEM`).
     pending_length: u64,
-    /// Declared ref count from the ExtentItem.
+    /// Declared ref count from the `ExtentItem`.
     pending_refs: u64,
     /// Counted refs (inline + standalone).
     pending_counted: u64,
@@ -124,10 +124,10 @@ struct ExtentCheckState {
     /// Accumulated stats.
     data_bytes_allocated: u64,
     data_bytes_referenced: u64,
-    /// All bytenrs that have a METADATA_ITEM or EXTENT_ITEM entry.
+    /// All bytenrs that have a `METADATA_ITEM` or `EXTENT_ITEM` entry.
     extent_item_addrs: HashSet<u64>,
     /// For tree block extents: address → list of claimed owner roots
-    /// (from TREE_BLOCK_REF inline backrefs and standalone backrefs).
+    /// (from `TREE_BLOCK_REF` inline backrefs and standalone backrefs).
     extent_backref_owners: HashMap<u64, Vec<u64>>,
 }
 
@@ -249,11 +249,8 @@ fn process_extent_item(
             }
         }
 
-        KeyType::BlockGroupItem => {
-            // Block group items live in the extent tree (or block group
-            // tree). Skip them here — they're checked in chunks.rs.
-        }
-
+        // Block group items (and any other key types) are not relevant
+        // for extent ref counting — block groups are checked in chunks.rs.
         _ => {}
     }
 }
@@ -281,7 +278,7 @@ fn flush_pending(state: &mut ExtentCheckState, results: &mut CheckResults) {
     state.pending_bytenr = 0;
 }
 
-/// Count the number of references from inline backrefs in an ExtentItem.
+/// Count the number of references from inline backrefs in an `ExtentItem`.
 fn count_inline_refs(ei: &ExtentItem) -> u64 {
     let mut count = 0u64;
     for iref in &ei.inline_refs {
@@ -289,8 +286,8 @@ fn count_inline_refs(ei: &ExtentItem) -> u64 {
             btrfs_disk::items::InlineRef::ExtentDataBackref {
                 count: c,
                 ..
-            } => count += u64::from(*c),
-            btrfs_disk::items::InlineRef::SharedDataBackref {
+            }
+            | btrfs_disk::items::InlineRef::SharedDataBackref {
                 count: c,
                 ..
             } => count += u64::from(*c),

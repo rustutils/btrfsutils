@@ -29,6 +29,7 @@ pub use self::{
 /// useful for debugging, analysis, and recovery operations. Most operations
 /// require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct InspectCommand {
     #[clap(subcommand)]
     pub subcommand: InspectSubcommand,

@@ -6,7 +6,7 @@ use btrfs_uapi::subvolume::{
 use clap::Parser;
 use std::{os::unix::io::AsFd, path::PathBuf};
 
-/// Wrapper around SubvolumeFlags that implements FromStr for clap parsing.
+/// Wrapper around `SubvolumeFlags` that implements `FromStr` for clap parsing.
 #[derive(Debug, Clone, Copy)]
 pub struct ParsedSubvolumeFlags(SubvolumeFlags);
 

@@ -14,6 +14,7 @@ pub use self::{cancel::*, start::*, status::*};
 /// data is read from the old device and written to the new one. The replace
 /// operation can be monitored and cancelled. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct ReplaceCommand {
     #[clap(subcommand)]
     pub subcommand: ReplaceSubcommand,

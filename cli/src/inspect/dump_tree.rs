@@ -16,6 +16,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 /// are printed. Use -t to select a specific tree, -b to print a specific
 /// block, or -e/-d/-u to print subsets.
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct DumpTreeCommand {
     /// Path to a btrfs block device or image file
     path: PathBuf,
@@ -83,6 +84,7 @@ pub struct DumpTreeCommand {
 }
 
 impl Runnable for DumpTreeCommand {
+    #[allow(clippy::too_many_lines)]
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         println!("btrfs-cli v{}", env!("CARGO_PKG_VERSION"));
 

@@ -65,6 +65,7 @@ pub enum Level {
 /// Most operations require CAP_SYS_ADMIN (root privileges) or special permissions for
 /// the specific filesystem.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 #[clap(version, infer_subcommands = true)]
 pub struct Arguments {
     #[clap(flatten)]
@@ -102,6 +103,11 @@ pub struct GlobalOptions {
 
 /// A CLI subcommand that can be executed.
 pub trait Runnable {
+    /// Execute this command.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the command fails.
     fn run(&self, format: Format, dry_run: bool) -> Result<()>;
 }
 
@@ -156,6 +162,11 @@ impl Runnable for Command {
 }
 
 impl Arguments {
+    /// Parse and run the CLI command.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the command fails.
     pub fn run(&self) -> Result<()> {
         let level = if let Some(explicit) = self.global.log {
             match explicit {

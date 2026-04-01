@@ -31,6 +31,7 @@ impl Runnable for BalanceStatusCommand {
                     println!("Balance on '{}' is paused", self.path.display());
                 }
 
+                #[allow(clippy::cast_precision_loss)]
                 let pct_left = if progress.expected > 0 {
                     100.0
                         * (1.0

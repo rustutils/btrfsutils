@@ -17,6 +17,7 @@ use std::{os::unix::io::AsFd, path::PathBuf};
 /// Scrubs all devices sequentially. This command blocks until the scrub
 /// completes; use Ctrl-C to cancel.
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ScrubStartCommand {
     /// Do not background (default behavior, accepted for compatibility)
     #[clap(short = 'B')]
@@ -176,6 +177,7 @@ impl ScrubStartCommand {
         Ok(old_limits)
     }
 
+    #[allow(clippy::unused_self)] // method kept on the command struct for consistency
     fn restore_limits(&self, sysfs: &SysfsBtrfs, old_limits: &[(u64, u64)]) {
         for &(devid, old_limit) in old_limits {
             if let Err(e) = sysfs.scrub_speed_max_set(devid, old_limit) {

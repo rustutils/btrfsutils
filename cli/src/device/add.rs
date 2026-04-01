@@ -11,6 +11,7 @@ use std::{ffi::CString, fs, os::unix::io::AsFd, path::PathBuf};
 /// The device must not be mounted and should not contain a filesystem or
 /// other data. The operation requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct DeviceAddCommand {
     /// Force overwrite of an existing filesystem on the device
     #[clap(short = 'f', long)]

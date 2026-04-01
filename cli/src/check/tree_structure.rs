@@ -14,10 +14,10 @@ use uuid::Uuid;
 /// Classify a tree by its objectid for byte attribution.
 fn tree_kind(tree_id: u64) -> TreeKind {
     use btrfs_disk::raw;
-    if tree_id == raw::BTRFS_EXTENT_TREE_OBJECTID as u64 {
+    if tree_id == u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID) {
         TreeKind::Extent
-    } else if tree_id == raw::BTRFS_FS_TREE_OBJECTID as u64
-        || tree_id >= raw::BTRFS_FIRST_FREE_OBJECTID as u64
+    } else if tree_id == u64::from(raw::BTRFS_FS_TREE_OBJECTID)
+        || tree_id >= u64::from(raw::BTRFS_FIRST_FREE_OBJECTID)
     {
         TreeKind::Fs
     } else {
@@ -65,7 +65,7 @@ pub fn check_all_trees<R: Read + Seek>(
     let mut visited: HashMap<u64, u64> = HashMap::new();
 
     // Check root tree.
-    let root_oid = btrfs_disk::raw::BTRFS_ROOT_TREE_OBJECTID as u64;
+    let root_oid = u64::from(btrfs_disk::raw::BTRFS_ROOT_TREE_OBJECTID);
     check_tree(
         reader,
         "root tree",
@@ -78,7 +78,7 @@ pub fn check_all_trees<R: Read + Seek>(
     );
 
     // Check chunk tree.
-    let chunk_oid = btrfs_disk::raw::BTRFS_CHUNK_TREE_OBJECTID as u64;
+    let chunk_oid = u64::from(btrfs_disk::raw::BTRFS_CHUNK_TREE_OBJECTID);
     check_tree(
         reader,
         "chunk tree",
@@ -294,7 +294,7 @@ fn key_less(a: &DiskKey, b: &DiskKey) -> bool {
     (a.objectid, a_type, a.offset) < (b.objectid, b_type, b.offset)
 }
 
-/// Return the fsid used for tree block validation. If the METADATA_UUID
+/// Return the fsid used for tree block validation. If the `METADATA_UUID`
 /// incompat flag is set, tree blocks use `metadata_uuid`; otherwise `fsid`.
 fn effective_fsid(sb: &Superblock) -> Uuid {
     if sb.has_metadata_uuid() {

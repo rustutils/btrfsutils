@@ -25,8 +25,8 @@ pub fn check_fs_roots<R: Read + Seek>(
     for (&tree_id, &(bytenr, _gen)) in tree_roots {
         // FS trees have objectid >= FIRST_FREE_OBJECTID (256) or are the
         // default FS tree (objectid 5).
-        let is_fs_tree = tree_id == raw::BTRFS_FS_TREE_OBJECTID as u64
-            || tree_id >= raw::BTRFS_FIRST_FREE_OBJECTID as u64;
+        let is_fs_tree = tree_id == u64::from(raw::BTRFS_FS_TREE_OBJECTID)
+            || tree_id >= u64::from(raw::BTRFS_FIRST_FREE_OBJECTID);
         if !is_fs_tree {
             continue;
         }
@@ -35,6 +35,16 @@ pub fn check_fs_roots<R: Read + Seek>(
     }
 }
 
+/// Mode mask for file type bits.
+const S_IFMT: u32 = 0o17_0000;
+/// Directory mode flag.
+const S_IFDIR: u32 = 0o04_0000;
+/// Regular file mode flag.
+const S_IFREG: u32 = 0o10_0000;
+/// Symlink mode flag.
+const S_IFLNK: u32 = 0o12_0000;
+
+#[allow(clippy::too_many_lines)]
 fn check_one_fs_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     tree_id: u64,
@@ -42,9 +52,8 @@ fn check_one_fs_tree<R: Read + Seek>(
     results: &mut CheckResults,
 ) {
     // Collect all items from this FS tree, grouped by inode number.
-    let items = match collect_fs_items(reader, root_bytenr, results) {
-        Some(items) => items,
-        None => return,
+    let Some(items) = collect_fs_items(reader, root_bytenr, results) else {
+        return;
     };
 
     // Set of all inodes that have an INODE_ITEM.
@@ -55,15 +64,6 @@ fn check_one_fs_tree<R: Read + Seek>(
         })
         .map(|(&ino, _)| ino)
         .collect();
-
-    /// Mode mask for file type bits.
-    const S_IFMT: u32 = 0o170000;
-    /// Directory mode flag.
-    const S_IFDIR: u32 = 0o040000;
-    /// Regular file mode flag.
-    const S_IFREG: u32 = 0o100000;
-    /// Symlink mode flag.
-    const S_IFLNK: u32 = 0o120000;
 
     for (&ino, entries) in &items {
         let mut has_inode_item = false;
@@ -139,7 +139,7 @@ fn check_one_fs_tree<R: Read + Seek>(
                         let child_ino = di.location.objectid;
                         if di.location.key_type == KeyType::InodeItem
                             && child_ino
-                                >= raw::BTRFS_FIRST_FREE_OBJECTID as u64
+                                >= u64::from(raw::BTRFS_FIRST_FREE_OBJECTID)
                             && !inodes_with_item.contains(&child_ino)
                         {
                             let name =
@@ -160,7 +160,7 @@ fn check_one_fs_tree<R: Read + Seek>(
                         let child_ino = di.location.objectid;
                         if di.location.key_type == KeyType::InodeItem
                             && child_ino
-                                >= raw::BTRFS_FIRST_FREE_OBJECTID as u64
+                                >= u64::from(raw::BTRFS_FIRST_FREE_OBJECTID)
                             && !inodes_with_item.contains(&child_ino)
                         {
                             let name =
@@ -195,7 +195,7 @@ fn check_one_fs_tree<R: Read + Seek>(
         // Nlink check: skip the root dir inode (256) which has special nlink
         // handling, and skip inodes without an inode item (already reported).
         if has_inode_item
-            && ino >= raw::BTRFS_FIRST_FREE_OBJECTID as u64
+            && ino >= u64::from(raw::BTRFS_FIRST_FREE_OBJECTID)
             && inode_nlink != ref_count
             && ref_count > 0
         {
@@ -239,7 +239,7 @@ fn check_one_fs_tree<R: Read + Seek>(
 }
 
 /// Collected items for one FS tree, grouped by objectid (inode number).
-/// Each entry is (key_type, key_offset, raw_data).
+/// Each entry is (`key_type`, `key_offset`, `raw_data`).
 type FsItemMap = BTreeMap<u64, Vec<(KeyType, u64, Vec<u8>)>>;
 
 fn collect_fs_items<R: Read + Seek>(

@@ -27,6 +27,7 @@ pub enum CheckMode {
 /// running this command. This is a potentially slow operation that requires
 /// CAP_SYS_ADMIN. Use --readonly to perform checks without attempting repairs.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown, clippy::struct_excessive_bools)]
 pub struct CheckCommand {
     /// Path to the device containing the btrfs filesystem
     device: PathBuf,
@@ -89,6 +90,7 @@ pub struct CheckCommand {
 }
 
 impl Runnable for CheckCommand {
+    #[allow(clippy::too_many_lines)]
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         // Reject unsupported flags.
         if self.repair {
@@ -136,6 +138,7 @@ impl Runnable for CheckCommand {
         eprintln!("Opening filesystem to check...");
 
         let mut file = File::open(&self.device)?;
+        #[allow(clippy::cast_possible_truncation)] // mirror index fits in u32
         let mirror = self.superblock.unwrap_or(0) as u32;
 
         let mut open =
@@ -164,7 +167,7 @@ impl Runnable for CheckCommand {
         eprintln!("[3/7] checking extents");
         let extent_root = open
             .tree_roots
-            .get(&(raw::BTRFS_EXTENT_TREE_OBJECTID as u64))
+            .get(&u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID))
             .map(|&(bytenr, _)| bytenr);
         if let Some(extent_root) = extent_root {
             extents::check_extent_tree(
@@ -182,14 +185,14 @@ impl Runnable for CheckCommand {
             != 0
         {
             open.tree_roots
-                .get(&(raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID as u64))
+                .get(&u64::from(raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID))
                 .map(|&(bytenr, _)| bytenr)
         } else {
             None
         };
         let dev_tree_root = open
             .tree_roots
-            .get(&(raw::BTRFS_DEV_TREE_OBJECTID as u64))
+            .get(&u64::from(raw::BTRFS_DEV_TREE_OBJECTID))
             .map(|&(bytenr, _)| bytenr);
         if let (Some(er), Some(dr)) = (extent_root, dev_tree_root) {
             chunks::check_chunks(
@@ -220,7 +223,7 @@ impl Runnable for CheckCommand {
         }
         let csum_root = open
             .tree_roots
-            .get(&(raw::BTRFS_CSUM_TREE_OBJECTID as u64))
+            .get(&u64::from(raw::BTRFS_CSUM_TREE_OBJECTID))
             .map(|&(bytenr, _)| bytenr);
         if let Some(csum_root) = csum_root {
             csums::check_csums(

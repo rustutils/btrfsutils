@@ -1,7 +1,8 @@
 use crate::{Format, Runnable, util::is_mounted};
 use anyhow::{Context, Result, bail};
-use btrfs_disk::superblock::{
-    read_superblock_bytes, write_superblock_all_mirrors,
+use btrfs_disk::{
+    raw,
+    superblock::{read_superblock_bytes, write_superblock_all_mirrors},
 };
 use clap::Parser;
 use std::{fs::OpenOptions, mem, path::PathBuf};
@@ -41,7 +42,6 @@ impl Runnable for RescueZeroLogCommand {
             )
         })?;
 
-        use btrfs_disk::raw;
         let log_root_off = mem::offset_of!(raw::btrfs_super_block, log_root);
         let log_root_level_off =
             mem::offset_of!(raw::btrfs_super_block, log_root_level);

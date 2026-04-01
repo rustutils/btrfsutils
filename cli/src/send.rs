@@ -28,6 +28,7 @@ const HEADING_PROTOCOL: &str = "Protocol";
 /// changes. The stream output is in btrfs send format and can be received
 /// with the receive command. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
+#[allow(clippy::doc_markdown)]
 pub struct SendCommand {
     /// Subvolume(s) to send
     #[clap(required = true)]
@@ -62,7 +63,7 @@ pub struct SendCommand {
     compressed_data: bool,
 }
 
-/// Buffer size for protocol v1 (matches BTRFS_SEND_BUF_SIZE_V1 = 64 KiB).
+/// Buffer size for protocol v1 (matches `BTRFS_SEND_BUF_SIZE_V1` = 64 KiB).
 const SEND_BUF_SIZE_V1: usize = 64 * 1024;
 /// Buffer size for protocol v2+ (16 KiB + 128 KiB compressed = 144 KiB).
 const SEND_BUF_SIZE_V2: usize = 16 * 1024 + 128 * 1024;
@@ -130,7 +131,7 @@ fn find_good_parent(
     Ok(best_root_id)
 }
 
-/// Create a pipe and return (read_end, write_end) as OwnedFds.
+/// Create a pipe and return (`read_end`, `write_end`) as `OwnedFd`s.
 fn make_pipe() -> Result<(OwnedFd, OwnedFd)> {
     let mut fds = [0i32; 2];
     let ret = unsafe { nix::libc::pipe(fds.as_mut_ptr()) };
@@ -167,7 +168,7 @@ fn spawn_reader_thread(
 }
 
 /// Open or create the output writer for the reader thread.
-fn open_output(outfile: &Option<PathBuf>) -> Result<Box<dyn Write + Send>> {
+fn open_output(outfile: Option<&PathBuf>) -> Result<Box<dyn Write + Send>> {
     match outfile {
         Some(path) => {
             let file =
@@ -181,6 +182,7 @@ fn open_output(outfile: &Option<PathBuf>) -> Result<Box<dyn Write + Send>> {
 }
 
 impl Runnable for SendCommand {
+    #[allow(clippy::too_many_lines)]
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         // Validate output destination.
         if let Some(path) = &self.outfile {
@@ -328,7 +330,7 @@ impl Runnable for SendCommand {
 
             // Create pipe and spawn reader thread.
             let (pipe_read, pipe_write) = make_pipe()?;
-            let out = open_output(&self.outfile)?;
+            let out = open_output(self.outfile.as_ref())?;
             let reader = spawn_reader_thread(pipe_read, out, buf_size);
 
             let send_result = btrfs_uapi::send_receive::send(

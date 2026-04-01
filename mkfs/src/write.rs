@@ -1,6 +1,6 @@
 //! # Write: checksumming and disk I/O for tree blocks and superblocks
 //!
-//! Provides checksum computation (CRC32C, xxhash64, SHA256, BLAKE2b) and
+//! Provides checksum computation (CRC32C, xxhash64, SHA256, `BLAKE2b`) and
 //! pwrite helpers for writing blocks to disk.
 
 use btrfs_disk::raw;
@@ -20,6 +20,8 @@ pub enum ChecksumType {
 
 impl ChecksumType {
     /// The on-disk `csum_type` value for this algorithm.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)] // csum type values fit in u16
     pub fn to_raw(self) -> u16 {
         match self {
             ChecksumType::Crc32c => {
@@ -38,16 +40,17 @@ impl ChecksumType {
     }
 
     /// Number of bytes in the checksum output.
+    #[must_use]
     pub fn size(self) -> usize {
         match self {
             ChecksumType::Crc32c => 4,
             ChecksumType::Xxhash64 => 8,
-            ChecksumType::Sha256 => 32,
-            ChecksumType::Blake2b => 32,
+            ChecksumType::Sha256 | ChecksumType::Blake2b => 32,
         }
     }
 
     /// Compute the checksum of `data` and return the result bytes.
+    #[must_use]
     pub fn compute(self, data: &[u8]) -> Vec<u8> {
         match self {
             ChecksumType::Crc32c => crc32c::crc32c(data).to_le_bytes().to_vec(),
@@ -71,6 +74,10 @@ impl ChecksumType {
 /// Checksums bytes `CSUM_SIZE..len` and writes the result into the
 /// first `csum_type.size()` bytes of `buf`. Remaining csum field bytes
 /// stay zero.
+///
+/// # Panics
+///
+/// Panics if `buf` is not longer than `CSUM_SIZE`.
 pub fn fill_csum(buf: &mut [u8], csum_type: ChecksumType) {
     assert!(buf.len() > CSUM_SIZE);
     let hash = csum_type.compute(&buf[CSUM_SIZE..]);
@@ -78,6 +85,14 @@ pub fn fill_csum(buf: &mut [u8], csum_type: ChecksumType) {
 }
 
 /// Write `buf` to `fd` at byte offset `offset` using pwrite.
+///
+/// # Errors
+///
+/// Returns an I/O error if the write fails or produces a zero-length write.
+#[allow(clippy::cast_possible_truncation)] // offset fits in off_t
+#[allow(clippy::cast_possible_wrap)] // offset fits in off_t
+#[allow(clippy::cast_sign_loss)] // pwrite returns positive on success
+#[allow(clippy::ptr_cast_constness)]
 pub fn pwrite_all(
     fd: &impl AsRawFd,
     buf: &[u8],
@@ -89,7 +104,7 @@ pub fn pwrite_all(
         let ret = unsafe {
             libc::pwrite(
                 raw_fd,
-                buf[written..].as_ptr() as *const libc::c_void,
+                buf[written..].as_ptr().cast::<libc::c_void>(),
                 buf.len() - written,
                 (offset + written as u64) as libc::off_t,
             )
@@ -112,7 +127,7 @@ pub fn pwrite_all(
 pub const SUPER_INFO_SIZE: usize = mem::size_of::<raw::btrfs_super_block>();
 
 /// Byte offset of the primary superblock on disk (64 KiB).
-/// From kernel-shared/ctree.h: BTRFS_SUPER_INFO_OFFSET
+/// From kernel-shared/ctree.h: `BTRFS_SUPER_INFO_OFFSET`
 pub const SUPER_INFO_OFFSET: u64 = 65536;
 
 #[cfg(test)]
