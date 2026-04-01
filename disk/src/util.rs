@@ -3,7 +3,15 @@
 //! Little-endian writer functions for placing typed values into raw byte
 //! buffers at known offsets, and a raw CRC32C matching the kernel's format.
 
+use bytes::Buf;
 use uuid::Uuid;
+
+/// Read a UUID (16 bytes) from a `Buf`, advancing the cursor.
+pub fn get_uuid(buf: &mut &[u8]) -> Uuid {
+    let bytes: [u8; 16] = buf[..16].try_into().unwrap();
+    buf.advance(16);
+    Uuid::from_bytes(bytes)
+}
 
 /// Write a little-endian u64 into `buf` at byte offset `off`.
 pub fn write_le_u64(buf: &mut [u8], off: usize, val: u64) {

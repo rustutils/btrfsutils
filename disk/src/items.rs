@@ -5,6 +5,8 @@
 //! structs are the public API for item data; display formatting lives in
 //! the `cli` crate.
 
+/// Read a UUID (16 bytes) from a `Buf` cursor, advancing it by 16 bytes.
+use crate::util::get_uuid;
 use crate::{
     raw,
     tree::{DiskKey, ObjectId},
@@ -13,13 +15,6 @@ use crate::{
 use bytes::{Buf, BufMut};
 use std::{fmt, mem};
 use uuid::Uuid;
-
-/// Read a UUID (16 bytes) from a `Buf` cursor, advancing it by 16 bytes.
-fn get_uuid(buf: &mut &[u8]) -> Uuid {
-    let bytes: [u8; 16] = buf[..16].try_into().unwrap();
-    buf.advance(16);
-    Uuid::from_bytes(bytes)
-}
 
 bitflags::bitflags! {
     /// Block group / chunk type flags: the combination of chunk type

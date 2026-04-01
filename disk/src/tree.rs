@@ -9,16 +9,10 @@
 //! enums for key types and well-known object IDs, with safe LE parsing from
 //! raw byte buffers.
 
-use crate::raw;
+use crate::{raw, util::get_uuid};
 use bytes::Buf;
 use std::{fmt, mem};
 use uuid::Uuid;
-
-fn get_uuid(buf: &mut &[u8]) -> Uuid {
-    let bytes: [u8; 16] = buf[..16].try_into().unwrap();
-    buf.advance(16);
-    Uuid::from_bytes(bytes)
-}
 
 /// Btrfs item key type, identifying what kind of item a key refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
