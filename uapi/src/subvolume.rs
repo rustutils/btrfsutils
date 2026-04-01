@@ -366,10 +366,10 @@ pub fn subvolume_info_by_id(
         otransid: raw.otransid,
         stransid: raw.stransid,
         rtransid: raw.rtransid,
-        ctime: ioctl_timespec_to_system_time(raw.ctime.sec, raw.ctime.nsec),
-        otime: ioctl_timespec_to_system_time(raw.otime.sec, raw.otime.nsec),
-        stime: ioctl_timespec_to_system_time(raw.stime.sec, raw.stime.nsec),
-        rtime: ioctl_timespec_to_system_time(raw.rtime.sec, raw.rtime.nsec),
+        ctime: timespec_to_system_time(raw.ctime.sec, raw.ctime.nsec),
+        otime: timespec_to_system_time(raw.otime.sec, raw.otime.nsec),
+        stime: timespec_to_system_time(raw.stime.sec, raw.stime.nsec),
+        rtime: timespec_to_system_time(raw.rtime.sec, raw.rtime.nsec),
     })
 }
 
@@ -756,16 +756,9 @@ fn parse_root_ref(data: &[u8]) -> Option<(u64, String)> {
 
 /// Convert an on-disk `btrfs_timespec` (LE sec + LE nsec, packed) to
 /// [`SystemTime`].  Returns [`UNIX_EPOCH`] if sec == 0.
+/// Convert a (sec, nsec) timestamp to [`SystemTime`].
+/// Returns [`UNIX_EPOCH`] if sec == 0.
 fn timespec_to_system_time(sec: u64, nsec: u32) -> SystemTime {
-    if sec == 0 {
-        return UNIX_EPOCH;
-    }
-    UNIX_EPOCH + Duration::new(sec, nsec)
-}
-
-/// Convert a `btrfs_ioctl_timespec` (host byte order, with padding) to
-/// [`SystemTime`].  Returns [`UNIX_EPOCH`] if sec == 0.
-fn ioctl_timespec_to_system_time(sec: u64, nsec: u32) -> SystemTime {
     if sec == 0 {
         return UNIX_EPOCH;
     }
