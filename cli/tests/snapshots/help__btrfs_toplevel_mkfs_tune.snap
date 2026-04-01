@@ -20,7 +20,7 @@ Commands:
   device      Manage devices in a btrfs filesystem
   filesystem  Overall filesystem tasks and information
   inspect     Query various internal filesystem information
-  mkfs        Create a btrfs filesystem
+  mkfs        
   property    Modify properties of filesystem objects
   qgroup      Manage quota groups
   quota       Manage filesystem quota settings

@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -12,15 +12,22 @@ use uuid::Uuid;
 /// of devices. For a single device the defaults are SINGLE for data and DUP
 /// for metadata. For multiple devices the defaults are SINGLE for data and
 /// RAID1 for metadata.
+const HEADING_LAYOUT: &str = "Block layout";
+const HEADING_FEATURES: &str = "Features";
+const HEADING_IDENTITY: &str = "Identity";
+const HEADING_ROOTDIR: &str = "Rootdir population";
+
 #[derive(Parser, Debug)]
 #[command(name = "mkfs.btrfs", version)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Arguments {
+    // ── Block layout ────────────────────────────────────────────────
     /// Data block group profile.
     ///
     /// Valid values are raid0, raid1, raid1c3, raid1c4, raid5, raid6,
     /// raid10, single, or dup (case insensitive).
-    #[arg(short = 'd', long = "data", value_name = "PROFILE")]
+    #[arg(short = 'd', long = "data", value_name = "PROFILE",
+        help_heading = HEADING_LAYOUT)]
     pub data_profile: Option<Profile>,
 
     /// Metadata block group profile.
@@ -28,7 +35,8 @@ pub struct Arguments {
     /// Valid values are raid0, raid1, raid1c3, raid1c4, raid5, raid6,
     /// raid10, single, or dup (case insensitive). Default is DUP for a
     /// single device, RAID1 for multiple devices.
-    #[arg(short = 'm', long = "metadata", value_name = "PROFILE")]
+    #[arg(short = 'm', long = "metadata", value_name = "PROFILE",
+        help_heading = HEADING_LAYOUT)]
     pub metadata_profile: Option<Profile>,
 
     /// Mix data and metadata in the same block groups.
@@ -36,38 +44,39 @@ pub struct Arguments {
     /// Recommended for filesystems smaller than 1 GiB. The nodesize and
     /// sectorsize must be equal, and the data and metadata profiles must
     /// match.
-    #[arg(short = 'M', long)]
+    #[arg(short = 'M', long, help_heading = HEADING_LAYOUT)]
     pub mixed: bool,
-
-    /// Filesystem label (maximum 255 bytes).
-    #[arg(short = 'L', long = "label", value_name = "LABEL")]
-    pub label: Option<String>,
 
     /// Size of btree nodes.
     ///
     /// Default is 16 KiB or the page size, whichever is larger. Must be a
     /// multiple of the sectorsize and a power of 2, up to 64 KiB.
-    #[arg(short = 'n', long, value_name = "SIZE")]
+    #[arg(short = 'n', long, value_name = "SIZE",
+        help_heading = HEADING_LAYOUT)]
     pub nodesize: Option<SizeArg>,
 
     /// Data block allocation unit.
     ///
     /// Default is 4 KiB. Using a value different from the system page size
     /// may result in an unmountable filesystem.
-    #[arg(short = 's', long, value_name = "SIZE")]
+    #[arg(short = 's', long, value_name = "SIZE",
+        help_heading = HEADING_LAYOUT)]
     pub sectorsize: Option<SizeArg>,
 
     /// Set filesystem size per device.
     ///
     /// If not set, the entire device size is used. The total filesystem
     /// size is the sum of all device sizes.
-    #[arg(short = 'b', long = "byte-count", value_name = "SIZE")]
+    #[arg(short = 'b', long = "byte-count", value_name = "SIZE",
+        help_heading = HEADING_LAYOUT)]
     pub byte_count: Option<SizeArg>,
 
+    // ── Features ────────────────────────────────────────────────────
     /// Checksum algorithm.
     ///
     /// Valid values are crc32c (default), xxhash, sha256, or blake2.
-    #[arg(long = "checksum", alias = "csum", value_name = "TYPE")]
+    #[arg(long = "checksum", alias = "csum", value_name = "TYPE",
+        help_heading = HEADING_FEATURES)]
     pub checksum: Option<ChecksumArg>,
 
     /// Comma-separated list of filesystem features.
@@ -80,20 +89,68 @@ pub struct Arguments {
         alias = "runtime-features",
         short_alias = 'R',
         value_name = "LIST",
-        value_delimiter = ','
+        value_delimiter = ',',
+        help_heading = HEADING_FEATURES,
     )]
     pub features: Vec<FeatureArg>,
 
+    // ── Identity ────────────────────────────────────────────────────
+    /// Filesystem label (maximum 255 bytes).
+    #[arg(short = 'L', long = "label", value_name = "LABEL",
+        help_heading = HEADING_IDENTITY)]
+    pub label: Option<String>,
+
     /// Specify the filesystem UUID.
-    #[arg(short = 'U', long = "uuid", value_name = "UUID")]
+    #[arg(short = 'U', long = "uuid", value_name = "UUID",
+        help_heading = HEADING_IDENTITY)]
     pub filesystem_uuid: Option<Uuid>,
 
     /// Specify the device UUID (sub-uuid).
     ///
     /// Only meaningful for single-device filesystems.
-    #[arg(long = "device-uuid", value_name = "UUID")]
+    #[arg(long = "device-uuid", value_name = "UUID",
+        help_heading = HEADING_IDENTITY)]
     pub device_uuid: Option<Uuid>,
 
+    // ── Rootdir population ──────────────────────────────────────────
+    /// Copy files from a directory into the filesystem image.
+    #[arg(short = 'r', long = "rootdir", value_name = "DIR",
+        help_heading = HEADING_ROOTDIR)]
+    pub rootdir: Option<PathBuf>,
+
+    /// Create a subdirectory as a subvolume (requires --rootdir).
+    ///
+    /// TYPE is one of: rw (default), ro, default, default-ro.
+    /// Can be specified multiple times.
+    #[arg(short = 'u', long = "subvol", value_name = "TYPE:SUBDIR",
+        help_heading = HEADING_ROOTDIR)]
+    pub subvol: Vec<SubvolArg>,
+
+    /// Specify inode flags for a path (requires --rootdir).
+    ///
+    /// FLAGS is a comma-separated list of: nodatacow, nodatasum. Can be
+    /// specified multiple times.
+    #[arg(long = "inode-flags", value_name = "FLAGS:PATH",
+        help_heading = HEADING_ROOTDIR)]
+    pub inode_flags: Vec<InodeFlagsArg>,
+
+    /// Compress files when populating from --rootdir.
+    ///
+    /// ALGO is one of: no (default), zstd, lzo, zlib. An optional
+    /// compression level can be appended after a colon.
+    #[arg(long = "compress", value_name = "ALGO[:LEVEL]",
+        help_heading = HEADING_ROOTDIR)]
+    pub compress: Option<CompressArg>,
+
+    /// Clone file extents from --rootdir instead of copying bytes.
+    #[arg(long, help_heading = HEADING_ROOTDIR)]
+    pub reflink: bool,
+
+    /// Shrink the filesystem to minimal size after populating from --rootdir.
+    #[arg(long, help_heading = HEADING_ROOTDIR)]
+    pub shrink: bool,
+
+    // ── General options ─────────────────────────────────────────────
     /// Force overwrite of an existing filesystem.
     #[arg(short = 'f', long)]
     pub force: bool,
@@ -101,39 +158,6 @@ pub struct Arguments {
     /// Do not perform whole-device TRIM.
     #[arg(short = 'K', long)]
     pub nodiscard: bool,
-
-    /// Copy files from a directory into the filesystem image.
-    #[arg(short = 'r', long = "rootdir", value_name = "DIR")]
-    pub rootdir: Option<PathBuf>,
-
-    /// Create a subdirectory as a subvolume (requires --rootdir).
-    ///
-    /// TYPE is one of: rw (default), ro, default, default-ro.
-    /// Can be specified multiple times.
-    #[arg(short = 'u', long = "subvol", value_name = "TYPE:SUBDIR")]
-    pub subvol: Vec<SubvolArg>,
-
-    /// Specify inode flags for a path (requires --rootdir).
-    ///
-    /// FLAGS is a comma-separated list of: nodatacow, nodatasum. Can be
-    /// specified multiple times.
-    #[arg(long = "inode-flags", value_name = "FLAGS:PATH")]
-    pub inode_flags: Vec<InodeFlagsArg>,
-
-    /// Compress files when populating from --rootdir.
-    ///
-    /// ALGO is one of: no (default), zstd, lzo, zlib. An optional
-    /// compression level can be appended after a colon.
-    #[arg(long = "compress", value_name = "ALGO[:LEVEL]")]
-    pub compress: Option<CompressArg>,
-
-    /// Clone file extents from --rootdir instead of copying bytes.
-    #[arg(long)]
-    pub reflink: bool,
-
-    /// Shrink the filesystem to minimal size after populating from --rootdir.
-    #[arg(long)]
-    pub shrink: bool,
 
     /// Quiet mode: only print errors and warnings.
     #[arg(short = 'q', long)]
@@ -180,7 +204,8 @@ impl std::str::FromStr for SizeArg {
 }
 
 /// Block group RAID profile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "snake_case")]
 pub enum Profile {
     Single,
     Dup,
@@ -191,25 +216,6 @@ pub enum Profile {
     Raid5,
     Raid6,
     Raid10,
-}
-
-impl std::str::FromStr for Profile {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "single" => Ok(Profile::Single),
-            "dup" => Ok(Profile::Dup),
-            "raid0" => Ok(Profile::Raid0),
-            "raid1" => Ok(Profile::Raid1),
-            "raid1c3" => Ok(Profile::Raid1c3),
-            "raid1c4" => Ok(Profile::Raid1c4),
-            "raid5" => Ok(Profile::Raid5),
-            "raid6" => Ok(Profile::Raid6),
-            "raid10" => Ok(Profile::Raid10),
-            _ => Err(format!("unknown profile: {s}")),
-        }
-    }
 }
 
 impl std::fmt::Display for Profile {
@@ -279,26 +285,15 @@ impl Profile {
 }
 
 /// Checksum algorithm selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "snake_case")]
 pub enum ChecksumArg {
     Crc32c,
+    #[value(alias = "xxhash64")]
     Xxhash,
     Sha256,
+    #[value(alias = "blake2b")]
     Blake2,
-}
-
-impl std::str::FromStr for ChecksumArg {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "crc32c" => Ok(ChecksumArg::Crc32c),
-            "xxhash" | "xxhash64" => Ok(ChecksumArg::Xxhash),
-            "sha256" => Ok(ChecksumArg::Sha256),
-            "blake2" | "blake2b" => Ok(ChecksumArg::Blake2),
-            _ => Err(format!("unknown checksum type: {s}")),
-        }
-    }
 }
 
 impl std::fmt::Display for ChecksumArg {
@@ -330,28 +325,34 @@ impl std::str::FromStr for FeatureArg {
         } else {
             (true, s)
         };
-        let feature = name.parse::<Feature>()?;
+        let feature = Feature::from_str(name, false)?;
         Ok(FeatureArg { feature, enabled })
     }
 }
 
 /// Known filesystem features.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
 pub enum Feature {
     MixedBg,
     Extref,
     Raid56,
+    #[value(alias = "skinny_metadata")]
     SkinnyMetadata,
+    #[value(alias = "no_holes")]
     NoHoles,
     Zoned,
     Quota,
+    #[value(alias = "fst")]
     FreeSpaceTree,
+    #[value(alias = "bgt")]
     BlockGroupTree,
     RaidStripeTree,
     Squota,
     ListAll,
 }
 
+/*
 impl std::str::FromStr for Feature {
     type Err = String;
 
@@ -373,6 +374,7 @@ impl std::str::FromStr for Feature {
         }
     }
 }
+*/
 
 impl std::fmt::Display for Feature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -596,30 +598,39 @@ mod tests {
         assert!("17E".parse::<SizeArg>().is_err());
     }
 
-    // --- Profile::from_str ---
+    // --- Profile::from_str (ValueEnum) ---
 
     #[test]
     fn profile_all_variants() {
-        assert_eq!("single".parse::<Profile>().unwrap(), Profile::Single);
-        assert_eq!("dup".parse::<Profile>().unwrap(), Profile::Dup);
-        assert_eq!("raid0".parse::<Profile>().unwrap(), Profile::Raid0);
-        assert_eq!("raid1".parse::<Profile>().unwrap(), Profile::Raid1);
-        assert_eq!("raid1c3".parse::<Profile>().unwrap(), Profile::Raid1c3);
-        assert_eq!("raid1c4".parse::<Profile>().unwrap(), Profile::Raid1c4);
-        assert_eq!("raid5".parse::<Profile>().unwrap(), Profile::Raid5);
-        assert_eq!("raid6".parse::<Profile>().unwrap(), Profile::Raid6);
-        assert_eq!("raid10".parse::<Profile>().unwrap(), Profile::Raid10);
+        assert_eq!(Profile::from_str("single", true).unwrap(), Profile::Single);
+        assert_eq!(Profile::from_str("dup", true).unwrap(), Profile::Dup);
+        assert_eq!(Profile::from_str("raid0", true).unwrap(), Profile::Raid0);
+        assert_eq!(Profile::from_str("raid1", true).unwrap(), Profile::Raid1);
+        assert_eq!(
+            Profile::from_str("raid1c3", true).unwrap(),
+            Profile::Raid1c3
+        );
+        assert_eq!(
+            Profile::from_str("raid1c4", true).unwrap(),
+            Profile::Raid1c4
+        );
+        assert_eq!(Profile::from_str("raid5", true).unwrap(), Profile::Raid5);
+        assert_eq!(Profile::from_str("raid6", true).unwrap(), Profile::Raid6);
+        assert_eq!(Profile::from_str("raid10", true).unwrap(), Profile::Raid10);
     }
 
     #[test]
     fn profile_case_insensitive() {
-        assert_eq!("SINGLE".parse::<Profile>().unwrap(), Profile::Single);
-        assert_eq!("Raid1C3".parse::<Profile>().unwrap(), Profile::Raid1c3);
+        assert_eq!(Profile::from_str("SINGLE", true).unwrap(), Profile::Single);
+        assert_eq!(
+            Profile::from_str("Raid1C3", true).unwrap(),
+            Profile::Raid1c3
+        );
     }
 
     #[test]
     fn profile_unknown() {
-        assert!("raid99".parse::<Profile>().is_err());
+        assert!(Profile::from_str("raid99", true).is_err());
     }
 
     // --- Profile::Display round-trip ---
@@ -640,7 +651,7 @@ mod tests {
         for p in all {
             let s = p.to_string();
             assert_eq!(
-                s.parse::<Profile>().unwrap(),
+                Profile::from_str(&s, true).unwrap(),
                 p,
                 "round-trip failed for {s}"
             );
@@ -700,19 +711,19 @@ mod tests {
     #[test]
     fn checksum_all_names() {
         assert_eq!(
-            "crc32c".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::from_str("crc32c", true).unwrap(),
             ChecksumArg::Crc32c
         );
         assert_eq!(
-            "xxhash".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::from_str("xxhash", true).unwrap(),
             ChecksumArg::Xxhash
         );
         assert_eq!(
-            "sha256".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::from_str("sha256", true).unwrap(),
             ChecksumArg::Sha256
         );
         assert_eq!(
-            "blake2".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::from_str("blake2", true).unwrap(),
             ChecksumArg::Blake2
         );
     }
@@ -720,18 +731,18 @@ mod tests {
     #[test]
     fn checksum_aliases() {
         assert_eq!(
-            "xxhash64".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::from_str("xxhash64", true).unwrap(),
             ChecksumArg::Xxhash
         );
         assert_eq!(
-            "blake2b".parse::<ChecksumArg>().unwrap(),
+            ChecksumArg::from_str("blake2b", true).unwrap(),
             ChecksumArg::Blake2
         );
     }
 
     #[test]
     fn checksum_unknown() {
-        assert!("md5".parse::<ChecksumArg>().is_err());
+        assert!(ChecksumArg::from_str("md5", true).is_err());
     }
 
     // --- ChecksumArg::Display round-trip ---
@@ -747,7 +758,7 @@ mod tests {
         for c in all {
             let s = c.to_string();
             assert_eq!(
-                s.parse::<ChecksumArg>().unwrap(),
+                ChecksumArg::from_str(&s, true).unwrap(),
                 c,
                 "round-trip failed for {s}"
             );
@@ -807,7 +818,7 @@ mod tests {
         for feat in samples {
             let s = feat.to_string();
             assert_eq!(
-                s.parse::<Feature>().unwrap(),
+                Feature::from_str(&s, false).unwrap(),
                 feat,
                 "round-trip failed for {s}"
             );
