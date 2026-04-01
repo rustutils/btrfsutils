@@ -727,33 +727,39 @@ fn read_xattrs(path: &Path) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
     Ok(result)
 }
 
-/// Fix up nlink for a specific inode (used for hardlinks).
+/// Patch a field inside the `INODE_ITEM` for a given objectid.
+///
+/// Finds the first `INODE_ITEM` with `objectid == ino`, then writes
+/// `value` at `field_offset` within the item data.
 #[allow(clippy::cast_possible_truncation)] // key type fits in u8
-fn fixup_inode_nlink(fs_items: &mut [(Key, Vec<u8>)], ino: u64, nlink: u32) {
+fn patch_inode_field(
+    fs_items: &mut [(Key, Vec<u8>)],
+    ino: u64,
+    field_offset: usize,
+    value: &[u8],
+) {
     for (key, data) in fs_items.iter_mut() {
         if key.objectid == ino
             && key.key_type == raw::BTRFS_INODE_ITEM_KEY as u8
-            && data.len() >= 44
+            && data.len() >= field_offset + value.len()
         {
-            data[40..44].copy_from_slice(&nlink.to_le_bytes());
+            data[field_offset..field_offset + value.len()]
+                .copy_from_slice(value);
             return;
         }
     }
 }
 
+/// Fix up nlink for a specific inode (used for hardlinks).
+fn fixup_inode_nlink(fs_items: &mut [(Key, Vec<u8>)], ino: u64, nlink: u32) {
+    let offset = std::mem::offset_of!(raw::btrfs_inode_item, nlink);
+    patch_inode_field(fs_items, ino, offset, &nlink.to_le_bytes());
+}
+
 /// Fix up inode size for a directory.
-#[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn fixup_inode_size(fs_items: &mut [(Key, Vec<u8>)], ino: u64, size: u64) {
-    for (key, data) in fs_items.iter_mut() {
-        if key.objectid == ino
-            && key.key_type == raw::BTRFS_INODE_ITEM_KEY as u8
-            && data.len() >= 24
-        {
-            // inode_item.size is at offset 16.
-            data[16..24].copy_from_slice(&size.to_le_bytes());
-            return;
-        }
-    }
+    let offset = std::mem::offset_of!(raw::btrfs_inode_item, size);
+    patch_inode_field(fs_items, ino, offset, &size.to_le_bytes());
 }
 
 /// Fix up nbytes for files with inline extents and symlinks.
@@ -761,6 +767,8 @@ fn fixup_inode_size(fs_items: &mut [(Key, Vec<u8>)], ino: u64, size: u64) {
 /// For inline file extents and symlinks, nbytes = data size (not aligned).
 #[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn fixup_inline_nbytes(fs_items: &mut [(Key, Vec<u8>)]) {
+    let nbytes_off = std::mem::offset_of!(raw::btrfs_inode_item, nbytes);
+
     let mut inline_sizes: HashMap<u64, u64> = HashMap::new();
     for (key, data) in fs_items.iter() {
         if key.key_type == raw::BTRFS_EXTENT_DATA_KEY as u8
@@ -776,7 +784,8 @@ fn fixup_inline_nbytes(fs_items: &mut [(Key, Vec<u8>)]) {
         if key.key_type == raw::BTRFS_INODE_ITEM_KEY as u8
             && let Some(&nbytes) = inline_sizes.get(&key.objectid)
         {
-            data[24..32].copy_from_slice(&nbytes.to_le_bytes());
+            data[nbytes_off..nbytes_off + 8]
+                .copy_from_slice(&nbytes.to_le_bytes());
         }
     }
 }
@@ -788,12 +797,14 @@ pub fn apply_nbytes_updates(
     fs_items: &mut [(Key, Vec<u8>)],
     updates: &HashMap<u64, u64>,
 ) {
+    let nbytes_off = std::mem::offset_of!(raw::btrfs_inode_item, nbytes);
     for (key, data) in fs_items.iter_mut() {
         if key.key_type == raw::BTRFS_INODE_ITEM_KEY as u8
             && let Some(&nbytes) = updates.get(&key.objectid)
-            && data.len() >= 32
+            && data.len() >= nbytes_off + 8
         {
-            data[24..32].copy_from_slice(&nbytes.to_le_bytes());
+            data[nbytes_off..nbytes_off + 8]
+                .copy_from_slice(&nbytes.to_le_bytes());
         }
     }
 }

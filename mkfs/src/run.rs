@@ -99,7 +99,7 @@ pub fn run(args: &Arguments) -> Result<()> {
             .ok()
             .is_some_and(|m| m.file_type().is_block_device());
         if is_block {
-            if mkfs::is_device_mounted(dev_path)? {
+            if mkfs::is_device_mounted(dev_path) {
                 bail!(
                     "'{}' is mounted; refusing to format a mounted device",
                     dev_path.display()
