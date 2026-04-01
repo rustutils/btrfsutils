@@ -77,7 +77,7 @@ fn find_mount_root(path: &Path) -> Result<PathBuf> {
 /// socket/device node creation, rename, link, unlink, rmdir, write (with fd
 /// caching for sequential writes to the same file), clone range (resolves
 /// source subvolume via UUID tree lookup), xattr set/remove, truncate, chmod,
-/// chown, utimes. UpdateExtent is a no-op (informational only).
+/// chown, utimes. `UpdateExtent` is a no-op (informational only).
 ///
 /// v2 commands: encoded write (passes compressed data directly to the kernel
 /// via `BTRFS_IOC_ENCODED_WRITE`, with automatic decompression fallback for
@@ -104,9 +104,9 @@ pub struct ReceiveContext {
     cur_subvol: Option<String>,
     /// Absolute path of the current subvolume.
     cur_subvol_path: Option<PathBuf>,
-    /// UUID from the stream's SUBVOL/SNAPSHOT command (for SET_RECEIVED_SUBVOL).
+    /// UUID from the stream's SUBVOL/SNAPSHOT command (for `SET_RECEIVED_SUBVOL`).
     received_uuid: Option<uuid::Uuid>,
-    /// ctransid from the stream (for SET_RECEIVED_SUBVOL).
+    /// ctransid from the stream (for `SET_RECEIVED_SUBVOL`).
     stransid: u64,
     /// Cached write fd: keep one file open to avoid repeated open/close for
     /// sequential writes to the same file.
@@ -121,6 +121,10 @@ impl ReceiveContext {
     /// root is auto-detected by walking up the directory tree while the device
     /// ID stays the same. An fd to the mount root is kept open for UUID tree
     /// lookups; subvolumes are created under `dest_dir`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the mount root cannot be determined or opened.
     pub fn new(dest_dir: &Path) -> Result<Self> {
         let mount_root = find_mount_root(dest_dir)?;
         let mnt_fd = File::open(&mount_root).with_context(|| {
@@ -147,6 +151,11 @@ impl ReceiveContext {
     /// are dispatched to the appropriate handler. Paths in the command are
     /// resolved relative to the current subvolume within the destination
     /// directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the filesystem operation for the command fails.
+    #[allow(clippy::too_many_lines)]
     pub fn process_command(&mut self, cmd: &StreamCommand) -> Result<()> {
         match cmd {
             StreamCommand::Subvol {
@@ -277,6 +286,10 @@ impl ReceiveContext {
     /// after processing a [`StreamCommand::End`] or at EOF if a subvolume
     /// was in progress. Safe to call when no subvolume is active (returns
     /// `Ok(())` immediately).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if setting the received UUID or read-only flag fails.
     pub fn finish_subvol(&mut self) -> Result<()> {
         self.close_write_fd();
 
@@ -502,6 +515,7 @@ impl ReceiveContext {
         Ok(())
     }
 
+    #[allow(clippy::cast_possible_truncation)] // mode/rdev fit in mode_t/dev_t
     fn process_mknod(
         &mut self,
         path: &str,
@@ -605,14 +619,15 @@ impl ReceiveContext {
                     || format!("cannot open '{}' for writing", full.display()),
                 )?;
             self.write_fd = Some(file);
-            self.write_path = full.clone();
+            self.write_path.clone_from(&full);
         }
 
         let fd = self.write_fd.as_ref().unwrap();
+        #[allow(clippy::cast_possible_wrap)] // offset fits in off_t
         let written = unsafe {
             nix::libc::pwrite(
                 fd.as_raw_fd(),
-                data.as_ptr() as *const nix::libc::c_void,
+                data.as_ptr().cast::<nix::libc::c_void>(),
                 data.len(),
                 offset as nix::libc::off_t,
             )
@@ -622,6 +637,7 @@ impl ReceiveContext {
                 format!("pwrite failed on '{}'", full.display())
             });
         }
+        #[allow(clippy::cast_sign_loss)] // checked non-negative above
         if (written as usize) != data.len() {
             bail!(
                 "short pwrite on '{}': wrote {} of {} bytes",
@@ -713,7 +729,7 @@ impl ReceiveContext {
             nix::libc::lsetxattr(
                 c_path.as_ptr(),
                 c_name.as_ptr(),
-                data.as_ptr() as *const nix::libc::c_void,
+                data.as_ptr().cast::<nix::libc::c_void>(),
                 data.len(),
                 0,
             )
@@ -742,6 +758,7 @@ impl ReceiveContext {
         Ok(())
     }
 
+    #[allow(clippy::cast_possible_wrap)] // size fits in off_t
     fn process_truncate(&mut self, path: &str, size: u64) -> Result<()> {
         let full = self.full_path(path)?;
         let c_path = path_to_cstring(&full)?;
@@ -756,6 +773,7 @@ impl ReceiveContext {
         Ok(())
     }
 
+    #[allow(clippy::cast_possible_truncation)] // mode fits in u32
     fn process_chmod(&mut self, path: &str, mode: u64) -> Result<()> {
         let full = self.full_path(path)?;
         fs::set_permissions(&full, fs::Permissions::from_mode(mode as u32))
@@ -763,6 +781,7 @@ impl ReceiveContext {
         Ok(())
     }
 
+    #[allow(clippy::cast_possible_truncation)] // uid/gid fit in uid_t/gid_t
     fn process_chown(&mut self, path: &str, uid: u64, gid: u64) -> Result<()> {
         let full = self.full_path(path)?;
         let c_path = path_to_cstring(&full)?;
@@ -781,6 +800,7 @@ impl ReceiveContext {
         Ok(())
     }
 
+    #[allow(clippy::cast_possible_wrap)] // timestamps fit in signed fields
     fn process_utimes(
         &mut self,
         path: &str,
@@ -792,11 +812,11 @@ impl ReceiveContext {
         let times = [
             nix::libc::timespec {
                 tv_sec: atime.sec as i64,
-                tv_nsec: atime.nsec as nix::libc::c_long,
+                tv_nsec: i64::from(atime.nsec),
             },
             nix::libc::timespec {
                 tv_sec: mtime.sec as i64,
-                tv_nsec: mtime.nsec as nix::libc::c_long,
+                tv_nsec: i64::from(mtime.nsec),
             },
         ];
         let ret = unsafe {
@@ -815,6 +835,7 @@ impl ReceiveContext {
         Ok(())
     }
 
+    #[allow(clippy::cast_possible_wrap)] // mode/offset/len fit in signed types
     fn process_fallocate(
         &mut self,
         path: &str,
@@ -892,6 +913,8 @@ impl ReceiveContext {
         encryption: u32,
         data: &[u8],
     ) -> Result<()> {
+        use std::os::unix::fs::FileExt;
+
         if encryption != 0 {
             bail!(
                 "encrypted encoded writes are not supported (encryption={encryption})"
@@ -908,7 +931,7 @@ impl ReceiveContext {
                     || format!("cannot open '{}' for writing", full.display()),
                 )?;
             self.write_fd = Some(file);
-            self.write_path = full.clone();
+            self.write_path.clone_from(&full);
         }
 
         // Try the encoded write ioctl first — passes compressed data directly
@@ -925,9 +948,11 @@ impl ReceiveContext {
             encryption,
         ) {
             Ok(()) => return Ok(()),
-            Err(nix::errno::Errno::ENOTTY)
-            | Err(nix::errno::Errno::EINVAL)
-            | Err(nix::errno::Errno::ENOSPC) => {
+            Err(
+                nix::errno::Errno::ENOTTY
+                | nix::errno::Errno::EINVAL
+                | nix::errno::Errno::ENOSPC,
+            ) => {
                 // Fall through to decompression.
             }
             Err(e) => {
@@ -938,16 +963,18 @@ impl ReceiveContext {
         }
 
         // Decompression fallback: decompress and pwrite.
+        #[allow(clippy::cast_possible_truncation)] // lengths fit in usize
         let decompressed =
             decompress(data, unencoded_len as usize, compression)
                 .with_context(|| {
                     format!("decompression failed for '{}'", full.display())
                 })?;
 
+        #[allow(clippy::cast_possible_truncation)]
+        // offsets/lengths fit in usize
         let write_data = &decompressed[unencoded_offset as usize
             ..unencoded_offset as usize + unencoded_file_len as usize];
 
-        use std::os::unix::fs::FileExt;
         fd.write_all_at(write_data, offset).with_context(|| {
             format!("pwrite failed on '{}'", full.display())
         })?;

@@ -30,6 +30,12 @@ pub struct FsverityEnableArg {
 /// `algorithm` is the hash algorithm (1 = SHA-256, 2 = SHA-512), `block_size`
 /// must be a power of two between 1024 and 65536 (filesystem block size is
 /// typical).
+///
+/// # Errors
+///
+/// Returns an error if the ioctl fails (e.g. verity already enabled, file
+/// not read-only, or unsupported filesystem).
+#[allow(clippy::cast_possible_truncation)] // salt/sig lengths fit in u32
 pub fn enable_verity(
     fd: BorrowedFd,
     algorithm: u8,
@@ -39,7 +45,7 @@ pub fn enable_verity(
 ) -> nix::Result<()> {
     let arg = FsverityEnableArg {
         version: 1,
-        hash_algorithm: algorithm as u32,
+        hash_algorithm: u32::from(algorithm),
         block_size,
         salt_size: salt.len() as u32,
         salt_ptr: if salt.is_empty() {
@@ -56,6 +62,6 @@ pub fn enable_verity(
         },
         __reserved2: [0; 11],
     };
-    unsafe { fs_ioc_enable_verity(fd.as_raw_fd(), &arg) }?;
+    unsafe { fs_ioc_enable_verity(fd.as_raw_fd(), &raw const arg) }?;
     Ok(())
 }

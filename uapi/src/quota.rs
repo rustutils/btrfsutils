@@ -48,6 +48,10 @@ use std::{
 /// When `simple` is `true`, uses `BTRFS_QUOTA_CTL_ENABLE_SIMPLE_QUOTA`, which
 /// accounts for extent ownership by lifetime rather than backref walks. This is
 /// faster but less precise than full qgroup accounting.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn quota_enable(fd: BorrowedFd, simple: bool) -> nix::Result<()> {
     let cmd = if simple {
         u64::from(BTRFS_QUOTA_CTL_ENABLE_SIMPLE_QUOTA)
@@ -61,6 +65,10 @@ pub fn quota_enable(fd: BorrowedFd, simple: bool) -> nix::Result<()> {
 }
 
 /// Disable quota accounting on the filesystem referred to by `fd`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn quota_disable(fd: BorrowedFd) -> nix::Result<()> {
     let mut args: btrfs_ioctl_quota_ctl_args = unsafe { mem::zeroed() };
     args.cmd = u64::from(BTRFS_QUOTA_CTL_DISABLE);
@@ -74,6 +82,11 @@ pub fn quota_disable(fd: BorrowedFd) -> nix::Result<()> {
 /// [`quota_rescan_wait`] to block until it finishes. If a rescan is already
 /// in progress the kernel returns `EINPROGRESS`; callers that are about to
 /// wait anyway can treat that as a non-error.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails. `EINPROGRESS` if a rescan is
+/// already running.
 pub fn quota_rescan(fd: BorrowedFd) -> nix::Result<()> {
     let args: btrfs_ioctl_quota_rescan_args = unsafe { mem::zeroed() };
     unsafe { btrfs_ioc_quota_rescan(fd.as_raw_fd(), &raw const args) }?;
@@ -82,6 +95,10 @@ pub fn quota_rescan(fd: BorrowedFd) -> nix::Result<()> {
 
 /// Block until the quota rescan currently running on the filesystem referred
 /// to by `fd` completes. Returns immediately if no rescan is in progress.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn quota_rescan_wait(fd: BorrowedFd) -> nix::Result<()> {
     unsafe { btrfs_ioc_quota_rescan_wait(fd.as_raw_fd()) }?;
     Ok(())
@@ -98,6 +115,10 @@ pub struct QuotaRescanStatus {
 }
 
 /// Query the status of the quota rescan on the filesystem referred to by `fd`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn quota_rescan_status(fd: BorrowedFd) -> nix::Result<QuotaRescanStatus> {
     let mut args: btrfs_ioctl_quota_rescan_args = unsafe { mem::zeroed() };
     unsafe { btrfs_ioc_quota_rescan_status(fd.as_raw_fd(), &raw mut args) }?;
@@ -272,6 +293,10 @@ fn parse_limit(builder: &mut QgroupEntryBuilder, data: &[u8]) {
 /// to by `fd`.
 ///
 /// `qgroupid` is the packed form: `(level << 48) | subvolid`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn qgroup_create(fd: BorrowedFd, qgroupid: u64) -> nix::Result<()> {
     let mut args: btrfs_ioctl_qgroup_create_args = unsafe { mem::zeroed() };
     args.create = 1;
@@ -284,6 +309,10 @@ pub fn qgroup_create(fd: BorrowedFd, qgroupid: u64) -> nix::Result<()> {
 
 /// Destroy the qgroup with the given `qgroupid` on the filesystem referred
 /// to by `fd`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn qgroup_destroy(fd: BorrowedFd, qgroupid: u64) -> nix::Result<()> {
     let mut args: btrfs_ioctl_qgroup_create_args = unsafe { mem::zeroed() };
     args.create = 0;
@@ -302,6 +331,10 @@ pub fn qgroup_destroy(fd: BorrowedFd, qgroupid: u64) -> nix::Result<()> {
 ///
 /// Errors: ENOENT if either qgroup does not exist.  EEXIST if the
 /// relationship already exists.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn qgroup_assign(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
     let mut args: btrfs_ioctl_qgroup_assign_args = unsafe { mem::zeroed() };
     args.assign = 1;
@@ -320,6 +353,10 @@ pub fn qgroup_assign(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
 ///
 /// Errors: ENOENT if either qgroup does not exist or the relationship
 /// is not present.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn qgroup_remove(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
     let mut args: btrfs_ioctl_qgroup_assign_args = unsafe { mem::zeroed() };
     args.assign = 0;
@@ -337,6 +374,10 @@ pub fn qgroup_remove(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
 /// Pass `QgroupLimitFlags::MAX_RFER` in `flags` to enforce `max_rfer`, and/or
 /// `QgroupLimitFlags::MAX_EXCL` to enforce `max_excl`.  Clear a limit by
 /// omitting the corresponding flag.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn qgroup_limit(
     fd: BorrowedFd,
     qgroupid: u64,
@@ -366,6 +407,10 @@ pub fn qgroup_limit(
 ///
 /// Returns `Ok(QgroupList { status_flags: empty, qgroups: [] })` when quota
 /// accounting is not enabled (`ENOENT` from the kernel).
+///
+/// # Errors
+///
+/// Returns `Err` if the tree search fails (other than `ENOENT`).
 pub fn qgroup_list(fd: BorrowedFd) -> nix::Result<QgroupList> {
     // Build a map of qgroupid → builder as we walk the quota tree.
     let mut builders: HashMap<u64, QgroupEntryBuilder> = HashMap::new();
@@ -462,6 +507,7 @@ fn collect_subvol_ids(fd: BorrowedFd) -> nix::Result<HashSet<u64>> {
 
     // BTRFS_LAST_FREE_OBJECTID binds as i32 = -256; cast to u64 gives
     // 0xFFFFFFFF_FFFFFF00 as expected.
+    #[allow(clippy::cast_sign_loss)]
     let key = SearchKey::for_objectid_range(
         u64::from(BTRFS_ROOT_TREE_OBJECTID),
         BTRFS_ROOT_ITEM_KEY,
@@ -485,6 +531,10 @@ fn collect_subvol_ids(fd: BorrowedFd) -> nix::Result<HashSet<u64>> {
 /// dropped subvolumes.
 ///
 /// Returns the number of qgroups successfully destroyed.
+///
+/// # Errors
+///
+/// Returns `Err` if listing qgroups fails.
 pub fn qgroup_clear_stale(fd: BorrowedFd) -> nix::Result<usize> {
     let list = qgroup_list(fd)?;
     let simple_mode =

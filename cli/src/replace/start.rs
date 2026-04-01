@@ -136,7 +136,7 @@ impl Runnable for ReplaceStartCommand {
             }
         }
 
-        match replace_start(fd, source, &tgtdev, self.redundancy_only)
+        match replace_start(fd, &source, &tgtdev, self.redundancy_only)
             .with_context(|| {
                 format!(
                     "failed to start replace on '{}'",

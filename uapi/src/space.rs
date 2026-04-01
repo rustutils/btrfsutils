@@ -59,6 +59,11 @@ impl From<btrfs_ioctl_space_info> for SpaceInfo {
 /// block groups concurrently; this is benign (the kernel fills at most
 /// `space_slots` entries and the second call will simply return fewer
 /// than expected).
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
+#[allow(clippy::cast_possible_truncation)] // space count always fits in usize
 pub fn space_info(fd: BorrowedFd) -> nix::Result<Vec<SpaceInfo>> {
     // Phase 1: query with space_slots = 0 to discover the number of entries.
     let mut args: btrfs_ioctl_space_args = unsafe { mem::zeroed() };

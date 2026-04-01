@@ -112,6 +112,10 @@ fn parse_feature_flags(raw: &btrfs_ioctl_feature_flags) -> FeatureFlags {
 }
 
 /// Query the feature flags currently active on the filesystem.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn get_features(fd: BorrowedFd<'_>) -> nix::Result<FeatureFlags> {
     let mut flags: btrfs_ioctl_feature_flags = unsafe { std::mem::zeroed() };
     unsafe { btrfs_ioc_get_features(fd.as_raw_fd(), &raw mut flags) }?;
@@ -129,6 +133,10 @@ pub fn get_features(fd: BorrowedFd<'_>) -> nix::Result<FeatureFlags> {
 /// set or cleared at runtime.
 ///
 /// Requires `CAP_SYS_ADMIN`. Returns `EPERM` without it.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn set_features(
     fd: BorrowedFd<'_>,
     flags: &FeatureFlags,
@@ -148,6 +156,10 @@ pub fn set_features(
 /// Returns three sets per category (`compat_ro`, incompat): which flags the
 /// kernel understands, which can be enabled at runtime, and which can be
 /// disabled at runtime.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn get_supported_features(
     fd: BorrowedFd<'_>,
 ) -> nix::Result<SupportedFeatures> {

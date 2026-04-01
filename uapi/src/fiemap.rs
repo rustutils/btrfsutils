@@ -65,6 +65,10 @@ pub struct FileExtentInfo {
 ///
 /// `fd` must be open on a regular file.  Symlinks and directories will return
 /// an empty result or an error depending on the kernel version.
+///
+/// # Errors
+///
+/// Returns `Err` if the `FS_IOC_FIEMAP` ioctl fails.
 pub fn file_extents(fd: BorrowedFd) -> nix::Result<FileExtentInfo> {
     use std::os::fd::AsRawFd;
 

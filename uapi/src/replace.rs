@@ -100,6 +100,10 @@ pub enum ReplaceSource<'a> {
 
 /// Query the status of a device replace operation on the filesystem referred
 /// to by `fd`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn replace_status(fd: BorrowedFd) -> nix::Result<ReplaceStatus> {
     let mut args: btrfs_ioctl_dev_replace_args = unsafe { mem::zeroed() };
     args.cmd = u64::from(BTRFS_IOCTL_DEV_REPLACE_CMD_STATUS);
@@ -161,11 +165,13 @@ impl std::error::Error for ReplaceStartError {}
 /// `Ok(Err(AlreadyStarted))` means another replace is in progress.
 /// `Ok(Err(ScrubInProgress))` means a scrub must finish or be cancelled first.
 ///
-/// Errors: ENAMETOOLONG if source or target device paths exceed the kernel
-/// buffer size.
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails. `ENAMETOOLONG` if device paths exceed
+/// the kernel buffer size.
 pub fn replace_start(
     fd: BorrowedFd,
-    source: ReplaceSource,
+    source: &ReplaceSource<'_>,
     tgtdev_path: &CStr,
     avoid_srcdev: bool,
 ) -> nix::Result<Result<(), ReplaceStartError>> {
@@ -175,7 +181,7 @@ pub fn replace_start(
     // SAFETY: we are filling in the start union member before issuing CMD_START.
     let start = unsafe { &mut args.__bindgen_anon_1.start };
 
-    match source {
+    match *source {
         ReplaceSource::DevId(devid) => {
             start.srcdevid = devid;
         }
@@ -224,6 +230,10 @@ pub fn replace_start(
 ///
 /// Returns `Ok(true)` if the replace was successfully cancelled, or
 /// `Ok(false)` if no replace operation was in progress.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn replace_cancel(fd: BorrowedFd) -> nix::Result<bool> {
     let mut args: btrfs_ioctl_dev_replace_args = unsafe { mem::zeroed() };
     args.cmd = u64::from(BTRFS_IOCTL_DEV_REPLACE_CMD_CANCEL);

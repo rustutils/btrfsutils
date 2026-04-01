@@ -290,6 +290,16 @@ pub struct StreamReader<R: Read> {
 
 impl<R: Read> StreamReader<R> {
     /// Read and validate the stream header, returning a new reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the header is truncated, the magic is invalid,
+    /// or the stream version is unsupported.
+    ///
+    /// # Panics
+    ///
+    /// Panics are unreachable: all `unwrap()` calls are on fixed-size
+    /// slice-to-array conversions that always succeed.
     pub fn new(mut reader: R) -> Result<Self> {
         let mut header = [0u8; STREAM_HEADER_LEN];
         reader
@@ -318,11 +328,13 @@ impl<R: Read> StreamReader<R> {
     }
 
     /// Return the stream protocol version.
+    #[must_use]
     pub fn version(&self) -> u32 {
         self.version
     }
 
     /// Consume the underlying reader back out.
+    #[must_use]
     pub fn into_inner(self) -> R {
         self.reader
     }
@@ -331,6 +343,17 @@ impl<R: Read> StreamReader<R> {
     ///
     /// Returns `Ok(None)` on clean EOF (no more data), `Ok(Some(End))` when
     /// the stream contains an explicit end-of-stream marker.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on I/O failure, CRC mismatch, malformed TLV
+    /// attributes, or unknown command types.
+    ///
+    /// # Panics
+    ///
+    /// Panics are unreachable: all `unwrap()` calls are on fixed-size
+    /// slice-to-array conversions that always succeed.
+    #[allow(clippy::too_many_lines)]
     pub fn next_command(&mut self) -> Result<Option<StreamCommand>> {
         // Read command header.
         let mut cmd_hdr = [0u8; CMD_HEADER_LEN];
@@ -338,6 +361,8 @@ impl<R: Read> StreamReader<R> {
             return Ok(None); // clean EOF
         }
 
+        #[allow(clippy::cast_possible_truncation)]
+        // payload length fits in usize
         let payload_len =
             u32::from_le_bytes(cmd_hdr[0..4].try_into().unwrap()) as usize;
         let cmd = u16::from_le_bytes(cmd_hdr[4..6].try_into().unwrap());
@@ -854,7 +879,7 @@ fn parse_tlv_attrs(payload: &[u8], version: u32) -> Result<AttrTable> {
             u16::from_le_bytes(payload[pos..pos + 2].try_into().unwrap());
         pos += 2;
 
-        if tlv_type == 0 || tlv_type as usize > MAX_ATTRS {
+        if tlv_type == 0 || usize::from(tlv_type) > MAX_ATTRS {
             return Err(StreamError::InvalidTlvType(tlv_type));
         }
 
@@ -868,9 +893,9 @@ fn parse_tlv_attrs(payload: &[u8], version: u32) -> Result<AttrTable> {
                     detail: "not enough bytes for length field".into(),
                 });
             }
-            let len =
-                u16::from_le_bytes(payload[pos..pos + 2].try_into().unwrap())
-                    as usize;
+            let len = usize::from(u16::from_le_bytes(
+                payload[pos..pos + 2].try_into().unwrap(),
+            ));
             pos += 2;
             len
         };
@@ -884,7 +909,7 @@ fn parse_tlv_attrs(payload: &[u8], version: u32) -> Result<AttrTable> {
             });
         }
 
-        attrs[(tlv_type - 1) as usize] = Some((pos, tlv_len));
+        attrs[usize::from(tlv_type - 1)] = Some((pos, tlv_len));
         pos += tlv_len;
     }
 
@@ -897,7 +922,7 @@ fn get_attr<'a>(
     attr_type: u16,
     name: &'static str,
 ) -> Result<&'a [u8]> {
-    let (offset, len) = attrs[(attr_type - 1) as usize]
+    let (offset, len) = attrs[usize::from(attr_type - 1)]
         .ok_or(StreamError::MissingAttribute(name))?;
     Ok(&buf[offset..offset + len])
 }
@@ -1011,7 +1036,7 @@ fn get_attr_opt<'a>(
     attrs: &AttrTable,
     attr_type: u16,
 ) -> Option<&'a [u8]> {
-    let (offset, len) = attrs[(attr_type - 1) as usize]?;
+    let (offset, len) = attrs[usize::from(attr_type - 1)]?;
     Some(&buf[offset..offset + len])
 }
 

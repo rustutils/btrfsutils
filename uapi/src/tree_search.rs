@@ -133,11 +133,16 @@ const SEARCH_HEADER_SIZE: usize = mem::size_of::<btrfs_ioctl_search_header>();
 ///
 /// Returns `Ok(())` when the entire requested range has been scanned.
 ///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails or the callback returns an error.
+///
 /// # Privileges
 ///
 /// Most trees require `CAP_SYS_ADMIN`.  The subvolume tree of the inode
 /// belonging to `fd` can be searched without elevated privileges by setting
 /// `key.tree_id = 0`.
+#[allow(clippy::needless_pass_by_value)] // SearchKey is small but not Copy by design
 pub fn tree_search(
     fd: BorrowedFd,
     key: SearchKey,
@@ -235,6 +240,12 @@ const DEFAULT_V2_BUF_SIZE: usize = 64 * 1024;
 /// If `buf_size` is too small for even a single item, the kernel returns
 /// `EOVERFLOW` and sets `buf_size` to the required minimum. This function
 /// automatically retries with the larger buffer.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails or the callback returns an error.
+#[allow(clippy::needless_pass_by_value)] // SearchKey is small but not Copy by design
+#[allow(clippy::too_many_lines)]
 pub fn tree_search_v2(
     fd: BorrowedFd,
     key: SearchKey,
@@ -267,6 +278,8 @@ pub fn tree_search_v2(
             Ok(_) => {}
             Err(nix::errno::Errno::EOVERFLOW) => {
                 // Kernel tells us the needed size via buf_size.
+                #[allow(clippy::cast_possible_truncation)]
+                // buf_size fits in usize
                 let needed = unsafe { (*args_ptr).buf_size } as usize;
                 if needed <= capacity {
                     return Err(nix::errno::Errno::EOVERFLOW);

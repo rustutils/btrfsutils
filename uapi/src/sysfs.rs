@@ -85,26 +85,42 @@ impl SysfsBtrfs {
         Ok(self.read_u64(name)? != 0)
     }
 
-    /// Background reclaim threshold as a percentage (0–100).
+    /// Background reclaim threshold as a percentage (0-100).
     /// `/sys/fs/btrfs/<uuid>/bg_reclaim_threshold`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read or parsed.
     pub fn bg_reclaim_threshold(&self) -> io::Result<u64> {
         self.read_u64("bg_reclaim_threshold")
     }
 
     /// Checksum algorithm in use, e.g. `"crc32c (crc32c-lib)"`.
     /// `/sys/fs/btrfs/<uuid>/checksum`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read.
     pub fn checksum(&self) -> io::Result<String> {
         self.read_file("checksum")
     }
 
     /// Minimum clone/reflink alignment in bytes.
     /// `/sys/fs/btrfs/<uuid>/clone_alignment`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read or parsed.
     pub fn clone_alignment(&self) -> io::Result<u64> {
         self.read_u64("clone_alignment")
     }
 
     /// Commit statistics since mount (or last reset).
     /// `/sys/fs/btrfs/<uuid>/commit_stats`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read or parsed.
     pub fn commit_stats(&self) -> io::Result<CommitStats> {
         let contents = self.read_file("commit_stats")?;
         let mut commits = None;
@@ -153,6 +169,10 @@ impl SysfsBtrfs {
     /// Reset the `max_commit_ms` counter by writing `0` to the `commit_stats`
     /// file. Requires root.
     /// `/sys/fs/btrfs/<uuid>/commit_stats`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the write fails.
     pub fn reset_commit_stats(&self) -> io::Result<()> {
         fs::write(self.base.join("commit_stats"), b"0")
     }
@@ -160,6 +180,10 @@ impl SysfsBtrfs {
     /// Name of the exclusive operation currently running, e.g. `"none"`,
     /// `"balance"`, `"device add"`.
     /// `/sys/fs/btrfs/<uuid>/exclusive_operation`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read.
     pub fn exclusive_operation(&self) -> io::Result<String> {
         self.read_file("exclusive_operation")
     }
@@ -170,6 +194,10 @@ impl SysfsBtrfs {
     /// Returns immediately if no exclusive operation is in progress, or after
     /// the running operation completes. Returns the name of the operation
     /// that was waited on, or `"none"` if nothing was running.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if reading the sysfs file fails.
     pub fn wait_for_exclusive_operation(&self) -> io::Result<String> {
         let mut op = self.exclusive_operation()?;
         if op == "none" {
@@ -186,6 +214,10 @@ impl SysfsBtrfs {
     /// Names of the filesystem features that are enabled. Each feature
     /// corresponds to a file in the `features/` subdirectory.
     /// `/sys/fs/btrfs/<uuid>/features/`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if reading the features directory fails.
     pub fn features(&self) -> io::Result<Vec<String>> {
         let mut features = Vec::new();
         for entry in fs::read_dir(self.base.join("features"))? {
@@ -200,12 +232,20 @@ impl SysfsBtrfs {
 
     /// Current filesystem generation number.
     /// `/sys/fs/btrfs/<uuid>/generation`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read or parsed.
     pub fn generation(&self) -> io::Result<u64> {
         self.read_u64("generation")
     }
 
     /// Filesystem label. Empty string if no label is set.
     /// `/sys/fs/btrfs/<uuid>/label`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read.
     pub fn label(&self) -> io::Result<String> {
         self.read_file("label")
     }
@@ -213,6 +253,10 @@ impl SysfsBtrfs {
     /// Metadata UUID. May differ from the filesystem UUID if the metadata UUID
     /// feature is in use.
     /// `/sys/fs/btrfs/<uuid>/metadata_uuid`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read or parsed.
     pub fn metadata_uuid(&self) -> io::Result<Uuid> {
         let s = self.read_file("metadata_uuid")?;
         Uuid::parse_str(&s)
@@ -221,30 +265,50 @@ impl SysfsBtrfs {
 
     /// B-tree node size in bytes.
     /// `/sys/fs/btrfs/<uuid>/nodesize`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read or parsed.
     pub fn nodesize(&self) -> io::Result<u64> {
         self.read_u64("nodesize")
     }
 
     /// Whether the quota override is active.
     /// `/sys/fs/btrfs/<uuid>/quota_override`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read or parsed.
     pub fn quota_override(&self) -> io::Result<bool> {
         self.read_bool("quota_override")
     }
 
     /// Read policy for RAID profiles, e.g. `"[pid]"` or `"[roundrobin]"`.
     /// `/sys/fs/btrfs/<uuid>/read_policy`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read.
     pub fn read_policy(&self) -> io::Result<String> {
         self.read_file("read_policy")
     }
 
     /// Sector size in bytes.
     /// `/sys/fs/btrfs/<uuid>/sectorsize`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read or parsed.
     pub fn sectorsize(&self) -> io::Result<u64> {
         self.read_u64("sectorsize")
     }
 
     /// Whether a temporary fsid is in use (seeding device feature).
     /// `/sys/fs/btrfs/<uuid>/temp_fsid`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read or parsed.
     pub fn temp_fsid(&self) -> io::Result<bool> {
         self.read_bool("temp_fsid")
     }
@@ -252,6 +316,10 @@ impl SysfsBtrfs {
     /// Read the per-device scrub throughput limit for the given device, in
     /// bytes per second. A value of `0` means no limit is set (unlimited).
     /// `/sys/fs/btrfs/<uuid>/devinfo/<devid>/scrub_speed_max`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs file cannot be read or parsed.
     pub fn scrub_speed_max_get(&self, devid: u64) -> io::Result<u64> {
         let path = format!("devinfo/{devid}/scrub_speed_max");
         match self.read_u64(&path) {
@@ -265,6 +333,10 @@ impl SysfsBtrfs {
     /// bytes per second. Pass `0` to remove the limit (unlimited).
     /// Requires root.
     /// `/sys/fs/btrfs/<uuid>/devinfo/<devid>/scrub_speed_max`
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the write fails.
     pub fn scrub_speed_max_set(
         &self,
         devid: u64,
@@ -297,6 +369,10 @@ impl SysfsBtrfs {
     /// enabled (the `qgroups/` directory does not exist). Returns an
     /// [`io::Error`] with kind `NotFound` if the sysfs entry for this UUID
     /// does not exist (i.e. the filesystem is not currently mounted).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the sysfs files cannot be read or parsed.
     pub fn quota_status(&self) -> io::Result<QuotaStatus> {
         let qgroups = self.base.join("qgroups");
 

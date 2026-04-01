@@ -249,6 +249,10 @@ mod tests {
 /// `fd` must be an open file descriptor to a regular file on a btrfs
 /// filesystem. Pass `&DefragRangeArgs::new()` to defragment the entire file
 /// with default settings.
+///
+/// # Errors
+///
+/// Returns `Err` if the defrag ioctl fails.
 pub fn defrag_range(fd: BorrowedFd, args: &DefragRangeArgs) -> nix::Result<()> {
     let mut raw: btrfs_ioctl_defrag_range_args = unsafe { mem::zeroed() };
 

@@ -49,6 +49,10 @@ bitflags! {
 /// `clone_sources` is a list of root IDs that the kernel may reference for
 /// clone operations in the stream. `parent_root` is the root ID of the parent
 /// snapshot for incremental sends, or `0` for a full send.
+///
+/// # Errors
+///
+/// Returns `Err` if the send ioctl fails.
 pub fn send(
     subvol_fd: BorrowedFd<'_>,
     send_fd: RawFd,
@@ -90,6 +94,11 @@ pub struct SubvolumeSearchResult {
 /// After applying a send stream, this ioctl records the sender's UUID and
 /// transaction ID so that future incremental sends can use this subvolume as
 /// a reference. Returns the receive transaction ID assigned by the kernel.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
+#[allow(clippy::cast_possible_wrap)] // UUID bytes fit in c_char
 pub fn received_subvol_set(
     fd: BorrowedFd<'_>,
     uuid: &Uuid,
@@ -120,7 +129,11 @@ pub fn received_subvol_set(
 ///
 /// Errors: EXDEV if source and destination are on different filesystems.
 /// EINVAL if the range is not sector-aligned or extends beyond EOF.
-/// ETXTBSY if the destination file is a swap file.
+/// `ETXTBSY` if the destination file is a swap file.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn clone_range(
     dest_fd: BorrowedFd<'_>,
     src_fd: BorrowedFd<'_>,
@@ -152,7 +165,12 @@ pub fn clone_range(
 /// EINVAL if the compression type, alignment, or lengths are not accepted.
 /// ENOSPC if the filesystem has no room for the encoded extent.  Callers
 /// should fall back to manual decompression + pwrite for any of these.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::cast_possible_wrap)] // offset fits in i64 for filesystem offsets
 pub fn encoded_write(
     fd: BorrowedFd<'_>,
     data: &[u8],
@@ -215,7 +233,13 @@ pub struct EncodedReadResult {
 /// the encoding and how many bytes were read.
 ///
 /// Errors: ENOTTY on kernels that do not support encoded reads (pre-5.18).
-/// EINVAL if the offset or length are not accepted.
+/// `EINVAL` if the offset or length are not accepted.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
+#[allow(clippy::cast_possible_wrap)] // offset fits in i64
+#[allow(clippy::cast_sign_loss)] // offset and ret are non-negative after successful ioctl
 pub fn encoded_read(
     fd: BorrowedFd<'_>,
     buf: &mut [u8],
@@ -253,6 +277,10 @@ pub fn encoded_read(
 ///
 /// Returns the root ID of the matching subvolume, or `Errno::ENOENT` if not
 /// found.
+///
+/// # Errors
+///
+/// Returns `Err` if the tree search fails. `ENOENT` if not found.
 pub fn subvolume_search_by_uuid(
     fd: BorrowedFd<'_>,
     uuid: &Uuid,
@@ -264,6 +292,10 @@ pub fn subvolume_search_by_uuid(
 ///
 /// Returns the root ID of the matching subvolume, or `Errno::ENOENT` if not
 /// found.
+///
+/// # Errors
+///
+/// Returns `Err` if the tree search fails. `ENOENT` if not found.
 pub fn subvolume_search_by_received_uuid(
     fd: BorrowedFd<'_>,
     uuid: &Uuid,

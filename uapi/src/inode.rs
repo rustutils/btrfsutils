@@ -84,6 +84,10 @@ pub fn ino_paths(fd: BorrowedFd<'_>, inum: u64) -> nix::Result<Vec<String>> {
 
     // Parse the results from the data container
     // The buffer is laid out as: btrfs_data_container header, followed by val[] array
+    // SAFETY: buf is u64-aligned from the Vec<u8> allocation, and the ioctl
+    // populated it as a btrfs_data_container. The cast is safe because the
+    // buffer was allocated with at least PATH_MAX bytes.
+    #[allow(clippy::cast_ptr_alignment)]
     let container =
         unsafe { &*buf.as_ptr().cast::<crate::raw::btrfs_data_container>() };
 
@@ -92,6 +96,7 @@ pub fn ino_paths(fd: BorrowedFd<'_>, inum: u64) -> nix::Result<Vec<String>> {
     // Each element in val[] is an offset into the data buffer where a path string starts
     for i in 0..container.elem_cnt as usize {
         // Get the offset from val[i]
+        #[allow(clippy::cast_possible_truncation)] // offsets fit in usize
         let val_offset = unsafe {
             let val_ptr = container.val.as_ptr();
             *val_ptr.add(i) as usize
@@ -148,6 +153,7 @@ pub fn logical_ino(
     const DEFAULT_BUFSIZE: u64 = 64 * 1024; // 64KB
 
     let size = std::cmp::min(bufsize.unwrap_or(DEFAULT_BUFSIZE), MAX_BUFSIZE);
+    #[allow(clippy::cast_possible_truncation)] // buffer size fits in usize
     let mut buf = vec![0u8; size as usize];
 
     // Set up flags for v2 ioctl
@@ -169,7 +175,9 @@ pub fn logical_ino(
         btrfs_ioc_logical_ino_v2(fd.as_raw_fd(), &raw mut args)?;
     }
 
-    // Parse the results from the data container
+    // Parse the results from the data container.
+    // SAFETY: buf is correctly sized and was populated by the ioctl.
+    #[allow(clippy::cast_ptr_alignment)]
     let container =
         unsafe { &*buf.as_ptr().cast::<crate::raw::btrfs_data_container>() };
 
@@ -270,6 +278,8 @@ fn subvolid_resolve_sub(
             subvol_id,
         ),
         |hdr, data| {
+            use std::mem::{offset_of, size_of};
+
             found = true;
 
             // The parent subvolume ID is stored in the offset field
@@ -279,7 +289,6 @@ fn subvolid_resolve_sub(
             subvolid_resolve_sub(fd, path, parent_subvol_id)?;
 
             // data is a packed btrfs_root_ref followed by name bytes.
-            use std::mem::{offset_of, size_of};
 
             let header_size = size_of::<btrfs_root_ref>();
             if data.len() < header_size {
@@ -379,6 +388,10 @@ pub struct InoLookupUserResult {
 /// Unlike [`subvolid_resolve`], this does not require `CAP_SYS_ADMIN`.
 /// However, it only resolves one level — for nested subvolumes the caller
 /// must walk up the tree.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn ino_lookup_user(
     fd: BorrowedFd<'_>,
     treeid: u64,

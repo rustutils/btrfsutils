@@ -90,13 +90,13 @@ impl Runnable for DeviceRemoveCommand {
 /// is treated as a path (or the special strings `"missing"` / `"cancel"`).
 fn remove_one(fd: std::os::unix::io::BorrowedFd, spec_str: &str) -> Result<()> {
     if let Ok(devid) = spec_str.parse::<u64>() {
-        device_remove(fd, DeviceSpec::Id(devid))
+        device_remove(fd, &DeviceSpec::Id(devid))
             .with_context(|| format!("failed to remove devid {devid}"))?;
     } else {
         let cpath = CString::new(spec_str).with_context(|| {
             format!("device spec contains a null byte: '{spec_str}'")
         })?;
-        device_remove(fd, DeviceSpec::Path(&cpath))
+        device_remove(fd, &DeviceSpec::Path(&cpath))
             .with_context(|| format!("failed to remove device '{spec_str}'"))?;
     }
     Ok(())

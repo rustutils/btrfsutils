@@ -74,6 +74,10 @@ pub struct ChunkEntry {
 /// struct followed by `num_stripes - 1` additional `btrfs_stripe` structs.
 /// The `stripe_len` field of each stripe is accumulated per `(devid, flags)`
 /// to produce the physical byte counts in the returned list.
+///
+/// # Errors
+///
+/// Returns `Err` if the tree search ioctl fails.
 pub fn device_chunk_allocations(
     fd: BorrowedFd,
 ) -> nix::Result<Vec<DeviceAllocation>> {
@@ -107,6 +111,10 @@ pub fn device_chunk_allocations(
 /// fails the field is set to `0` rather than propagating an error.
 ///
 /// Requires `CAP_SYS_ADMIN`.
+///
+/// # Errors
+///
+/// Returns `Err` if the tree search ioctl fails.
 pub fn chunk_list(fd: BorrowedFd) -> nix::Result<Vec<ChunkEntry>> {
     let mut entries: Vec<ChunkEntry> = Vec::new();
 

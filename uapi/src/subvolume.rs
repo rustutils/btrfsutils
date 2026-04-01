@@ -132,6 +132,7 @@ pub struct SubvolumeListItem {
 
 /// Write `name` into the `name` union member of a zeroed
 /// `btrfs_ioctl_vol_args_v2`, returning `ENAMETOOLONG` if it does not fit.
+#[allow(clippy::cast_possible_wrap)] // ASCII bytes always fit in c_char
 fn set_v2_name(
     args: &mut btrfs_ioctl_vol_args_v2,
     name: &CStr,
@@ -200,7 +201,11 @@ fn set_qgroup_inherit(
 ///
 /// Errors: ENAMETOOLONG if `name` does not fit in the 4040-byte kernel
 /// buffer.  EEXIST if a subvolume or directory with that name already exists.
-/// EPERM without `CAP_SYS_ADMIN`.
+/// `EPERM` without `CAP_SYS_ADMIN`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn subvolume_create(
     parent_fd: BorrowedFd,
     name: &CStr,
@@ -233,6 +238,10 @@ pub fn subvolume_create(
 /// the subvolume). Call `sync` to force a commit, or pass
 /// `-c`/`--commit-after` at the CLI level. To wait for the cleaner to
 /// finish, use [`subvol_sync_wait_one`].
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn subvolume_delete(parent_fd: BorrowedFd, name: &CStr) -> nix::Result<()> {
     let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
     set_v2_name(&mut args, name)?;
@@ -250,6 +259,10 @@ pub fn subvolume_delete(parent_fd: BorrowedFd, name: &CStr) -> nix::Result<()> {
 ///
 /// See [`subvolume_delete`] for details on commit visibility and async
 /// cleanup.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn subvolume_delete_by_id(
     fd: BorrowedFd,
     subvolid: u64,
@@ -272,6 +285,10 @@ pub fn subvolume_delete_by_id(
 /// buffer.  EEXIST if a subvolume or directory with that name already exists.
 /// EROFS if `parent_fd` refers to a read-only subvolume.  EPERM without
 /// `CAP_SYS_ADMIN`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn snapshot_create(
     parent_fd: BorrowedFd,
     source_fd: BorrowedFd,
@@ -303,6 +320,10 @@ pub fn snapshot_create(
 ///
 /// `fd` can be any file or directory within the target subvolume.
 /// Does not require elevated privileges.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn subvolume_info(fd: BorrowedFd) -> nix::Result<SubvolumeInfo> {
     subvolume_info_by_id(fd, 0)
 }
@@ -315,6 +336,10 @@ pub fn subvolume_info(fd: BorrowedFd) -> nix::Result<SubvolumeInfo> {
 ///
 /// Errors: ENOENT if no subvolume with that `rootid` exists (or has been
 /// deleted but not yet cleaned).
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn subvolume_info_by_id(
     fd: BorrowedFd,
     rootid: u64,
@@ -349,6 +374,10 @@ pub fn subvolume_info_by_id(
 }
 
 /// Read the flags of the subvolume that `fd` belongs to.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn subvolume_flags_get(fd: BorrowedFd) -> nix::Result<SubvolumeFlags> {
     let mut flags: u64 = 0;
     unsafe { btrfs_ioc_subvol_getflags(fd.as_raw_fd(), &raw mut flags) }?;
@@ -359,6 +388,10 @@ pub fn subvolume_flags_get(fd: BorrowedFd) -> nix::Result<SubvolumeFlags> {
 ///
 /// Requires `CAP_SYS_ADMIN` to make a subvolume read-only; any user may
 /// clear the read-only flag from a subvolume they own.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn subvolume_flags_set(
     fd: BorrowedFd,
     flags: SubvolumeFlags,
@@ -376,6 +409,15 @@ pub fn subvolume_flags_set(
 /// Returns [`FS_TREE_OBJECTID`] if no default has been set.
 ///
 /// Requires `CAP_SYS_ADMIN`.
+///
+/// # Errors
+///
+/// Returns `Err` if the tree search ioctl fails.
+///
+/// # Panics
+///
+/// Panics if the dir item data is malformed (slice conversion fails). This
+/// cannot happen with valid btrfs on-disk data.
 pub fn subvolume_default_get(fd: BorrowedFd) -> nix::Result<u64> {
     let mut default_id: Option<u64> = None;
 
@@ -421,6 +463,10 @@ pub fn subvolume_default_get(fd: BorrowedFd) -> nix::Result<u64> {
 /// `subvolid`.
 ///
 /// Pass [`FS_TREE_OBJECTID`] to restore the default.  Requires `CAP_SYS_ADMIN`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn subvolume_default_set(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> {
     unsafe { btrfs_ioc_default_subvol(fd.as_raw_fd(), &raw const subvolid) }?;
     Ok(())
@@ -438,8 +484,13 @@ pub fn subvolume_default_set(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> {
 /// `parent_id`, `dir_id`, and `name` will be zeroed / empty.
 ///
 /// Requires `CAP_SYS_ADMIN` for the tree search. Without it the kernel
-/// returns EPERM; the caller should degrade gracefully (e.g. show only the
+/// returns `EPERM`; the caller should degrade gracefully (e.g. show only the
 /// leaf name without full path resolution).
+///
+/// # Errors
+///
+/// Returns `Err` if the tree search ioctl fails.
+#[allow(clippy::cast_sign_loss)] // BTRFS_LAST_FREE_OBJECTID: i32 → u64 intentional
 pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
     let mut items: Vec<SubvolumeListItem> = Vec::new();
 
@@ -674,7 +725,7 @@ fn build_full_path(
     cache.get(&root_id).cloned().unwrap_or_default()
 }
 
-/// Parse a ROOT_ITEM payload into a [`SubvolumeListItem`].
+/// Parse a `ROOT_ITEM` payload into a [`SubvolumeListItem`].
 fn parse_root_item(root_id: u64, data: &[u8]) -> Option<SubvolumeListItem> {
     let ri = btrfs_disk::items::RootItem::parse(data)?;
     let flags = SubvolumeFlags::from_bits_truncate(ri.flags.bits());
@@ -738,7 +789,11 @@ pub struct SubvolRootRef {
 ///
 /// Does not require `CAP_SYS_ADMIN`.
 ///
-/// Errors: ENOTTY on kernels older than 4.18.
+/// Errors: `ENOTTY` on kernels older than 4.18.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn subvol_rootrefs(fd: BorrowedFd) -> nix::Result<Vec<SubvolRootRef>> {
     use crate::raw::{
         btrfs_ioc_get_subvol_rootref, btrfs_ioctl_get_subvol_rootref_args,
@@ -792,6 +847,10 @@ pub fn subvol_rootrefs(fd: BorrowedFd) -> nix::Result<Vec<SubvolRootRef>> {
 /// completes and when the subvolume is already gone (`ENOENT`).
 /// Useful after `subvolume_delete` when subsequent operations depend on
 /// the subvolume being fully gone (e.g. qgroup staleness checks).
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails (other than `ENOENT`).
 pub fn subvol_sync_wait_one(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> {
     let args = btrfs_ioctl_subvol_wait {
         subvolid,
@@ -810,6 +869,10 @@ pub fn subvol_sync_wait_one(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> {
 /// Blocks until every subvolume that was in the deletion queue at the time
 /// of the call has been fully cleaned. Does not wait for subvolumes
 /// deleted after the call is made.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn subvol_sync_wait_all(fd: BorrowedFd) -> nix::Result<()> {
     let args = btrfs_ioctl_subvol_wait {
         subvolid: 0,

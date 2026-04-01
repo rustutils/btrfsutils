@@ -42,9 +42,12 @@ pub enum DedupeResult {
 ///
 /// Returns one [`DedupeResult`] per target, in the same order.
 ///
-/// Errors (ioctl-level): EINVAL if `src_offset` or `length` are not
-/// sector-aligned, or if `targets` is empty. EPERM if the destination
-/// files are not writable.
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails. `EINVAL` if offsets or length are not
+/// sector-aligned, or if `targets` is empty. `EPERM` if destination files
+/// are not writable.
+#[allow(clippy::cast_possible_wrap)] // BTRFS_SAME_DATA_DIFFERS is 1, fits in i32
 pub fn file_extent_same(
     src_fd: BorrowedFd<'_>,
     src_offset: u64,
@@ -67,7 +70,11 @@ pub fn file_extent_same(
         let args_ptr = buf.as_mut_ptr().cast::<btrfs_ioctl_same_args>();
         (*args_ptr).logical_offset = src_offset;
         (*args_ptr).length = length;
-        (*args_ptr).dest_count = count as u16;
+        #[allow(clippy::cast_possible_truncation)]
+        // count is bounded by target slice length
+        {
+            (*args_ptr).dest_count = count as u16;
+        }
 
         let info_slice = (*args_ptr).info.as_mut_slice(count);
         for (i, target) in targets.iter().enumerate() {

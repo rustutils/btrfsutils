@@ -38,6 +38,10 @@ pub struct FilesystemInfo {
 }
 
 /// Query information about the btrfs filesystem referred to by `fd`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn filesystem_info(fd: BorrowedFd) -> nix::Result<FilesystemInfo> {
     let mut raw: btrfs_ioctl_fs_info_args = unsafe { mem::zeroed() };
     raw.flags = u64::from(BTRFS_FS_INFO_FLAG_GENERATION);
@@ -55,6 +59,10 @@ pub fn filesystem_info(fd: BorrowedFd) -> nix::Result<FilesystemInfo> {
 
 /// Force a sync on the btrfs filesystem referred to by `fd` and wait for it
 /// to complete.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn sync(fd: BorrowedFd) -> nix::Result<()> {
     unsafe { btrfs_ioc_sync(fd.as_raw_fd()) }?;
     Ok(())
@@ -64,6 +72,10 @@ pub fn sync(fd: BorrowedFd) -> nix::Result<()> {
 ///
 /// Returns the transaction ID of the initiated sync, which can be passed to
 /// `wait_sync` to block until it completes.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn start_sync(fd: BorrowedFd) -> nix::Result<u64> {
     let mut transid: u64 = 0;
     unsafe { btrfs_ioc_start_sync(fd.as_raw_fd(), &raw mut transid) }?;
@@ -74,6 +86,10 @@ pub fn start_sync(fd: BorrowedFd) -> nix::Result<u64> {
 ///
 /// `transid` is the transaction ID returned by `start_sync`. Pass zero to
 /// wait for the current transaction.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn wait_sync(fd: BorrowedFd, transid: u64) -> nix::Result<()> {
     unsafe { btrfs_ioc_wait_sync(fd.as_raw_fd(), &raw const transid) }?;
     Ok(())
@@ -82,6 +98,10 @@ pub fn wait_sync(fd: BorrowedFd, transid: u64) -> nix::Result<()> {
 /// Read the label of the btrfs filesystem referred to by `fd`.
 ///
 /// Returns the label as a [`CString`]. An empty string means no label is set.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn label_get(fd: BorrowedFd) -> nix::Result<CString> {
     let mut buf = [0i8; BTRFS_LABEL_SIZE as usize];
     unsafe { btrfs_ioc_get_fslabel(fd.as_raw_fd(), &raw mut buf) }?;
@@ -98,7 +118,12 @@ pub fn label_get(fd: BorrowedFd) -> nix::Result<CString> {
 /// kernel.
 ///
 /// Errors: EINVAL if the label is 256 bytes or longer (checked before the
-/// ioctl).  EPERM without `CAP_SYS_ADMIN`.
+/// ioctl).  `EPERM` without `CAP_SYS_ADMIN`.
+///
+/// # Errors
+///
+/// Returns `Err` if the label is too long or the ioctl fails.
+#[allow(clippy::cast_possible_wrap)] // ASCII bytes always fit in c_char
 pub fn label_set(fd: BorrowedFd, label: &CStr) -> nix::Result<()> {
     let bytes = label.to_bytes();
     if bytes.len() >= BTRFS_LABEL_SIZE as usize {
@@ -179,6 +204,11 @@ impl ResizeArgs {
 ///
 /// `fd` must be an open file descriptor to a directory on the mounted
 /// filesystem. Use [`ResizeArgs`] to specify the target device and amount.
+///
+/// # Errors
+///
+/// Returns `Err` if the resize ioctl fails.
+#[allow(clippy::cast_possible_wrap)] // ASCII bytes always fit in c_char
 pub fn resize(fd: BorrowedFd, args: ResizeArgs) -> nix::Result<()> {
     let name = args.format_name();
     let name_bytes = name.as_bytes();

@@ -160,6 +160,10 @@ fn from_raw(raw: &btrfs_ioctl_scrub_args) -> ScrubProgress {
 /// completion the final [`ScrubProgress`] counters are returned.
 ///
 /// Set `readonly` to `true` to check for errors without attempting repairs.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn scrub_start(
     fd: BorrowedFd,
     devid: u64,
@@ -177,6 +181,10 @@ pub fn scrub_start(
 }
 
 /// Cancel the scrub currently running on the filesystem referred to by `fd`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn scrub_cancel(fd: BorrowedFd) -> nix::Result<()> {
     unsafe { btrfs_ioc_scrub_cancel(fd.as_raw_fd()) }?;
     Ok(())
@@ -186,6 +194,10 @@ pub fn scrub_cancel(fd: BorrowedFd) -> nix::Result<()> {
 /// by `devid` within the filesystem referred to by `fd`.
 ///
 /// Returns `None` if no scrub is running on that device (`ENOTCONN`).
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails (other than `ENOTCONN`).
 pub fn scrub_progress(
     fd: BorrowedFd,
     devid: u64,

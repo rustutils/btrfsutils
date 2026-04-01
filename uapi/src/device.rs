@@ -136,6 +136,7 @@ mod tests {
 /// Copy the bytes of `path` (without the nul terminator) into `name`,
 /// returning `ENAMETOOLONG` if the path (including the terminator that the
 /// kernel expects to already be present via zeroing) does not fit.
+#[allow(clippy::cast_possible_wrap)] // ASCII bytes always fit in c_char
 fn copy_path_to_name(name: &mut [c_char], path: &CStr) -> nix::Result<()> {
     let bytes = path.to_bytes(); // excludes nul terminator
     if bytes.len() >= name.len() {
@@ -164,6 +165,10 @@ fn open_control() -> nix::Result<std::fs::File> {
 /// referred to by `fd`.
 ///
 /// Returns `None` if no device with that ID exists (`ENODEV`).
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails (other than `ENODEV`).
 pub fn device_info(
     fd: BorrowedFd,
     devid: u64,
@@ -195,10 +200,16 @@ pub fn device_info(
 ///
 /// Iterates devids `1..=max_id`, skipping any that return `ENODEV` (holes in
 /// the devid space are normal when devices have been removed).
+///
+/// # Errors
+///
+/// Returns `Err` if any device info ioctl fails.
 pub fn device_info_all(
     fd: BorrowedFd,
     fs_info: &FilesystemInfo,
 ) -> nix::Result<Vec<DeviceInfo>> {
+    #[allow(clippy::cast_possible_truncation)]
+    // device count always fits in usize
     let mut devices = Vec::with_capacity(fs_info.num_devices as usize);
     for devid in 1..=fs_info.max_id {
         if let Some(info) = device_info(fd, devid)? {
@@ -212,6 +223,10 @@ pub fn device_info_all(
 ///
 /// `path` must be the path to an unmounted block device. The kernel requires
 /// `CAP_SYS_ADMIN`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn device_add(fd: BorrowedFd, path: &CStr) -> nix::Result<()> {
     let mut raw: btrfs_ioctl_vol_args = unsafe { mem::zeroed() };
     copy_path_to_name(&mut raw.name, path)?;
@@ -228,12 +243,16 @@ pub fn device_add(fd: BorrowedFd, path: &CStr) -> nix::Result<()> {
 ///
 /// Errors: ENOTTY or EOPNOTSUPP from `RM_DEV_V2` triggers an automatic
 /// fallback to the v1 ioctl (path-based removal only; by-ID removal
-/// requires v2 and will propagate the error).  EBUSY if the device holds
+/// requires v2 and will propagate the error).  `EBUSY` if the device holds
 /// the only copy of some data and cannot be removed.
-pub fn device_remove(fd: BorrowedFd, spec: DeviceSpec) -> nix::Result<()> {
+///
+/// # Errors
+///
+/// Returns `Err` if the remove ioctl fails.
+pub fn device_remove(fd: BorrowedFd, spec: &DeviceSpec<'_>) -> nix::Result<()> {
     let mut args: btrfs_ioctl_vol_args_v2 = unsafe { mem::zeroed() };
 
-    match spec {
+    match *spec {
         DeviceSpec::Id(devid) => {
             args.flags = u64::from(BTRFS_DEVICE_SPEC_BY_ID);
             // SAFETY: devid is the active union member when BTRFS_DEVICE_SPEC_BY_ID is set.
@@ -272,6 +291,10 @@ pub fn device_remove(fd: BorrowedFd, spec: DeviceSpec) -> nix::Result<()> {
 ///
 /// Opens `/dev/btrfs-control` and issues `BTRFS_IOC_SCAN_DEV`. `path` must
 /// be the path to a block device that contains a btrfs filesystem member.
+///
+/// # Errors
+///
+/// Returns `Err` if opening `/dev/btrfs-control` or the ioctl fails.
 pub fn device_scan(path: &CStr) -> nix::Result<()> {
     let ctl = open_control()?;
     let mut raw: btrfs_ioctl_vol_args = unsafe { mem::zeroed() };
@@ -287,6 +310,10 @@ pub fn device_scan(path: &CStr) -> nix::Result<()> {
 /// is `None`, all devices that are not part of a currently mounted filesystem
 /// are unregistered. If `path` is `Some`, only that specific device path is
 /// unregistered.
+///
+/// # Errors
+///
+/// Returns `Err` if opening `/dev/btrfs-control` or the ioctl fails.
 pub fn device_forget(path: Option<&CStr>) -> nix::Result<()> {
     let ctl = open_control()?;
     let mut raw: btrfs_ioctl_vol_args = unsafe { mem::zeroed() };
@@ -304,6 +331,10 @@ pub fn device_forget(path: Option<&CStr>) -> nix::Result<()> {
 /// must be the path to one of the block devices belonging to the filesystem.
 /// Returns `Ok(())` when all devices are present; returns an error (typically
 /// `ENOENT` or `ENXIO`) if the set is incomplete.
+///
+/// # Errors
+///
+/// Returns `Err` if some devices are missing or the ioctl fails.
 pub fn device_ready(path: &CStr) -> nix::Result<()> {
     let ctl = open_control()?;
     // BTRFS_IOC_DEVICES_READY is declared _IOR but the kernel reads the device
@@ -319,6 +350,10 @@ pub fn device_ready(path: &CStr) -> nix::Result<()> {
 ///
 /// If `reset` is `true`, the kernel atomically returns the current values and
 /// then resets all counters to zero. The kernel requires `CAP_SYS_ADMIN`.
+///
+/// # Errors
+///
+/// Returns `Err` if the ioctl fails.
 pub fn device_stats(
     fd: BorrowedFd,
     devid: u64,
@@ -381,6 +416,10 @@ struct Extent {
 /// min-dev-size` from btrfs-progs.
 ///
 /// Requires `CAP_SYS_ADMIN`.
+///
+/// # Errors
+///
+/// Returns `Err` if the tree search ioctl fails.
 pub fn device_min_size(fd: BorrowedFd, devid: u64) -> nix::Result<u64> {
     let mut min_size: u64 = SZ_1M;
     let mut extents: Vec<Extent> = Vec::new();

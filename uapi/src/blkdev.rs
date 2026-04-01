@@ -12,6 +12,10 @@ nix::ioctl_read!(blk_getsize64, 0x12, 114, u64);
 nix::ioctl_write_ptr!(blk_discard, 0x12, 119, [u64; 2]);
 
 /// Get the size of a block device in bytes.
+///
+/// # Errors
+///
+/// Returns `Err` if the `BLKGETSIZE64` ioctl fails.
 pub fn device_size(fd: BorrowedFd) -> nix::Result<u64> {
     let mut size: u64 = 0;
     unsafe { blk_getsize64(fd.as_raw_fd(), &raw mut size) }?;
@@ -23,6 +27,10 @@ pub fn device_size(fd: BorrowedFd) -> nix::Result<u64> {
 /// Tells the device that the specified range is no longer in use and its
 /// contents can be discarded. This is typically done before repurposing a
 /// device (e.g. as a replace target).
+///
+/// # Errors
+///
+/// Returns `Err` if the `BLKDISCARD` ioctl fails.
 pub fn discard_range(
     fd: BorrowedFd,
     offset: u64,
@@ -36,7 +44,12 @@ pub fn discard_range(
 /// Issue a BLKDISCARD on the entire block device.
 ///
 /// Returns the number of bytes discarded (the device size), or an error.
-/// Silently ignores EOPNOTSUPP (device does not support discard).
+/// Silently ignores `EOPNOTSUPP` (device does not support discard).
+///
+/// # Errors
+///
+/// Returns `Err` if querying the device size or issuing the discard fails
+/// (other than `EOPNOTSUPP`).
 pub fn discard_whole_device(fd: BorrowedFd) -> nix::Result<u64> {
     let size = device_size(fd)?;
     if size == 0 {

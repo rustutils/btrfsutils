@@ -255,6 +255,7 @@ pub enum BalanceCtl {
 }
 
 impl BalanceCtl {
+    #[allow(clippy::cast_possible_wrap)] // constants fit in c_int
     fn as_raw(self) -> c_int {
         match self {
             BalanceCtl::Pause => BTRFS_BALANCE_CTL_PAUSE as c_int,
@@ -271,6 +272,10 @@ impl BalanceCtl {
 ///
 /// On success, returns the progress counters as reported by the kernel after
 /// the operation completes (or is paused/interrupted).
+///
+/// # Errors
+///
+/// Returns `Err` if the balance ioctl fails.
 pub fn balance(
     fd: BorrowedFd,
     flags: BalanceFlags,
@@ -307,7 +312,12 @@ pub fn balance(
 /// referred to by `fd`.
 ///
 /// Use [`BalanceCtl::Pause`] to pause or [`BalanceCtl::Cancel`] to cancel.
+///
+/// # Errors
+///
+/// Returns `Err` if the balance control ioctl fails.
 pub fn balance_ctl(fd: BorrowedFd, cmd: BalanceCtl) -> nix::Result<()> {
+    #[allow(clippy::cast_sign_loss)] // as_raw returns small positive constants
     unsafe {
         btrfs_ioc_balance_ctl(fd.as_raw_fd(), cmd.as_raw() as u64)?;
     }
@@ -320,6 +330,10 @@ pub fn balance_ctl(fd: BorrowedFd, cmd: BalanceCtl) -> nix::Result<()> {
 /// Returns a [`BalanceState`] bitflags value indicating whether a balance is
 /// running, paused, or being cancelled, along with a [`BalanceProgress`] with
 /// the current counters.
+///
+/// # Errors
+///
+/// Returns `Err` if the balance progress ioctl fails.
 pub fn balance_progress(
     fd: BorrowedFd,
 ) -> nix::Result<(BalanceState, BalanceProgress)> {
