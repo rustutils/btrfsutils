@@ -1,10 +1,28 @@
 use crate::util::format_timespec;
 use btrfs_disk::{
-    items::{self, FileExtentBody, InlineRef, ItemPayload, Timespec},
+    items::{
+        self, BlockGroupFlags, FileExtentBody, InlineRef, ItemPayload, Timespec,
+    },
     raw,
     tree::{Header, ObjectId, TreeBlock, format_key},
 };
 use std::mem;
+
+/// Format block group flags in dump-tree style: `DATA|DUP`, `METADATA|single`.
+fn fmt_block_group_flags(flags: &BlockGroupFlags) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if flags.contains(BlockGroupFlags::DATA) {
+        parts.push("DATA");
+    }
+    if flags.contains(BlockGroupFlags::SYSTEM) {
+        parts.push("SYSTEM");
+    }
+    if flags.contains(BlockGroupFlags::METADATA) {
+        parts.push("METADATA");
+    }
+    parts.push(flags.profile_name());
+    parts.join("|")
+}
 
 pub struct PrintOptions {
     pub hide_names: bool,
@@ -430,7 +448,9 @@ fn print_payload(
         ItemPayload::BlockGroupItem(v) => {
             println!(
                 "\t\tblock group used {} chunk_objectid {} flags {}",
-                v.used, v.chunk_objectid, v.flags
+                v.used,
+                v.chunk_objectid,
+                fmt_block_group_flags(&v.flags)
             );
         }
         ItemPayload::FreeSpaceInfo(v) => {
@@ -444,7 +464,10 @@ fn print_payload(
         ItemPayload::ChunkItem(v) => {
             println!(
                 "\t\tlength {} owner {} stripe_len {} type {}",
-                v.length, v.owner, v.stripe_len, v.chunk_type
+                v.length,
+                v.owner,
+                v.stripe_len,
+                fmt_block_group_flags(&v.chunk_type)
             );
             println!(
                 "\t\tio_align {} io_width {} sector_size {}",

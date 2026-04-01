@@ -40,11 +40,35 @@ bitflags::bitflags! {
         const RAID6    = raw::BTRFS_BLOCK_GROUP_RAID6 as u64;
         const RAID1C3  = raw::BTRFS_BLOCK_GROUP_RAID1C3 as u64;
         const RAID1C4  = raw::BTRFS_BLOCK_GROUP_RAID1C4 as u64;
+
+        /// Explicit "single" marker (bit 48). When no profile bits are
+        /// set, the allocation is also single.
+        const SINGLE     = raw::BTRFS_AVAIL_ALLOC_BIT_SINGLE;
+
+        /// Pseudo-type used for the global reservation pool.
+        const GLOBAL_RSV = raw::BTRFS_SPACE_INFO_GLOBAL_RSV;
     }
 }
 
 impl BlockGroupFlags {
+    /// Returns the human-readable chunk type name.
+    #[must_use]
+    pub fn type_name(self) -> &'static str {
+        if self.contains(Self::GLOBAL_RSV) {
+            return "GlobalReserve";
+        }
+        let ty = self & (Self::DATA | Self::SYSTEM | Self::METADATA);
+        match ty {
+            t if t == Self::DATA => "Data",
+            t if t == Self::SYSTEM => "System",
+            t if t == Self::METADATA => "Metadata",
+            t if t == Self::DATA | Self::METADATA => "Data+Metadata",
+            _ => "unknown",
+        }
+    }
+
     /// Returns the RAID profile name, or `"single"` when no profile bit is set.
+    #[must_use]
     pub fn profile_name(self) -> &'static str {
         let profile = self
             & (Self::RAID0
@@ -54,7 +78,8 @@ impl BlockGroupFlags {
                 | Self::RAID5
                 | Self::RAID6
                 | Self::RAID1C3
-                | Self::RAID1C4);
+                | Self::RAID1C4
+                | Self::SINGLE);
         match profile {
             p if p == Self::RAID0 => "RAID0",
             p if p == Self::RAID1 => "RAID1",
@@ -64,29 +89,8 @@ impl BlockGroupFlags {
             p if p == Self::RAID6 => "RAID6",
             p if p == Self::RAID1C3 => "RAID1C3",
             p if p == Self::RAID1C4 => "RAID1C4",
+            // Both explicit SINGLE and no-profile-bits mean "single".
             _ => "single",
-        }
-    }
-}
-
-impl fmt::Display for BlockGroupFlags {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut parts: Vec<&str> = Vec::new();
-        if self.contains(Self::DATA) {
-            parts.push("DATA");
-        }
-        if self.contains(Self::SYSTEM) {
-            parts.push("SYSTEM");
-        }
-        if self.contains(Self::METADATA) {
-            parts.push("METADATA");
-        }
-        let profile = self.profile_name();
-        if parts.is_empty() {
-            write!(f, "{profile}")
-        } else {
-            parts.push(profile);
-            write!(f, "{}", parts.join("|"))
         }
     }
 }
@@ -2381,52 +2385,51 @@ mod tests {
     }
 
     #[test]
-    fn block_group_flags_data_single() {
-        let flags = BlockGroupFlags::DATA;
-        assert_eq!(format!("{flags}"), "DATA|single");
-    }
-
-    #[test]
-    fn block_group_flags_metadata_dup() {
-        let flags = BlockGroupFlags::METADATA | BlockGroupFlags::DUP;
-        assert_eq!(format!("{flags}"), "METADATA|DUP");
-    }
-
-    #[test]
-    fn block_group_flags_system_raid1() {
-        let flags = BlockGroupFlags::SYSTEM | BlockGroupFlags::RAID1;
-        assert_eq!(format!("{flags}"), "SYSTEM|RAID1");
-    }
-
-    #[test]
-    fn block_group_flags_data_metadata() {
-        let flags = BlockGroupFlags::DATA | BlockGroupFlags::METADATA;
-        assert_eq!(format!("{flags}"), "DATA|METADATA|single");
-    }
-
-    #[test]
-    fn block_group_flags_no_type_bits() {
-        // Profile only, no DATA/SYSTEM/METADATA bit.
-        assert_eq!(format!("{}", BlockGroupFlags::empty()), "single");
-        assert_eq!(format!("{}", BlockGroupFlags::RAID0), "RAID0");
-    }
-
-    #[test]
-    fn block_group_flags_all_profiles() {
-        let data = BlockGroupFlags::DATA;
-        assert_eq!(format!("{}", data | BlockGroupFlags::RAID5), "DATA|RAID5");
-        assert_eq!(format!("{}", data | BlockGroupFlags::RAID6), "DATA|RAID6");
+    fn block_group_flags_type_name() {
+        assert_eq!(BlockGroupFlags::DATA.type_name(), "Data");
+        assert_eq!(BlockGroupFlags::METADATA.type_name(), "Metadata");
+        assert_eq!(BlockGroupFlags::SYSTEM.type_name(), "System");
         assert_eq!(
-            format!("{}", data | BlockGroupFlags::RAID10),
-            "DATA|RAID10"
+            (BlockGroupFlags::DATA | BlockGroupFlags::METADATA).type_name(),
+            "Data+Metadata"
+        );
+        assert_eq!(BlockGroupFlags::GLOBAL_RSV.type_name(), "GlobalReserve");
+    }
+
+    #[test]
+    fn block_group_flags_profile_name() {
+        assert_eq!(BlockGroupFlags::DATA.profile_name(), "single");
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::DUP).profile_name(),
+            "DUP"
         );
         assert_eq!(
-            format!("{}", data | BlockGroupFlags::RAID1C3),
-            "DATA|RAID1C3"
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID0).profile_name(),
+            "RAID0"
         );
         assert_eq!(
-            format!("{}", data | BlockGroupFlags::RAID1C4),
-            "DATA|RAID1C4"
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID1).profile_name(),
+            "RAID1"
+        );
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID10).profile_name(),
+            "RAID10"
+        );
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID5).profile_name(),
+            "RAID5"
+        );
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID6).profile_name(),
+            "RAID6"
+        );
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID1C3).profile_name(),
+            "RAID1C3"
+        );
+        assert_eq!(
+            (BlockGroupFlags::DATA | BlockGroupFlags::RAID1C4).profile_name(),
+            "RAID1C4"
         );
     }
 }

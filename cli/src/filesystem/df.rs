@@ -27,8 +27,9 @@ impl Runnable for FilesystemDfCommand {
 
         for entry in &entries {
             println!(
-                "{}: total={}, used={}",
-                entry.flags,
+                "{}, {}: total={}, used={}",
+                entry.flags.type_name(),
+                entry.flags.profile_name(),
                 fmt_size(entry.total_bytes, &mode),
                 fmt_size(entry.used_bytes, &mode),
             );
