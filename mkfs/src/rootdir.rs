@@ -5,7 +5,12 @@
 //! writes file data to the data chunk, and generates checksums and extent
 //! backrefs for the extent and csum trees.
 
-use crate::{args::CompressAlgorithm, items, tree::Key, write::ChecksumType};
+use crate::{
+    args::{CompressAlgorithm, InodeFlagsArg},
+    items,
+    tree::Key,
+    write::ChecksumType,
+};
 use anyhow::{Context, Result};
 use btrfs_disk::{raw, util::raw_crc32c};
 use std::{
@@ -106,6 +111,8 @@ pub struct FileAllocation {
     pub ino: u64,
     /// Size in bytes.
     pub size: u64,
+    /// Whether to skip checksum generation (NODATASUM).
+    pub nodatasum: bool,
 }
 
 /// Output of the directory walk: items for the FS tree plus file allocations.
@@ -136,8 +143,15 @@ pub fn walk_directory(
     generation: u64,
     now_sec: u64,
     compress: CompressConfig,
+    inode_flags: &[InodeFlagsArg],
 ) -> Result<RootdirPlan> {
     let max_inline = max_inline_data_size(sectorsize, nodesize);
+
+    // Build inode flags lookup: relative path → (nodatacow, nodatasum).
+    let inode_flags_map: HashMap<PathBuf, (bool, bool)> = inode_flags
+        .iter()
+        .map(|f| (f.path.clone(), (f.nodatacow, f.nodatasum)))
+        .collect();
 
     let mut next_ino: u64 = raw::BTRFS_FIRST_FREE_OBJECTID as u64 + 1; // 257
     let root_ino: u64 = raw::BTRFS_FIRST_FREE_OBJECTID as u64; // 256
@@ -278,6 +292,22 @@ pub fn walk_directory(
             0
         };
 
+        // Compute inode flags from --inode-flags args.
+        let rel_path = host_path.strip_prefix(rootdir).unwrap_or(&host_path);
+        let (nodatacow, nodatasum) = inode_flags_map
+            .get(rel_path)
+            .copied()
+            .unwrap_or((false, false));
+        // NODATACOW implies NODATASUM for regular files.
+        let nodatasum = nodatasum || (nodatacow && meta.is_file());
+        let mut iflags = 0u64;
+        if nodatacow {
+            iflags |= raw::BTRFS_INODE_NODATACOW as u64;
+        }
+        if nodatasum {
+            iflags |= raw::BTRFS_INODE_NODATASUM as u64;
+        }
+
         let inode_data = items::inode_item(&items::InodeItemArgs {
             generation,
             transid: generation,
@@ -288,7 +318,7 @@ pub fn walk_directory(
             gid: meta.gid(),
             mode,
             rdev,
-            flags: 0,
+            flags: iflags,
             atime: (meta.atime() as u64, meta.atime_nsec() as u32),
             ctime: (meta.ctime() as u64, meta.ctime_nsec() as u32),
             mtime: (meta.mtime() as u64, meta.mtime_nsec() as u32),
@@ -367,6 +397,7 @@ pub fn walk_directory(
                     host_path: host_path.clone(),
                     ino: btrfs_ino,
                     size,
+                    nodatasum,
                 });
             }
         }
@@ -465,24 +496,26 @@ pub fn write_file_data(
                     })?;
             }
 
-            // Compute checksums over the on-disk (possibly compressed) data.
-            let num_csums = (aligned_disk / sectorsize as u64) as usize;
-            let mut csums = Vec::with_capacity(num_csums * csum_size);
-            for i in 0..num_csums {
-                let start = i * sectorsize as usize;
-                let end = start + sectorsize as usize;
-                let csum = csum_type.compute(&padded[start..end]);
-                csums.extend_from_slice(&csum[..csum_size]);
-            }
+            // Compute checksums (skip for NODATASUM files).
+            if !alloc.nodatasum {
+                let num_csums = (aligned_disk / sectorsize as u64) as usize;
+                let mut csums = Vec::with_capacity(num_csums * csum_size);
+                for i in 0..num_csums {
+                    let start = i * sectorsize as usize;
+                    let end = start + sectorsize as usize;
+                    let csum = csum_type.compute(&padded[start..end]);
+                    csums.extend_from_slice(&csum[..csum_size]);
+                }
 
-            csum_items.push((
-                Key::new(
-                    raw::BTRFS_EXTENT_CSUM_OBJECTID as u64,
-                    raw::BTRFS_EXTENT_CSUM_KEY as u8,
-                    disk_bytenr,
-                ),
-                csums,
-            ));
+                csum_items.push((
+                    Key::new(
+                        raw::BTRFS_EXTENT_CSUM_OBJECTID as u64,
+                        raw::BTRFS_EXTENT_CSUM_KEY as u8,
+                        disk_bytenr,
+                    ),
+                    csums,
+                ));
+            }
 
             fs_items.push((
                 Key::new(
@@ -565,7 +598,7 @@ fn max_inline_data_size(sectorsize: u32, nodesize: u32) -> usize {
 }
 
 /// Align `val` up to the next multiple of `align`.
-fn align_up(val: u64, align: u64) -> u64 {
+pub fn align_up(val: u64, align: u64) -> u64 {
     val.div_ceil(align) * align
 }
 

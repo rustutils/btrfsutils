@@ -221,7 +221,13 @@ fn main() -> Result<()> {
                 eprintln!("  Compression:    {:?}", compress.algorithm);
             }
         }
-        mkfs::make_btrfs_with_rootdir(&cfg, rootdir, compress)?;
+        mkfs::make_btrfs_with_rootdir(
+            &cfg,
+            rootdir,
+            compress,
+            &args.inode_flags,
+            args.shrink,
+        )?;
     } else {
         mkfs::make_btrfs(&cfg)?;
     }
