@@ -119,8 +119,11 @@ pub fn ino_paths(fd: BorrowedFd<'_>, inum: u64) -> nix::Result<Vec<String>> {
 /// Result from logical-ino resolution: (inode, offset, root)
 #[derive(Debug, Clone)]
 pub struct LogicalInoResult {
+    /// Inode number that contains data at the queried logical address.
     pub inode: u64,
+    /// Byte offset within the file where the logical address maps.
     pub offset: u64,
+    /// Subvolume tree ID (root) that owns this inode.
     pub root: u64,
 }
 

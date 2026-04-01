@@ -47,10 +47,15 @@ pub fn super_mirror_offset(index: u32) -> u64 {
 /// `csum_type` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChecksumType {
+    /// CRC32C (Castagnoli), the default and most common checksum algorithm.
     Crc32,
+    /// xxHash64, a fast non-cryptographic hash.
     Xxhash,
+    /// SHA-256, a cryptographic hash.
     Sha256,
+    /// BLAKE2b-256, a cryptographic hash.
     Blake2,
+    /// Unrecognized checksum type value.
     Unknown(u16),
 }
 

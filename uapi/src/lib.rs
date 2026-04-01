@@ -36,6 +36,8 @@
 //! on `amd64`, but all architectures supported by the kernel (and Rust) should
 //! work.
 
+#![warn(missing_docs)]
+
 pub mod balance;
 pub mod blkdev;
 pub mod chunk;
@@ -47,6 +49,7 @@ pub mod fiemap;
 pub mod filesystem;
 pub mod inode;
 pub mod quota;
+#[allow(missing_docs)]
 pub mod raw;
 pub mod replace;
 pub mod scrub;

@@ -18,10 +18,16 @@ use std::{
 ///
 /// Corresponds to the `BTRFS_COMPRESS_*` values from `compression.h`.
 /// The numeric values are part of the on-disk/ioctl ABI.
+///
+/// See also [`btrfs_disk::items::CompressionType`] which includes `None` and
+/// `Unknown` variants for parsing on-disk data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompressType {
+    /// DEFLATE-based compression (zlib).
     Zlib = 1,
+    /// Lempel-Ziv-Oberhumer compression (lzo).
     Lzo = 2,
+    /// Zstandard compression (zstd).
     Zstd = 3,
 }
 

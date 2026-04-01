@@ -23,49 +23,168 @@ fn get_uuid(buf: &mut &[u8]) -> Uuid {
 /// Btrfs item key type, identifying what kind of item a key refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeyType {
+    /// Inode metadata (POSIX attributes, timestamps, flags). Key:
+    /// `(ino, INODE_ITEM, 0)`. Exactly one per inode in the FS tree.
     InodeItem,
+    /// Hard-link reference from an inode to a parent directory. Key:
+    /// `(ino, INODE_REF, parent_dir_ino)`. Multiple refs may be packed
+    /// into one item when the inode has several links in the same parent.
     InodeRef,
+    /// Extended inode reference (when the `extref` feature is enabled).
+    /// Key: `(ino, INODE_EXTREF, hash(parent_ino, name))`. Stores the
+    /// parent inode number inside the struct rather than in the key offset.
     InodeExtref,
+    /// Extended attribute stored as a directory-entry-like item. Key:
+    /// `(ino, XATTR_ITEM, crc32c(name))`. Data contains the xattr name
+    /// and value.
     XattrItem,
+    /// fs-verity descriptor item. Key: `(ino, VERITY_DESC_ITEM, 0)`.
+    /// Stores the fs-verity descriptor for a verity-protected file.
     VerityDescItem,
+    /// fs-verity Merkle tree block. Key: `(ino, VERITY_MERKLE_ITEM, offset)`.
+    /// Stores a block of the Merkle tree used for fs-verity verification.
     VerityMerkleItem,
+    /// Orphan inode marker. Key: `(ORPHAN_OBJECTID, ORPHAN_ITEM, ino)`.
+    /// Created when an inode is unlinked while still open; cleaned up on
+    /// mount or by orphan cleanup.
     OrphanItem,
+    /// Directory log item (tree-log only). Key:
+    /// `(dir_ino, DIR_LOG_ITEM, end_range)`. Used during log replay to
+    /// track which directory entries have been logged.
     DirLogItem,
+    /// Directory log index (tree-log only). Key:
+    /// `(dir_ino, DIR_LOG_INDEX, end_range)`. Index counterpart of
+    /// `DIR_LOG_ITEM`.
     DirLogIndex,
+    /// Directory entry keyed by name hash. Key:
+    /// `(dir_ino, DIR_ITEM, crc32c(name))`. Multiple entries may share
+    /// the same item when names hash-collide.
     DirItem,
+    /// Directory entry keyed by sequential index. Key:
+    /// `(dir_ino, DIR_INDEX, seq)`. Provides ordered directory iteration
+    /// independent of the name hash.
     DirIndex,
+    /// File extent descriptor. Key: `(ino, EXTENT_DATA, file_offset)`.
+    /// Describes how a range of file bytes maps to on-disk storage (inline,
+    /// regular, or preallocated).
     ExtentData,
+    /// Data checksum. Key: `(EXTENT_CSUM, EXTENT_CSUM, logical_bytenr)`.
+    /// Stores an array of per-sector CRC32C checksums for a contiguous
+    /// range of data blocks.
     ExtentCsum,
+    /// Tree root descriptor. Key: `(tree_objectid, ROOT_ITEM, 0)`. Stored
+    /// in the root tree; contains the root block pointer, generation,
+    /// subvolume UUIDs, and timestamps.
     RootItem,
+    /// Backreference from a child subvolume to its parent. Key:
+    /// `(child_tree_id, ROOT_BACKREF, parent_tree_id)`. Contains the
+    /// directory inode and name where the subvolume is mounted.
     RootBackref,
+    /// Forward reference from a parent subvolume to a child. Key:
+    /// `(parent_tree_id, ROOT_REF, child_tree_id)`. Same on-disk format
+    /// as `ROOT_BACKREF`.
     RootRef,
+    /// Non-skinny extent allocation record. Key:
+    /// `(bytenr, EXTENT_ITEM, length)`. Tracks reference counts and
+    /// backreferences for a contiguous range of allocated disk space.
     ExtentItem,
+    /// Skinny metadata extent record (when `skinny_metadata` feature is
+    /// enabled). Key: `(bytenr, METADATA_ITEM, level)`. Like `EXTENT_ITEM`
+    /// but the tree block info is encoded in the key offset instead of an
+    /// extra header.
     MetadataItem,
+    /// Simple subvolume ownership reference for an extent. Key:
+    /// `(bytenr, EXTENT_OWNER_REF, root_objectid)`. Used with the
+    /// `simple_quota` feature for fast ownership tracking.
     ExtentOwnerRef,
+    /// Direct backref from a metadata extent to the owning tree. Key:
+    /// `(bytenr, TREE_BLOCK_REF, root_objectid)`. The key offset
+    /// identifies which tree root owns the block.
     TreeBlockRef,
+    /// Backref from a data extent to a specific file inode. Key:
+    /// `(bytenr, EXTENT_DATA_REF, hash(root, ino, offset))`. Stores
+    /// the root, inode, file offset, and reference count.
     ExtentDataRef,
+    /// Shared backref from a metadata extent via a parent block. Key:
+    /// `(bytenr, SHARED_BLOCK_REF, parent_bytenr)`. Used for
+    /// snapshot-shared tree blocks.
     SharedBlockRef,
+    /// Shared backref from a data extent via a parent tree block. Key:
+    /// `(bytenr, SHARED_DATA_REF, parent_bytenr)`. Used for
+    /// snapshot-shared data extents; stores a reference count.
     SharedDataRef,
+    /// Block group descriptor tracking space usage for a chunk. Key:
+    /// `(logical_offset, BLOCK_GROUP_ITEM, length)`. Contains bytes used
+    /// and the chunk type/RAID profile flags.
     BlockGroupItem,
+    /// Free space info for a block group in the free space tree. Key:
+    /// `(block_group_offset, FREE_SPACE_INFO, block_group_length)`.
+    /// Describes whether the block group uses bitmaps or extents.
     FreeSpaceInfo,
+    /// Free space extent in the free space tree. Key:
+    /// `(start, FREE_SPACE_EXTENT, length)`. Represents a contiguous
+    /// free range; the item has no data payload.
     FreeSpaceExtent,
+    /// Free space bitmap in the free space tree. Key:
+    /// `(start, FREE_SPACE_BITMAP, length)`. A bitmap covering the
+    /// block group's address range; each bit represents one sector.
     FreeSpaceBitmap,
+    /// Physical extent mapping on a device. Key:
+    /// `(devid, DEV_EXTENT, physical_offset)`. The inverse of a chunk
+    /// stripe: maps a physical range back to the owning chunk.
     DeviceExtent,
+    /// Device item describing a single device. Key:
+    /// `(DEV_ITEMS, DEV_ITEM, devid)`. Contains size, usage, and UUIDs.
+    /// Also embedded in the superblock.
     DeviceItem,
+    /// Chunk item mapping logical to physical addresses. Key:
+    /// `(FIRST_CHUNK_TREE, CHUNK_ITEM, logical_offset)`. Contains the
+    /// chunk length, RAID profile, and per-device stripe locations.
     ChunkItem,
+    /// RAID stripe extent mapping (for the raid-stripe-tree feature). Key:
+    /// `(logical_offset, RAID_STRIPE, length)`. Contains per-device
+    /// physical offsets for the stripe.
     RaidStripe,
+    /// Quota group status. Key: `(0, QGROUP_STATUS, 0)`. Tracks the
+    /// overall quota accounting state, rescan progress, and enable
+    /// generation.
     QgroupStatus,
+    /// Quota group accounting info. Key:
+    /// `(level/subvolid, QGROUP_INFO, 0)`. Tracks referenced and
+    /// exclusive bytes for a qgroup.
     QgroupInfo,
+    /// Quota group limits. Key: `(level/subvolid, QGROUP_LIMIT, 0)`.
+    /// Caps referenced and/or exclusive space usage for a qgroup.
     QgroupLimit,
+    /// Quota group relation. Key:
+    /// `(child_qgroupid, QGROUP_RELATION, parent_qgroupid)`. Defines
+    /// the parent-child relationship between qgroups.
     QgroupRelation,
-    /// `BTRFS_BALANCE_ITEM_KEY` and `BTRFS_TEMPORARY_ITEM_KEY` share value 248
+    /// Temporary item (value 248). `BTRFS_BALANCE_ITEM_KEY` and
+    /// `BTRFS_TEMPORARY_ITEM_KEY` share this value. Used for balance
+    /// status persistence.
     TemporaryItem,
-    /// `BTRFS_DEV_STATS_KEY` and `BTRFS_PERSISTENT_ITEM_KEY` share value 249
+    /// Persistent item (value 249). `BTRFS_DEV_STATS_KEY` and
+    /// `BTRFS_PERSISTENT_ITEM_KEY` share this value. Used for device
+    /// statistics and device replace status.
     PersistentItem,
+    /// Device replace status. Key: `(DEV_REPLACE, DEV_REPLACE, 0)`.
+    /// Persists the state of an in-progress device replace operation
+    /// across reboots.
     DeviceReplace,
+    /// UUID tree entry for a subvolume. Key:
+    /// `(upper_uuid_half, UUID_KEY_SUBVOL, lower_uuid_half)`. Maps a
+    /// subvolume UUID to its tree objectid for fast lookup.
     UuidKeySubvol,
+    /// UUID tree entry for a received subvolume. Key:
+    /// `(upper_uuid_half, UUID_KEY_RECEIVED_SUBVOL, lower_uuid_half)`.
+    /// Maps a received UUID to the subvolume objectid.
     UuidKeyReceivedSubvol,
+    /// String item (typically the superblock's label). Key:
+    /// `(BTRFS_FREE_SPACE_OBJECTID, STRING_ITEM, 0)`. The data payload
+    /// is a raw byte string.
     StringItem,
+    /// Unrecognized key type byte value.
     Unknown(u8),
 }
 
@@ -231,32 +350,90 @@ impl fmt::Display for KeyType {
 /// special-purpose objectids in item keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ObjectId {
+    /// The root tree (objectid 1). Contains `ROOT_ITEM` entries pointing
+    /// to the root block of every other tree in the filesystem.
     RootTree,
+    /// The extent tree (objectid 2). Tracks all allocated extents
+    /// (metadata tree blocks and data extents) with backreferences to
+    /// their owners.
     ExtentTree,
+    /// The chunk tree (objectid 3). Maps logical address ranges to
+    /// physical device stripes. Bootstrapped from the superblock's
+    /// `sys_chunk_array`.
     ChunkTree,
+    /// The device tree (objectid 4). Contains per-device extent
+    /// allocation records (`DEV_EXTENT` items).
     DevTree,
+    /// The default FS tree (objectid 5). Holds the filesystem content
+    /// (inodes, directory entries, file extents) for the top-level
+    /// subvolume. Additional subvolumes/snapshots have objectids >= 256.
     FsTree,
+    /// The root tree directory (objectid 6). A virtual directory entry
+    /// in the root tree that links to the default subvolume.
     RootTreeDir,
+    /// The checksum tree (objectid 7). Stores per-block data checksums
+    /// as `EXTENT_CSUM` items.
     CsumTree,
+    /// The quota tree (objectid 8). Contains qgroup status, info, limit,
+    /// and relation items for space accounting.
     QuotaTree,
+    /// The UUID tree (objectid 9). Provides fast UUID-to-subvolume
+    /// lookups for send/receive operations.
     UuidTree,
+    /// The free space tree (objectid 10). Tracks free space per block
+    /// group using extent or bitmap items, replacing the older free
+    /// space cache (v1).
     FreeSpaceTree,
+    /// The block group tree (objectid 11). Separates block group items
+    /// from the extent tree for faster mount times (requires the
+    /// `block_group_tree` compat-ro feature).
     BlockGroupTree,
+    /// The RAID stripe tree (objectid 12). Maps logical extents to
+    /// per-device physical stripe offsets for the `raid-stripe-tree`
+    /// feature.
     RaidStripeTree,
+    /// The remap tree (objectid 13). Reserved for future use by the
+    /// extent-tree-v2 feature.
     RemapTree,
+    /// Device statistics objectid (0). Used with `PERSISTENT_ITEM_KEY`
+    /// to store per-device I/O error counters.
     DeviceStats,
+    /// Balance status objectid (-4 as u64). Stored in the root tree
+    /// as a `TEMPORARY_ITEM` to persist in-progress balance state.
     Balance,
+    /// Orphan objectid (-5 as u64). Used as the objectid for
+    /// `ORPHAN_ITEM` keys that mark inodes pending cleanup.
     Orphan,
+    /// Tree log objectid (-6 as u64). The tree log records recent
+    /// fsync'd changes for fast replay after a crash.
     TreeLog,
+    /// Tree log fixup objectid (-7 as u64). Temporary items created
+    /// during log replay to resolve backreferences.
     TreeLogFixup,
+    /// Tree relocation objectid (-8 as u64). Used during balance to
+    /// hold relocated tree blocks before they are committed to their
+    /// final location.
     TreeReloc,
+    /// Data relocation tree objectid (-9 as u64). A temporary tree
+    /// used during balance to hold relocated data extents.
     DataRelocTree,
+    /// Extent checksum objectid (-10 as u64). Used as the objectid in
+    /// `EXTENT_CSUM` keys in the checksum tree.
     ExtentCsum,
+    /// Free space objectid (-11 as u64). Used in the older free space
+    /// cache (v1) inode items.
     FreeSpace,
+    /// Free inode objectid (-12 as u64). Used for free inode number
+    /// tracking within FS trees.
     FreeIno,
+    /// Checksum change objectid (-13 as u64). Used during online
+    /// checksum algorithm conversion.
     CsumChange,
+    /// Multiple objectids sentinel (-255 as u64). Used internally to
+    /// indicate that an extent is referenced by multiple trees.
     Multiple,
-    /// First user-accessible objectid (256)
+    /// First user-accessible objectid (256). Inode numbers in FS trees
+    /// start at this value; the root directory inode is always 256.
     FirstFree,
     /// A numeric objectid that doesn't match any well-known value.
     Id(u64),
@@ -684,6 +861,7 @@ impl KeyPtr {
 /// A leaf item descriptor: key + offset/size into the leaf's data area.
 #[derive(Debug, Clone, Copy)]
 pub struct Item {
+    /// The three-part key that identifies this item (objectid, type, offset).
     pub key: DiskKey,
     /// Byte offset of this item's data, relative to the end of the item array
     /// (i.e. relative to `HEADER_SIZE + nritems * ITEM_SIZE`... but actually
@@ -717,10 +895,17 @@ impl Item {
 /// [`crate::items::parse_item_payload`].
 pub enum TreeBlock {
     /// Internal node (level > 0): contains key pointers to child blocks.
-    Node { header: Header, ptrs: Vec<KeyPtr> },
+    Node {
+        /// The tree block header.
+        header: Header,
+        /// Sorted key pointers to child blocks.
+        ptrs: Vec<KeyPtr>,
+    },
     /// Leaf node (level == 0): contains items with data payloads.
     Leaf {
+        /// The tree block header.
         header: Header,
+        /// Sorted item descriptors (key + offset/size into the data area).
         items: Vec<Item>,
         /// The full block data, so item formatters can extract payloads.
         data: Vec<u8>,

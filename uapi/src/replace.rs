@@ -33,10 +33,15 @@ use std::{
 /// Current state of a device replace operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplaceState {
+    /// No replace operation has ever been started on this filesystem.
     NeverStarted,
+    /// A replace operation is currently running.
     Started,
+    /// The replace operation completed successfully.
     Finished,
+    /// The replace operation was canceled before completion.
     Canceled,
+    /// The replace operation was suspended (e.g. by unmount) and can be resumed.
     Suspended,
 }
 

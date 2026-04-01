@@ -170,11 +170,16 @@ impl std::fmt::Display for ResizeAmount {
 /// the kernel defaults to device ID 1 (the first device).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResizeArgs {
+    /// Device within the filesystem to resize, identified by btrfs device ID.
+    /// When `None`, the kernel defaults to device ID 1 (the first device).
     pub devid: Option<u64>,
+    /// How much to grow, shrink, or set the device size to.
     pub amount: ResizeAmount,
 }
 
 impl ResizeArgs {
+    /// Create a new `ResizeArgs` targeting the default device (ID 1) with the
+    /// given resize amount.
     #[must_use]
     pub fn new(amount: ResizeAmount) -> Self {
         Self {
@@ -183,6 +188,7 @@ impl ResizeArgs {
         }
     }
 
+    /// Set the target device ID for the resize operation.
     #[must_use]
     pub fn with_devid(mut self, devid: u64) -> Self {
         self.devid = Some(devid);

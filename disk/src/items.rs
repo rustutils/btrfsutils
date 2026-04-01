@@ -173,15 +173,23 @@ impl Timespec {
 
 /// Compression type for file extents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// See also `btrfs_uapi::defrag::CompressType` which omits `None`/`Unknown`
+/// for use in ioctl requests.
 pub enum CompressionType {
+    /// No compression.
     None,
+    /// Zlib (deflate) compression.
     Zlib,
+    /// LZO compression (btrfs per-sector format).
     Lzo,
+    /// Zstandard compression.
     Zstd,
+    /// Unrecognized compression type byte.
     Unknown(u8),
 }
 
 impl CompressionType {
+    /// Convert a raw on-disk compression type byte to a `CompressionType` variant.
     #[must_use]
     pub fn from_raw(v: u8) -> Self {
         match v {
@@ -193,6 +201,7 @@ impl CompressionType {
         }
     }
 
+    /// Return the human-readable name of this compression type.
     #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
@@ -204,6 +213,7 @@ impl CompressionType {
         }
     }
 
+    /// Convert back to the raw on-disk byte value.
     #[must_use]
     pub fn to_raw(self) -> u8 {
         match self {
@@ -219,13 +229,18 @@ impl CompressionType {
 /// File extent type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileExtentType {
+    /// Data stored directly in the tree leaf (small files or file tails).
     Inline,
+    /// Data stored in a separate disk extent, referenced by logical address.
     Regular,
+    /// Preallocated extent (reserved but not yet written).
     Prealloc,
+    /// Unrecognized extent type byte.
     Unknown(u8),
 }
 
 impl FileExtentType {
+    /// Convert a raw on-disk extent type byte to a `FileExtentType` variant.
     #[must_use]
     pub fn from_raw(v: u8) -> Self {
         match u32::from(v) {
@@ -236,6 +251,7 @@ impl FileExtentType {
         }
     }
 
+    /// Return the human-readable name of this extent type.
     #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
@@ -246,6 +262,7 @@ impl FileExtentType {
         }
     }
 
+    /// Convert back to the raw on-disk byte value.
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn to_raw(self) -> u8 {
@@ -261,19 +278,30 @@ impl FileExtentType {
 /// Directory entry file type, stored in `btrfs_dir_item::type`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
+    /// Unknown file type (0).
     Unknown,
+    /// Regular file.
     RegFile,
+    /// Directory.
     Dir,
+    /// Character device.
     Chrdev,
+    /// Block device.
     Blkdev,
+    /// Named pipe (FIFO).
     Fifo,
+    /// Unix domain socket.
     Sock,
+    /// Symbolic link.
     Symlink,
+    /// Extended attribute (used in `XATTR_ITEM` entries).
     Xattr,
+    /// Unrecognized file type byte.
     Other(u8),
 }
 
 impl FileType {
+    /// Convert a raw on-disk file type byte to a `FileType` variant.
     #[must_use]
     pub fn from_raw(v: u8) -> Self {
         match u32::from(v) {
@@ -290,6 +318,7 @@ impl FileType {
         }
     }
 
+    /// Return the human-readable name of this file type (matches btrfs-progs output).
     #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
@@ -347,6 +376,8 @@ pub struct InodeItem {
 }
 
 impl InodeItem {
+    /// Parse an inode item from a raw byte buffer. Returns `None` if the
+    /// buffer is too small.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_inode_item>() {
@@ -392,6 +423,7 @@ pub struct InodeRef {
 }
 
 impl InodeRef {
+    /// Parse all packed inode refs from a single item's data buffer.
     #[must_use]
     pub fn parse_all(data: &[u8]) -> Vec<Self> {
         let mut result = Vec::new();
@@ -426,6 +458,7 @@ pub struct InodeExtref {
 }
 
 impl InodeExtref {
+    /// Parse all packed extended inode refs from a single item's data buffer.
     #[must_use]
     pub fn parse_all(data: &[u8]) -> Vec<Self> {
         let mut result = Vec::new();
@@ -469,6 +502,7 @@ pub struct DirItem {
 }
 
 impl DirItem {
+    /// Parse all packed directory entries from a single item's data buffer.
     #[must_use]
     pub fn parse_all(data: &[u8]) -> Vec<Self> {
         let mut result = Vec::new();
@@ -579,6 +613,9 @@ pub struct RootItem {
 }
 
 impl RootItem {
+    /// Parse a root item from a raw byte buffer. Handles both v1 (shorter)
+    /// and v2 (full) root item formats gracefully, defaulting missing fields
+    /// to zero/nil.
     #[must_use]
     #[allow(clippy::too_many_lines)]
     pub fn parse(data: &[u8]) -> Option<Self> {
@@ -738,6 +775,7 @@ pub struct RootRef {
 }
 
 impl RootRef {
+    /// Parse a root ref (or root backref) from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_root_ref>() {
@@ -803,6 +841,7 @@ pub enum FileExtentBody {
 }
 
 impl FileExtentItem {
+    /// Parse a file extent item from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 21 {
@@ -853,28 +892,52 @@ fn extent_data_ref_hash(root: u64, objectid: u64, offset: u64) -> u64 {
 /// Inline reference types found inside `EXTENT_ITEM`/`METADATA_ITEM`.
 #[derive(Debug, Clone)]
 pub enum InlineRef {
+    /// Direct backref from a metadata extent to the tree that owns it.
+    /// The `root` field is the tree objectid (e.g. 5 for FS_TREE).
     TreeBlockBackref {
+        /// Raw offset value from the inline ref header (equals `root`).
         ref_offset: u64,
+        /// Tree objectid that owns this metadata block.
         root: u64,
     },
+    /// Shared backref from a metadata extent via a parent tree block.
+    /// Used when a tree block is shared between snapshots.
     SharedBlockBackref {
+        /// Raw offset value from the inline ref header (equals `parent`).
         ref_offset: u64,
+        /// Logical bytenr of the parent tree block that references this extent.
         parent: u64,
     },
+    /// Backref from a data extent to a specific file inode. Stores the
+    /// owning root, inode number, file offset, and reference count.
     ExtentDataBackref {
+        /// Computed hash of (root, objectid, offset) for display.
         ref_offset: u64,
+        /// Tree objectid that owns the referencing inode.
         root: u64,
+        /// Inode number that references this data extent.
         objectid: u64,
+        /// File byte offset where this extent is referenced.
         offset: u64,
+        /// Number of references from this (root, objectid, offset) triple.
         count: u32,
     },
+    /// Shared backref from a data extent via a parent tree block.
+    /// Used when data extents are shared between snapshots.
     SharedDataBackref {
+        /// Raw offset value from the inline ref header (equals `parent`).
         ref_offset: u64,
+        /// Logical bytenr of the parent tree block that references this extent.
         parent: u64,
+        /// Number of references from the parent block.
         count: u32,
     },
+    /// Simple ownership reference for an extent (simple_quota feature).
+    /// Records which tree root owns the extent.
     ExtentOwnerRef {
+        /// Raw offset value from the inline ref header (equals `root`).
         ref_offset: u64,
+        /// Tree objectid that owns this extent.
         root: u64,
     },
 }
@@ -968,16 +1031,20 @@ pub struct ExtentItem {
 }
 
 impl ExtentItem {
+    /// Returns true if this extent holds file data.
     #[must_use]
     pub fn is_data(&self) -> bool {
         self.flags.contains(ExtentFlags::DATA)
     }
 
+    /// Returns true if this extent holds a metadata tree block.
     #[must_use]
     pub fn is_tree_block(&self) -> bool {
         self.flags.contains(ExtentFlags::TREE_BLOCK)
     }
 
+    /// Parse an extent item from a raw byte buffer, using the item key to
+    /// determine whether this is a skinny metadata item or a full extent item.
     #[must_use]
     pub fn parse(data: &[u8], key: &DiskKey) -> Option<Self> {
         use crate::tree::KeyType;
@@ -1107,6 +1174,7 @@ pub struct ExtentDataRef {
 }
 
 impl ExtentDataRef {
+    /// Parse a standalone extent data ref from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_extent_data_ref>() {
@@ -1132,6 +1200,7 @@ pub struct SharedDataRef {
 }
 
 impl SharedDataRef {
+    /// Parse a shared data ref from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 4 {
@@ -1158,6 +1227,7 @@ pub struct BlockGroupItem {
 }
 
 impl BlockGroupItem {
+    /// Parse a block group item from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_block_group_item>() {
@@ -1212,6 +1282,7 @@ pub struct ChunkStripe {
 }
 
 impl ChunkItem {
+    /// Parse a chunk item (with stripes) from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         let chunk_base_size = mem::offset_of!(raw::btrfs_chunk, stripe);
@@ -1297,7 +1368,7 @@ pub struct DeviceItem {
 }
 
 impl DeviceItem {
-    /// Serialize the device item to a `BufMut`.
+    /// Serialize this device item to a `BufMut` in on-disk little-endian format.
     pub fn write_bytes(&self, buf: &mut impl BufMut) {
         buf.put_u64_le(self.devid);
         buf.put_u64_le(self.total_bytes);
@@ -1315,6 +1386,7 @@ impl DeviceItem {
         buf.put_slice(self.fsid.as_bytes());
     }
 
+    /// Parse a device item from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_dev_item>() {
@@ -1373,6 +1445,7 @@ pub struct DeviceExtent {
 }
 
 impl DeviceExtent {
+    /// Parse a device extent from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_dev_extent>() {
@@ -1423,6 +1496,7 @@ pub struct FreeSpaceInfo {
 }
 
 impl FreeSpaceInfo {
+    /// Parse a free space info item from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 8 {
@@ -1454,6 +1528,7 @@ pub struct QgroupStatus {
 }
 
 impl QgroupStatus {
+    /// Parse a qgroup status item from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 32 {
@@ -1498,6 +1573,7 @@ pub struct QgroupInfo {
 }
 
 impl QgroupInfo {
+    /// Parse a qgroup info item from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_qgroup_info_item>() {
@@ -1533,6 +1609,7 @@ pub struct QgroupLimit {
 }
 
 impl QgroupLimit {
+    /// Parse a qgroup limit item from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_qgroup_limit_item>() {
@@ -1561,6 +1638,8 @@ pub struct DeviceStats {
 }
 
 impl DeviceStats {
+    /// Parse device statistics from a raw byte buffer. Reads up to 5 u64
+    /// counters (write_errs, read_errs, flush_errs, corruption_errs, generation).
     #[must_use]
     pub fn parse(data: &[u8]) -> Self {
         let stat_names = [
@@ -1591,6 +1670,7 @@ pub struct UuidItem {
 }
 
 impl UuidItem {
+    /// Parse a UUID tree item from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Self {
         let mut buf = data;
@@ -1608,39 +1688,85 @@ impl UuidItem {
 /// Returned by [`parse_item_payload`]. Each variant wraps the corresponding
 /// item struct. `Unknown` holds the raw bytes for unrecognized key types.
 pub enum ItemPayload {
+    /// Inode metadata (POSIX attributes, timestamps, flags).
     InodeItem(InodeItem),
+    /// One or more hard-link references packed in a single item.
     InodeRef(Vec<InodeRef>),
+    /// One or more extended inode references.
     InodeExtref(Vec<InodeExtref>),
+    /// One or more directory entries (also used for `DIR_INDEX` and `XATTR_ITEM`).
     DirItem(Vec<DirItem>),
-    DirLogItem { end: u64 },
+    /// Directory log item with the logged range end offset.
+    DirLogItem {
+        /// End of the logged directory range.
+        end: u64,
+    },
+    /// Orphan marker (no data payload).
     OrphanItem,
+    /// Tree root descriptor (subvolume, snapshot, or internal tree).
     RootItem(RootItem),
+    /// Root forward or back reference (ROOT_REF / ROOT_BACKREF).
     RootRef(RootRef),
+    /// File extent descriptor.
     FileExtentItem(FileExtentItem),
-    ExtentCsum { data: Vec<u8> },
+    /// Raw extent checksum data.
+    ExtentCsum {
+        /// Raw checksum bytes (array of per-sector checksums).
+        data: Vec<u8>,
+    },
+    /// Extent allocation record (EXTENT_ITEM or METADATA_ITEM).
     ExtentItem(ExtentItem),
+    /// Standalone tree block backref (no data payload; the key offset is the root).
     TreeBlockRef,
+    /// Standalone shared block backref (no data payload; the key offset is the parent bytenr).
     SharedBlockRef,
+    /// Standalone data extent backref.
     ExtentDataRef(ExtentDataRef),
+    /// Standalone shared data extent backref.
     SharedDataRef(SharedDataRef),
-    ExtentOwnerRef { root: u64 },
+    /// Simple ownership reference for an extent.
+    ExtentOwnerRef {
+        /// Tree objectid that owns this extent.
+        root: u64,
+    },
+    /// Block group descriptor.
     BlockGroupItem(BlockGroupItem),
+    /// Free space info for a block group.
     FreeSpaceInfo(FreeSpaceInfo),
+    /// Free space extent (no data payload; key encodes start and length).
     FreeSpaceExtent,
+    /// Free space bitmap (data payload is the bitmap).
     FreeSpaceBitmap,
+    /// Chunk item mapping logical to physical addresses.
     ChunkItem(ChunkItem),
+    /// Device item describing a single device.
     DeviceItem(DeviceItem),
+    /// Physical extent mapping on a device.
     DeviceExtent(DeviceExtent),
+    /// Quota group status.
     QgroupStatus(QgroupStatus),
+    /// Quota group accounting info.
     QgroupInfo(QgroupInfo),
+    /// Quota group limits.
     QgroupLimit(QgroupLimit),
+    /// Quota group relation (no data payload; parent/child encoded in key).
     QgroupRelation,
+    /// Per-device I/O error statistics.
     DeviceStats(DeviceStats),
-    BalanceItem { flags: u64 },
+    /// Balance status item.
+    BalanceItem {
+        /// Balance flags from the first 8 bytes of the item data.
+        flags: u64,
+    },
+    /// Device replace status.
     DeviceReplace(DeviceReplaceItem),
+    /// UUID tree entry mapping a UUID to subvolume objectids.
     UuidItem(UuidItem),
+    /// String item (typically the superblock label).
     StringItem(Vec<u8>),
+    /// RAID stripe extent mapping.
     RaidStripe(RaidStripeItem),
+    /// Unrecognized item type; raw data preserved.
     Unknown(Vec<u8>),
 }
 
@@ -1670,6 +1796,7 @@ pub struct DeviceReplaceItem {
 }
 
 impl DeviceReplaceItem {
+    /// Parse a device replace item from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 80 {
@@ -1711,6 +1838,7 @@ pub struct RaidStripeEntry {
 }
 
 impl RaidStripeItem {
+    /// Parse a RAID stripe item from a raw byte buffer.
     #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 8 {

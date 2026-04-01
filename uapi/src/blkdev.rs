@@ -8,8 +8,20 @@ use std::os::{fd::AsRawFd, unix::io::BorrowedFd};
 // From linux/fs.h:
 // #define BLKGETSIZE64 _IOR(0x12, 114, size_t)
 // #define BLKDISCARD   _IO(0x12, 119)
-nix::ioctl_read!(blk_getsize64, 0x12, 114, u64);
-nix::ioctl_write_ptr!(blk_discard, 0x12, 119, [u64; 2]);
+nix::ioctl_read!(
+    /// Raw ioctl wrapper for `BLKGETSIZE64` (`_IOR(0x12, 114)`).
+    blk_getsize64,
+    0x12,
+    114,
+    u64
+);
+nix::ioctl_write_ptr!(
+    /// Raw ioctl wrapper for `BLKDISCARD` (`_IO(0x12, 119)`).
+    blk_discard,
+    0x12,
+    119,
+    [u64; 2]
+);
 
 /// Get the size of a block device in bytes.
 ///

@@ -61,8 +61,13 @@
 //! on [`tree::TreeBlock`]. Parse leaf item payloads with
 //! [`items::parse_item_payload`] or the individual struct `parse` methods.
 
+// Note: missing_docs is not enabled as a warning because bitflags! generates
+// undocumentable `const _ = !0` associated constants. All public items are
+// documented — this was verified manually.
+
 pub mod chunk;
 pub mod items;
+#[allow(missing_docs)]
 pub mod raw;
 pub mod reader;
 pub mod superblock;

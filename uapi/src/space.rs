@@ -20,8 +20,11 @@ use std::{
 /// byte counts respectively.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpaceInfo {
+    /// Block group type and RAID profile flags for this space category.
     pub flags: BlockGroupFlags,
+    /// Total bytes allocated to block groups of this type/profile.
     pub total_bytes: u64,
+    /// Bytes actually in use within those block groups.
     pub used_bytes: u64,
 }
 

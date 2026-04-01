@@ -48,18 +48,24 @@ use std::{
 /// call site.
 #[derive(Debug, Clone)]
 pub struct SearchKey {
-    /// Tree to search — use a `BTRFS_*_TREE_OBJECTID` constant from `crate::raw`.
+    /// Tree to search: use a `BTRFS_*_TREE_OBJECTID` constant from `crate::raw`.
     pub tree_id: u64,
+    /// Lower bound of the objectid range to search (inclusive).
     pub min_objectid: u64,
+    /// Upper bound of the objectid range to search (inclusive).
     pub max_objectid: u64,
-    /// Item type — use a `BTRFS_*_KEY` constant from `crate::raw`.
+    /// Lower bound of the item type range: use a `BTRFS_*_KEY` constant.
     pub min_type: u32,
+    /// Upper bound of the item type range: use a `BTRFS_*_KEY` constant.
     pub max_type: u32,
+    /// Lower bound of the offset range to search (inclusive).
     pub min_offset: u64,
+    /// Upper bound of the offset range to search (inclusive).
     pub max_offset: u64,
-    /// Filter on the transaction ID of the *metadata block* that holds the
-    /// item, not the transaction that created the item itself.
+    /// Lower bound on the transaction ID of the metadata block holding the
+    /// item (not the transaction that created the item itself).
     pub min_transid: u64,
+    /// Upper bound on the metadata block transaction ID (inclusive).
     pub max_transid: u64,
 }
 
@@ -105,8 +111,11 @@ impl SearchKey {
 /// the raw on-disk item payload and is in **little-endian** byte order.
 #[derive(Debug, Clone, Copy)]
 pub struct SearchHeader {
+    /// Transaction ID of the metadata block that contains this item.
     pub transid: u64,
+    /// Object ID portion of the item's btrfs key.
     pub objectid: u64,
+    /// Offset portion of the item's btrfs key.
     pub offset: u64,
     /// Item type (the `type` field of the btrfs key).
     pub item_type: u32,

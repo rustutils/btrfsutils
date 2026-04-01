@@ -19,12 +19,16 @@ bitflags! {
     /// filesystem read-only.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct CompatRoFlags: u64 {
+        /// Free space is tracked via a dedicated B-tree instead of bitmaps.
         const FREE_SPACE_TREE =
             crate::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64;
+        /// The free space tree has been fully built and is valid.
         const FREE_SPACE_TREE_VALID =
             crate::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID as u64;
+        /// fs-verity support for individual files.
         const VERITY =
             crate::raw::BTRFS_FEATURE_COMPAT_RO_VERITY as u64;
+        /// Block groups are tracked in a dedicated B-tree for faster mount.
         const BLOCK_GROUP_TREE =
             crate::raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE as u64;
     }
@@ -37,38 +41,57 @@ bitflags! {
     /// that does not understand that flag.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct IncompatFlags: u64 {
+        /// New-style backrefs with parent objectid and generation in the key.
         const MIXED_BACKREF =
             crate::raw::BTRFS_FEATURE_INCOMPAT_MIXED_BACKREF as u64;
+        /// A non-root subvolume has been set as the default mount target.
         const DEFAULT_SUBVOL =
             crate::raw::BTRFS_FEATURE_INCOMPAT_DEFAULT_SUBVOL as u64;
+        /// Data and metadata may share the same block group.
         const MIXED_GROUPS =
             crate::raw::BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS as u64;
+        /// LZO compression is in use on the filesystem.
         const COMPRESS_LZO =
             crate::raw::BTRFS_FEATURE_INCOMPAT_COMPRESS_LZO as u64;
+        /// Zstandard compression is in use on the filesystem.
         const COMPRESS_ZSTD =
             crate::raw::BTRFS_FEATURE_INCOMPAT_COMPRESS_ZSTD as u64;
+        /// Metadata blocks larger than the page size are in use.
         const BIG_METADATA =
             crate::raw::BTRFS_FEATURE_INCOMPAT_BIG_METADATA as u64;
+        /// Extended inode refs allow more than 65536 hardlinks per inode.
         const EXTENDED_IREF =
             crate::raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF as u64;
+        /// RAID5/6 block group profiles are in use.
         const RAID56 =
             crate::raw::BTRFS_FEATURE_INCOMPAT_RAID56 as u64;
+        /// Tree block references use the type directly instead of embedding a
+        /// level indirection (reduces metadata overhead).
         const SKINNY_METADATA =
             crate::raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64;
+        /// File extent items for holes are omitted, saving metadata space.
         const NO_HOLES =
             crate::raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES as u64;
+        /// The filesystem has a separate `metadata_uuid` that differs from the
+        /// main `fsid`, allowing fsid changes without rewriting every tree block.
         const METADATA_UUID =
             crate::raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID as u64;
+        /// RAID1 profiles with 3 or 4 copies are in use.
         const RAID1C34 =
             crate::raw::BTRFS_FEATURE_INCOMPAT_RAID1C34 as u64;
+        /// Zoned block device support is enabled.
         const ZONED =
             crate::raw::BTRFS_FEATURE_INCOMPAT_ZONED as u64;
+        /// Version 2 of the extent tree (experimental).
         const EXTENT_TREE_V2 =
             crate::raw::BTRFS_FEATURE_INCOMPAT_EXTENT_TREE_V2 as u64;
+        /// RAID stripe tree for logical-to-physical mapping on zoned devices.
         const RAID_STRIPE_TREE =
             crate::raw::BTRFS_FEATURE_INCOMPAT_RAID_STRIPE_TREE as u64;
+        /// Simplified quota accounting that avoids full backref walks.
         const SIMPLE_QUOTA =
             crate::raw::BTRFS_FEATURE_INCOMPAT_SIMPLE_QUOTA as u64;
+        /// Remap tree support (experimental).
         const REMAP_TREE =
             crate::raw::BTRFS_FEATURE_INCOMPAT_REMAP_TREE as u64;
     }
