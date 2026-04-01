@@ -5,7 +5,7 @@
 //! writes file data to the data chunk, and generates checksums and extent
 //! backrefs for the extent and csum trees.
 
-use crate::{items, tree::Key, write::ChecksumType};
+use crate::{args::CompressAlgorithm, items, tree::Key, write::ChecksumType};
 use anyhow::{Context, Result};
 use btrfs_disk::{raw, util::raw_crc32c};
 use std::{
@@ -18,6 +18,62 @@ use std::{
 
 /// Maximum size of a single file extent (1 MiB).
 const MAX_EXTENT_SIZE: u64 = 1024 * 1024;
+
+/// Compression configuration passed through from CLI args.
+#[derive(Debug, Clone, Copy)]
+pub struct CompressConfig {
+    pub algorithm: CompressAlgorithm,
+    pub level: Option<u32>,
+}
+
+impl CompressConfig {
+    /// On-disk compression type byte for FILE_EXTENT_ITEM.
+    fn extent_type_byte(self) -> u8 {
+        match self.algorithm {
+            CompressAlgorithm::No => 0,
+            CompressAlgorithm::Zlib => 1,
+            CompressAlgorithm::Lzo => 2,
+            CompressAlgorithm::Zstd => 3,
+        }
+    }
+
+    /// Whether compression is enabled.
+    fn is_enabled(self) -> bool {
+        self.algorithm != CompressAlgorithm::No
+    }
+}
+
+/// Try to compress `data`. Returns `Some(compressed)` if the result is
+/// smaller than the original, `None` otherwise (incompressible data).
+fn try_compress(data: &[u8], cfg: CompressConfig) -> Option<Vec<u8>> {
+    if !cfg.is_enabled() || data.is_empty() {
+        return None;
+    }
+    let compressed = match cfg.algorithm {
+        CompressAlgorithm::No => return None,
+        CompressAlgorithm::Zlib => {
+            use flate2::write::ZlibEncoder;
+            use std::io::Write;
+            let level = cfg.level.unwrap_or(3);
+            let mut encoder =
+                ZlibEncoder::new(Vec::new(), flate2::Compression::new(level));
+            encoder.write_all(data).ok()?;
+            encoder.finish().ok()?
+        }
+        CompressAlgorithm::Zstd => {
+            let level = cfg.level.unwrap_or(3) as i32;
+            zstd::bulk::compress(data, level).ok()?
+        }
+        CompressAlgorithm::Lzo => {
+            unreachable!("LZO rejected at argument validation")
+        }
+    };
+    if compressed.len() < data.len() {
+        Some(compressed)
+    } else {
+        None
+    }
+}
 
 /// Btrfs name hash: `crc32c((u32)~1, name)`.
 ///
@@ -79,6 +135,7 @@ pub fn walk_directory(
     nodesize: u32,
     generation: u64,
     now_sec: u64,
+    compress: CompressConfig,
 ) -> Result<RootdirPlan> {
     let max_inline = max_inline_data_size(sectorsize, nodesize);
 
@@ -260,7 +317,7 @@ pub fn walk_directory(
                 stack.push((child, btrfs_ino));
             }
         } else if meta.is_symlink() {
-            // Symlink: inline extent with link target.
+            // Symlink: inline extent with link target (never compressed).
             let target = fs::read_link(&host_path).with_context(|| {
                 format!("cannot readlink '{}'", host_path.display())
             })?;
@@ -269,6 +326,7 @@ pub fn walk_directory(
             let extent_data = items::file_extent_inline(
                 generation,
                 target_bytes.len() as u64,
+                0, // symlinks are never compressed
                 target_bytes,
             );
             let extent_key =
@@ -283,10 +341,18 @@ pub fn walk_directory(
                 })?;
                 f.read_to_end(&mut data)?;
 
+                // Try to compress inline data.
+                let (stored_data, comp_type) =
+                    if let Some(compressed) = try_compress(&data, compress) {
+                        (compressed, compress.extent_type_byte())
+                    } else {
+                        (data.clone(), 0)
+                    };
                 let extent_data = items::file_extent_inline(
                     generation,
-                    data.len() as u64,
-                    &data,
+                    data.len() as u64, // ram_bytes = uncompressed size
+                    comp_type,
+                    &stored_data,
                 );
                 let extent_key =
                     Key::new(btrfs_ino, raw::BTRFS_EXTENT_DATA_KEY as u8, 0);
@@ -338,12 +404,14 @@ pub fn walk_directory(
 /// Returns additional FS tree items (FILE_EXTENT_ITEM for regular extents),
 /// extent tree items (EXTENT_ITEM + EXTENT_DATA_REF), and csum tree items.
 /// Also returns a map of inode → nbytes for patching INODE_ITEMs.
+#[allow(clippy::too_many_arguments)]
 pub fn write_file_data(
     plan: &RootdirPlan,
     data_logical: u64,
     sectorsize: u32,
     generation: u64,
     csum_type: ChecksumType,
+    compress: CompressConfig,
     files: &[std::fs::File],
     chunks: &crate::layout::ChunkLayout,
 ) -> Result<DataOutput> {
@@ -361,35 +429,49 @@ pub fn write_file_data(
 
         let mut file_offset: u64 = 0;
         let mut bytes_left = alloc.size;
+        let mut disk_allocated: u64 = 0;
 
         while bytes_left > 0 {
             let extent_size = bytes_left.min(MAX_EXTENT_SIZE);
-            let aligned_extent = align_up(extent_size, sectorsize as u64);
 
-            let mut data = vec![0u8; aligned_extent as usize];
-            file.read_exact(&mut data[..extent_size as usize])
-                .with_context(|| {
-                    format!("short read from '{}'", alloc.host_path.display())
-                })?;
+            // Read the raw (uncompressed) data.
+            let mut raw_data = vec![0u8; extent_size as usize];
+            file.read_exact(&mut raw_data).with_context(|| {
+                format!("short read from '{}'", alloc.host_path.display())
+            })?;
+
+            // Try compression.
+            let (disk_data, comp_type) =
+                if let Some(compressed) = try_compress(&raw_data, compress) {
+                    (compressed, compress.extent_type_byte())
+                } else {
+                    (raw_data, 0u8)
+                };
+
+            // Pad to sectorsize alignment for on-disk storage.
+            let aligned_disk =
+                align_up(disk_data.len() as u64, sectorsize as u64);
+            let mut padded = disk_data;
+            padded.resize(aligned_disk as usize, 0);
 
             let disk_bytenr = data_logical + offset;
 
             // Write data to physical locations.
             for (devid, phys) in chunks.logical_to_physical(disk_bytenr) {
                 let file_idx = (devid - 1) as usize;
-                crate::write::pwrite_all(&files[file_idx], &data, phys)
+                crate::write::pwrite_all(&files[file_idx], &padded, phys)
                     .with_context(|| {
                         format!("failed to write file data to device {devid}")
                     })?;
             }
 
-            // Compute checksums.
-            let num_csums = (aligned_extent / sectorsize as u64) as usize;
+            // Compute checksums over the on-disk (possibly compressed) data.
+            let num_csums = (aligned_disk / sectorsize as u64) as usize;
             let mut csums = Vec::with_capacity(num_csums * csum_size);
             for i in 0..num_csums {
                 let start = i * sectorsize as usize;
                 let end = start + sectorsize as usize;
-                let csum = csum_type.compute(&data[start..end]);
+                let csum = csum_type.compute(&padded[start..end]);
                 csums.extend_from_slice(&csum[..csum_size]);
             }
 
@@ -411,10 +493,11 @@ pub fn write_file_data(
                 items::file_extent_reg(
                     generation,
                     disk_bytenr,
-                    aligned_extent,
+                    aligned_disk, // compressed + aligned size on disk
                     0,
-                    extent_size,
-                    extent_size,
+                    extent_size, // logical file bytes this extent covers
+                    extent_size, // ram_bytes = uncompressed size
+                    comp_type,
                 ),
             ));
 
@@ -422,7 +505,7 @@ pub fn write_file_data(
                 Key::new(
                     disk_bytenr,
                     raw::BTRFS_EXTENT_ITEM_KEY as u8,
-                    aligned_extent,
+                    aligned_disk,
                 ),
                 items::data_extent_item(
                     1,
@@ -434,13 +517,13 @@ pub fn write_file_data(
                 ),
             ));
 
-            offset += aligned_extent;
+            offset += aligned_disk;
+            disk_allocated += aligned_disk;
             file_offset += extent_size;
             bytes_left -= extent_size;
         }
 
-        let aligned_total = align_up(alloc.size, sectorsize as u64);
-        nbytes_updates.insert(alloc.ino, aligned_total);
+        nbytes_updates.insert(alloc.ino, disk_allocated);
     }
 
     fs_items.sort_by_key(|(k, _)| *k);

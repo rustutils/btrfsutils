@@ -356,7 +356,11 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
 }
 
 /// Create a btrfs filesystem populated from a source directory.
-pub fn make_btrfs_with_rootdir(cfg: &MkfsConfig, rootdir: &Path) -> Result<()> {
+pub fn make_btrfs_with_rootdir(
+    cfg: &MkfsConfig,
+    rootdir: &Path,
+    compress: rootdir::CompressConfig,
+) -> Result<()> {
     if !cfg.sectorsize.is_power_of_two() || cfg.sectorsize < 4096 {
         bail!(
             "invalid sectorsize {}: must be a power of 2 >= 4096",
@@ -388,6 +392,7 @@ pub fn make_btrfs_with_rootdir(cfg: &MkfsConfig, rootdir: &Path) -> Result<()> {
         cfg.nodesize,
         generation,
         now,
+        compress,
     )?;
 
     // Compute chunk layout.
@@ -437,6 +442,7 @@ pub fn make_btrfs_with_rootdir(cfg: &MkfsConfig, rootdir: &Path) -> Result<()> {
         cfg.sectorsize,
         generation,
         cfg.csum_type,
+        compress,
         &files,
         &chunks,
     )?;

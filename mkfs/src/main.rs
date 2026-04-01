@@ -200,10 +200,28 @@ fn main() -> Result<()> {
         if !rootdir.is_dir() {
             bail!("'{}' is not a directory", rootdir.display());
         }
+        let algorithm = args
+            .compress
+            .as_ref()
+            .map(|c| c.algorithm)
+            .unwrap_or(btrfs_mkfs::args::CompressAlgorithm::No);
+        if algorithm == btrfs_mkfs::args::CompressAlgorithm::Lzo {
+            bail!(
+                "LZO compression is not yet supported for --rootdir \
+                 (btrfs LZO uses a per-sector format that is not yet implemented)"
+            );
+        }
+        let compress = btrfs_mkfs::rootdir::CompressConfig {
+            algorithm,
+            level: args.compress.as_ref().and_then(|c| c.level),
+        };
         if !args.quiet {
             eprintln!("  Rootdir:        {}", rootdir.display());
+            if compress.algorithm != btrfs_mkfs::args::CompressAlgorithm::No {
+                eprintln!("  Compression:    {:?}", compress.algorithm);
+            }
         }
-        mkfs::make_btrfs_with_rootdir(&cfg, rootdir)?;
+        mkfs::make_btrfs_with_rootdir(&cfg, rootdir, compress)?;
     } else {
         mkfs::make_btrfs(&cfg)?;
     }

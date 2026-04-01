@@ -378,12 +378,13 @@ pub fn xattr_item(name: &[u8], value: &[u8]) -> Vec<u8> {
 pub fn file_extent_inline(
     generation: u64,
     ram_bytes: u64,
+    compression: u8,
     data: &[u8],
 ) -> Vec<u8> {
     let mut buf = Vec::with_capacity(21 + data.len());
     buf.put_u64_le(generation);
     buf.put_u64_le(ram_bytes);
-    buf.put_u8(0); // compression = NONE
+    buf.put_u8(compression);
     buf.put_u8(0); // encryption
     buf.put_u16_le(0); // other_encoding
     buf.put_u8(raw::BTRFS_FILE_EXTENT_INLINE as u8);
@@ -402,11 +403,12 @@ pub fn file_extent_reg(
     offset: u64,
     num_bytes: u64,
     ram_bytes: u64,
+    compression: u8,
 ) -> Vec<u8> {
     let mut buf = Vec::with_capacity(53);
     buf.put_u64_le(generation);
     buf.put_u64_le(ram_bytes);
-    buf.put_u8(0); // compression = NONE
+    buf.put_u8(compression);
     buf.put_u8(0); // encryption
     buf.put_u16_le(0); // other_encoding
     buf.put_u8(raw::BTRFS_FILE_EXTENT_REG as u8);
@@ -701,7 +703,7 @@ mod tests {
 
     #[test]
     fn roundtrip_file_extent_inline() {
-        let data = file_extent_inline(1, 5, b"hello");
+        let data = file_extent_inline(1, 5, 0, b"hello");
         let parsed = items::FileExtentItem::parse(&data).unwrap();
         assert_eq!(parsed.generation, 1);
         assert_eq!(parsed.ram_bytes, 5);
@@ -717,7 +719,7 @@ mod tests {
 
     #[test]
     fn roundtrip_file_extent_reg() {
-        let data = file_extent_reg(1, 0x500000, 4096, 0, 4096, 4096);
+        let data = file_extent_reg(1, 0x500000, 4096, 0, 4096, 4096, 0);
         assert_eq!(data.len(), 53);
         let parsed = items::FileExtentItem::parse(&data).unwrap();
         assert_eq!(parsed.generation, 1);
