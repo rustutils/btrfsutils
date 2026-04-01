@@ -41,7 +41,7 @@ pub fn run(args: &Arguments) -> Result<()> {
         );
     }
 
-    if is_mounted(&args.device) {
+    if is_mounted(&args.device).unwrap_or(false) {
         bail!("'{}' is currently mounted", args.device.display());
     }
 

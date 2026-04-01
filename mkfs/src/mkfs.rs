@@ -2069,7 +2069,7 @@ pub fn has_btrfs_superblock(path: &Path) -> bool {
 /// Check if a device is currently mounted (appears in /proc/mounts).
 #[must_use]
 pub fn is_device_mounted(path: &Path) -> bool {
-    btrfs_uapi::filesystem::is_mounted(path)
+    btrfs_uapi::filesystem::is_mounted(path).unwrap_or(false)
 }
 
 /// Issue BLKDISCARD (TRIM) on the entire device.

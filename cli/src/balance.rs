@@ -1,7 +1,7 @@
+pub(crate) use crate::util::open_path;
 use crate::{Format, Runnable};
 use anyhow::Result;
 use clap::Parser;
-use std::{fs::File, path::PathBuf};
 
 mod cancel;
 mod filters;
@@ -44,11 +44,4 @@ pub enum BalanceSubcommand {
     Cancel(BalanceCancelCommand),
     Resume(BalanceResumeCommand),
     Status(BalanceStatusCommand),
-}
-
-/// Open a path as a read-only file descriptor, suitable for passing to ioctls.
-fn open_path(path: &PathBuf) -> Result<File> {
-    use anyhow::Context;
-    File::open(path)
-        .with_context(|| format!("failed to open '{}'", path.display()))
 }

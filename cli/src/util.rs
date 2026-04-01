@@ -2,7 +2,6 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Local};
 use std::{
     fs::{self, File},
-    io::BufRead,
     os::unix::fs::FileTypeExt,
     path::Path,
     str::FromStr,
@@ -23,7 +22,7 @@ pub fn open_path(path: &Path) -> Result<File> {
 ///
 /// Delegates to [`btrfs_uapi::filesystem::is_mounted`].
 pub fn is_mounted(device: &Path) -> bool {
-    btrfs_uapi::filesystem::is_mounted(device)
+    btrfs_uapi::filesystem::is_mounted(device).unwrap_or(false)
 }
 
 /// Resolved size display mode.
@@ -217,24 +216,13 @@ pub fn check_device_for_overwrite(device: &Path, force: bool) -> Result<()> {
     Ok(())
 }
 
-/// Check if a device path appears in /proc/mounts.
+/// Check if a device path appears in /proc/mounts (with error propagation).
+///
+/// Delegates to [`btrfs_uapi::filesystem::is_mounted`].
 pub fn is_device_mounted(device: &Path) -> Result<bool> {
-    let canonical = fs::canonicalize(device).with_context(|| {
-        format!("cannot resolve path '{}'", device.display())
-    })?;
-    let canonical_str = canonical.to_string_lossy();
-
-    let file =
-        File::open("/proc/mounts").context("failed to open /proc/mounts")?;
-    for line in std::io::BufReader::new(file).lines() {
-        let line = line?;
-        if let Some(mount_dev) = line.split_whitespace().next()
-            && mount_dev == canonical_str.as_ref()
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+    btrfs_uapi::filesystem::is_mounted(device).with_context(|| {
+        format!("cannot check mount status of '{}'", device.display())
+    })
 }
 
 /// Try to read a btrfs superblock from the device. Returns true if a valid
