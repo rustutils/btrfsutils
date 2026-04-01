@@ -9,11 +9,10 @@
 //! Most operations require `CAP_SYS_ADMIN`.
 
 use crate::{
-    field_size,
     filesystem::FilesystemInfo,
     raw::{
         BTRFS_DEV_EXTENT_KEY, BTRFS_DEV_STATS_RESET, BTRFS_DEV_TREE_OBJECTID,
-        BTRFS_DEVICE_SPEC_BY_ID, btrfs_dev_extent,
+        BTRFS_DEVICE_SPEC_BY_ID,
         btrfs_dev_stat_values_BTRFS_DEV_STAT_CORRUPTION_ERRS,
         btrfs_dev_stat_values_BTRFS_DEV_STAT_FLUSH_ERRS,
         btrfs_dev_stat_values_BTRFS_DEV_STAT_GENERATION_ERRS,
@@ -27,7 +26,6 @@ use crate::{
         btrfs_ioctl_vol_args_v2,
     },
     tree_search::{SearchKey, tree_search},
-    util::read_le_u64,
 };
 use nix::{errno::Errno, libc::c_char};
 use std::{
@@ -350,9 +348,6 @@ pub fn device_stats(
     })
 }
 
-const DEV_EXTENT_LENGTH_OFF: usize =
-    std::mem::offset_of!(btrfs_dev_extent, length);
-
 const SZ_1M: u64 = 1024 * 1024;
 const SZ_32M: u64 = 32 * 1024 * 1024;
 
@@ -401,13 +396,11 @@ pub fn device_min_size(fd: BorrowedFd, devid: u64) -> nix::Result<u64> {
             devid,
         ),
         |hdr, data| {
-            if data.len()
-                < DEV_EXTENT_LENGTH_OFF + field_size!(btrfs_dev_extent, length)
-            {
+            let Some(de) = btrfs_disk::items::DeviceExtent::parse(data) else {
                 return Ok(());
-            }
+            };
             let phys_start = hdr.offset;
-            let len = read_le_u64(data, DEV_EXTENT_LENGTH_OFF);
+            let len = de.length;
 
             min_size += len;
 

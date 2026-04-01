@@ -1,19 +1,15 @@
 use crate::{Format, Runnable, util::open_path};
 use anyhow::{Context, Result};
+use btrfs_disk::items::{FileExtentBody, FileExtentItem, FileExtentType};
 use btrfs_uapi::{
     filesystem::sync,
     inode::ino_paths,
-    raw::{
-        BTRFS_EXTENT_DATA_KEY, BTRFS_FILE_EXTENT_INLINE,
-        BTRFS_FILE_EXTENT_PREALLOC, BTRFS_FILE_EXTENT_REG,
-        btrfs_file_extent_item,
-    },
+    raw::BTRFS_EXTENT_DATA_KEY,
     subvolume::subvolume_info,
     tree_search::{SearchKey, tree_search},
-    util::read_le_u64,
 };
 use clap::Parser;
-use std::{mem, os::unix::io::AsFd, path::PathBuf};
+use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// List the recently modified files in a subvolume
 ///
@@ -56,48 +52,28 @@ impl Runnable for SubvolumeFindNewCommand {
         let mut cache_name: Option<String> = None;
 
         tree_search(file.as_fd(), key, |hdr, data| {
-            let gen_off = mem::offset_of!(btrfs_file_extent_item, generation);
-            let type_off = mem::offset_of!(btrfs_file_extent_item, type_);
-            let compression_off = mem::offset_of!(btrfs_file_extent_item, compression);
+            let Some(fe) = FileExtentItem::parse(data) else {
+                return Ok(());
+            };
 
-            // Need at least enough data to read the generation and type fields.
-            if data.len() < type_off + 1 {
+            if fe.generation < self.last_gen {
                 return Ok(());
             }
 
-            let found_gen = read_le_u64(data, gen_off);
-            if found_gen < self.last_gen {
-                return Ok(());
-            }
+            let compressed =
+                !matches!(fe.compression, btrfs_disk::items::CompressionType::None);
 
-            let extent_type = data[type_off];
-            let compressed = data.get(compression_off).copied().unwrap_or(0) != 0;
-
-            let (disk_start, disk_offset, len) =
-                if extent_type == BTRFS_FILE_EXTENT_REG as u8
-                    || extent_type == BTRFS_FILE_EXTENT_PREALLOC as u8
-                {
-                    let disk_bytenr_off = mem::offset_of!(btrfs_file_extent_item, disk_bytenr);
-                    let offset_off = mem::offset_of!(btrfs_file_extent_item, offset);
-                    let num_bytes_off = mem::offset_of!(btrfs_file_extent_item, num_bytes);
-
-                    if data.len() < num_bytes_off + 8 {
-                        return Ok(());
-                    }
-                    (
-                        read_le_u64(data, disk_bytenr_off),
-                        read_le_u64(data, offset_off),
-                        read_le_u64(data, num_bytes_off),
-                    )
-                } else if extent_type == BTRFS_FILE_EXTENT_INLINE as u8 {
-                    let ram_bytes_off = mem::offset_of!(btrfs_file_extent_item, ram_bytes);
-                    if data.len() < ram_bytes_off + 8 {
-                        return Ok(());
-                    }
-                    (0, 0, read_le_u64(data, ram_bytes_off))
-                } else {
-                    return Ok(());
-                };
+            let (disk_start, disk_offset, len) = match &fe.body {
+                FileExtentBody::Regular {
+                    disk_bytenr,
+                    num_bytes,
+                    offset,
+                    ..
+                } => (*disk_bytenr, *offset, *num_bytes),
+                FileExtentBody::Inline { inline_size } => {
+                    (0, 0, *inline_size as u64)
+                }
+            };
 
             // Resolve inode to path (with caching for consecutive extents
             // of the same inode).
@@ -105,7 +81,9 @@ impl Runnable for SubvolumeFindNewCommand {
                 cache_name.as_deref().unwrap_or("unknown")
             } else {
                 let resolved = match ino_paths(file.as_fd(), hdr.objectid) {
-                    Ok(paths) if !paths.is_empty() => Some(paths.into_iter().next().unwrap()),
+                    Ok(paths) if !paths.is_empty() => {
+                        Some(paths.into_iter().next().unwrap())
+                    }
                     _ => None,
                 };
                 cache_ino = hdr.objectid;
@@ -118,13 +96,13 @@ impl Runnable for SubvolumeFindNewCommand {
             if compressed {
                 flags.push_str("COMPRESS");
             }
-            if extent_type == BTRFS_FILE_EXTENT_PREALLOC as u8 {
+            if fe.extent_type == FileExtentType::Prealloc {
                 if !flags.is_empty() {
                     flags.push('|');
                 }
                 flags.push_str("PREALLOC");
             }
-            if extent_type == BTRFS_FILE_EXTENT_INLINE as u8 {
+            if fe.extent_type == FileExtentType::Inline {
                 if !flags.is_empty() {
                     flags.push('|');
                 }
@@ -136,7 +114,7 @@ impl Runnable for SubvolumeFindNewCommand {
 
             println!(
                 "inode {} file offset {} len {} disk start {} offset {} gen {} flags {flags} {name}",
-                hdr.objectid, hdr.offset, len, disk_start, disk_offset, found_gen,
+                hdr.objectid, hdr.offset, len, disk_start, disk_offset, fe.generation,
             );
 
             Ok(())

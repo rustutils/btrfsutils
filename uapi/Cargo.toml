@@ -20,6 +20,7 @@ path = "tests/tests.rs"
 nix = { workspace = true }
 bitflags = { workspace = true }
 uuid = { workspace = true }
+btrfs-disk = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -8,7 +8,6 @@
 //! that is mounted when no subvolume is explicitly requested.
 
 use crate::{
-    field_size,
     raw::{
         BTRFS_DIR_ITEM_KEY, BTRFS_FIRST_FREE_OBJECTID, BTRFS_FS_TREE_OBJECTID,
         BTRFS_LAST_FREE_OBJECTID, BTRFS_ROOT_BACKREF_KEY, BTRFS_ROOT_ITEM_KEY,
@@ -22,10 +21,8 @@ use crate::{
         btrfs_ioc_subvol_setflags, btrfs_ioc_subvol_sync_wait,
         btrfs_ioctl_get_subvol_info_args, btrfs_ioctl_ino_lookup_args,
         btrfs_ioctl_subvol_wait, btrfs_ioctl_vol_args_v2, btrfs_qgroup_inherit,
-        btrfs_root_item, btrfs_timespec,
     },
     tree_search::{SearchKey, tree_search},
-    util::{read_le_u32, read_le_u64},
 };
 use bitflags::bitflags;
 use nix::libc::c_char;
@@ -677,63 +674,22 @@ fn build_full_path(
     cache.get(&root_id).cloned().unwrap_or_default()
 }
 
-/// `btrfs_root_item` field offsets (packed, LE).
+/// Parse a ROOT_ITEM payload into a [`SubvolumeListItem`].
 fn parse_root_item(root_id: u64, data: &[u8]) -> Option<SubvolumeListItem> {
-    use std::mem::offset_of;
-
-    // Items shorter than generation_v2 are "legacy" and do not carry
-    // UUID / otime / otransid fields.
-    let legacy_boundary = offset_of!(btrfs_root_item, generation_v2);
-    if data.len() < legacy_boundary {
-        return None;
-    }
-
-    let generation = read_le_u64(data, offset_of!(btrfs_root_item, generation));
-    let flags_raw = read_le_u64(data, offset_of!(btrfs_root_item, flags));
-    let flags = SubvolumeFlags::from_bits_truncate(flags_raw);
-
-    // Extended fields exist only in non-legacy items.
-    let otime_nsec =
-        offset_of!(btrfs_root_item, otime) + offset_of!(btrfs_timespec, nsec);
-    let (uuid, parent_uuid, received_uuid, otransid, otime) = if data.len()
-        >= otime_nsec + field_size!(btrfs_timespec, nsec)
-    {
-        let off_uuid = offset_of!(btrfs_root_item, uuid);
-        let off_parent = offset_of!(btrfs_root_item, parent_uuid);
-        let off_received = offset_of!(btrfs_root_item, received_uuid);
-        let uuid_size = field_size!(btrfs_root_item, uuid);
-        let uuid = Uuid::from_bytes(
-            data[off_uuid..off_uuid + uuid_size].try_into().unwrap(),
-        );
-        let parent_uuid = Uuid::from_bytes(
-            data[off_parent..off_parent + uuid_size].try_into().unwrap(),
-        );
-        let received_uuid = Uuid::from_bytes(
-            data[off_received..off_received + uuid_size]
-                .try_into()
-                .unwrap(),
-        );
-        let otransid = read_le_u64(data, offset_of!(btrfs_root_item, otransid));
-        let otime_sec = offset_of!(btrfs_root_item, otime);
-        let otime = timespec_to_system_time(
-            read_le_u64(data, otime_sec),
-            read_le_u32(data, otime_nsec),
-        );
-        (uuid, parent_uuid, received_uuid, otransid, otime)
-    } else {
-        (Uuid::nil(), Uuid::nil(), Uuid::nil(), 0, UNIX_EPOCH)
-    };
+    let ri = btrfs_disk::items::RootItem::parse(data)?;
+    let flags = SubvolumeFlags::from_bits_truncate(ri.flags.bits());
+    let otime = timespec_to_system_time(ri.otime.sec, ri.otime.nsec);
 
     Some(SubvolumeListItem {
         root_id,
         parent_id: 0,
         dir_id: 0,
-        generation,
+        generation: ri.generation,
         flags,
-        uuid,
-        parent_uuid,
-        received_uuid,
-        otransid,
+        uuid: ri.uuid,
+        parent_uuid: ri.parent_uuid,
+        received_uuid: ri.received_uuid,
+        otransid: ri.otransid,
         otime,
         name: String::new(),
     })
@@ -742,24 +698,9 @@ fn parse_root_item(root_id: u64, data: &[u8]) -> Option<SubvolumeListItem> {
 /// Parse a `btrfs_root_ref` payload (packed, LE). The name immediately
 /// follows the fixed-size header.
 fn parse_root_ref(data: &[u8]) -> Option<(u64, String)> {
-    use crate::raw::btrfs_root_ref;
-    use std::mem::{offset_of, size_of};
-
-    let header_size = size_of::<btrfs_root_ref>();
-    if data.len() < header_size {
-        return None;
-    }
-    let dir_id = read_le_u64(data, offset_of!(btrfs_root_ref, dirid));
-    let name_off = offset_of!(btrfs_root_ref, name_len);
-    let name_len =
-        u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
-    if data.len() < header_size + name_len {
-        return None;
-    }
-    let name =
-        String::from_utf8_lossy(&data[header_size..header_size + name_len])
-            .into_owned();
-    Some((dir_id, name))
+    let rr = btrfs_disk::items::RootRef::parse(data)?;
+    let name = String::from_utf8_lossy(&rr.name).into_owned();
+    Some((rr.dirid, name))
 }
 
 /// Convert an on-disk `btrfs_timespec` (LE sec + LE nsec, packed) to
@@ -958,13 +899,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_root_ref_too_short_name() {
-        // Header claims 10-byte name but buffer only has the header
+    fn parse_root_ref_truncated_name() {
+        // Header claims 10-byte name but buffer only has the header.
+        // The parser succeeds but returns an empty name (graceful truncation).
         let mut buf = vec![0u8; 18];
-        // Set name_len = 10 at offset 16
-        buf[16] = 10;
+        buf[16] = 10; // name_len = 10
         buf[17] = 0;
-        assert!(parse_root_ref(&buf).is_none());
+        let result = parse_root_ref(&buf);
+        assert!(result.is_some());
+        let (_, name) = result.unwrap();
+        assert!(name.is_empty());
     }
 
     #[test]

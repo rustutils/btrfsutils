@@ -15,7 +15,6 @@
 //! Most operations require `CAP_SYS_ADMIN`.
 
 use crate::{
-    field_size,
     raw::{
         BTRFS_FIRST_FREE_OBJECTID, BTRFS_LAST_FREE_OBJECTID,
         BTRFS_QGROUP_INFO_KEY, BTRFS_QGROUP_LIMIT_EXCL_CMPR,
@@ -32,17 +31,15 @@ use crate::{
         btrfs_ioc_quota_rescan_wait, btrfs_ioctl_qgroup_assign_args,
         btrfs_ioctl_qgroup_create_args, btrfs_ioctl_qgroup_limit_args,
         btrfs_ioctl_quota_ctl_args, btrfs_ioctl_quota_rescan_args,
-        btrfs_qgroup_info_item, btrfs_qgroup_limit, btrfs_qgroup_limit_item,
-        btrfs_qgroup_status_item,
+        btrfs_qgroup_limit,
     },
     tree_search::{SearchKey, tree_search},
-    util::read_le_u64,
 };
 use bitflags::bitflags;
 use nix::errno::Errno;
 use std::{
     collections::{HashMap, HashSet},
-    mem::{self, offset_of, size_of},
+    mem,
     os::{fd::AsRawFd, unix::io::BorrowedFd},
 };
 
@@ -247,41 +244,28 @@ impl QgroupEntryBuilder {
 }
 
 fn parse_status_flags(data: &[u8]) -> Option<u64> {
-    let off = offset_of!(btrfs_qgroup_status_item, flags);
-    if data.len() < off + field_size!(btrfs_qgroup_status_item, flags) {
-        return None;
-    }
-    Some(read_le_u64(data, off))
+    btrfs_disk::items::QgroupStatus::parse(data).map(|qs| qs.flags)
 }
 
 fn parse_info(builder: &mut QgroupEntryBuilder, data: &[u8]) {
-    if data.len() < size_of::<btrfs_qgroup_info_item>() {
+    let Some(qi) = btrfs_disk::items::QgroupInfo::parse(data) else {
         return;
-    }
-
+    };
     builder.has_info = true;
-    builder.rfer = read_le_u64(data, offset_of!(btrfs_qgroup_info_item, rfer));
-    builder.rfer_cmpr =
-        read_le_u64(data, offset_of!(btrfs_qgroup_info_item, rfer_cmpr));
-    builder.excl = read_le_u64(data, offset_of!(btrfs_qgroup_info_item, excl));
-    builder.excl_cmpr =
-        read_le_u64(data, offset_of!(btrfs_qgroup_info_item, excl_cmpr));
+    builder.rfer = qi.referenced;
+    builder.rfer_cmpr = qi.referenced_compressed;
+    builder.excl = qi.exclusive;
+    builder.excl_cmpr = qi.exclusive_compressed;
 }
 
 fn parse_limit(builder: &mut QgroupEntryBuilder, data: &[u8]) {
-    let end = offset_of!(btrfs_qgroup_limit_item, max_excl)
-        + field_size!(btrfs_qgroup_limit_item, max_excl);
-    if data.len() < end {
+    let Some(ql) = btrfs_disk::items::QgroupLimit::parse(data) else {
         return;
-    }
-
+    };
     builder.has_limit = true;
-    builder.limit_flags =
-        read_le_u64(data, offset_of!(btrfs_qgroup_limit_item, flags));
-    builder.max_rfer =
-        read_le_u64(data, offset_of!(btrfs_qgroup_limit_item, max_rfer));
-    builder.max_excl =
-        read_le_u64(data, offset_of!(btrfs_qgroup_limit_item, max_excl));
+    builder.limit_flags = ql.flags;
+    builder.max_rfer = ql.max_referenced;
+    builder.max_excl = ql.max_exclusive;
 }
 
 /// Create a new qgroup with the given `qgroupid` on the filesystem referred

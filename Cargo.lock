@@ -235,6 +235,7 @@ version = "0.7.0"
 dependencies = [
  "bindgen",
  "bitflags",
+ "btrfs-disk",
  "nix",
  "tempfile",
  "uuid",
