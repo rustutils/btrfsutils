@@ -45,7 +45,7 @@ fn device_add_remove() {
     balance(mnt.fd(), flags, None, None, None).expect("balance failed");
 
     // Remove second device by path.
-    device_remove(mnt.fd(), DeviceSpec::Path(&dev2_cpath))
+    device_remove(mnt.fd(), &DeviceSpec::Path(&dev2_cpath))
         .expect("device_remove failed");
 
     let info_after_remove =
@@ -129,7 +129,7 @@ fn device_remove_by_devid() {
         .find(|d| d.devid != 1)
         .expect("should have a second device");
 
-    device_remove(mnt.fd(), DeviceSpec::Id(dev2.devid))
+    device_remove(mnt.fd(), &DeviceSpec::Id(dev2.devid))
         .expect("device_remove by id failed");
 
     let info_after =

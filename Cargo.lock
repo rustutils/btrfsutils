@@ -227,6 +227,7 @@ dependencies = [
  "anyhow",
  "btrfs-disk",
  "btrfs-mkfs",
+ "btrfs-uapi",
  "clap",
  "insta",
  "tempfile",

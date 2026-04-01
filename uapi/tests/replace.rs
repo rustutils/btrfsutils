@@ -67,7 +67,7 @@ fn replace_device() {
     let tgt_cpath = CString::new(lo3.path().to_str().unwrap()).unwrap();
 
     // Replace device 2.
-    replace_start(mnt.fd(), ReplaceSource::DevId(2), &tgt_cpath, false)
+    replace_start(mnt.fd(), &ReplaceSource::DevId(2), &tgt_cpath, false)
         .expect("replace_start ioctl failed")
         .expect("replace_start returned application error");
 
@@ -135,7 +135,7 @@ fn replace_cancel_test() {
     let lo3 = LoopbackDevice::new(f3);
     let tgt_cpath = CString::new(lo3.path().to_str().unwrap()).unwrap();
 
-    replace_start(mnt.fd(), ReplaceSource::DevId(2), &tgt_cpath, false)
+    replace_start(mnt.fd(), &ReplaceSource::DevId(2), &tgt_cpath, false)
         .expect("replace_start ioctl failed")
         .expect("replace_start returned application error");
 
