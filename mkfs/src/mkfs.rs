@@ -897,7 +897,6 @@ pub fn make_btrfs_with_rootdir(cfg: &MkfsConfig, rootdir: &Path) -> Result<()> {
                 extent_root_addr,
                 extent_tree.root_level,
             ),
-            (raw::BTRFS_CHUNK_TREE_OBJECTID as u64, chunk_tree_addr, 0),
             (raw::BTRFS_DEV_TREE_OBJECTID as u64, dev_tree_addr, 0),
             (
                 raw::BTRFS_FS_TREE_OBJECTID as u64,
@@ -956,7 +955,8 @@ pub fn make_btrfs_with_rootdir(cfg: &MkfsConfig, rootdir: &Path) -> Result<()> {
     }
 
     // Superblock.
-    let bytes_used = alloc.system_used() + alloc.metadata_used();
+    let bytes_used =
+        alloc.system_used() + alloc.metadata_used() + data_output.data_used;
     for dev in &cfg.devices {
         let sb = build_superblock_rootdir(
             cfg,
