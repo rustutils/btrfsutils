@@ -20,5 +20,7 @@
 
 /// Argument parsing for the `btrfs-tune` binary.
 pub mod args;
+/// Entry point logic, callable from both standalone binary and CLI subcommand.
+pub mod run;
 /// Core tuning operations: feature flags, seeding, UUID changes.
 pub mod tune;

@@ -45,6 +45,7 @@ pub mod items;
 pub mod layout;
 pub mod mkfs;
 pub mod rootdir;
+pub mod run;
 pub mod tree;
 pub mod treebuilder;
 pub mod write;

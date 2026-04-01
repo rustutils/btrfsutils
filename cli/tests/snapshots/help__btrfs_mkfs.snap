@@ -1,0 +1,126 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Create a btrfs filesystem.
+
+mkfs.btrfs is used to create a btrfs filesystem on a single or multiple devices.
+The device is typically a block device but can be a file-backed image as well.
+Multiple devices are grouped by UUID of the filesystem.
+
+The default block group profiles for data and metadata depend on the number of
+devices. For a single device the defaults are SINGLE for data and DUP for
+metadata. For multiple devices the defaults are SINGLE for data and RAID1 for
+metadata.
+
+Usage: mkfs [OPTIONS] <DEVICES>...
+
+Arguments:
+  <DEVICES>...
+          Block devices or image files to format
+
+Options:
+  -d, --data <PROFILE>
+          Data block group profile.
+          
+          Valid values are raid0, raid1, raid1c3, raid1c4, raid5, raid6, raid10,
+          single, or dup (case insensitive).
+
+  -m, --metadata <PROFILE>
+          Metadata block group profile.
+          
+          Valid values are raid0, raid1, raid1c3, raid1c4, raid5, raid6, raid10,
+          single, or dup (case insensitive). Default is DUP for a single device,
+          RAID1 for multiple devices.
+
+  -M, --mixed
+          Mix data and metadata in the same block groups.
+          
+          Recommended for filesystems smaller than 1 GiB. The nodesize and
+          sectorsize must be equal, and the data and metadata profiles must
+          match.
+
+  -L, --label <LABEL>
+          Filesystem label (maximum 255 bytes)
+
+  -n, --nodesize <SIZE>
+          Size of btree nodes.
+          
+          Default is 16 KiB or the page size, whichever is larger. Must be a
+          multiple of the sectorsize and a power of 2, up to 64 KiB.
+
+  -s, --sectorsize <SIZE>
+          Data block allocation unit.
+          
+          Default is 4 KiB. Using a value different from the system page size
+          may result in an unmountable filesystem.
+
+  -b, --byte-count <SIZE>
+          Set filesystem size per device.
+          
+          If not set, the entire device size is used. The total filesystem size
+          is the sum of all device sizes.
+
+      --checksum <TYPE>
+          Checksum algorithm.
+          
+          Valid values are crc32c (default), xxhash, sha256, or blake2.
+
+  -O, --features <LIST>
+          Comma-separated list of filesystem features.
+          
+          Prefix a feature with ^ to disable it. Use 'list-all' to list all
+          available features.
+
+  -U, --uuid <UUID>
+          Specify the filesystem UUID
+
+      --device-uuid <UUID>
+          Specify the device UUID (sub-uuid).
+          
+          Only meaningful for single-device filesystems.
+
+  -f, --force
+          Force overwrite of an existing filesystem
+
+  -K, --nodiscard
+          Do not perform whole-device TRIM
+
+  -r, --rootdir <DIR>
+          Copy files from a directory into the filesystem image
+
+  -u, --subvol <TYPE:SUBDIR>
+          Create a subdirectory as a subvolume (requires --rootdir).
+          
+          TYPE is one of: rw (default), ro, default, default-ro. Can be
+          specified multiple times.
+
+      --inode-flags <FLAGS:PATH>
+          Specify inode flags for a path (requires --rootdir).
+          
+          FLAGS is a comma-separated list of: nodatacow, nodatasum. Can be
+          specified multiple times.
+
+      --compress <ALGO[:LEVEL]>
+          Compress files when populating from --rootdir.
+          
+          ALGO is one of: no (default), zstd, lzo, zlib. An optional compression
+          level can be appended after a colon.
+
+      --reflink
+          Clone file extents from --rootdir instead of copying bytes
+
+      --shrink
+          Shrink the filesystem to minimal size after populating from --rootdir
+
+  -q, --quiet
+          Quiet mode: only print errors and warnings
+
+  -v, --verbose...
+          Increase verbosity level
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version

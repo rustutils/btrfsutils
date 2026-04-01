@@ -139,8 +139,8 @@ pub struct Arguments {
     pub quiet: bool,
 
     /// Increase verbosity level.
-    #[arg(short = 'v', long)]
-    pub verbose: bool,
+    #[arg(short = 'v', long, action = clap::ArgAction::Count)]
+    pub verbose: u8,
 
     /// Block devices or image files to format.
     #[arg(required = true)]

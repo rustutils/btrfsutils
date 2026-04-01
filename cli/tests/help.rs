@@ -27,7 +27,13 @@ fn collect_subcommands(
     out: &mut Vec<(String, Vec<String>)>,
 ) {
     let name = if prefix.is_empty() {
-        "toplevel".to_string()
+        #[allow(unused_mut)]
+        let mut name = "toplevel".to_string();
+        #[cfg(feature = "mkfs")]
+        name.push_str("_mkfs");
+        #[cfg(feature = "tune")]
+        name.push_str("_tune");
+        name
     } else {
         prefix
             .iter()

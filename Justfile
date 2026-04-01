@@ -10,11 +10,12 @@ test:
     set -euo pipefail
 
     # Build first so the user sees compile progress/warnings on stderr.
-    cargo test
+    cargo test --all-features
 
     # Then extract the binary paths from the JSON output.
     mapfile -t binaries < <(
         cargo test \
+            --all-features \
             --no-run \
             --message-format=json 2>/dev/null \
         | jq -r 'select(.profile.test == true) | .executable'
@@ -78,7 +79,7 @@ check:
     cargo deny check
     taplo check
     RUSTDOCFLAGS="-Dwarnings" cargo doc --no-deps
-    cargo clippy -- -Dwarnings
+    cargo clippy --all-features -- -Dwarnings
     cargo check --target x86_64-unknown-linux-gnu
     cargo check --target x86_64-unknown-linux-musl
 

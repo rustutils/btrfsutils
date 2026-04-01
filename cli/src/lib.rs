@@ -113,6 +113,8 @@ pub enum Command {
     Filesystem(FilesystemCommand),
     #[command(alias = "inspect-internal")]
     Inspect(InspectCommand),
+    #[cfg(feature = "mkfs")]
+    Mkfs(btrfs_mkfs::args::Arguments),
     Property(PropertyCommand),
     Qgroup(QgroupCommand),
     Quota(QuotaCommand),
@@ -123,6 +125,8 @@ pub enum Command {
     Scrub(ScrubCommand),
     Send(SendCommand),
     Subvolume(SubvolumeCommand),
+    #[cfg(feature = "tune")]
+    Tune(btrfs_tune::args::Arguments),
 }
 
 impl Runnable for Command {
@@ -133,6 +137,8 @@ impl Runnable for Command {
             Command::Device(cmd) => cmd.run(format, dry_run),
             Command::Filesystem(cmd) => cmd.run(format, dry_run),
             Command::Inspect(cmd) => cmd.run(format, dry_run),
+            #[cfg(feature = "mkfs")]
+            Command::Mkfs(args) => btrfs_mkfs::run::run(args),
             Command::Property(cmd) => cmd.run(format, dry_run),
             Command::Qgroup(cmd) => cmd.run(format, dry_run),
             Command::Quota(cmd) => cmd.run(format, dry_run),
@@ -143,6 +149,8 @@ impl Runnable for Command {
             Command::Scrub(cmd) => cmd.run(format, dry_run),
             Command::Send(cmd) => cmd.run(format, dry_run),
             Command::Subvolume(cmd) => cmd.run(format, dry_run),
+            #[cfg(feature = "tune")]
+            Command::Tune(args) => btrfs_tune::run::run(args),
         }
     }
 }

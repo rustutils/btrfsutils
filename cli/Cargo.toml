@@ -17,20 +17,27 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-clap = { workspace = true }
-libc = { workspace = true }
-env_logger = { workspace = true }
-log = { workspace = true }
-nix = { workspace = true }
-uuid = { workspace = true }
-btrfs-uapi = { workspace = true }
 btrfs-disk = { workspace = true }
+btrfs-mkfs = { workspace = true, optional = true }
 btrfs-stream = { workspace = true, features = ["receive"] }
+btrfs-tune = { workspace = true, optional = true }
+btrfs-uapi = { workspace = true }
 chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
-flate2 = "1"
-zstd = "0.13"
-lzokay = "2"
+clap = { workspace = true }
+env_logger = { workspace = true }
+flate2 = { workspace = true }
+libc = { workspace = true }
+log = { workspace = true }
+lzokay = { workspace = true }
+nix = { workspace = true }
 regex-lite = "0.1"
+uuid = { workspace = true }
+zstd = { workspace = true }
+
+[features]
+default = []
+mkfs = ["dep:btrfs-mkfs"]
+tune = ["dep:btrfs-tune"]
 
 [dev-dependencies]
 insta = "1"

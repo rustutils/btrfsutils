@@ -138,7 +138,9 @@ version = "0.7.0"
 dependencies = [
  "anyhow",
  "btrfs-disk",
+ "btrfs-mkfs",
  "btrfs-stream",
+ "btrfs-tune",
  "btrfs-uapi",
  "chrono",
  "clap",
@@ -191,11 +193,13 @@ dependencies = [
  "flate2",
  "insta",
  "libc",
+ "lzokay",
  "nix",
  "sha2",
  "tempfile",
  "uuid",
  "xxhash-rust",
+ "zstd",
 ]
 
 [[package]]

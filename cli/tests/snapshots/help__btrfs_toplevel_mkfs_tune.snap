@@ -1,0 +1,63 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+User-space command-line tool for managing Btrfs filesystems.
+
+btrfs is a modern copy-on-write filesystem for Linux that provides advanced
+features including subvolumes, snapshots, RAID support, compression, quotas, and
+checksumming. This tool allows you to create and manage filesystems, devices,
+subvolumes, snapshots, quotas, and perform various maintenance operations.
+
+Most operations require CAP_SYS_ADMIN (root privileges) or special permissions
+for the specific filesystem.
+
+Usage: btrfs-cli [OPTIONS] <COMMAND>
+
+Commands:
+  balance     Balance data across devices, or change block groups using filters
+  check       Check structural integrity of a filesystem (unmounted)
+  device      Manage devices in a btrfs filesystem
+  filesystem  Overall filesystem tasks and information
+  inspect     Query various internal filesystem information
+  mkfs        Create a btrfs filesystem
+  property    Modify properties of filesystem objects
+  qgroup      Manage quota groups
+  quota       Manage filesystem quota settings
+  receive     Receive subvolumes from a stream
+  replace     Replace a device in the filesystem
+  rescue      Toolbox for specific rescue operations
+  restore     Try to restore files from a damaged filesystem (unmounted)
+  scrub       Verify checksums of data and metadata
+  send        Send the subvolume(s) to stdout
+  subvolume   Create, delete, list, and manage btrfs subvolumes and snapshots
+  tune        Modify btrfs filesystem parameters on an unmounted device by
+              writing directly to the on-disk superblock and tree structures
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+Global options:
+  -v, --verbose...
+          Increase verbosity (repeat for more: -v, -vv, -vvv)
+
+  -q, --quiet
+          Print only errors
+
+      --dry-run
+          If supported, do not do any active/changing actions
+
+      --log <LOG>
+          Set log level
+          
+          [possible values: debug, info, warn, error]
+
+      --format <FORMAT>
+          If supported, print subcommand output in that format
+          
+          [possible values: text, json]
