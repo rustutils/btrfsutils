@@ -1,0 +1,21 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs check <BROKEN_IMG> (stderr)
+expression: "redact_img(&stderr, &img)"
+---
+Opening filesystem to check...
+Checking filesystem on <IMG>
+UUID: d0918564-9de7-4eb9-b88d-13b656efc866
+[1/7] checking superblocks
+[2/7] checking root items
+[3/7] checking extents
+[4/7] checking free space tree
+[5/7] checking fs roots
+ERROR: root 5: inode 257 dir isize wrong: inode says 0, expected 12
+ERROR: root 5: inode 258 dir isize wrong: inode says 0, expected 16
+ERROR: root 5: inode 259 nbytes wrong: inode says 4096, expected 15
+ERROR: root 5: inode 260 nbytes wrong: inode says 4096, expected 6
+ERROR: root 5: inode 261 nbytes wrong: inode says 4096, expected 9
+ERROR: root 5: inode 262 nbytes wrong: inode says 4096, expected 12
+[6/7] checking only csums items (without verifying data)
+[7/7] checking root refs

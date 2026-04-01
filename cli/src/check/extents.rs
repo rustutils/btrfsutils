@@ -4,15 +4,21 @@ use btrfs_disk::{
     reader::{self, BlockReader},
     tree::{KeyType, TreeBlock},
 };
-use std::io::{Read, Seek};
+use std::{
+    collections::HashSet,
+    io::{Read, Seek},
+};
 
 /// Header size in a btrfs tree block (bytes before item data area).
 const HEADER_SIZE: usize = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
 
-/// Check extent tree: verify reference counts and detect overlapping extents.
+/// Check extent tree: verify reference counts, detect overlapping extents,
+/// and cross-check that every tree block address from tree walks has a
+/// corresponding METADATA_ITEM or EXTENT_ITEM entry.
 pub fn check_extent_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     extent_root: u64,
+    tree_block_addrs: &HashSet<u64>,
     results: &mut CheckResults,
 ) {
     let mut state = ExtentCheckState::default();
@@ -53,6 +59,14 @@ pub fn check_extent_tree<R: Read + Seek>(
         results.report(CheckError::ReadError { logical, detail });
     }
 
+    // Cross-check: every tree block found during tree walks must have a
+    // corresponding METADATA_ITEM or EXTENT_ITEM in the extent tree.
+    for &addr in tree_block_addrs {
+        if !state.extent_item_addrs.contains(&addr) {
+            results.report(CheckError::MissingExtentItem { bytenr: addr });
+        }
+    }
+
     results.data_bytes_allocated = state.data_bytes_allocated;
     results.data_bytes_referenced = state.data_bytes_referenced;
 }
@@ -74,6 +88,8 @@ struct ExtentCheckState {
     /// Accumulated stats.
     data_bytes_allocated: u64,
     data_bytes_referenced: u64,
+    /// All bytenrs that have a METADATA_ITEM or EXTENT_ITEM entry.
+    extent_item_addrs: HashSet<u64>,
 }
 
 fn process_extent_item(
@@ -88,6 +104,7 @@ fn process_extent_item(
             flush_pending(state, results);
 
             let bytenr = key.objectid;
+            state.extent_item_addrs.insert(bytenr);
             let length = if key.key_type == KeyType::ExtentItem {
                 key.offset
             } else {

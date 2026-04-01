@@ -153,7 +153,7 @@ impl Runnable for CheckCommand {
 
         // Phase 2: Tree structure checks (all trees).
         eprintln!("[2/7] checking root items");
-        tree_structure::check_all_trees(
+        let tree_block_addrs = tree_structure::check_all_trees(
             &mut open.reader,
             sb,
             &open.tree_roots,
@@ -170,6 +170,7 @@ impl Runnable for CheckCommand {
             extents::check_extent_tree(
                 &mut open.reader,
                 extent_root,
+                &tree_block_addrs,
                 &mut results,
             );
         }

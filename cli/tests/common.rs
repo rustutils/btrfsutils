@@ -360,6 +360,35 @@ pub fn cached_fixture_image() -> PathBuf {
     cached
 }
 
+/// Return the path to the cached decompressed broken image (for check tests).
+/// This image was produced by a pre-fix mkfs --rootdir with known errors.
+pub fn cached_broken_image() -> PathBuf {
+    let cache_dir =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-fixtures");
+    let cached = cache_dir.join("broken.img");
+
+    if !cached.exists() {
+        fs::create_dir_all(&cache_dir).unwrap_or_else(|e| {
+            panic!("failed to create {}: {e}", cache_dir.display())
+        });
+        let gz_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/commands/broken.img.gz");
+        let tmp = cache_dir.join("broken.img.tmp");
+        let status = Command::new("gunzip")
+            .args(["-k", "-c"])
+            .arg(&gz_path)
+            .stdout(File::create(&tmp).unwrap_or_else(|e| {
+                panic!("failed to create {}: {e}", tmp.display())
+            }))
+            .status()
+            .expect("failed to run gunzip");
+        assert!(status.success(), "gunzip failed");
+        let _ = fs::rename(&tmp, &cached);
+    }
+
+    cached
+}
+
 /// Mount the pre-built fixture image read-only. The decompressed image is
 /// cached in `target/test-fixtures/` so only the first test pays the gunzip
 /// cost. Each test attaches its own loopback device directly to the shared

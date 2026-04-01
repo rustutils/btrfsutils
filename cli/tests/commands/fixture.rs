@@ -731,6 +731,21 @@ fn check_readonly_flag() {
     );
 }
 
+// ── check on broken image ───────────────────────────────────────────
+
+#[test]
+fn check_broken_image() {
+    let img = common::cached_broken_image();
+    let img_str = img.to_str().unwrap();
+    let (stdout, stderr, code) = super::btrfs(&["check", img_str]);
+    assert_ne!(code, 0, "btrfs check on broken image should fail");
+    snap!("btrfs check <BROKEN_IMG> (stdout)", stdout);
+    snap!(
+        "btrfs check <BROKEN_IMG> (stderr)",
+        redact_img(&stderr, &img)
+    );
+}
+
 // ── quota ────────────────────────────────────────────────────────────
 
 #[test]

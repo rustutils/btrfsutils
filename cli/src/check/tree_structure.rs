@@ -5,7 +5,10 @@ use btrfs_disk::{
     tree::{DiskKey, TreeBlock},
     util::btrfs_csum_data,
 };
-use std::io::{Read, Seek};
+use std::{
+    collections::HashSet,
+    io::{Read, Seek},
+};
 use uuid::Uuid;
 
 /// Classify a tree by its objectid for byte attribution.
@@ -33,12 +36,13 @@ enum TreeKind {
 ///
 /// Walks every tree discovered in `tree_roots` plus the root and chunk trees.
 /// For each block, verifies checksum, header fields, and key ordering.
+/// Returns the set of all tree block logical addresses visited.
 pub fn check_all_trees<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     sb: &Superblock,
     tree_roots: &std::collections::BTreeMap<u64, (u64, u64)>,
     results: &mut CheckResults,
-) {
+) -> HashSet<u64> {
     let fsid = effective_fsid(sb);
     let csum_supported = sb.csum_type == ChecksumType::Crc32;
 
@@ -57,8 +61,18 @@ pub fn check_all_trees<R: Read + Seek>(
         csum_supported,
     };
 
+    let mut visited = HashSet::new();
+
     // Check root tree.
-    check_tree(reader, "root tree", sb.root, TreeKind::Other, &ctx, results);
+    check_tree(
+        reader,
+        "root tree",
+        sb.root,
+        TreeKind::Other,
+        &ctx,
+        results,
+        &mut visited,
+    );
 
     // Check chunk tree.
     check_tree(
@@ -68,14 +82,17 @@ pub fn check_all_trees<R: Read + Seek>(
         TreeKind::Other,
         &ctx,
         results,
+        &mut visited,
     );
 
     // Check all trees discovered in the root tree.
     for (&tree_id, &(bytenr, _gen)) in tree_roots {
         let name = tree_name(tree_id);
         let kind = tree_kind(tree_id);
-        check_tree(reader, &name, bytenr, kind, &ctx, results);
+        check_tree(reader, &name, bytenr, kind, &ctx, results, &mut visited);
     }
+
+    visited
 }
 
 struct TreeCheckCtx {
@@ -92,6 +109,7 @@ fn check_tree<R: Read + Seek>(
     kind: TreeKind,
     ctx: &TreeCheckCtx,
     results: &mut CheckResults,
+    visited: &mut HashSet<u64>,
 ) {
     let tree: &'static str = leak_name(name);
 
@@ -99,6 +117,7 @@ fn check_tree<R: Read + Seek>(
     let mut read_errors: Vec<(u64, String)> = Vec::new();
 
     let mut visitor = |raw: &[u8], block: &TreeBlock| {
+        visited.insert(block.header().bytenr);
         check_block(raw, block, tree, kind, ctx, results);
     };
 

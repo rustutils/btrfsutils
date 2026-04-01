@@ -96,6 +96,18 @@ pub enum CheckError {
         parent: u64,
         detail: String,
     },
+    DirSizeWrong {
+        tree: u64,
+        ino: u64,
+        expected: u64,
+        found: u64,
+    },
+    NbytesWrong {
+        tree: u64,
+        ino: u64,
+        expected: u64,
+        found: u64,
+    },
     ReadError {
         logical: u64,
         detail: String,
@@ -254,6 +266,30 @@ impl fmt::Display for CheckError {
                     f,
                     "ROOT_REF/ROOT_BACKREF mismatch for child {child}, \
                      parent {parent}: {detail}"
+                )
+            }
+            Self::DirSizeWrong {
+                tree,
+                ino,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "root {tree}: inode {ino} dir isize wrong: \
+                     inode says {found}, expected {expected}"
+                )
+            }
+            Self::NbytesWrong {
+                tree,
+                ino,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "root {tree}: inode {ino} nbytes wrong: \
+                     inode says {found}, expected {expected}"
                 )
             }
             Self::ReadError { logical, detail } => {
@@ -577,6 +613,34 @@ mod tests {
         assert_eq!(
             e.to_string(),
             "ROOT_REF/ROOT_BACKREF mismatch for child 257, parent 5: dirid mismatch"
+        );
+    }
+
+    #[test]
+    fn display_dir_size_wrong() {
+        let e = CheckError::DirSizeWrong {
+            tree: 5,
+            ino: 256,
+            expected: 42,
+            found: 100,
+        };
+        assert_eq!(
+            e.to_string(),
+            "root 5: inode 256 dir isize wrong: inode says 100, expected 42"
+        );
+    }
+
+    #[test]
+    fn display_nbytes_wrong() {
+        let e = CheckError::NbytesWrong {
+            tree: 5,
+            ino: 257,
+            expected: 4096,
+            found: 8192,
+        };
+        assert_eq!(
+            e.to_string(),
+            "root 5: inode 257 nbytes wrong: inode says 8192, expected 4096"
         );
     }
 
