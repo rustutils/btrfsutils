@@ -33,6 +33,7 @@ const SUPER_MIRROR_SHIFT: u32 = 12;
 /// Compute the byte offset of the superblock mirror at `index`.
 ///
 /// Mirror 0 is at 64 KiB, mirror 1 at 64 MiB, mirror 2 at 256 GiB.
+#[must_use]
 pub fn super_mirror_offset(index: u32) -> u64 {
     if index == 0 {
         SUPER_INFO_OFFSET
@@ -69,6 +70,7 @@ impl ChecksumType {
     /// Size in bytes of checksums for this algorithm.
     // Unknown falls back to 32 (BTRFS_CSUM_SIZE); same value as Sha256/Blake2
     // but for a different reason — suppress the match_same_arms lint.
+    #[must_use]
     #[allow(clippy::match_same_arms)]
     pub fn size(&self) -> usize {
         match self {
@@ -82,7 +84,10 @@ impl ChecksumType {
 
 impl ChecksumType {
     /// Convert to the raw u16 value for on-disk storage.
+    // All btrfs csum type constants fit in u16 (they are small enum values);
+    // the u32 bindgen type is wider than necessary.
     #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn to_raw(self) -> u16 {
         match self {
             ChecksumType::Crc32 => {
@@ -247,11 +252,13 @@ pub struct Superblock {
 
 impl Superblock {
     /// Whether the magic bytes match `BTRFS_MAGIC`.
+    #[must_use]
     pub fn magic_is_valid(&self) -> bool {
         self.magic == raw::BTRFS_MAGIC
     }
 
     /// Whether the `METADATA_UUID` incompat flag is set.
+    #[must_use]
     pub fn has_metadata_uuid(&self) -> bool {
         self.incompat_flags
             & u64::from(raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID)
@@ -261,7 +268,9 @@ impl Superblock {
     /// Serialize the superblock to a 4096-byte buffer.
     ///
     /// The checksum field is written as-is from `self.csum`; call
-    /// `csum_superblock` on the result to recompute it.
+    /// [`csum_superblock`] on the result to recompute it.
+    #[must_use]
+    #[allow(clippy::missing_panics_doc)] // Vec is pre-sized; try_into always succeeds
     pub fn to_bytes(&self) -> [u8; SUPER_INFO_SIZE] {
         type S = raw::btrfs_super_block;
         let mut v = Vec::with_capacity(SUPER_INFO_SIZE);
@@ -522,6 +531,10 @@ fn parse_superblock(sb: &raw::btrfs_super_block) -> Superblock {
 
 /// Read and parse a btrfs superblock from a reader at the given mirror index
 /// (0, 1, or 2).
+///
+/// # Errors
+///
+/// Returns an error if the underlying read or seek fails.
 pub fn read_superblock(
     reader: &mut (impl Read + Seek),
     mirror: u32,
@@ -531,6 +544,10 @@ pub fn read_superblock(
 }
 
 /// Read and parse a btrfs superblock from a reader at an explicit byte offset.
+///
+/// # Errors
+///
+/// Returns an error if the underlying read or seek fails.
 pub fn read_superblock_at(
     reader: &mut (impl Read + Seek),
     offset: u64,
@@ -540,6 +557,10 @@ pub fn read_superblock_at(
 }
 
 /// Read the raw 4096-byte superblock from the primary mirror into a byte buffer.
+///
+/// # Errors
+///
+/// Returns an error if the underlying read or seek fails.
 pub fn read_superblock_bytes(
     reader: &mut (impl Read + Seek),
 ) -> io::Result<[u8; SUPER_INFO_SIZE]> {
@@ -547,6 +568,10 @@ pub fn read_superblock_bytes(
 }
 
 /// Read the raw 4096-byte superblock at an explicit byte offset.
+///
+/// # Errors
+///
+/// Returns an error if the underlying read or seek fails.
 pub fn read_superblock_bytes_at(
     reader: &mut (impl Read + Seek),
     offset: u64,
@@ -560,6 +585,8 @@ pub fn read_superblock_bytes_at(
 /// Return `true` if the superblock buffer has valid magic and a matching CRC32C checksum.
 ///
 /// Only CRC32C (`csum_type` == 0) is validated; other checksum types always return `false`.
+#[must_use]
+#[allow(clippy::missing_panics_doc)] // Slices are bounded by SUPER_INFO_SIZE; try_into always succeeds
 pub fn superblock_is_valid(buf: &[u8; SUPER_INFO_SIZE]) -> bool {
     let magic_off = mem::offset_of!(raw::btrfs_super_block, magic);
     let magic =
@@ -580,6 +607,8 @@ pub fn superblock_is_valid(buf: &[u8; SUPER_INFO_SIZE]) -> bool {
 }
 
 /// Extract the generation field from a raw superblock byte buffer.
+#[must_use]
+#[allow(clippy::missing_panics_doc)] // Slice is bounded by SUPER_INFO_SIZE; try_into always succeeds
 pub fn superblock_generation(buf: &[u8; SUPER_INFO_SIZE]) -> u64 {
     let off = mem::offset_of!(raw::btrfs_super_block, generation);
     u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
@@ -590,6 +619,11 @@ pub fn superblock_generation(buf: &[u8; SUPER_INFO_SIZE]) -> u64 {
 /// Stores the 4-byte LE checksum at bytes 0..4, computed over bytes 32..4096.
 /// Only CRC32C (`csum_type` == 0) is supported; returns an error for other
 /// checksum types.
+///
+/// # Errors
+///
+/// Returns an error if the superblock uses a checksum type other than CRC32C.
+#[allow(clippy::missing_panics_doc)] // Slice is bounded by SUPER_INFO_SIZE; try_into always succeeds
 pub fn csum_superblock(buf: &mut [u8; SUPER_INFO_SIZE]) -> io::Result<()> {
     let csum_type_off = mem::offset_of!(raw::btrfs_super_block, csum_type);
     let csum_type = u16::from_le_bytes(
@@ -611,6 +645,10 @@ pub fn csum_superblock(buf: &mut [u8; SUPER_INFO_SIZE]) -> io::Result<()> {
 ///
 /// Updates the `bytenr` field per mirror before writing, then recomputes the
 /// checksum. Queries the device size via `Seek::seek(End(0))`.
+///
+/// # Errors
+///
+/// Returns an error if the underlying I/O fails or the checksum type is unsupported.
 pub fn write_superblock_all_mirrors(
     file: &mut (impl Read + Write + Seek),
     buf: &[u8; SUPER_INFO_SIZE],

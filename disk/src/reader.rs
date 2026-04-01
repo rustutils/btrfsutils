@@ -26,6 +26,10 @@ pub struct BlockReader<R> {
 
 impl<R: Read + Seek> BlockReader<R> {
     /// Read raw bytes at a logical address, resolving to physical via the chunk cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the logical address is unmapped or the underlying read fails.
     pub fn read_block(&mut self, logical: u64) -> io::Result<Vec<u8>> {
         let physical = self.chunk_cache.resolve(logical).ok_or_else(|| {
             io::Error::new(
@@ -40,6 +44,10 @@ impl<R: Read + Seek> BlockReader<R> {
     }
 
     /// Read and parse a tree block at a logical address.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the logical address is unmapped or the underlying read fails.
     pub fn read_tree_block(&mut self, logical: u64) -> io::Result<TreeBlock> {
         let buf = self.read_block(logical)?;
         Ok(TreeBlock::parse(&buf))
@@ -64,6 +72,10 @@ impl<R: Read + Seek> BlockReader<R> {
     ///
     /// Unlike `read_block` which always reads `nodesize` bytes, this reads
     /// exactly `len` bytes. Used for reading file data extents.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the logical address is unmapped or the underlying read fails.
     pub fn read_data(
         &mut self,
         logical: u64,
@@ -94,6 +106,10 @@ impl<R: Read + Seek> BlockReader<R> {
 
 impl<R: Read + Write + Seek> BlockReader<R> {
     /// Write raw bytes to a logical address, resolving to physical via the chunk cache.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the logical address is unmapped or the underlying write fails.
     pub fn write_block(&mut self, logical: u64, buf: &[u8]) -> io::Result<()> {
         let physical = self.chunk_cache.resolve(logical).ok_or_else(|| {
             io::Error::new(
@@ -124,6 +140,10 @@ pub struct OpenFilesystem<R> {
 /// 2. Seed the chunk cache from the `sys_chunk_array`
 /// 3. Read the full chunk tree to complete the cache
 /// 4. Read the root tree to collect all tree root pointers
+///
+/// # Errors
+///
+/// Returns an error if any I/O operation fails during bootstrap.
 pub fn filesystem_open<R: Read + Seek>(
     reader: R,
 ) -> io::Result<OpenFilesystem<R>> {
@@ -131,6 +151,10 @@ pub fn filesystem_open<R: Read + Seek>(
 }
 
 /// Open a btrfs filesystem using a specific superblock mirror (0, 1, or 2).
+///
+/// # Errors
+///
+/// Returns an error if any I/O operation fails during bootstrap.
 pub fn filesystem_open_mirror<R: Read + Seek>(
     reader: R,
     mirror: u32,
@@ -223,6 +247,10 @@ pub enum Traversal {
 }
 
 /// Walk a tree starting at `root_logical`, calling `visitor` for each block.
+///
+/// # Errors
+///
+/// Returns an error if any tree block cannot be read.
 pub fn tree_walk<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
@@ -292,6 +320,10 @@ fn tree_walk_bfs<R: Read + Seek>(
 /// Instead, it calls `on_error` with the logical address and the I/O error,
 /// then continues with remaining siblings. The root block failure still
 /// propagates since there is nothing to walk.
+///
+/// # Errors
+///
+/// Returns an error only if the root block itself cannot be read.
 pub fn tree_walk_tolerant<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
@@ -335,6 +367,10 @@ fn tree_walk_tolerant_dfs<R: Read + Seek>(
 }
 
 /// Read a single block and call `visitor` (and optionally walk children with `follow`).
+///
+/// # Errors
+///
+/// Returns an error if any tree block cannot be read.
 pub fn block_visit<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     logical: u64,
@@ -392,13 +428,17 @@ pub struct TreeStats {
 ///
 /// When `find_inline` is true the walk also counts inline extent data bytes
 /// (relevant for subvolume / FS trees which contain `EXTENT_DATA` items).
+///
+/// # Errors
+///
+/// Returns an error if any tree block cannot be read.
 pub fn tree_stats_collect<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
     find_inline: bool,
 ) -> io::Result<TreeStats> {
     let root_block = reader.read_tree_block(root_logical)?;
-    let nodesize = reader.nodesize() as u64;
+    let nodesize = u64::from(reader.nodesize());
     let root_level = root_block.header().level;
     let root_bytenr = root_block.header().bytenr;
 
@@ -469,7 +509,7 @@ fn walk_stats<R: Read + Seek>(
                         && item.size as usize > inline_hdr_size
                     {
                         stats.total_inline +=
-                            item.size as u64 - inline_hdr_size as u64;
+                            u64::from(item.size) - inline_hdr_size as u64;
                     }
                 }
             }
@@ -483,7 +523,9 @@ fn walk_stats<R: Read + Seek>(
                 walk_stats(reader, child, stats, find_inline, nodesize)?;
 
                 let cur = ptr.blockptr;
-                if last_block + nodesize != cur {
+                if last_block + nodesize == cur {
+                    cluster_size += nodesize;
+                } else {
                     let distance = cur.abs_diff(last_block + nodesize);
                     stats.total_seeks += 1;
                     stats.total_seek_len += distance;
@@ -506,8 +548,6 @@ fn walk_stats<R: Read + Seek>(
                         }
                     }
                     cluster_size = nodesize;
-                } else {
-                    cluster_size += nodesize;
                 }
                 last_block = cur;
             }

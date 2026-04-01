@@ -33,6 +33,7 @@ pub fn write_uuid(buf: &mut [u8], off: usize, uuid: &Uuid) {
 /// Use this only for internal hash computations like `extent_data_ref_hash`
 /// where the C code calls `crc32c(seed, data, len)` (which maps to
 /// `crc32c_le`).
+#[must_use]
 pub fn raw_crc32c(seed: u32, data: &[u8]) -> u32 {
     // crc32c::crc32c_append(seed) computes: !crc32c_hw(!seed, data)
     // We want: crc32c_hw(seed, data)
@@ -47,6 +48,7 @@ pub fn raw_crc32c(seed: u32, data: &[u8]) -> u32 {
 /// blocks, and data checksums. The kernel computes these via `hash_crc32c`
 /// which calls `crc32c_le(~0, data, len)` and then inverts the result,
 /// which is equivalent to standard ISO 3309 CRC32C.
+#[must_use]
 pub fn btrfs_csum_data(data: &[u8]) -> u32 {
     crc32c::crc32c(data)
 }
@@ -57,6 +59,10 @@ pub fn btrfs_csum_data(data: &[u8]) -> u32 {
 /// The 4-byte LE result is written to `buf[0..4]` and `buf[4..32]` is zeroed.
 /// This is the same algorithm as `superblock::csum_superblock` but for
 /// arbitrary-length tree blocks (nodesize bytes).
+///
+/// # Panics
+///
+/// Panics if `buf` is 32 bytes or smaller.
 pub fn csum_tree_block(buf: &mut [u8]) {
     assert!(buf.len() > 32, "buffer too small for tree block checksum");
     let csum = btrfs_csum_data(&buf[32..]);

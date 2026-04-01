@@ -36,6 +36,11 @@ fn is_mounted(device: &Path) -> bool {
 }
 
 /// Run btrfs-tune with the given parsed arguments.
+///
+/// # Errors
+///
+/// Returns an error if no operation is specified, the device is not a block
+/// device or regular file, the device is mounted, or any tuning operation fails.
 pub fn run(args: &Arguments) -> Result<()> {
     let has_legacy = args.extref || args.skinny_metadata || args.no_holes;
     let has_seeding = args.seeding.is_some();
@@ -73,13 +78,13 @@ pub fn run(args: &Arguments) -> Result<()> {
     if has_legacy {
         let mut flags = 0u64;
         if args.extref {
-            flags |= raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF as u64;
+            flags |= u64::from(raw::BTRFS_FEATURE_INCOMPAT_EXTENDED_IREF);
         }
         if args.skinny_metadata {
-            flags |= raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA as u64;
+            flags |= u64::from(raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA);
         }
         if args.no_holes {
-            flags |= raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES as u64;
+            flags |= u64::from(raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES);
         }
         crate::tune::set_incompat_flags(&mut file, flags)?;
     }

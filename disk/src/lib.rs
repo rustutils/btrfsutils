@@ -51,7 +51,7 @@
 //!
 //! Open a block device or image file and bootstrap the tree hierarchy with
 //! [`reader::filesystem_open`]. This reads the superblock, seeds the chunk
-//! cache from the sys_chunk_array, reads the full chunk tree, then walks the
+//! cache from the `sys_chunk_array`, reads the full chunk tree, then walks the
 //! root tree to discover all tree roots. The returned
 //! [`reader::OpenFilesystem`] gives you a [`reader::BlockReader`] (for reading
 //! tree blocks by logical address) and a map of tree roots.

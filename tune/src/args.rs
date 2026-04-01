@@ -23,6 +23,7 @@ const HEADING_SEEDING: &str = "Seeding";
 #[command(group = ArgGroup::new("uuid_change")
     .args(["metadata_uuid", "set_metadata_uuid", "random_uuid", "set_uuid"])
     .conflicts_with_all(["extref", "skinny_metadata", "no_holes", "seeding"]))]
+#[allow(clippy::struct_excessive_bools, clippy::doc_markdown)]
 pub struct Arguments {
     /// Enable extended inode refs (extref)
     #[arg(short = 'r', help_heading = HEADING_FEATURES)]

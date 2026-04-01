@@ -13,7 +13,7 @@
 //! - **Seeding** (`-S 0`/`-S 1`): mark or unmark a filesystem as a seed
 //!   device for sprouted filesystems.
 //! - **Metadata UUID** (`-m`, `-M UUID`): change the user-visible fsid via
-//!   the lightweight metadata_uuid mechanism (superblock-only, no tree walk).
+//!   the lightweight `metadata_uuid` mechanism (superblock-only, no tree walk).
 //! - **Full fsid rewrite** (`-u`, `-U UUID`): rewrite the fsid in every
 //!   tree block header and device item on disk, with crash-safety via
 //!   `BTRFS_SUPER_FLAG_CHANGING_FSID`.

@@ -43,6 +43,10 @@ fn write_uuid(buf: &mut [u8; 4096], offset: usize, uuid: Uuid) {
 /// to all mirrors.
 ///
 /// Returns without writing if the flags are already set.
+///
+/// # Errors
+///
+/// Returns an error if the superblock is invalid or the write fails.
 pub fn set_incompat_flags(
     file: &mut (impl Read + Write + Seek),
     flags: u64,
@@ -74,8 +78,14 @@ pub fn set_incompat_flags(
 /// Set or clear the seeding flag on the superblock.
 ///
 /// Setting the seeding flag is rejected if the filesystem has a dirty log
-/// or if the METADATA_UUID incompat flag is set. Clearing requires user
+/// or if the `METADATA_UUID` incompat flag is set. Clearing requires user
 /// confirmation unless `force` is true.
+///
+/// # Errors
+///
+/// Returns an error if the superblock is invalid, the filesystem has a dirty
+/// log, the `METADATA_UUID` flag is set, clearing is attempted without `force`,
+/// or the write fails.
 pub fn update_seeding_flag(
     file: &mut (impl Read + Write + Seek),
     set: bool,
@@ -97,7 +107,7 @@ pub fn update_seeding_flag(
     let log_root = read_u64(&buf, log_root_off);
 
     let seeding = raw::BTRFS_SUPER_FLAG_SEEDING;
-    let metadata_uuid = raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID as u64;
+    let metadata_uuid = u64::from(raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID);
 
     if incompat_flags & metadata_uuid != 0 {
         bail!(
@@ -145,19 +155,24 @@ pub fn update_seeding_flag(
     Ok(())
 }
 
-/// Change the visible filesystem UUID using the metadata_uuid mechanism.
+/// Change the visible filesystem UUID using the `metadata_uuid` mechanism.
 ///
 /// This changes the user-visible fsid field while preserving the original
-/// UUID in the metadata_uuid field with the METADATA_UUID incompat flag.
+/// UUID in the `metadata_uuid` field with the `METADATA_UUID` incompat flag.
 /// Unlike a full fsid rewrite (`-u`/`-U`), this does not require traversing
 /// every tree block on disk.
 ///
 /// Three cases are handled:
-/// 1. First change: copy current fsid to metadata_uuid, set new fsid,
-///    enable METADATA_UUID incompat flag.
-/// 2. Already changed, new fsid differs from metadata_uuid: just update fsid.
-/// 3. Already changed, new fsid equals metadata_uuid: restore original state
-///    by clearing the METADATA_UUID flag and zeroing metadata_uuid.
+/// 1. First change: copy current fsid to `metadata_uuid`, set new fsid,
+///    enable `METADATA_UUID` incompat flag.
+/// 2. Already changed, new fsid differs from `metadata_uuid`: just update fsid.
+/// 3. Already changed, new fsid equals `metadata_uuid`: restore original state
+///    by clearing the `METADATA_UUID` flag and zeroing `metadata_uuid`.
+///
+/// # Errors
+///
+/// Returns an error if the superblock is invalid, the filesystem is a seed
+/// device, or the write fails.
 pub fn set_metadata_uuid(
     file: &mut (impl Read + Write + Seek),
     new_fsid: Uuid,
@@ -184,7 +199,8 @@ pub fn set_metadata_uuid(
         bail!("cannot set metadata UUID on a seed device");
     }
 
-    let metadata_uuid_flag = raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID as u64;
+    let metadata_uuid_flag =
+        u64::from(raw::BTRFS_FEATURE_INCOMPAT_METADATA_UUID);
     let fsid_changed = incompat_flags & metadata_uuid_flag != 0;
 
     if new_fsid == current_fsid {
@@ -233,11 +249,16 @@ pub fn set_metadata_uuid(
 ///
 /// Unlike `set_metadata_uuid` (which only modifies the superblock), this
 /// traverses the extent tree to find every tree block and patches the fsid
-/// and chunk_tree_uuid in each header. It also patches the device fsid in
-/// chunk tree DEV_ITEM entries and the superblock's embedded dev_item.
+/// and `chunk_tree_uuid` in each header. It also patches the device fsid in
+/// chunk tree `DEV_ITEM` entries and the superblock's embedded `dev_item`.
 ///
 /// The operation is crash-safe: `BTRFS_SUPER_FLAG_CHANGING_FSID` is set
 /// before any writes and cleared only after all blocks are updated.
+///
+/// # Errors
+///
+/// Returns an error if the filesystem cannot be opened, the extent tree root
+/// is missing, or any block read/write fails.
 pub fn change_uuid<R: Read + Write + Seek>(
     file: R,
     new_fsid: Uuid,
@@ -255,6 +276,8 @@ pub fn change_uuid<R: Read + Write + Seek>(
     }
 
     let new_chunk_tree_uuid = Uuid::new_v4();
+    // nodesize is always small (e.g. 16384), safe to cast to usize.
+    #[allow(clippy::cast_possible_truncation)]
     let nodesize = reader.nodesize() as usize;
     let header_fsid_off = mem::offset_of!(raw::btrfs_header, fsid);
     let header_chunk_uuid_off =
@@ -278,7 +301,7 @@ pub fn change_uuid<R: Read + Write + Seek>(
     // patch each one.
     let extent_root = open
         .tree_roots
-        .get(&(raw::BTRFS_EXTENT_TREE_OBJECTID as u64))
+        .get(&u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID))
         .map(|(bytenr, _)| *bytenr)
         .context("extent tree root not found")?;
 
@@ -337,8 +360,8 @@ fn set_superblock_fields(
 /// Walk the extent tree (DFS) and collect the logical addresses of all tree
 /// blocks on the filesystem.
 ///
-/// Tree blocks are identified by EXTENT_ITEM or METADATA_ITEM keys whose
-/// extent_item flags include TREE_BLOCK.
+/// Tree blocks are identified by `EXTENT_ITEM` or `METADATA_ITEM` keys whose
+/// `extent_item` flags include `TREE_BLOCK`.
 fn collect_tree_block_addrs<R: Read + Seek>(
     reader: &mut reader::BlockReader<R>,
     logical: u64,
@@ -354,7 +377,7 @@ fn collect_tree_block_addrs<R: Read + Seek>(
             let header_size = mem::size_of::<raw::btrfs_header>();
             let extent_item_flags_off =
                 mem::offset_of!(raw::btrfs_extent_item, flags);
-            let tree_block_flag = raw::BTRFS_EXTENT_FLAG_TREE_BLOCK as u64;
+            let tree_block_flag = u64::from(raw::BTRFS_EXTENT_FLAG_TREE_BLOCK);
 
             for item in items {
                 let is_extent = item.key.key_type == KeyType::ExtentItem
@@ -390,7 +413,7 @@ fn collect_tree_block_addrs<R: Read + Seek>(
     Ok(())
 }
 
-/// Walk the chunk tree (DFS) and patch the device fsid in all DEV_ITEM
+/// Walk the chunk tree (DFS) and patch the device fsid in all `DEV_ITEM`
 /// entries.
 fn patch_chunk_tree_dev_fsid<R: Read + Write + Seek>(
     reader: &mut reader::BlockReader<R>,

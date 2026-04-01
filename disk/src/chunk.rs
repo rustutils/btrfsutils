@@ -64,6 +64,7 @@ impl ChunkTreeCache {
     }
 
     /// Look up the chunk mapping that contains the given logical address.
+    #[must_use]
     pub fn lookup(&self, logical: u64) -> Option<&ChunkMapping> {
         // Find the entry whose start is <= logical
         self.inner
@@ -78,6 +79,7 @@ impl ChunkTreeCache {
     /// For read-only access (like dump-tree), the first stripe is sufficient
     /// for single, DUP, and RAID1 profiles. RAID0/5/6/10 would need stripe
     /// index calculation, but for the common case this works.
+    #[must_use]
     pub fn resolve(&self, logical: u64) -> Option<u64> {
         let mapping = self.lookup(logical)?;
         let offset_within_chunk = logical - mapping.logical;
@@ -85,11 +87,13 @@ impl ChunkTreeCache {
     }
 
     /// Return the number of cached chunk mappings.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Return true if the cache is empty.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -104,6 +108,7 @@ impl ChunkTreeCache {
 ///
 /// Returns the chunk mapping and the total number of bytes consumed.
 /// `logical` is the logical start address from the key's offset field.
+#[must_use]
 pub fn parse_chunk_item(
     buf: &[u8],
     logical: u64,
@@ -159,6 +164,7 @@ pub fn parse_chunk_item(
 ///
 /// The `sys_chunk_array` contains a subset of chunk items needed to bootstrap
 /// access to the full chunk tree (system profile chunks).
+#[must_use]
 pub fn seed_from_sys_chunk_array(array: &[u8], size: u32) -> ChunkTreeCache {
     let array = &array[..size as usize];
     let mut cache = ChunkTreeCache::default();

@@ -71,6 +71,7 @@ pub enum KeyType {
 
 impl KeyType {
     /// Convert a raw on-disk key type byte to a `KeyType` variant.
+    #[must_use]
     pub fn from_raw(value: u8) -> Self {
         match u32::from(value) {
             raw::BTRFS_INODE_ITEM_KEY => Self::InodeItem,
@@ -123,6 +124,7 @@ impl KeyType {
     /// Return the raw u8 key type value.
     // All btrfs key type constants are defined to fit in u8 (they're the
     // on-disk key type field); the u32 bindgen type is wider than necessary.
+    #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn to_raw(self) -> u8 {
         match self {
@@ -265,6 +267,7 @@ impl ObjectId {
     // Negative objectid constants (e.g. BTRFS_BALANCE_OBJECTID = -4) are i32
     // in bindgen output; casting them to u64 intentionally produces the kernel's
     // two's-complement representation (e.g. 0xFFFFFFFF_FFFFFFFC).
+    #[must_use]
     #[allow(clippy::cast_sign_loss, clippy::cast_lossless)]
     pub fn from_raw(value: u64) -> Self {
         // Positive well-known objectids (bindgen produces u32 for these)
@@ -317,6 +320,7 @@ impl ObjectId {
     }
 
     /// Return the raw u64 objectid value.
+    #[must_use]
     #[allow(clippy::cast_sign_loss, clippy::cast_lossless)]
     pub fn to_raw(self) -> u64 {
         match self {
@@ -356,6 +360,7 @@ impl ObjectId {
     /// For example, objectid 1 is `ROOT_TREE` in general but `DEV_ITEMS`
     /// when used with `DEV_ITEM_KEY`, and `0` is `DEV_STATS` when used
     /// with `PERSISTENT_ITEM_KEY`.
+    #[must_use]
     #[allow(clippy::cast_lossless)]
     pub fn display_with_type(self, key_type: KeyType) -> String {
         let raw = self.to_raw();
@@ -458,6 +463,7 @@ pub struct DiskKey {
 impl DiskKey {
     /// Parse a disk key from `buf` at byte offset `off`.
     /// The on-disk layout is: objectid (le64), type (u8), offset (le64) = 17 bytes.
+    #[must_use]
     pub fn parse(buf: &[u8], off: usize) -> Self {
         let mut buf = &buf[off..];
         let objectid = buf.get_u64_le();
@@ -477,6 +483,7 @@ impl DiskKey {
 /// - Qgroup keys: objectid and offset are formatted as `LEVEL/SUBVOLID`
 /// - UUID keys: objectid is formatted as `0x<16-char-hex>`
 /// - Offset of `u64::MAX` is formatted as `-1`
+#[must_use]
 pub fn format_key(key: &DiskKey) -> String {
     let objectid_str = format_key_objectid(key);
     let type_str = format_key_type(key);
@@ -573,7 +580,7 @@ impl fmt::Display for HeaderFlags {
 pub struct Header {
     /// Checksum of everything past this field to the end of the tree block.
     pub csum: [u8; 32],
-    /// Filesystem UUID (must match the superblock's fsid or metadata_uuid).
+    /// Filesystem UUID (must match the superblock's fsid or `metadata_uuid`).
     pub fsid: Uuid,
     /// Logical byte offset where this block is stored.
     pub bytenr: u64,
@@ -596,6 +603,11 @@ const HEADER_SIZE: usize = mem::size_of::<raw::btrfs_header>();
 
 impl Header {
     /// Parse a tree block header from the start of `buf`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `buf` is smaller than the on-disk header size (101 bytes).
+    #[must_use]
     pub fn parse(buf: &[u8]) -> Self {
         assert!(
             buf.len() >= HEADER_SIZE,
@@ -628,11 +640,13 @@ impl Header {
     }
 
     /// Return the backref revision from the flags field.
+    #[must_use]
     pub fn backref_rev(&self) -> u64 {
         self.flags.bits() >> raw::BTRFS_BACKREF_REV_SHIFT
     }
 
     /// Return the block flags with the backref revision bits masked out.
+    #[must_use]
     pub fn block_flags(&self) -> HeaderFlags {
         let mask = (u64::from(raw::BTRFS_BACKREF_REV_MAX) - 1)
             << raw::BTRFS_BACKREF_REV_SHIFT;
@@ -715,6 +729,7 @@ pub enum TreeBlock {
 
 impl TreeBlock {
     /// Parse a tree block from a nodesize-length buffer.
+    #[must_use]
     pub fn parse(buf: &[u8]) -> Self {
         let header = Header::parse(buf);
         let nritems = header.nritems as usize;
@@ -741,6 +756,7 @@ impl TreeBlock {
     }
 
     /// Return a reference to the header.
+    #[must_use]
     pub fn header(&self) -> &Header {
         match self {
             Self::Node { header, .. } | Self::Leaf { header, .. } => header,
@@ -752,6 +768,7 @@ impl TreeBlock {
     /// The item's `offset` field is relative to the start of the data area,
     /// which begins right after the header. So the absolute offset in the
     /// block buffer is `HEADER_SIZE + item.offset`.
+    #[must_use]
     pub fn item_data(&self, index: usize) -> Option<&[u8]> {
         match self {
             Self::Leaf { items, data, .. } => {

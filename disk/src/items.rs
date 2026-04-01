@@ -158,7 +158,7 @@ impl fmt::Display for InodeFlags {
 pub struct Timespec {
     /// Seconds since 1970-01-01 00:00:00 UTC.
     pub sec: u64,
-    /// Nanosecond component (0..999_999_999).
+    /// Nanosecond component (`0..999_999_999`).
     pub nsec: u32,
 }
 
@@ -182,6 +182,7 @@ pub enum CompressionType {
 }
 
 impl CompressionType {
+    #[must_use]
     pub fn from_raw(v: u8) -> Self {
         match v {
             0 => Self::None,
@@ -192,6 +193,7 @@ impl CompressionType {
         }
     }
 
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             Self::None => "none",
@@ -202,6 +204,7 @@ impl CompressionType {
         }
     }
 
+    #[must_use]
     pub fn to_raw(self) -> u8 {
         match self {
             Self::None => 0,
@@ -223,6 +226,7 @@ pub enum FileExtentType {
 }
 
 impl FileExtentType {
+    #[must_use]
     pub fn from_raw(v: u8) -> Self {
         match u32::from(v) {
             raw::BTRFS_FILE_EXTENT_INLINE => Self::Inline,
@@ -232,6 +236,7 @@ impl FileExtentType {
         }
     }
 
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             Self::Inline => "inline",
@@ -241,6 +246,7 @@ impl FileExtentType {
         }
     }
 
+    #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn to_raw(self) -> u8 {
         match self {
@@ -268,6 +274,7 @@ pub enum FileType {
 }
 
 impl FileType {
+    #[must_use]
     pub fn from_raw(v: u8) -> Self {
         match u32::from(v) {
             raw::BTRFS_FT_UNKNOWN => Self::Unknown,
@@ -283,6 +290,7 @@ impl FileType {
         }
     }
 
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             Self::Unknown | Self::Other(_) => "UNKNOWN",
@@ -339,6 +347,7 @@ pub struct InodeItem {
 }
 
 impl InodeItem {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_inode_item>() {
             return None;
@@ -383,6 +392,7 @@ pub struct InodeRef {
 }
 
 impl InodeRef {
+    #[must_use]
     pub fn parse_all(data: &[u8]) -> Vec<Self> {
         let mut result = Vec::new();
         let mut buf = data;
@@ -416,6 +426,7 @@ pub struct InodeExtref {
 }
 
 impl InodeExtref {
+    #[must_use]
     pub fn parse_all(data: &[u8]) -> Vec<Self> {
         let mut result = Vec::new();
         let mut buf = data;
@@ -458,6 +469,7 @@ pub struct DirItem {
 }
 
 impl DirItem {
+    #[must_use]
     pub fn parse_all(data: &[u8]) -> Vec<Self> {
         let mut result = Vec::new();
         let dir_item_size = mem::size_of::<raw::btrfs_dir_item>();
@@ -567,6 +579,8 @@ pub struct RootItem {
 }
 
 impl RootItem {
+    #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn parse(data: &[u8]) -> Option<Self> {
         let inode_size = mem::size_of::<raw::btrfs_inode_item>();
         if data.len() < inode_size + 8 {
@@ -724,6 +738,7 @@ pub struct RootRef {
 }
 
 impl RootRef {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_root_ref>() {
             return None;
@@ -788,6 +803,7 @@ pub enum FileExtentBody {
 }
 
 impl FileExtentItem {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 21 {
             return None;
@@ -865,6 +881,7 @@ pub enum InlineRef {
 
 impl InlineRef {
     /// The raw type byte for this inline ref.
+    #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn raw_type(&self) -> u8 {
         match self {
@@ -887,6 +904,7 @@ impl InlineRef {
     }
 
     /// The offset value from the inline ref header.
+    #[must_use]
     pub fn raw_offset(&self) -> u64 {
         match self {
             Self::TreeBlockBackref { ref_offset, .. }
@@ -950,14 +968,17 @@ pub struct ExtentItem {
 }
 
 impl ExtentItem {
+    #[must_use]
     pub fn is_data(&self) -> bool {
         self.flags.contains(ExtentFlags::DATA)
     }
 
+    #[must_use]
     pub fn is_tree_block(&self) -> bool {
         self.flags.contains(ExtentFlags::TREE_BLOCK)
     }
 
+    #[must_use]
     pub fn parse(data: &[u8], key: &DiskKey) -> Option<Self> {
         use crate::tree::KeyType;
 
@@ -1086,6 +1107,7 @@ pub struct ExtentDataRef {
 }
 
 impl ExtentDataRef {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_extent_data_ref>() {
             return None;
@@ -1110,6 +1132,7 @@ pub struct SharedDataRef {
 }
 
 impl SharedDataRef {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 4 {
             return None;
@@ -1135,6 +1158,7 @@ pub struct BlockGroupItem {
 }
 
 impl BlockGroupItem {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_block_group_item>() {
             return None;
@@ -1188,6 +1212,7 @@ pub struct ChunkStripe {
 }
 
 impl ChunkItem {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         let chunk_base_size = mem::offset_of!(raw::btrfs_chunk, stripe);
         if data.len() < chunk_base_size {
@@ -1290,6 +1315,7 @@ impl DeviceItem {
         buf.put_slice(self.fsid.as_bytes());
     }
 
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_dev_item>() {
             return None;
@@ -1347,6 +1373,7 @@ pub struct DeviceExtent {
 }
 
 impl DeviceExtent {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_dev_extent>() {
             return None;
@@ -1396,6 +1423,7 @@ pub struct FreeSpaceInfo {
 }
 
 impl FreeSpaceInfo {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 8 {
             return None;
@@ -1426,6 +1454,7 @@ pub struct QgroupStatus {
 }
 
 impl QgroupStatus {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 32 {
             return None;
@@ -1469,6 +1498,7 @@ pub struct QgroupInfo {
 }
 
 impl QgroupInfo {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_qgroup_info_item>() {
             return None;
@@ -1503,6 +1533,7 @@ pub struct QgroupLimit {
 }
 
 impl QgroupLimit {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < mem::size_of::<raw::btrfs_qgroup_limit_item>() {
             return None;
@@ -1530,6 +1561,7 @@ pub struct DeviceStats {
 }
 
 impl DeviceStats {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Self {
         let stat_names = [
             "write_errs",
@@ -1559,6 +1591,7 @@ pub struct UuidItem {
 }
 
 impl UuidItem {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Self {
         let mut buf = data;
         let mut subvol_ids = Vec::new();
@@ -1637,6 +1670,7 @@ pub struct DeviceReplaceItem {
 }
 
 impl DeviceReplaceItem {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 80 {
             return None;
@@ -1677,6 +1711,7 @@ pub struct RaidStripeEntry {
 }
 
 impl RaidStripeItem {
+    #[must_use]
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 8 {
             return None;
@@ -1695,6 +1730,7 @@ impl RaidStripeItem {
 }
 
 /// Parse an item's raw data into a typed payload based on its key type.
+#[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn parse_item_payload(key: &DiskKey, data: &[u8]) -> ItemPayload {
     use crate::tree::KeyType;
