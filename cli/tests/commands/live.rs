@@ -338,6 +338,43 @@ fn subvolume_list() {
 
 #[test]
 #[ignore = "requires elevated privileges"]
+fn subvolume_list_snapshot_parent_id() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // Create a subvolume and a snapshot of it.
+    btrfs_ok(&["subvolume", "create", &format!("{mp}/parent_sv")]);
+    btrfs_ok(&[
+        "subvolume",
+        "snapshot",
+        &format!("{mp}/parent_sv"),
+        &format!("{mp}/snap_of_parent"),
+    ]);
+
+    // The snapshot should appear with correct parent and name.
+    let out = btrfs_ok(&["subvolume", "list", mp]);
+    let lines: Vec<&str> = out.lines().collect();
+    // We expect two subvolumes: parent_sv and snap_of_parent.
+    assert_eq!(lines.len(), 2, "expected 2 subvolumes:\n{out}");
+
+    // Find the snapshot line (ID 257, the second subvolume created).
+    // Parse "ID NNN gen NNN top level NNN path NAME"
+    let snap_line = lines
+        .iter()
+        .find(|l| !l.contains("parent_sv"))
+        .expect("expected a snapshot line");
+    assert!(
+        snap_line.contains("snap_of_parent"),
+        "snapshot should have name 'snap_of_parent':\n{out}"
+    );
+    assert!(
+        snap_line.contains("top level 5"),
+        "snapshot top level should be 5 (FS_TREE):\n{out}"
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
 fn subvolume_snapshot() {
     let (_td, mnt) = single_mount();
     let mp = mnt.path().to_str().unwrap();

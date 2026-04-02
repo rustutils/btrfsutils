@@ -503,6 +503,9 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
             BTRFS_LAST_FREE_OBJECTID as u64,
         ),
         |hdr, data| {
+            if hdr.item_type != BTRFS_ROOT_ITEM_KEY {
+                return Ok(());
+            }
             if let Some(item) = parse_root_item(hdr.objectid, data) {
                 items.push(item);
             }
@@ -519,6 +522,9 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
             BTRFS_LAST_FREE_OBJECTID as u64,
         ),
         |hdr, data| {
+            if hdr.item_type != BTRFS_ROOT_BACKREF_KEY {
+                return Ok(());
+            }
             // ROOT_BACKREF_KEY: objectid = subvol root_id, offset = parent root_id
             let root_id = hdr.objectid;
             let parent_id = hdr.offset;
