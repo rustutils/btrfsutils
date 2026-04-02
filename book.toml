@@ -7,3 +7,6 @@ src = "docs"
 [build]
 build-dir = "target/book"
 create-missing = true
+
+[output.html]
+additional-css = ["docs/theme/custom.css"]

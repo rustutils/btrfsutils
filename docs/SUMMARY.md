@@ -21,4 +21,9 @@
 
 # Specifications
 
+- [On-Disk Format](spec/on-disk-format.md)
+- [Chunks and Block Groups](spec/chunks-and-block-groups.md)
+- [Extent Tree](spec/extent-tree.md)
 - [Transactions](spec/transaction.md)
+- [mkfs Process](spec/mkfs-process.md)
+- [Check Phases](spec/check-phases.md)
