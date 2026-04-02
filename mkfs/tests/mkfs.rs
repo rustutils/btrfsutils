@@ -1339,3 +1339,41 @@ fn rootdir_reflink_produces_valid_image() {
         }
     }
 }
+
+/// LZO compression should produce a valid filesystem image.
+#[test]
+fn rootdir_lzo_compression_produces_valid_image() {
+    use btrfs_mkfs::{args::CompressAlgorithm, rootdir::CompressConfig};
+
+    let rootdir = tempfile::tempdir().unwrap();
+    // Compressible data (repeated bytes compress well with LZO).
+    let big_data = vec![0x42u8; 8192];
+    std::fs::write(rootdir.path().join("data.bin"), &big_data).unwrap();
+    // Small inline file too.
+    std::fs::write(rootdir.path().join("small.txt"), "hello LZO").unwrap();
+
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.devices[0].path = image.path().to_path_buf();
+
+    let compress = CompressConfig {
+        algorithm: CompressAlgorithm::Lzo,
+        level: None,
+    };
+
+    mkfs::make_btrfs_with_rootdir(
+        &cfg,
+        rootdir.path(),
+        compress,
+        &[],
+        &[],
+        RootdirOptions::default(),
+    )
+    .unwrap();
+
+    // Verify the image has a valid superblock.
+    let mut file = std::fs::File::open(image.path()).unwrap();
+    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.fsid, cfg.fs_uuid);
+}

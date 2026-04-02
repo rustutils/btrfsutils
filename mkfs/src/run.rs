@@ -242,12 +242,6 @@ pub fn run(args: &Arguments) -> Result<()> {
             .compress
             .as_ref()
             .map_or(CompressAlgorithm::No, |c| c.algorithm);
-        if algorithm == CompressAlgorithm::Lzo {
-            bail!(
-                "LZO compression is not yet supported for --rootdir \
-                 (btrfs LZO uses a per-sector format that is not yet implemented)"
-            );
-        }
         if args.reflink && algorithm != CompressAlgorithm::No {
             bail!("--reflink and --compress cannot be used together");
         }

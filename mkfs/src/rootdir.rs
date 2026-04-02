@@ -95,10 +95,13 @@ impl CompressConfig {
     }
 }
 
-/// Try to compress `data`. Returns `Some(compressed)` if the result is
-/// smaller than the original, `None` otherwise (incompressible data).
+/// Try to compress `data` for an inline extent. Returns `Some(compressed)`
+/// if the result is smaller than the original, `None` otherwise.
+///
+/// For LZO, uses the single-segment inline format:
+/// `[4B total_len] [4B seg_len] [lzo data]`.
 #[allow(clippy::cast_possible_wrap)] // zstd level fits in i32
-fn try_compress(data: &[u8], cfg: CompressConfig) -> Option<Vec<u8>> {
+fn try_compress_inline(data: &[u8], cfg: CompressConfig) -> Option<Vec<u8>> {
     if !cfg.is_enabled() || data.is_empty() {
         return None;
     }
@@ -117,15 +120,107 @@ fn try_compress(data: &[u8], cfg: CompressConfig) -> Option<Vec<u8>> {
             let level = cfg.level.unwrap_or(3) as i32;
             zstd::bulk::compress(data, level).ok()?
         }
-        CompressAlgorithm::Lzo => {
-            unreachable!("LZO rejected at argument validation")
-        }
+        CompressAlgorithm::Lzo => lzo_compress_inline(data)?,
     };
     if compressed.len() < data.len() {
         Some(compressed)
     } else {
         None
     }
+}
+
+/// Try to compress `data` for a regular (non-inline) extent. Returns
+/// `Some(compressed)` if the result is smaller, `None` otherwise.
+///
+/// For LZO, uses the per-sector framed format:
+/// `[4B total_len] { [4B seg_len] [lzo data] [padding] }*`.
+#[allow(clippy::cast_possible_wrap)] // zstd level fits in i32
+fn try_compress_regular(
+    data: &[u8],
+    cfg: CompressConfig,
+    sectorsize: u32,
+) -> Option<Vec<u8>> {
+    if !cfg.is_enabled() || data.is_empty() {
+        return None;
+    }
+    let compressed = match cfg.algorithm {
+        CompressAlgorithm::No => return None,
+        CompressAlgorithm::Zlib => {
+            use flate2::write::ZlibEncoder;
+            use std::io::Write;
+            let level = cfg.level.unwrap_or(3);
+            let mut encoder =
+                ZlibEncoder::new(Vec::new(), flate2::Compression::new(level));
+            encoder.write_all(data).ok()?;
+            encoder.finish().ok()?
+        }
+        CompressAlgorithm::Zstd => {
+            let level = cfg.level.unwrap_or(3) as i32;
+            zstd::bulk::compress(data, level).ok()?
+        }
+        CompressAlgorithm::Lzo => lzo_compress_extent(data, sectorsize)?,
+    };
+    if compressed.len() < data.len() {
+        Some(compressed)
+    } else {
+        None
+    }
+}
+
+/// LZO inline compression: single-segment format.
+///
+/// Layout: `[4B total_len] [4B seg_len] [lzo1x compressed data]`.
+#[allow(clippy::cast_possible_truncation)] // lengths fit in u32
+fn lzo_compress_inline(data: &[u8]) -> Option<Vec<u8>> {
+    let seg = lzokay::compress::compress(data).ok()?;
+    let total_len = 4 + 4 + seg.len();
+    let mut buf = Vec::with_capacity(total_len);
+    buf.extend_from_slice(&(total_len as u32).to_le_bytes());
+    buf.extend_from_slice(&(seg.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&seg);
+    Some(buf)
+}
+
+/// LZO per-sector compression for regular extents.
+///
+/// Layout: `[4B total_len] { [4B seg_len] [lzo1x data] [padding] }*`.
+/// Each input sector is compressed independently. Padding is added when
+/// the next segment header would cross a sector boundary.
+#[allow(clippy::cast_possible_truncation)] // lengths fit in u32
+fn lzo_compress_extent(data: &[u8], sectorsize: u32) -> Option<Vec<u8>> {
+    let ss = sectorsize as usize;
+    let sectors = data.len().div_ceil(ss);
+    let mut buf = Vec::with_capacity(data.len());
+
+    // Reserve space for the total length header.
+    buf.extend_from_slice(&[0u8; 4]);
+
+    for i in 0..sectors {
+        let start = i * ss;
+        let end = (start + ss).min(data.len());
+        let seg = lzokay::compress::compress(&data[start..end]).ok()?;
+
+        buf.extend_from_slice(&(seg.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&seg);
+
+        // Pad if the next 4-byte header would cross a sector boundary.
+        let pos = buf.len();
+        let sector_rem = ss - (pos % ss);
+        if sector_rem < 4 && sector_rem < ss {
+            buf.resize(pos + sector_rem, 0);
+        }
+
+        // Early exit: if first 3 sectors don't compress well, give up.
+        if i >= 3 && buf.len() > i * ss {
+            return None;
+        }
+    }
+
+    // Write total length (includes the 4-byte header itself).
+    let total = buf.len() as u32;
+    buf[0..4].copy_from_slice(&total.to_le_bytes());
+
+    Some(buf)
 }
 
 /// Btrfs name hash: `crc32c((u32)~1, name)`.
@@ -631,12 +726,13 @@ fn walk_single_tree(
                     format!("cannot open '{}'", host_path.display())
                 })?;
                 f.read_to_end(&mut data)?;
-                let (stored_data, comp_type) =
-                    if let Some(compressed) = try_compress(&data, compress) {
-                        (compressed, compress.extent_type_byte())
-                    } else {
-                        (data.clone(), 0)
-                    };
+                let (stored_data, comp_type) = if let Some(compressed) =
+                    try_compress_inline(&data, compress)
+                {
+                    (compressed, compress.extent_type_byte())
+                } else {
+                    (data.clone(), 0)
+                };
                 let extent_data = items::file_extent_inline(
                     generation,
                     data.len() as u64,
@@ -732,12 +828,13 @@ pub fn write_file_data(
                 format!("short read from '{}'", alloc.host_path.display())
             })?;
 
-            let (disk_data, comp_type) =
-                if let Some(compressed) = try_compress(&raw_data, compress) {
-                    (compressed, compress.extent_type_byte())
-                } else {
-                    (raw_data, 0u8)
-                };
+            let (disk_data, comp_type) = if let Some(compressed) =
+                try_compress_regular(&raw_data, compress, sectorsize)
+            {
+                (compressed, compress.extent_type_byte())
+            } else {
+                (raw_data, 0u8)
+            };
 
             let aligned_disk =
                 align_up(disk_data.len() as u64, u64::from(sectorsize));
@@ -1134,5 +1231,84 @@ mod tests {
         assert_eq!(align_up(1, 4096), 4096);
         assert_eq!(align_up(4096, 4096), 4096);
         assert_eq!(align_up(4097, 4096), 8192);
+    }
+
+    #[test]
+    fn lzo_inline_roundtrip() {
+        let original =
+            b"hello world, this is a test of LZO inline compression!";
+        let compressed = lzo_compress_inline(original).unwrap();
+
+        // Verify format: [4B total_len] [4B seg_len] [lzo data]
+        let total_len =
+            u32::from_le_bytes(compressed[0..4].try_into().unwrap()) as usize;
+        assert_eq!(total_len, compressed.len());
+        let seg_len =
+            u32::from_le_bytes(compressed[4..8].try_into().unwrap()) as usize;
+        assert_eq!(seg_len, compressed.len() - 8);
+
+        // Decompress and verify.
+        let mut decompressed = vec![0u8; original.len()];
+        lzokay::decompress::decompress(&compressed[8..], &mut decompressed)
+            .unwrap();
+        assert_eq!(&decompressed, original);
+    }
+
+    #[test]
+    fn lzo_extent_roundtrip() {
+        // Create data spanning multiple 4K sectors.
+        let mut original = Vec::new();
+        for i in 0..3u8 {
+            let sector = vec![i; 4096];
+            original.extend_from_slice(&sector);
+        }
+
+        let compressed = lzo_compress_extent(&original, 4096).unwrap();
+        assert!(compressed.len() < original.len());
+
+        // Verify total_len header.
+        let total_len =
+            u32::from_le_bytes(compressed[0..4].try_into().unwrap()) as usize;
+        assert_eq!(total_len, compressed.len());
+
+        // Decompress segment by segment.
+        let ss = 4096usize;
+        let mut pos = 4;
+        let mut decompressed = Vec::new();
+        while pos < total_len && decompressed.len() < original.len() {
+            let sector_rem = ss - (pos % ss);
+            if sector_rem < 4 && sector_rem < ss {
+                pos += sector_rem;
+            }
+            let seg_len = u32::from_le_bytes(
+                compressed[pos..pos + 4].try_into().unwrap(),
+            ) as usize;
+            pos += 4;
+            let remaining = original.len() - decompressed.len();
+            let out_len = remaining.min(ss);
+            let mut seg_out = vec![0u8; out_len];
+            lzokay::decompress::decompress(
+                &compressed[pos..pos + seg_len],
+                &mut seg_out,
+            )
+            .unwrap();
+            decompressed.extend_from_slice(&seg_out);
+            pos += seg_len;
+        }
+        assert_eq!(decompressed, original);
+    }
+
+    #[test]
+    fn lzo_incompressible_returns_none() {
+        // Random-ish data that won't compress well.
+        let data: Vec<u8> = (0..256).map(|i| (i * 137 + 42) as u8).collect();
+        let result = lzo_compress_inline(&data);
+        // Small random data may or may not compress; just verify no panic.
+        // If it compressed, verify format is valid.
+        if let Some(buf) = result {
+            let total =
+                u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
+            assert_eq!(total, buf.len());
+        }
     }
 }

@@ -2235,3 +2235,37 @@ fn mkfs_rootdir_shrink() {
     let mnt = Mount::new(lo, td.path());
     verify_test_data(mnt.path(), "data.bin", 4096);
 }
+
+/// Test --rootdir with LZO compression: data should still be readable.
+/// LZO uses a per-sector framing format that differs from zlib/zstd.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mkfs_rootdir_lzo_compressed() {
+    let td = tempfile::tempdir().unwrap();
+    let rootdir = td.path().join("rootdir");
+    std::fs::create_dir_all(&rootdir).unwrap();
+
+    // Compressible data (zeros compress well with LZO).
+    write_compressible_data(&rootdir, "zeros.bin", 1024 * 1024);
+    // Small inline file (uses single-segment LZO format).
+    std::fs::write(rootdir.join("small.txt"), "hello LZO compression test")
+        .unwrap();
+    // Incompressible data (pseudo-random pattern).
+    write_test_data(&rootdir, "random.bin", 64 * 1024);
+
+    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
+    file.mkfs_rootdir(&rootdir, &["--compress", "lzo"]);
+    let lo = LoopbackDevice::new(file);
+    let mnt = Mount::new(lo, td.path());
+    let mp = mnt.path();
+
+    // Verify data reads back correctly (kernel handles LZO decompression).
+    let zeros = std::fs::read(mp.join("zeros.bin")).unwrap();
+    assert_eq!(zeros.len(), 1024 * 1024);
+    assert!(zeros.iter().all(|&b| b == 0), "decompressed zeros mismatch");
+
+    let small = std::fs::read_to_string(mp.join("small.txt")).unwrap();
+    assert_eq!(small, "hello LZO compression test");
+
+    verify_test_data(mp, "random.bin", 64 * 1024);
+}
