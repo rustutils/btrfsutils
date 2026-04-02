@@ -21,7 +21,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   population (LZO not yet supported)
 - `mkfs --rootdir --subvol`: create subdirectories as separate btrfs
   subvolumes with independent FS trees, ROOT_REF/ROOT_BACKREF linkage,
-  read-only support (`ro:`, `default-ro:`), and nested subvolume support
+  read-only support (`ro:`, `default-ro:`), default subvolume
+  designation, and nested subvolume support
+- `mkfs --rootdir --reflink`: clone file extents via FICLONERANGE
+  instead of copying bytes (requires source and image on same filesystem)
+- `mkfs --rootdir --compress`: LZO compression support with per-sector
+  framed format for regular extents and single-segment format for
+  inline extents (completes zlib, zstd, and LZO support)
 - `mkfs --rootdir --inode-flags`: set NODATACOW/NODATASUM flags on
   specific paths during rootdir population
 - `mkfs --rootdir --shrink`: truncate the image to the actual used size

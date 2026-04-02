@@ -1,23 +1,34 @@
 use btrfs_disk::{
     items::{DirItem, InodeFlags, InodeItem, RootItem, RootItemFlags, RootRef},
+    raw::{
+        btrfs_header, BTRFS_FIRST_FREE_OBJECTID, BTRFS_FS_TREE_OBJECTID,
+    },
     reader::{self, Traversal},
-    tree::KeyType,
+    superblock::read_superblock,
+    tree::{KeyType, TreeBlock},
 };
 use btrfs_mkfs::{
     args::{
-        Feature, FeatureArg, InodeFlagsArg, Profile, SubvolArg, SubvolType,
+        CompressAlgorithm, Feature, FeatureArg, InodeFlagsArg, Profile,
+        SubvolArg, SubvolType,
     },
-    mkfs::{self, DeviceInfo, MkfsConfig, RootdirOptions},
+    mkfs::{
+        self, DeviceInfo, MkfsConfig, RootdirOptions, make_btrfs,
+        make_btrfs_with_rootdir,
+    },
     rootdir::CompressConfig,
     write::ChecksumType,
 };
 use flate2::{Compression, write::GzEncoder};
 use std::{
     collections::HashMap,
+    fs::{File, write},
     io::{Read as _, Seek, SeekFrom, Write},
-    path::PathBuf,
+    mem::size_of,
+    path::{Path, PathBuf},
     process::Command,
 };
+use tempfile::{NamedTempFile, TempDir, tempdir};
 use uuid::Uuid;
 
 fn test_config(total_bytes: u64) -> MkfsConfig {
@@ -77,31 +88,31 @@ fn test_config_two_devices(per_device_bytes: u64) -> MkfsConfig {
 const MIN_SIZE: u64 = 256 * 1024 * 1024;
 
 /// Set the device path in the config and call make_btrfs.
-fn make_btrfs_on(image: &tempfile::NamedTempFile, cfg: &mut MkfsConfig) {
+fn make_btrfs_on(image: &NamedTempFile, cfg: &mut MkfsConfig) {
     cfg.devices[0].path = image.path().to_path_buf();
-    mkfs::make_btrfs(cfg).unwrap();
+    make_btrfs(cfg).unwrap();
 }
 
 fn make_btrfs_on_err(
-    image: &tempfile::NamedTempFile,
+    image: &NamedTempFile,
     cfg: &mut MkfsConfig,
 ) -> anyhow::Error {
     cfg.devices[0].path = image.path().to_path_buf();
-    mkfs::make_btrfs(cfg).unwrap_err()
+    make_btrfs(cfg).unwrap_err()
 }
 
 fn make_btrfs_two_devices(
-    img1: &tempfile::NamedTempFile,
-    img2: &tempfile::NamedTempFile,
+    img1: &NamedTempFile,
+    img2: &NamedTempFile,
     cfg: &mut MkfsConfig,
 ) {
     cfg.devices[0].path = img1.path().to_path_buf();
     cfg.devices[1].path = img2.path().to_path_buf();
-    mkfs::make_btrfs(cfg).unwrap();
+    make_btrfs(cfg).unwrap();
 }
 
-fn create_image(size: u64) -> tempfile::NamedTempFile {
-    let mut file = tempfile::NamedTempFile::new().unwrap();
+fn create_image(size: u64) -> NamedTempFile {
+    let mut file = NamedTempFile::new().unwrap();
     file.as_file_mut().set_len(size).unwrap();
     // Write a zero byte at the end to ensure the file is fully allocated.
     file.as_file_mut().seek(SeekFrom::Start(size - 1)).unwrap();
@@ -115,8 +126,8 @@ fn mkfs_creates_valid_superblock() {
     let mut cfg = test_config(MIN_SIZE);
     make_btrfs_on(&image, &mut cfg);
 
-    let mut file = std::fs::File::open(image.path()).unwrap();
-    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    let mut file = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut file, 0).unwrap();
     assert!(sb.magic_is_valid());
 }
 
@@ -126,8 +137,8 @@ fn mkfs_superblock_has_correct_uuid() {
     let mut cfg = test_config(MIN_SIZE);
     make_btrfs_on(&image, &mut cfg);
 
-    let mut file = std::fs::File::open(image.path()).unwrap();
-    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    let mut file = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut file, 0).unwrap();
     assert_eq!(sb.fsid, cfg.fs_uuid);
 }
 
@@ -137,8 +148,8 @@ fn mkfs_superblock_has_correct_sizes() {
     let mut cfg = test_config(MIN_SIZE);
     make_btrfs_on(&image, &mut cfg);
 
-    let mut file = std::fs::File::open(image.path()).unwrap();
-    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    let mut file = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut file, 0).unwrap();
     assert_eq!(sb.nodesize, 16384);
     assert_eq!(sb.sectorsize, 4096);
     assert_eq!(sb.total_bytes, MIN_SIZE);
@@ -151,8 +162,8 @@ fn mkfs_superblock_has_label() {
     cfg.label = Some("test-label".to_string());
     make_btrfs_on(&image, &mut cfg);
 
-    let mut file = std::fs::File::open(image.path()).unwrap();
-    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    let mut file = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut file, 0).unwrap();
     assert_eq!(sb.label, "test-label");
 }
 
@@ -162,8 +173,8 @@ fn mkfs_superblock_generation_is_one() {
     let mut cfg = test_config(MIN_SIZE);
     make_btrfs_on(&image, &mut cfg);
 
-    let mut file = std::fs::File::open(image.path()).unwrap();
-    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    let mut file = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut file, 0).unwrap();
     assert_eq!(sb.generation, 1);
 }
 
@@ -260,8 +271,8 @@ fn mkfs_with_no_free_space_tree() {
     cfg.apply_features(&features).unwrap();
     make_btrfs_on(&image, &mut cfg);
 
-    let mut file = std::fs::File::open(image.path()).unwrap();
-    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    let mut file = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut file, 0).unwrap();
     assert!(sb.magic_is_valid());
     // compat_ro should not have free-space-tree bits
     let fst_bit =
@@ -278,8 +289,8 @@ fn mkfs_with_different_nodesize() {
     cfg.nodesize = 65536;
     make_btrfs_on(&image, &mut cfg);
 
-    let mut file = std::fs::File::open(image.path()).unwrap();
-    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    let mut file = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut file, 0).unwrap();
     assert_eq!(sb.nodesize, 65536);
     assert!(sb.magic_is_valid());
 }
@@ -293,12 +304,12 @@ fn mkfs_raid1_two_devices_valid_superblocks() {
     make_btrfs_two_devices(&img1, &img2, &mut cfg);
 
     // Both devices should have valid superblocks.
-    let mut f1 = std::fs::File::open(img1.path()).unwrap();
-    let sb1 = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
+    let mut f1 = File::open(img1.path()).unwrap();
+    let sb1 = read_superblock(&mut f1, 0).unwrap();
     assert!(sb1.magic_is_valid());
 
-    let mut f2 = std::fs::File::open(img2.path()).unwrap();
-    let sb2 = btrfs_disk::superblock::read_superblock(&mut f2, 0).unwrap();
+    let mut f2 = File::open(img2.path()).unwrap();
+    let sb2 = read_superblock(&mut f2, 0).unwrap();
     assert!(sb2.magic_is_valid());
 }
 
@@ -310,10 +321,10 @@ fn mkfs_raid1_superblocks_share_uuid() {
     let mut cfg = test_config_two_devices(per_dev);
     make_btrfs_two_devices(&img1, &img2, &mut cfg);
 
-    let mut f1 = std::fs::File::open(img1.path()).unwrap();
-    let sb1 = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
-    let mut f2 = std::fs::File::open(img2.path()).unwrap();
-    let sb2 = btrfs_disk::superblock::read_superblock(&mut f2, 0).unwrap();
+    let mut f1 = File::open(img1.path()).unwrap();
+    let sb1 = read_superblock(&mut f1, 0).unwrap();
+    let mut f2 = File::open(img2.path()).unwrap();
+    let sb2 = read_superblock(&mut f2, 0).unwrap();
 
     // Same filesystem UUID.
     assert_eq!(sb1.fsid, sb2.fsid);
@@ -328,10 +339,10 @@ fn mkfs_raid1_superblocks_different_dev_items() {
     let mut cfg = test_config_two_devices(per_dev);
     make_btrfs_two_devices(&img1, &img2, &mut cfg);
 
-    let mut f1 = std::fs::File::open(img1.path()).unwrap();
-    let sb1 = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
-    let mut f2 = std::fs::File::open(img2.path()).unwrap();
-    let sb2 = btrfs_disk::superblock::read_superblock(&mut f2, 0).unwrap();
+    let mut f1 = File::open(img1.path()).unwrap();
+    let sb1 = read_superblock(&mut f1, 0).unwrap();
+    let mut f2 = File::open(img2.path()).unwrap();
+    let sb2 = read_superblock(&mut f2, 0).unwrap();
 
     // Each superblock should embed its own device's dev_item.
     assert_eq!(sb1.dev_item.devid, 1);
@@ -349,8 +360,8 @@ fn mkfs_raid1_total_bytes_is_sum() {
     let mut cfg = test_config_two_devices(per_dev);
     make_btrfs_two_devices(&img1, &img2, &mut cfg);
 
-    let mut f1 = std::fs::File::open(img1.path()).unwrap();
-    let sb1 = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
+    let mut f1 = File::open(img1.path()).unwrap();
+    let sb1 = read_superblock(&mut f1, 0).unwrap();
     assert_eq!(sb1.total_bytes, 2 * per_dev);
 }
 
@@ -361,14 +372,14 @@ fn mkfs_writes_super_mirror_1() {
     let mut cfg = test_config(MIN_SIZE);
     make_btrfs_on(&image, &mut cfg);
 
-    let mut file = std::fs::File::open(image.path()).unwrap();
+    let mut file = File::open(image.path()).unwrap();
 
     // Mirror 0 at 64 KiB
-    let sb0 = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    let sb0 = read_superblock(&mut file, 0).unwrap();
     assert!(sb0.magic_is_valid());
 
     // Mirror 1 at 64 MiB
-    let sb1 = btrfs_disk::superblock::read_superblock(&mut file, 1).unwrap();
+    let sb1 = read_superblock(&mut file, 1).unwrap();
     assert!(sb1.magic_is_valid());
     assert_eq!(sb0.fsid, sb1.fsid);
     assert_eq!(sb0.generation, sb1.generation);
@@ -382,8 +393,8 @@ fn mkfs_raid0_data_two_devices() {
     cfg.data_profile = Profile::Raid0;
     make_btrfs_two_devices(&img1, &img2, &mut cfg);
 
-    let mut f1 = std::fs::File::open(img1.path()).unwrap();
-    let sb = btrfs_disk::superblock::read_superblock(&mut f1, 0).unwrap();
+    let mut f1 = File::open(img1.path()).unwrap();
+    let sb = read_superblock(&mut f1, 0).unwrap();
     assert!(sb.magic_is_valid());
     assert_eq!(sb.num_devices, 2);
 }
@@ -420,11 +431,11 @@ fn deterministic_config(total_bytes: u64) -> MkfsConfig {
 fn make_image_compressed(cfg: &mut MkfsConfig) -> Vec<u8> {
     let image = create_image(cfg.devices[0].total_bytes);
     cfg.devices[0].path = image.path().to_path_buf();
-    mkfs::make_btrfs(cfg).unwrap();
+    make_btrfs(cfg).unwrap();
 
     // Read back the full image.
     let mut raw = Vec::new();
-    std::fs::File::open(image.path())
+    File::open(image.path())
         .unwrap()
         .read_to_end(&mut raw)
         .unwrap();
@@ -483,7 +494,7 @@ struct LoopDev {
 }
 
 impl LoopDev {
-    fn attach(file: &std::path::Path) -> Self {
+    fn attach(file: &Path) -> Self {
         let output = Command::new("losetup")
             .args(["--find", "--show", &file.to_string_lossy()])
             .output()
@@ -506,13 +517,13 @@ impl Drop for LoopDev {
 }
 
 struct MountPoint {
-    dir: tempfile::TempDir,
+    dir: TempDir,
     _loop_dev: LoopDev,
 }
 
 impl MountPoint {
     fn mount(loop_dev: LoopDev) -> Self {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = TempDir::new().unwrap();
         run(
             "mount",
             &[
@@ -528,7 +539,7 @@ impl MountPoint {
         }
     }
 
-    fn path(&self) -> &std::path::Path {
+    fn path(&self) -> &Path {
         self.dir.path()
     }
 }
@@ -540,7 +551,7 @@ impl Drop for MountPoint {
 }
 
 /// Run `btrfs check` on an image file and assert it passes.
-fn btrfs_check(image: &std::path::Path) {
+fn btrfs_check(image: &Path) {
     let output = Command::new("btrfs")
         .args(["check", &image.to_string_lossy()])
         .output()
@@ -566,7 +577,7 @@ fn make_check_mount_verify(cfg: &mut MkfsConfig) {
         cfg.devices[i].path = img.path().to_path_buf();
     }
 
-    mkfs::make_btrfs(cfg).unwrap();
+    make_btrfs(cfg).unwrap();
 
     // Verify with btrfs check before mounting.
     btrfs_check(images[0].path());
@@ -582,7 +593,7 @@ fn make_check_mount_verify(cfg: &mut MkfsConfig) {
 
     // Verify we can write a file.
     let test_file = mount.path().join("hello.txt");
-    std::fs::write(&test_file, b"btrfs works!").unwrap();
+    write(&test_file, b"btrfs works!").unwrap();
     assert_eq!(std::fs::read_to_string(&test_file).unwrap(), "btrfs works!");
 }
 
@@ -739,8 +750,8 @@ fn valid_sectorsize_nodesize_combos() {
     cfg.nodesize = 16384;
     make_btrfs_on(&image, &mut cfg);
 
-    let mut file = std::fs::File::open(image.path()).unwrap();
-    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    let mut file = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut file, 0).unwrap();
     assert!(sb.magic_is_valid());
     assert_eq!(sb.sectorsize, 4096);
     assert_eq!(sb.nodesize, 16384);
@@ -755,8 +766,8 @@ fn large_sectorsize_64k_works() {
     cfg.nodesize = 65536;
     make_btrfs_on(&image, &mut cfg);
 
-    let mut file = std::fs::File::open(image.path()).unwrap();
-    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    let mut file = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut file, 0).unwrap();
     assert!(sb.magic_is_valid());
     assert_eq!(sb.sectorsize, 65536);
     assert_eq!(sb.nodesize, 65536);
@@ -779,9 +790,8 @@ fn nodesize_sectorsize_combinations() {
             cfg.sectorsize = sectorsize;
             make_btrfs_on(&image, &mut cfg);
 
-            let mut file = std::fs::File::open(image.path()).unwrap();
-            let sb =
-                btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+            let mut file = File::open(image.path()).unwrap();
+            let sb = read_superblock(&mut file, 0).unwrap();
             assert!(
                 sb.magic_is_valid(),
                 "invalid superblock for nodesize={nodesize} sectorsize={sectorsize}"
@@ -801,7 +811,7 @@ fn first_dev_extent_above_reserved_1m() {
     let mut cfg = test_config(MIN_SIZE);
     make_btrfs_on(&image, &mut cfg);
 
-    let file = std::fs::File::open(image.path()).unwrap();
+    let file = File::open(image.path()).unwrap();
     let fs = reader::filesystem_open(file).unwrap();
 
     // Find the device tree (objectid 4) root.
@@ -819,7 +829,7 @@ fn first_dev_extent_above_reserved_1m() {
         *dev_root,
         Traversal::Dfs,
         &mut |block| {
-            if let btrfs_disk::tree::TreeBlock::Leaf { items, .. } = block {
+            if let TreeBlock::Leaf { items, .. } = block {
                 for item in items {
                     if item.key.key_type == KeyType::DeviceExtent {
                         // The key offset is the physical byte offset on device.
@@ -854,13 +864,13 @@ fn fs_tree_root_item_has_uuid_and_otime() {
     let mut cfg = test_config(MIN_SIZE);
     make_btrfs_on(&image, &mut cfg);
 
-    let file = std::fs::File::open(image.path()).unwrap();
+    let file = File::open(image.path()).unwrap();
     let fs = reader::filesystem_open(file).unwrap();
 
     // Read the root tree to find FS_TREE's ROOT_ITEM.
     let root_tree_logical = fs.superblock.root;
     let mut fs_tree_root_item: Option<RootItem> = None;
-    let fs_tree_id = btrfs_disk::raw::BTRFS_FS_TREE_OBJECTID as u64;
+    let fs_tree_id = BTRFS_FS_TREE_OBJECTID as u64;
 
     let mut block_reader = fs.reader;
     reader::tree_walk(
@@ -868,10 +878,8 @@ fn fs_tree_root_item_has_uuid_and_otime() {
         root_tree_logical,
         Traversal::Dfs,
         &mut |block| {
-            if let btrfs_disk::tree::TreeBlock::Leaf { items, data, .. } = block
-            {
-                let header_size =
-                    std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
+            if let TreeBlock::Leaf { items, data, .. } = block {
+                let header_size = size_of::<btrfs_header>();
                 for item in items {
                     if item.key.objectid == fs_tree_id
                         && item.key.key_type == KeyType::RootItem
@@ -908,7 +916,7 @@ fn free_space_tree_no_bitmaps_on_empty_fs() {
     let mut cfg = test_config(MIN_SIZE);
     make_btrfs_on(&image, &mut cfg);
 
-    let file = std::fs::File::open(image.path()).unwrap();
+    let file = File::open(image.path()).unwrap();
     let fs = reader::filesystem_open(file).unwrap();
 
     // Find the free-space tree (objectid 10) root.
@@ -924,7 +932,7 @@ fn free_space_tree_no_bitmaps_on_empty_fs() {
             *fst_logical,
             Traversal::Dfs,
             &mut |block| {
-                if let btrfs_disk::tree::TreeBlock::Leaf { items, .. } = block {
+                if let TreeBlock::Leaf { items, .. } = block {
                     for item in items {
                         if item.key.key_type == KeyType::FreeSpaceBitmap {
                             bitmap_count += 1;
@@ -945,13 +953,13 @@ fn free_space_tree_no_bitmaps_on_empty_fs() {
 // --- Root tree directory "default" DIR_ITEM tests ---
 
 /// Helper: find the "default" DIR_ITEM in the root tree and return its location key.
-fn find_default_dir_item(image_path: &std::path::Path) -> DirItem {
-    let file = std::fs::File::open(image_path).unwrap();
+fn find_default_dir_item(image_path: &Path) -> DirItem {
+    let file = File::open(image_path).unwrap();
     let fs = reader::filesystem_open(file).unwrap();
 
     let root_tree_logical = fs.superblock.root;
     let root_dir_oid = btrfs_disk::raw::BTRFS_ROOT_TREE_DIR_OBJECTID as u64;
-    let header_size = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
+    let header_size = size_of::<btrfs_header>();
 
     let mut found: Option<DirItem> = None;
     let mut block_reader = fs.reader;
@@ -960,8 +968,7 @@ fn find_default_dir_item(image_path: &std::path::Path) -> DirItem {
         root_tree_logical,
         Traversal::Dfs,
         &mut |block| {
-            if let btrfs_disk::tree::TreeBlock::Leaf { items, data, .. } = block
-            {
+            if let TreeBlock::Leaf { items, data, .. } = block {
                 for item in items {
                     if item.key.objectid == root_dir_oid
                         && item.key.key_type == KeyType::DirItem
@@ -996,7 +1003,7 @@ fn root_tree_default_dir_item_points_to_fs_tree() {
     let dir_item = find_default_dir_item(image.path());
     assert_eq!(
         dir_item.location.objectid,
-        btrfs_disk::raw::BTRFS_FS_TREE_OBJECTID as u64,
+        BTRFS_FS_TREE_OBJECTID as u64,
         "default DIR_ITEM should point to FS_TREE"
     );
     assert_eq!(dir_item.location.key_type, KeyType::RootItem);
@@ -1006,10 +1013,9 @@ fn root_tree_default_dir_item_points_to_fs_tree() {
 /// subvolume's objectid (256) instead of FS_TREE.
 #[test]
 fn rootdir_default_subvol_dir_item_points_to_subvol() {
-    let rootdir = tempfile::tempdir().unwrap();
+    let rootdir = tempdir().unwrap();
     std::fs::create_dir(rootdir.path().join("mysubvol")).unwrap();
-    std::fs::write(rootdir.path().join("mysubvol").join("hello.txt"), "hello")
-        .unwrap();
+    write(rootdir.path().join("mysubvol").join("hello.txt"), "hello").unwrap();
 
     let image = create_image(MIN_SIZE);
     let mut cfg = test_config(MIN_SIZE);
@@ -1022,7 +1028,7 @@ fn rootdir_default_subvol_dir_item_points_to_subvol() {
         path: PathBuf::from("mysubvol"),
     }];
 
-    mkfs::make_btrfs_with_rootdir(
+    make_btrfs_with_rootdir(
         &cfg,
         rootdir.path(),
         CompressConfig::default(),
@@ -1033,7 +1039,7 @@ fn rootdir_default_subvol_dir_item_points_to_subvol() {
     .unwrap();
 
     let dir_item = find_default_dir_item(image.path());
-    let expected_subvol_id = btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID as u64;
+    let expected_subvol_id = BTRFS_FIRST_FREE_OBJECTID as u64;
     assert_eq!(
         dir_item.location.objectid, expected_subvol_id,
         "default DIR_ITEM should point to subvolume {expected_subvol_id}, not FS_TREE"
@@ -1045,17 +1051,17 @@ fn rootdir_default_subvol_dir_item_points_to_subvol() {
 
 /// Helper: create a rootdir image with subvolumes and return the image path.
 fn make_rootdir_image_with_subvols(
-    subvols: &[btrfs_mkfs::args::SubvolArg],
-    setup: impl FnOnce(&std::path::Path),
-) -> tempfile::NamedTempFile {
-    let rootdir = tempfile::tempdir().unwrap();
+    subvols: &[SubvolArg],
+    setup: impl FnOnce(&Path),
+) -> NamedTempFile {
+    let rootdir = tempdir().unwrap();
     setup(rootdir.path());
 
     let image = create_image(MIN_SIZE);
     let mut cfg = test_config(MIN_SIZE);
     cfg.devices[0].path = image.path().to_path_buf();
 
-    mkfs::make_btrfs_with_rootdir(
+    make_btrfs_with_rootdir(
         &cfg,
         rootdir.path(),
         CompressConfig::default(),
@@ -1069,13 +1075,13 @@ fn make_rootdir_image_with_subvols(
 
 /// Helper: walk the root tree and collect items matching a predicate.
 fn walk_root_tree_items(
-    image_path: &std::path::Path,
+    image_path: &Path,
     mut predicate: impl FnMut(u64, KeyType, u64, &[u8]) -> bool,
 ) -> Vec<(u64, KeyType, u64, Vec<u8>)> {
-    let file = std::fs::File::open(image_path).unwrap();
+    let file = File::open(image_path).unwrap();
     let fs = reader::filesystem_open(file).unwrap();
     let root_logical = fs.superblock.root;
-    let header_size = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
+    let header_size = size_of::<btrfs_header>();
 
     let mut results = Vec::new();
     let mut block_reader = fs.reader;
@@ -1084,8 +1090,7 @@ fn walk_root_tree_items(
         root_logical,
         Traversal::Dfs,
         &mut |block| {
-            if let btrfs_disk::tree::TreeBlock::Leaf { items, data, .. } = block
-            {
+            if let TreeBlock::Leaf { items, data, .. } = block {
                 for item in items {
                     let start = header_size + item.offset as usize;
                     let end = start + item.size as usize;
@@ -1122,11 +1127,11 @@ fn subvol_rw_has_root_tree_entries() {
     }];
     let image = make_rootdir_image_with_subvols(&subvols, |root| {
         std::fs::create_dir(root.join("sub1")).unwrap();
-        std::fs::write(root.join("sub1/file.txt"), "data").unwrap();
+        write(root.join("sub1/file.txt"), "data").unwrap();
     });
 
-    let subvol_id = btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID as u64;
-    let fs_tree_id = btrfs_disk::raw::BTRFS_FS_TREE_OBJECTID as u64;
+    let subvol_id = BTRFS_FIRST_FREE_OBJECTID as u64;
+    let fs_tree_id = BTRFS_FS_TREE_OBJECTID as u64;
 
     // Check ROOT_ITEM exists for subvol.
     let root_items = walk_root_tree_items(image.path(), |oid, kt, _, _| {
@@ -1138,7 +1143,7 @@ fn subvol_rw_has_root_tree_entries() {
         !ri.flags.contains(RootItemFlags::RDONLY),
         "rw subvol should not be RDONLY"
     );
-    assert_ne!(ri.uuid, uuid::Uuid::nil(), "subvolume should have a UUID");
+    assert_ne!(ri.uuid, Uuid::nil(), "subvolume should have a UUID");
 
     // Check ROOT_REF: parent → child.
     let root_refs = walk_root_tree_items(image.path(), |oid, kt, offset, _| {
@@ -1169,7 +1174,7 @@ fn subvol_ro_has_rdonly_flag() {
         std::fs::create_dir(root.join("rosub")).unwrap();
     });
 
-    let subvol_id = btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID as u64;
+    let subvol_id = BTRFS_FIRST_FREE_OBJECTID as u64;
     let root_items = walk_root_tree_items(image.path(), |oid, kt, _, _| {
         oid == subvol_id && kt == KeyType::RootItem
     });
@@ -1187,11 +1192,11 @@ fn subvol_ro_has_rdonly_flag() {
 /// on the inode.
 #[test]
 fn rootdir_inode_flags_nodatacow_nodatasum() {
-    let rootdir = tempfile::tempdir().unwrap();
+    let rootdir = tempdir().unwrap();
     // Create a file large enough to not be inlined (> 4095 bytes).
     let big_data = vec![0x42u8; 8192];
-    std::fs::write(rootdir.path().join("nocow.bin"), &big_data).unwrap();
-    std::fs::write(rootdir.path().join("normal.bin"), &big_data).unwrap();
+    write(rootdir.path().join("nocow.bin"), &big_data).unwrap();
+    write(rootdir.path().join("normal.bin"), &big_data).unwrap();
 
     let image = create_image(MIN_SIZE);
     let mut cfg = test_config(MIN_SIZE);
@@ -1203,7 +1208,7 @@ fn rootdir_inode_flags_nodatacow_nodatasum() {
         path: PathBuf::from("nocow.bin"),
     }];
 
-    mkfs::make_btrfs_with_rootdir(
+    make_btrfs_with_rootdir(
         &cfg,
         rootdir.path(),
         CompressConfig::default(),
@@ -1214,14 +1219,14 @@ fn rootdir_inode_flags_nodatacow_nodatasum() {
     .unwrap();
 
     // Read the FS tree.
-    let file = std::fs::File::open(image.path()).unwrap();
+    let file = File::open(image.path()).unwrap();
     let fs = reader::filesystem_open(file).unwrap();
-    let fs_tree_id = btrfs_disk::raw::BTRFS_FS_TREE_OBJECTID as u64;
+    let fs_tree_id = BTRFS_FS_TREE_OBJECTID as u64;
     let (fs_root, _) =
         fs.tree_roots.get(&fs_tree_id).expect("FS tree not found");
     let fs_root = *fs_root;
     let mut block_reader = fs.reader;
-    let header_size = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
+    let header_size = size_of::<btrfs_header>();
 
     // Collect all INODE_ITEMs and DIR_ITEMs from the FS tree.
     let mut inodes: HashMap<u64, InodeItem> = HashMap::new();
@@ -1232,8 +1237,7 @@ fn rootdir_inode_flags_nodatacow_nodatasum() {
         fs_root,
         Traversal::Dfs,
         &mut |block| {
-            if let btrfs_disk::tree::TreeBlock::Leaf { items, data, .. } = block
-            {
+            if let TreeBlock::Leaf { items, data, .. } = block {
                 for item in items {
                     let start = header_size + item.offset as usize;
                     let end = start + item.size as usize;
@@ -1298,15 +1302,15 @@ fn rootdir_inode_flags_nodatacow_nodatasum() {
 /// This test only runs if the temp directory supports FICLONERANGE.
 #[test]
 fn rootdir_reflink_produces_valid_image() {
-    let rootdir = tempfile::tempdir().unwrap();
+    let rootdir = tempdir().unwrap();
     let big_data = vec![0x55u8; 8192];
-    std::fs::write(rootdir.path().join("data.bin"), &big_data).unwrap();
+    write(rootdir.path().join("data.bin"), &big_data).unwrap();
 
     let image = create_image(MIN_SIZE);
     let mut cfg = test_config(MIN_SIZE);
     cfg.devices[0].path = image.path().to_path_buf();
 
-    let result = mkfs::make_btrfs_with_rootdir(
+    let result = make_btrfs_with_rootdir(
         &cfg,
         rootdir.path(),
         CompressConfig::default(),
@@ -1318,9 +1322,8 @@ fn rootdir_reflink_produces_valid_image() {
     match result {
         Ok(()) => {
             // Reflink succeeded — verify the image has a valid superblock.
-            let mut file = std::fs::File::open(image.path()).unwrap();
-            let sb =
-                btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+            let mut file = File::open(image.path()).unwrap();
+            let sb = read_superblock(&mut file, 0).unwrap();
             assert!(sb.magic_is_valid());
             assert_eq!(sb.fsid, cfg.fs_uuid);
         }
@@ -1343,14 +1346,12 @@ fn rootdir_reflink_produces_valid_image() {
 /// LZO compression should produce a valid filesystem image.
 #[test]
 fn rootdir_lzo_compression_produces_valid_image() {
-    use btrfs_mkfs::{args::CompressAlgorithm, rootdir::CompressConfig};
-
-    let rootdir = tempfile::tempdir().unwrap();
+    let rootdir = tempdir().unwrap();
     // Compressible data (repeated bytes compress well with LZO).
     let big_data = vec![0x42u8; 8192];
-    std::fs::write(rootdir.path().join("data.bin"), &big_data).unwrap();
+    write(rootdir.path().join("data.bin"), &big_data).unwrap();
     // Small inline file too.
-    std::fs::write(rootdir.path().join("small.txt"), "hello LZO").unwrap();
+    write(rootdir.path().join("small.txt"), "hello LZO").unwrap();
 
     let image = create_image(MIN_SIZE);
     let mut cfg = test_config(MIN_SIZE);
@@ -1361,7 +1362,7 @@ fn rootdir_lzo_compression_produces_valid_image() {
         level: None,
     };
 
-    mkfs::make_btrfs_with_rootdir(
+    make_btrfs_with_rootdir(
         &cfg,
         rootdir.path(),
         compress,
@@ -1372,8 +1373,8 @@ fn rootdir_lzo_compression_produces_valid_image() {
     .unwrap();
 
     // Verify the image has a valid superblock.
-    let mut file = std::fs::File::open(image.path()).unwrap();
-    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    let mut file = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut file, 0).unwrap();
     assert!(sb.magic_is_valid());
     assert_eq!(sb.fsid, cfg.fs_uuid);
 }
