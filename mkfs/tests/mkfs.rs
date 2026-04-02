@@ -1,5 +1,5 @@
 use btrfs_disk::{
-    items::{DirItem, RootItem},
+    items::{DirItem, InodeFlags, InodeItem, RootItem, RootItemFlags, RootRef},
     reader::{self, Traversal},
     tree::KeyType,
 };
@@ -1045,4 +1045,276 @@ fn rootdir_default_subvol_dir_item_points_to_subvol() {
         "default DIR_ITEM should point to subvolume {expected_subvol_id}, not FS_TREE"
     );
     assert_eq!(dir_item.location.key_type, KeyType::RootItem);
+}
+
+// --- Subvolume tests ---
+
+/// Helper: create a rootdir image with subvolumes and return the image path.
+fn make_rootdir_image_with_subvols(
+    subvols: &[btrfs_mkfs::args::SubvolArg],
+    setup: impl FnOnce(&std::path::Path),
+) -> tempfile::NamedTempFile {
+    use btrfs_mkfs::{args::CompressAlgorithm, rootdir::CompressConfig};
+
+    let rootdir = tempfile::tempdir().unwrap();
+    setup(rootdir.path());
+
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.devices[0].path = image.path().to_path_buf();
+
+    let compress = CompressConfig {
+        algorithm: CompressAlgorithm::No,
+        level: None,
+    };
+    mkfs::make_btrfs_with_rootdir(
+        &cfg,
+        rootdir.path(),
+        compress,
+        &[],
+        subvols,
+        false,
+    )
+    .unwrap();
+    image
+}
+
+/// Helper: walk the root tree and collect items matching a predicate.
+fn walk_root_tree_items(
+    image_path: &std::path::Path,
+    mut predicate: impl FnMut(u64, KeyType, u64, &[u8]) -> bool,
+) -> Vec<(u64, KeyType, u64, Vec<u8>)> {
+    let file = std::fs::File::open(image_path).unwrap();
+    let fs = reader::filesystem_open(file).unwrap();
+    let root_logical = fs.superblock.root;
+    let header_size = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
+
+    let mut results = Vec::new();
+    let mut block_reader = fs.reader;
+    reader::tree_walk(
+        &mut block_reader,
+        root_logical,
+        Traversal::Dfs,
+        &mut |block| {
+            if let btrfs_disk::tree::TreeBlock::Leaf { items, data, .. } = block
+            {
+                for item in items {
+                    let start = header_size + item.offset as usize;
+                    let end = start + item.size as usize;
+                    if end <= data.len()
+                        && predicate(
+                            item.key.objectid,
+                            item.key.key_type,
+                            item.key.offset,
+                            &data[start..end],
+                        )
+                    {
+                        results.push((
+                            item.key.objectid,
+                            item.key.key_type,
+                            item.key.offset,
+                            data[start..end].to_vec(),
+                        ));
+                    }
+                }
+            }
+        },
+    )
+    .unwrap();
+    results
+}
+
+/// A read-write subvolume should have ROOT_ITEM, ROOT_REF, and ROOT_BACKREF
+/// in the root tree, with the ROOT_ITEM not marked RDONLY.
+#[test]
+fn subvol_rw_has_root_tree_entries() {
+    use btrfs_mkfs::args::{SubvolArg, SubvolType};
+
+    let subvols = [SubvolArg {
+        subvol_type: SubvolType::Rw,
+        path: PathBuf::from("sub1"),
+    }];
+    let image = make_rootdir_image_with_subvols(&subvols, |root| {
+        std::fs::create_dir(root.join("sub1")).unwrap();
+        std::fs::write(root.join("sub1/file.txt"), "data").unwrap();
+    });
+
+    let subvol_id = btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID as u64;
+    let fs_tree_id = btrfs_disk::raw::BTRFS_FS_TREE_OBJECTID as u64;
+
+    // Check ROOT_ITEM exists for subvol.
+    let root_items = walk_root_tree_items(image.path(), |oid, kt, _, _| {
+        oid == subvol_id && kt == KeyType::RootItem
+    });
+    assert_eq!(root_items.len(), 1, "expected one ROOT_ITEM for subvolume");
+    let ri = RootItem::parse(&root_items[0].3).unwrap();
+    assert!(
+        !ri.flags.contains(RootItemFlags::RDONLY),
+        "rw subvol should not be RDONLY"
+    );
+    assert_ne!(ri.uuid, uuid::Uuid::nil(), "subvolume should have a UUID");
+
+    // Check ROOT_REF: parent → child.
+    let root_refs = walk_root_tree_items(image.path(), |oid, kt, offset, _| {
+        oid == fs_tree_id && kt == KeyType::RootRef && offset == subvol_id
+    });
+    assert_eq!(root_refs.len(), 1, "expected one ROOT_REF");
+    let rr = RootRef::parse(&root_refs[0].3).unwrap();
+    assert_eq!(rr.name, b"sub1");
+
+    // Check ROOT_BACKREF: child → parent.
+    let backrefs = walk_root_tree_items(image.path(), |oid, kt, offset, _| {
+        oid == subvol_id && kt == KeyType::RootBackref && offset == fs_tree_id
+    });
+    assert_eq!(backrefs.len(), 1, "expected one ROOT_BACKREF");
+    let br = RootRef::parse(&backrefs[0].3).unwrap();
+    assert_eq!(br.name, b"sub1");
+}
+
+/// A read-only subvolume should have BTRFS_ROOT_SUBVOL_RDONLY set in its
+/// ROOT_ITEM.
+#[test]
+fn subvol_ro_has_rdonly_flag() {
+    use btrfs_mkfs::args::{SubvolArg, SubvolType};
+
+    let subvols = [SubvolArg {
+        subvol_type: SubvolType::Ro,
+        path: PathBuf::from("rosub"),
+    }];
+    let image = make_rootdir_image_with_subvols(&subvols, |root| {
+        std::fs::create_dir(root.join("rosub")).unwrap();
+    });
+
+    let subvol_id = btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID as u64;
+    let root_items = walk_root_tree_items(image.path(), |oid, kt, _, _| {
+        oid == subvol_id && kt == KeyType::RootItem
+    });
+    assert_eq!(root_items.len(), 1);
+    let ri = RootItem::parse(&root_items[0].3).unwrap();
+    assert!(
+        ri.flags.contains(RootItemFlags::RDONLY),
+        "ro subvol should be RDONLY"
+    );
+}
+
+// --- Inode flags tests ---
+
+/// --inode-flags NODATACOW,NODATASUM:path should set the corresponding flags
+/// on the inode.
+#[test]
+fn rootdir_inode_flags_nodatacow_nodatasum() {
+    use btrfs_mkfs::{
+        args::{CompressAlgorithm, InodeFlagsArg},
+        rootdir::CompressConfig,
+    };
+
+    let rootdir = tempfile::tempdir().unwrap();
+    // Create a file large enough to not be inlined (> 4095 bytes).
+    let big_data = vec![0x42u8; 8192];
+    std::fs::write(rootdir.path().join("nocow.bin"), &big_data).unwrap();
+    std::fs::write(rootdir.path().join("normal.bin"), &big_data).unwrap();
+
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.devices[0].path = image.path().to_path_buf();
+
+    let compress = CompressConfig {
+        algorithm: CompressAlgorithm::No,
+        level: None,
+    };
+    let inode_flags = [InodeFlagsArg {
+        nodatacow: true,
+        nodatasum: true,
+        path: PathBuf::from("nocow.bin"),
+    }];
+
+    mkfs::make_btrfs_with_rootdir(
+        &cfg,
+        rootdir.path(),
+        compress,
+        &inode_flags,
+        &[],
+        false,
+    )
+    .unwrap();
+
+    // Read the FS tree.
+    let file = std::fs::File::open(image.path()).unwrap();
+    let fs = reader::filesystem_open(file).unwrap();
+    let fs_tree_id = btrfs_disk::raw::BTRFS_FS_TREE_OBJECTID as u64;
+    let (fs_root, _) =
+        fs.tree_roots.get(&fs_tree_id).expect("FS tree not found");
+    let fs_root = *fs_root;
+    let mut block_reader = fs.reader;
+    let header_size = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
+
+    // Collect all INODE_ITEMs and DIR_ITEMs from the FS tree.
+    let mut inodes: std::collections::HashMap<u64, InodeItem> =
+        std::collections::HashMap::new();
+    let mut name_to_ino: std::collections::HashMap<Vec<u8>, u64> =
+        std::collections::HashMap::new();
+
+    reader::tree_walk(
+        &mut block_reader,
+        fs_root,
+        Traversal::Dfs,
+        &mut |block| {
+            if let btrfs_disk::tree::TreeBlock::Leaf { items, data, .. } = block
+            {
+                for item in items {
+                    let start = header_size + item.offset as usize;
+                    let end = start + item.size as usize;
+                    if end > data.len() {
+                        continue;
+                    }
+                    match item.key.key_type {
+                        KeyType::InodeItem => {
+                            if let Some(ii) =
+                                InodeItem::parse(&data[start..end])
+                            {
+                                inodes.insert(item.key.objectid, ii);
+                            }
+                        }
+                        KeyType::DirItem => {
+                            for di in DirItem::parse_all(&data[start..end]) {
+                                name_to_ino
+                                    .insert(di.name, di.location.objectid);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        },
+    )
+    .unwrap();
+
+    // Check nocow.bin has NODATACOW + NODATASUM flags.
+    let nocow_ino = name_to_ino
+        .get(&b"nocow.bin"[..])
+        .expect("nocow.bin not found in FS tree");
+    let nocow_inode = inodes.get(nocow_ino).expect("nocow.bin inode not found");
+    assert!(
+        nocow_inode.flags.contains(InodeFlags::NODATACOW),
+        "nocow.bin should have NODATACOW flag"
+    );
+    assert!(
+        nocow_inode.flags.contains(InodeFlags::NODATASUM),
+        "nocow.bin should have NODATASUM flag"
+    );
+
+    // Check normal.bin does NOT have those flags.
+    let normal_ino = name_to_ino
+        .get(&b"normal.bin"[..])
+        .expect("normal.bin not found in FS tree");
+    let normal_inode =
+        inodes.get(normal_ino).expect("normal.bin inode not found");
+    assert!(
+        !normal_inode.flags.contains(InodeFlags::NODATACOW),
+        "normal.bin should not have NODATACOW flag"
+    );
+    assert!(
+        !normal_inode.flags.contains(InodeFlags::NODATASUM),
+        "normal.bin should not have NODATASUM flag"
+    );
 }
