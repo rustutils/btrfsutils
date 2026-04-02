@@ -3,7 +3,6 @@ source: cli/tests/commands/fixture.rs
 description: btrfs inspect-internal dump-tree <IMG>
 expression: "btrfs_ok(&[\"inspect-internal\", \"dump-tree\", img_str])"
 ---
-btrfs-cli v0.7.0
 root tree
 leaf 31064064 items 21 free space 10557 generation 10 owner ROOT_TREE
 leaf 31064064 flags 0x1(WRITTEN) backref revision 1
