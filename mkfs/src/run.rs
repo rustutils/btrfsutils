@@ -229,6 +229,11 @@ pub fn run(args: &Arguments) -> Result<()> {
         if default_count > 1 {
             bail!("at most one subvolume may be marked as default");
         }
+        if default_count == 1 {
+            cfg.incompat_flags |= u64::from(
+                btrfs_disk::raw::BTRFS_FEATURE_INCOMPAT_DEFAULT_SUBVOL,
+            );
+        }
 
         let algorithm = args
             .compress

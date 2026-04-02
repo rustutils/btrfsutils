@@ -1,5 +1,5 @@
 use btrfs_disk::{
-    items::RootItem,
+    items::{DirItem, RootItem},
     reader::{self, Traversal},
     tree::KeyType,
 };
@@ -937,4 +937,112 @@ fn free_space_tree_no_bitmaps_on_empty_fs() {
             "found {bitmap_count} FREE_SPACE_BITMAP items on empty filesystem"
         );
     }
+}
+
+// --- Root tree directory "default" DIR_ITEM tests ---
+
+/// Helper: find the "default" DIR_ITEM in the root tree and return its location key.
+fn find_default_dir_item(image_path: &std::path::Path) -> DirItem {
+    let file = std::fs::File::open(image_path).unwrap();
+    let fs = reader::filesystem_open(file).unwrap();
+
+    let root_tree_logical = fs.superblock.root;
+    let root_dir_oid = btrfs_disk::raw::BTRFS_ROOT_TREE_DIR_OBJECTID as u64;
+    let header_size = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
+
+    let mut found: Option<DirItem> = None;
+    let mut block_reader = fs.reader;
+    reader::tree_walk(
+        &mut block_reader,
+        root_tree_logical,
+        Traversal::Dfs,
+        &mut |block| {
+            if let btrfs_disk::tree::TreeBlock::Leaf { items, data, .. } = block
+            {
+                for item in items {
+                    if item.key.objectid == root_dir_oid
+                        && item.key.key_type == KeyType::DirItem
+                    {
+                        let start = header_size + item.offset as usize;
+                        let end = start + item.size as usize;
+                        if end <= data.len() {
+                            let entries = DirItem::parse_all(&data[start..end]);
+                            for entry in entries {
+                                if entry.name == b"default" {
+                                    found = Some(entry);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+    .unwrap();
+
+    found.expect("no 'default' DIR_ITEM found in root tree")
+}
+
+/// Normal mkfs creates a "default" DIR_ITEM pointing to FS_TREE (objectid 5).
+#[test]
+fn root_tree_default_dir_item_points_to_fs_tree() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
+
+    let dir_item = find_default_dir_item(image.path());
+    assert_eq!(
+        dir_item.location.objectid,
+        btrfs_disk::raw::BTRFS_FS_TREE_OBJECTID as u64,
+        "default DIR_ITEM should point to FS_TREE"
+    );
+    assert_eq!(dir_item.location.key_type, KeyType::RootItem);
+}
+
+/// With --subvol default:subdir, the "default" DIR_ITEM should point to the
+/// subvolume's objectid (256) instead of FS_TREE.
+#[test]
+fn rootdir_default_subvol_dir_item_points_to_subvol() {
+    use btrfs_mkfs::{
+        args::{SubvolArg, SubvolType},
+        rootdir::CompressConfig,
+    };
+
+    let rootdir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(rootdir.path().join("mysubvol")).unwrap();
+    std::fs::write(rootdir.path().join("mysubvol").join("hello.txt"), "hello")
+        .unwrap();
+
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.devices[0].path = image.path().to_path_buf();
+    cfg.incompat_flags |=
+        u64::from(btrfs_disk::raw::BTRFS_FEATURE_INCOMPAT_DEFAULT_SUBVOL);
+
+    let compress = CompressConfig {
+        algorithm: btrfs_mkfs::args::CompressAlgorithm::No,
+        level: None,
+    };
+    let subvols = [SubvolArg {
+        subvol_type: SubvolType::Default,
+        path: PathBuf::from("mysubvol"),
+    }];
+
+    mkfs::make_btrfs_with_rootdir(
+        &cfg,
+        rootdir.path(),
+        compress,
+        &[],
+        &subvols,
+        false,
+    )
+    .unwrap();
+
+    let dir_item = find_default_dir_item(image.path());
+    let expected_subvol_id = btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID as u64;
+    assert_eq!(
+        dir_item.location.objectid, expected_subvol_id,
+        "default DIR_ITEM should point to subvolume {expected_subvol_id}, not FS_TREE"
+    );
+    assert_eq!(dir_item.location.key_type, KeyType::RootItem);
 }

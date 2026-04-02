@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   directories, symlinks, hardlinks, xattrs, and special files
 - `mkfs --rootdir --compress`: zlib and zstd compression for rootdir
   population (LZO not yet supported)
+- `mkfs --rootdir --subvol`: create subdirectories as separate btrfs
+  subvolumes with independent FS trees, ROOT_REF/ROOT_BACKREF linkage,
+  read-only support (`ro:`, `default-ro:`), and nested subvolume support
 - `mkfs --rootdir --inode-flags`: set NODATACOW/NODATASUM flags on
   specific paths during rootdir population
 - `mkfs --rootdir --shrink`: truncate the image to the actual used size

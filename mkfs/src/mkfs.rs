@@ -1350,6 +1350,41 @@ fn patch_root_item_fs(
     }
 }
 
+/// Add root tree directory items: `INODE_ITEM` + `INODE_REF` for objectid 6,
+/// and a `DIR_ITEM` for "default" pointing to the given root objectid.
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
+fn add_root_tree_dir_items(
+    items_out: &mut Vec<(Key, Vec<u8>)>,
+    generation: u64,
+    now: u64,
+    nodesize: u32,
+    default_root_id: u64,
+) {
+    let root_dir_oid = u64::from(raw::BTRFS_ROOT_TREE_DIR_OBJECTID);
+
+    // INODE_ITEM for the root tree directory (objectid 6).
+    items_out.push((
+        Key::new(root_dir_oid, raw::BTRFS_INODE_ITEM_KEY as u8, 0),
+        items::inode_item_dir(generation, u64::from(nodesize), now),
+    ));
+
+    // INODE_REF: ".." self-reference for objectid 6.
+    items_out.push((
+        Key::new(root_dir_oid, raw::BTRFS_INODE_REF_KEY as u8, root_dir_oid),
+        items::inode_ref(0, b".."),
+    ));
+
+    // DIR_ITEM: "default" entry pointing to the default subvolume.
+    let name = b"default";
+    let name_hash = rootdir::btrfs_name_hash(name);
+    let location =
+        Key::new(default_root_id, raw::BTRFS_ROOT_ITEM_KEY as u8, u64::MAX);
+    items_out.push((
+        Key::new(root_dir_oid, raw::BTRFS_DIR_ITEM_KEY as u8, name_hash),
+        items::dir_item(&location, generation, name, raw::BTRFS_FT_DIR as u8),
+    ));
+}
+
 #[allow(clippy::cast_possible_truncation)] // key type fits in u8
 #[allow(clippy::cast_sign_loss)] // DATA_RELOC_TREE_OBJECTID is positive
 #[allow(clippy::items_after_statements)]
@@ -1468,6 +1503,21 @@ fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
         ));
     }
 
+    // Root tree directory items: INODE_ITEM + INODE_REF for objectid 6,
+    // DIR_ITEM for "default" pointing to the default subvolume (or FS tree).
+    let default_root_id = args
+        .subvol_meta
+        .iter()
+        .find(|m| m.is_default)
+        .map_or(u64::from(raw::BTRFS_FS_TREE_OBJECTID), |m| m.subvol_id);
+    add_root_tree_dir_items(
+        &mut root_items,
+        args.generation,
+        args.now,
+        cfg.nodesize,
+        default_root_id,
+    );
+
     // Sort all items by key and push into the leaf.
     root_items.sort_by_key(|(k, _)| *k);
     for (key, data) in &root_items {
@@ -1493,13 +1543,11 @@ fn build_root_tree(
 
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Root));
     let generation = 1u64;
+    let now = cfg.now_secs();
 
-    // The root tree contains ROOT_ITEM entries for every other tree,
-    // sorted by objectid. We skip Root (self) and Chunk (bootstrapped
-    // via the superblock's chunk_root pointer, though we still write a
-    // ROOT_ITEM for it).
+    // Collect all root tree items, then sort by key and push.
+    let mut root_items: Vec<(Key, Vec<u8>)> = Vec::new();
 
-    // Collect entries sorted by objectid.
     let mut entries: Vec<RootEntry> = TreeId::ROOT_ITEM_TREES
         .iter()
         .map(|&tree| RootEntry {
@@ -1517,8 +1565,6 @@ fn build_root_tree(
         });
     }
 
-    entries.sort_by_key(|e| e.objectid);
-
     for entry in &entries {
         let key = Key::new(entry.objectid, raw::BTRFS_ROOT_ITEM_KEY as u8, 0);
 
@@ -1529,45 +1575,36 @@ fn build_root_tree(
             cfg.nodesize,
         );
 
-        // The FS tree root item gets a UUID, timestamps, and
-        // BTRFS_INODE_ROOT_ITEM_INIT flag.
         if entry.is_fs_tree {
-            // Derive FS tree UUID deterministically from fs_uuid by
-            // flipping bits. In production fs_uuid is random, so this
-            // is effectively random too.
             let mut uuid_bytes = *cfg.fs_uuid.as_bytes();
             for b in &mut uuid_bytes {
                 *b ^= 0xFF;
             }
-            let uuid = Uuid::from_bytes(uuid_bytes);
-            let uuid_off = mem::offset_of!(raw::btrfs_root_item, uuid);
-            data[uuid_off..uuid_off + 16].copy_from_slice(uuid.as_bytes());
-
-            // Set inode flags = BTRFS_INODE_ROOT_ITEM_INIT
-            let flags_off = mem::offset_of!(raw::btrfs_inode_item, flags);
-            data[flags_off..flags_off + 8].copy_from_slice(
-                &(u64::from(raw::BTRFS_INODE_ROOT_ITEM_INIT)).to_le_bytes(),
+            patch_root_item_fs(
+                &mut data,
+                &Uuid::from_bytes(uuid_bytes),
+                0,
+                cfg.nodesize,
+                now,
             );
-
-            // Set inode.size = 3 (C reference convention)
-            data[16..24].copy_from_slice(&3u64.to_le_bytes());
-            // Set inode.nbytes = nodesize
-            data[24..32]
-                .copy_from_slice(&(u64::from(cfg.nodesize)).to_le_bytes());
-
-            // Set timestamps: otime and ctime
-            let now = cfg.now_secs();
-            let ctime_off = mem::offset_of!(raw::btrfs_root_item, ctime);
-            let otime_off = mem::offset_of!(raw::btrfs_root_item, otime);
-            data[otime_off..otime_off + 8].copy_from_slice(&now.to_le_bytes());
-            data[otime_off + 8..otime_off + 12]
-                .copy_from_slice(&0u32.to_le_bytes());
-            data[ctime_off..ctime_off + 8].copy_from_slice(&now.to_le_bytes());
-            data[ctime_off + 8..ctime_off + 12]
-                .copy_from_slice(&0u32.to_le_bytes());
         }
 
-        leaf.push(key, &data)
+        root_items.push((key, data));
+    }
+
+    // Root tree directory: INODE_ITEM + INODE_REF for objectid 6,
+    // DIR_ITEM "default" pointing to the FS tree.
+    add_root_tree_dir_items(
+        &mut root_items,
+        generation,
+        now,
+        cfg.nodesize,
+        u64::from(raw::BTRFS_FS_TREE_OBJECTID),
+    );
+
+    root_items.sort_by_key(|(k, _)| *k);
+    for (key, data) in &root_items {
+        leaf.push(*key, data)
             .map_err(|e| anyhow::anyhow!("root tree: {e}"))?;
     }
 
