@@ -1,10 +1,14 @@
-use crate::{Format, Runnable, util::open_path};
+use crate::{
+    Format, Runnable,
+    util::{open_path, print_json},
+};
 use anyhow::{Context, Result, bail};
 use btrfs_uapi::{
     device::{DeviceStats, device_info_all, device_stats},
     filesystem::filesystem_info,
 };
 use clap::Parser;
+use serde::Serialize;
 use std::{os::unix::io::AsFd, path::PathBuf};
 
 /// Show device I/O error statistics for all devices of a filesystem
@@ -34,10 +38,59 @@ pub struct DeviceStatsCommand {
     pub path: PathBuf,
 }
 
+#[derive(Serialize)]
+struct StatsJson {
+    device: String,
+    devid: u64,
+    write_io_errs: u64,
+    read_io_errs: u64,
+    flush_io_errs: u64,
+    corruption_errs: u64,
+    generation_errs: u64,
+}
+
+impl StatsJson {
+    fn from_uapi(path: &str, stats: &DeviceStats) -> Self {
+        Self {
+            device: path.to_string(),
+            devid: stats.devid,
+            write_io_errs: stats.write_errs,
+            read_io_errs: stats.read_errs,
+            flush_io_errs: stats.flush_errs,
+            corruption_errs: stats.corruption_errs,
+            generation_errs: stats.generation_errs,
+        }
+    }
+
+    fn from_disk(
+        path: &str,
+        devid: u64,
+        stats: &btrfs_disk::items::DeviceStats,
+    ) -> Self {
+        Self {
+            device: path.to_string(),
+            devid,
+            write_io_errs: stats.values.first().map_or(0, |v| v.1),
+            read_io_errs: stats.values.get(1).map_or(0, |v| v.1),
+            flush_io_errs: stats.values.get(2).map_or(0, |v| v.1),
+            corruption_errs: stats.values.get(3).map_or(0, |v| v.1),
+            generation_errs: stats.values.get(4).map_or(0, |v| v.1),
+        }
+    }
+
+    fn is_clean(&self) -> bool {
+        self.write_io_errs == 0
+            && self.read_io_errs == 0
+            && self.flush_io_errs == 0
+            && self.corruption_errs == 0
+            && self.generation_errs == 0
+    }
+}
+
 impl Runnable for DeviceStatsCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, format: Format, _dry_run: bool) -> Result<()> {
         if self.offline {
-            return self.run_offline();
+            return self.run_offline(format);
         }
 
         let file = open_path(&self.path)?;
@@ -58,6 +111,7 @@ impl Runnable for DeviceStatsCommand {
             bail!("no devices found for '{}'", self.path.display());
         }
 
+        let mut all_stats: Vec<StatsJson> = Vec::new();
         let mut any_nonzero = false;
 
         for dev in &devices {
@@ -69,10 +123,21 @@ impl Runnable for DeviceStatsCommand {
                     )
                 })?;
 
-            print_stats(&dev.path, &stats);
-
-            if !stats.is_clean() {
+            let entry = StatsJson::from_uapi(&dev.path, &stats);
+            if !entry.is_clean() {
                 any_nonzero = true;
+            }
+            all_stats.push(entry);
+        }
+
+        match format {
+            Format::Text => {
+                for s in &all_stats {
+                    print_stats_text(s);
+                }
+            }
+            Format::Json => {
+                print_json("device-stats", &all_stats)?;
             }
         }
 
@@ -85,7 +150,7 @@ impl Runnable for DeviceStatsCommand {
 }
 
 impl DeviceStatsCommand {
-    fn run_offline(&self) -> Result<()> {
+    fn run_offline(&self, format: Format) -> Result<()> {
         use btrfs_disk::{
             items::DeviceStats as DiskDeviceStats,
             reader::{self, Traversal},
@@ -110,8 +175,7 @@ impl DeviceStatsCommand {
         let header_size = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
         let path_str = self.path.display().to_string();
 
-        let mut any_nonzero = false;
-        let mut found_any = false;
+        let mut all_stats: Vec<StatsJson> = Vec::new();
         let mut block_reader = fs.reader;
 
         reader::tree_walk(
@@ -128,13 +192,9 @@ impl DeviceStatsCommand {
                                 let ds =
                                     DiskDeviceStats::parse(&data[start..end]);
                                 let devid = item.key.offset;
-                                print_offline_stats(&path_str, devid, &ds);
-                                for &(_, v) in &ds.values {
-                                    if v > 0 {
-                                        any_nonzero = true;
-                                    }
-                                }
-                                found_any = true;
+                                all_stats.push(StatsJson::from_disk(
+                                    &path_str, devid, &ds,
+                                ));
                             }
                         }
                     }
@@ -145,9 +205,26 @@ impl DeviceStatsCommand {
             format!("failed to walk device tree on '{}'", self.path.display())
         })?;
 
-        if !found_any {
-            // No stats items: all devices are clean (print zeros).
-            print_offline_stats(&path_str, 1, &DiskDeviceStats::parse(&[]));
+        if all_stats.is_empty() {
+            all_stats.push(StatsJson::from_disk(
+                &path_str,
+                1,
+                &DiskDeviceStats::parse(&[]),
+            ));
+        }
+
+        let any_nonzero = all_stats.iter().any(|s| !s.is_clean());
+
+        match format {
+            Format::Text => {
+                for s in &all_stats {
+                    let label = format!("{}.devid.{}", s.device, s.devid);
+                    print_stats_text_labeled(&label, s);
+                }
+            }
+            Format::Json => {
+                print_json("device-stats", &all_stats)?;
+            }
         }
 
         if self.check && any_nonzero {
@@ -158,35 +235,19 @@ impl DeviceStatsCommand {
     }
 }
 
-/// Print the five counters for one device in the same layout as the C tool:
-/// `[/dev/path].counter_name   <value>`
-fn print_stats(path: &str, stats: &DeviceStats) {
-    let p = path;
-    println!("[{p}].{:<24} {}", "write_io_errs", stats.write_errs);
-    println!("[{p}].{:<24} {}", "read_io_errs", stats.read_errs);
-    println!("[{p}].{:<24} {}", "flush_io_errs", stats.flush_errs);
-    println!("[{p}].{:<24} {}", "corruption_errs", stats.corruption_errs);
-    println!("[{p}].{:<24} {}", "generation_errs", stats.generation_errs);
+fn print_stats_text(s: &StatsJson) {
+    let p = &s.device;
+    println!("[{p}].{:<24} {}", "write_io_errs", s.write_io_errs);
+    println!("[{p}].{:<24} {}", "read_io_errs", s.read_io_errs);
+    println!("[{p}].{:<24} {}", "flush_io_errs", s.flush_io_errs);
+    println!("[{p}].{:<24} {}", "corruption_errs", s.corruption_errs);
+    println!("[{p}].{:<24} {}", "generation_errs", s.generation_errs);
 }
 
-/// Print stats from offline (on-disk) format. The disk parser returns
-/// named pairs; map them to the standard counter names.
-#[allow(clippy::cast_possible_truncation)]
-fn print_offline_stats(
-    path: &str,
-    devid: u64,
-    stats: &btrfs_disk::items::DeviceStats,
-) {
-    let label = format!("{path}.devid.{devid}");
-    let names = [
-        "write_io_errs",
-        "read_io_errs",
-        "flush_io_errs",
-        "corruption_errs",
-        "generation_errs",
-    ];
-    for (i, name) in names.iter().enumerate() {
-        let val = stats.values.get(i).map_or(0, |&(_, v)| v);
-        println!("[{label}].{name:<24} {val}");
-    }
+fn print_stats_text_labeled(label: &str, s: &StatsJson) {
+    println!("[{label}].{:<24} {}", "write_io_errs", s.write_io_errs);
+    println!("[{label}].{:<24} {}", "read_io_errs", s.read_io_errs);
+    println!("[{label}].{:<24} {}", "flush_io_errs", s.flush_io_errs);
+    println!("[{label}].{:<24} {}", "corruption_errs", s.corruption_errs);
+    println!("[{label}].{:<24} {}", "generation_errs", s.generation_errs);
 }

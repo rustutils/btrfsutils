@@ -1,6 +1,6 @@
 use crate::{
     Format, Runnable,
-    util::{SizeFormat, fmt_size, open_path},
+    util::{SizeFormat, fmt_size, open_path, print_json},
 };
 use anyhow::{Context, Result};
 use btrfs_uapi::quota::{
@@ -8,6 +8,7 @@ use btrfs_uapi::quota::{
     qgroupid_subvolid,
 };
 use clap::Parser;
+use serde::Serialize;
 use std::{fmt::Write as _, os::unix::io::AsFd, path::PathBuf};
 
 const HEADING_COLUMN_SELECTION: &str = "Column selection";
@@ -165,9 +166,54 @@ fn format_qgroupid(qgroupid: u64) -> String {
     )
 }
 
+#[derive(Serialize)]
+struct QgroupJson {
+    qgroupid: String,
+    rfer: u64,
+    excl: u64,
+    max_rfer: Option<u64>,
+    max_excl: Option<u64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    parents: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    children: Vec<String>,
+}
+
+impl QgroupJson {
+    fn from_info(q: &QgroupInfo) -> Self {
+        let max_rfer = if q.limit_flags.contains(QgroupLimitFlags::MAX_RFER)
+            && q.max_rfer != u64::MAX
+        {
+            Some(q.max_rfer)
+        } else {
+            None
+        };
+        let max_excl = if q.limit_flags.contains(QgroupLimitFlags::MAX_EXCL)
+            && q.max_excl != u64::MAX
+        {
+            Some(q.max_excl)
+        } else {
+            None
+        };
+        Self {
+            qgroupid: format_qgroupid(q.qgroupid),
+            rfer: q.rfer,
+            excl: q.excl,
+            max_rfer,
+            max_excl,
+            parents: q.parents.iter().map(|&id| format_qgroupid(id)).collect(),
+            children: q
+                .children
+                .iter()
+                .map(|&id| format_qgroupid(id))
+                .collect(),
+        }
+    }
+}
+
 impl Runnable for QgroupShowCommand {
     #[allow(clippy::too_many_lines)]
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, format: Format, _dry_run: bool) -> Result<()> {
         // filter_all / filter_direct: not implemented, ignored
         let _ = self.filter_all;
         let _ = self.filter_direct;
@@ -249,66 +295,81 @@ impl Runnable for QgroupShowCommand {
             }
         }
 
-        // Build header
-        let mut header =
-            format!("{:<16} {:>12} {:>12}", "qgroupid", "rfer", "excl");
-        if self.print_rfer_limit {
-            let _ = write!(header, " {:>12}", "max_rfer");
-        }
-        if self.print_excl_limit {
-            let _ = write!(header, " {:>12}", "max_excl");
-        }
-        if self.print_parent {
-            let _ = write!(header, "  {:<20}", "parent");
-        }
-        if self.print_child {
-            let _ = write!(header, "  {:<20}", "child");
-        }
-        println!("{header}");
-
-        for q in &qgroups {
-            let id_str = format_qgroupid(q.qgroupid);
-            let rfer_str = fmt_size(q.rfer, &mode);
-            let excl_str = fmt_size(q.excl, &mode);
-
-            let mut line =
-                format!("{id_str:<16} {rfer_str:>12} {excl_str:>12}");
-
-            if self.print_rfer_limit {
-                let s = fmt_limit(
-                    q.max_rfer,
-                    q.limit_flags,
-                    QgroupLimitFlags::MAX_RFER,
-                    &mode,
-                );
-                let _ = write!(line, " {s:>12}");
+        match format {
+            Format::Text => {
+                print_qgroups_text(self, &qgroups, &mode);
             }
-
-            if self.print_excl_limit {
-                let s = fmt_limit(
-                    q.max_excl,
-                    q.limit_flags,
-                    QgroupLimitFlags::MAX_EXCL,
-                    &mode,
-                );
-                let _ = write!(line, " {s:>12}");
+            Format::Json => {
+                let json: Vec<QgroupJson> =
+                    qgroups.iter().map(QgroupJson::from_info).collect();
+                print_json("qgroup-show", &json)?;
             }
-
-            if self.print_parent {
-                let parents: Vec<String> =
-                    q.parents.iter().map(|&id| format_qgroupid(id)).collect();
-                let _ = write!(line, "  {:<20}", parents.join(","));
-            }
-
-            if self.print_child {
-                let children: Vec<String> =
-                    q.children.iter().map(|&id| format_qgroupid(id)).collect();
-                let _ = write!(line, "  {:<20}", children.join(","));
-            }
-
-            println!("{line}");
         }
 
         Ok(())
+    }
+}
+
+fn print_qgroups_text(
+    cmd: &QgroupShowCommand,
+    qgroups: &[QgroupInfo],
+    mode: &SizeFormat,
+) {
+    let mut header =
+        format!("{:<16} {:>12} {:>12}", "qgroupid", "rfer", "excl");
+    if cmd.print_rfer_limit {
+        let _ = write!(header, " {:>12}", "max_rfer");
+    }
+    if cmd.print_excl_limit {
+        let _ = write!(header, " {:>12}", "max_excl");
+    }
+    if cmd.print_parent {
+        let _ = write!(header, "  {:<20}", "parent");
+    }
+    if cmd.print_child {
+        let _ = write!(header, "  {:<20}", "child");
+    }
+    println!("{header}");
+
+    for q in qgroups {
+        let id_str = format_qgroupid(q.qgroupid);
+        let rfer_str = fmt_size(q.rfer, mode);
+        let excl_str = fmt_size(q.excl, mode);
+
+        let mut line = format!("{id_str:<16} {rfer_str:>12} {excl_str:>12}");
+
+        if cmd.print_rfer_limit {
+            let s = fmt_limit(
+                q.max_rfer,
+                q.limit_flags,
+                QgroupLimitFlags::MAX_RFER,
+                mode,
+            );
+            let _ = write!(line, " {s:>12}");
+        }
+
+        if cmd.print_excl_limit {
+            let s = fmt_limit(
+                q.max_excl,
+                q.limit_flags,
+                QgroupLimitFlags::MAX_EXCL,
+                mode,
+            );
+            let _ = write!(line, " {s:>12}");
+        }
+
+        if cmd.print_parent {
+            let parents: Vec<String> =
+                q.parents.iter().map(|&id| format_qgroupid(id)).collect();
+            let _ = write!(line, "  {:<20}", parents.join(","));
+        }
+
+        if cmd.print_child {
+            let children: Vec<String> =
+                q.children.iter().map(|&id| format_qgroupid(id)).collect();
+            let _ = write!(line, "  {:<20}", children.join(","));
+        }
+
+        println!("{line}");
     }
 }

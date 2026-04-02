@@ -46,7 +46,6 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ### Notable missing flags
 
-- `--format` (JSON output): device stats, filesystem df, qgroup show
 - `--offline`: filesystem resize
 
 ## Testing

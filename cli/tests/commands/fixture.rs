@@ -615,6 +615,34 @@ fn device_stats_offline_check_clean_succeeds() {
     btrfs_ok(&["device", "stats", "--offline", "--check", img_str]);
 }
 
+#[test]
+fn device_stats_offline_json() {
+    let img = cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let out = btrfs_ok(&[
+        "device",
+        "stats",
+        "--offline",
+        "--format",
+        "json",
+        img_str,
+    ]);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&out).expect("output should be valid JSON");
+    assert_eq!(parsed["__header"]["version"], "1");
+    let arr = parsed["device-stats"]
+        .as_array()
+        .expect("expected device-stats array");
+    assert_eq!(arr.len(), 1, "expected one device");
+    let dev = &arr[0];
+    assert_eq!(dev["write_io_errs"], 0);
+    assert_eq!(dev["read_io_errs"], 0);
+    assert_eq!(dev["flush_io_errs"], 0);
+    assert_eq!(dev["corruption_errs"], 0);
+    assert_eq!(dev["generation_errs"], 0);
+    assert!(dev["devid"].as_u64().is_some(), "expected devid field");
+}
+
 // ── restore (no privileges needed — reads raw image) ─────────────────
 
 #[test]

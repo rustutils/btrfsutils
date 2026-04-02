@@ -31,6 +31,8 @@ log = { workspace = true }
 lzokay = { workspace = true }
 nix = { workspace = true }
 regex-lite = "0.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 uuid = { workspace = true }
 zstd = { workspace = true }
 

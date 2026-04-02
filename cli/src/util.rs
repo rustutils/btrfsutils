@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Local};
+use serde::Serialize;
 use std::{
     fs::{self, File},
     os::unix::fs::FileTypeExt,
@@ -235,6 +236,35 @@ pub fn has_btrfs_superblock(device: &Path) -> bool {
         Ok(sb) => sb.magic_is_valid(),
         Err(_) => false,
     }
+}
+
+/// Write structured JSON output in the btrfs-progs format.
+///
+/// Wraps the data in a root object with a `__header` containing a version
+/// field, and the data under the given `key`:
+///
+/// ```json
+/// {
+///   "__header": { "version": "1" },
+///   "<key>": <data>
+/// }
+/// ```
+pub fn print_json(key: &str, data: &impl Serialize) -> Result<()> {
+    #[derive(Serialize)]
+    struct Header {
+        version: &'static str,
+    }
+
+    let mut map = serde_json::Map::new();
+    map.insert(
+        "__header".to_string(),
+        serde_json::to_value(Header { version: "1" })?,
+    );
+    map.insert(key.to_string(), serde_json::to_value(data)?);
+
+    serde_json::to_writer_pretty(std::io::stdout(), &map)?;
+    println!();
+    Ok(())
 }
 
 #[cfg(test)]
