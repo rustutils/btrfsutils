@@ -23,6 +23,7 @@ btrfs-stream = { workspace = true, features = ["receive"] }
 btrfs-tune = { workspace = true, optional = true }
 btrfs-uapi = { workspace = true }
 chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
+cols = { workspace = true }
 clap = { workspace = true }
 env_logger = { workspace = true }
 flate2 = { workspace = true }

@@ -19,6 +19,14 @@ All notable changes to this project will be documented in this file.
   deleted without actually removing subvolumes. Using `--dry-run`
   with commands that do not support it now returns an error instead
   of silently doing nothing
+- `btrfs device stats -T`: tabular output format with columns for
+  device ID, path, and error counters (uses `cols` crate)
+- Multicall binary support: with the `multicall` cargo feature, the
+  `btrfs` binary dispatches by program name (`mkfs.btrfs`,
+  `btrfs-mkfs`, `btrfstune`, `btrfs-tune`)
+- Sysfs module unit tests covering all accessors (numeric, string,
+  boolean, commit stats, features, quota status, scrub speed,
+  qgroup entry parsing)
 
 ## 0.8.0
 

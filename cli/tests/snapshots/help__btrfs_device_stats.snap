@@ -23,6 +23,10 @@ Options:
   -z, --reset
           Print current values and then atomically reset all counters to zero
 
+  -T
+          Show stats in a tabular format with columns instead of per-device
+          lines
+
       --offline
           Read stats from the on-disk device tree (no mount required)
 

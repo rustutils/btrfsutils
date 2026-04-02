@@ -432,6 +432,13 @@ impl SysfsBtrfs {
     }
 }
 
+#[cfg(test)]
+impl SysfsBtrfs {
+    fn with_base(base: PathBuf) -> Self {
+        Self { base }
+    }
+}
+
 /// Parse a qgroups sysfs directory entry name of the form `<level>_<id>`.
 ///
 /// Returns `Some((level, id))` for valid entries, `None` for anything else
@@ -442,6 +449,276 @@ fn parse_qgroup_entry_name(name: &OsStr) -> Option<(u64, u64)> {
     let level: u64 = level_str.parse().ok()?;
     let id: u64 = id_str.parse().ok()?;
     Some((level, id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn setup() -> (TempDir, SysfsBtrfs) {
+        let dir = TempDir::new().unwrap();
+        let sysfs = SysfsBtrfs::with_base(dir.path().to_path_buf());
+        (dir, sysfs)
+    }
+
+    #[test]
+    fn read_u64_values() {
+        let (dir, sysfs) = setup();
+        fs::write(dir.path().join("nodesize"), "16384\n").unwrap();
+        fs::write(dir.path().join("sectorsize"), "4096\n").unwrap();
+        fs::write(dir.path().join("clone_alignment"), "4096\n").unwrap();
+        fs::write(dir.path().join("generation"), "42\n").unwrap();
+        fs::write(dir.path().join("bg_reclaim_threshold"), "75\n").unwrap();
+
+        assert_eq!(sysfs.nodesize().unwrap(), 16384);
+        assert_eq!(sysfs.sectorsize().unwrap(), 4096);
+        assert_eq!(sysfs.clone_alignment().unwrap(), 4096);
+        assert_eq!(sysfs.generation().unwrap(), 42);
+        assert_eq!(sysfs.bg_reclaim_threshold().unwrap(), 75);
+    }
+
+    #[test]
+    fn read_u64_invalid() {
+        let (dir, sysfs) = setup();
+        fs::write(dir.path().join("nodesize"), "not_a_number\n").unwrap();
+        assert!(sysfs.nodesize().is_err());
+    }
+
+    #[test]
+    fn read_u64_missing_file() {
+        let (_dir, sysfs) = setup();
+        let err = sysfs.nodesize().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn read_string_values() {
+        let (dir, sysfs) = setup();
+        fs::write(dir.path().join("label"), "my-filesystem\n").unwrap();
+        fs::write(dir.path().join("checksum"), "crc32c (crc32c-lib)\n")
+            .unwrap();
+        fs::write(dir.path().join("read_policy"), "[pid]\n").unwrap();
+        fs::write(dir.path().join("exclusive_operation"), "none\n").unwrap();
+
+        assert_eq!(sysfs.label().unwrap(), "my-filesystem");
+        assert_eq!(sysfs.checksum().unwrap(), "crc32c (crc32c-lib)");
+        assert_eq!(sysfs.read_policy().unwrap(), "[pid]");
+        assert_eq!(sysfs.exclusive_operation().unwrap(), "none");
+    }
+
+    #[test]
+    fn read_empty_label() {
+        let (dir, sysfs) = setup();
+        fs::write(dir.path().join("label"), "\n").unwrap();
+        assert_eq!(sysfs.label().unwrap(), "");
+    }
+
+    #[test]
+    fn read_bool_values() {
+        let (dir, sysfs) = setup();
+        fs::write(dir.path().join("quota_override"), "0\n").unwrap();
+        assert!(!sysfs.quota_override().unwrap());
+
+        fs::write(dir.path().join("quota_override"), "1\n").unwrap();
+        assert!(sysfs.quota_override().unwrap());
+
+        fs::write(dir.path().join("temp_fsid"), "0\n").unwrap();
+        assert!(!sysfs.temp_fsid().unwrap());
+
+        fs::write(dir.path().join("temp_fsid"), "1\n").unwrap();
+        assert!(sysfs.temp_fsid().unwrap());
+    }
+
+    #[test]
+    fn metadata_uuid() {
+        let (dir, sysfs) = setup();
+        fs::write(
+            dir.path().join("metadata_uuid"),
+            "deadbeef-dead-beef-dead-beefdeadbeef\n",
+        )
+        .unwrap();
+        let uuid = sysfs.metadata_uuid().unwrap();
+        assert_eq!(uuid.to_string(), "deadbeef-dead-beef-dead-beefdeadbeef");
+    }
+
+    #[test]
+    fn metadata_uuid_invalid() {
+        let (dir, sysfs) = setup();
+        fs::write(dir.path().join("metadata_uuid"), "not-a-uuid\n").unwrap();
+        assert!(sysfs.metadata_uuid().is_err());
+    }
+
+    #[test]
+    fn commit_stats_valid() {
+        let (dir, sysfs) = setup();
+        fs::write(
+            dir.path().join("commit_stats"),
+            "commits 100\n\
+             cur_commit_ms 5\n\
+             last_commit_ms 12\n\
+             max_commit_ms 50\n\
+             total_commit_ms 2000\n",
+        )
+        .unwrap();
+
+        let stats = sysfs.commit_stats().unwrap();
+        assert_eq!(
+            stats,
+            CommitStats {
+                commits: 100,
+                cur_commit_ms: 5,
+                last_commit_ms: 12,
+                max_commit_ms: 50,
+                total_commit_ms: 2000,
+            }
+        );
+    }
+
+    #[test]
+    fn commit_stats_missing_field() {
+        let (dir, sysfs) = setup();
+        fs::write(
+            dir.path().join("commit_stats"),
+            "commits 100\ncur_commit_ms 5\n",
+        )
+        .unwrap();
+        let err = sysfs.commit_stats().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn commit_stats_extra_fields_ignored() {
+        let (dir, sysfs) = setup();
+        fs::write(
+            dir.path().join("commit_stats"),
+            "commits 1\n\
+             cur_commit_ms 2\n\
+             last_commit_ms 3\n\
+             max_commit_ms 4\n\
+             total_commit_ms 5\n\
+             unknown_field 99\n",
+        )
+        .unwrap();
+        let stats = sysfs.commit_stats().unwrap();
+        assert_eq!(stats.commits, 1);
+    }
+
+    #[test]
+    fn features_directory() {
+        let (dir, sysfs) = setup();
+        let feat_dir = dir.path().join("features");
+        fs::create_dir(&feat_dir).unwrap();
+        fs::write(feat_dir.join("skinny_metadata"), "").unwrap();
+        fs::write(feat_dir.join("extended_iref"), "").unwrap();
+        fs::write(feat_dir.join("no_holes"), "").unwrap();
+
+        let features = sysfs.features().unwrap();
+        // Should be sorted alphabetically.
+        assert_eq!(
+            features,
+            vec!["extended_iref", "no_holes", "skinny_metadata"]
+        );
+    }
+
+    #[test]
+    fn features_empty() {
+        let (dir, sysfs) = setup();
+        fs::create_dir(dir.path().join("features")).unwrap();
+        assert!(sysfs.features().unwrap().is_empty());
+    }
+
+    #[test]
+    fn scrub_speed_max_get() {
+        let (dir, sysfs) = setup();
+        let devinfo = dir.path().join("devinfo/1");
+        fs::create_dir_all(&devinfo).unwrap();
+        fs::write(devinfo.join("scrub_speed_max"), "104857600\n").unwrap();
+
+        assert_eq!(sysfs.scrub_speed_max_get(1).unwrap(), 104_857_600);
+    }
+
+    #[test]
+    fn scrub_speed_max_get_missing_returns_zero() {
+        let (_dir, sysfs) = setup();
+        // No devinfo directory exists — should return 0, not error.
+        assert_eq!(sysfs.scrub_speed_max_get(99).unwrap(), 0);
+    }
+
+    #[test]
+    fn scrub_speed_max_set() {
+        let (dir, sysfs) = setup();
+        let devinfo = dir.path().join("devinfo/1");
+        fs::create_dir_all(&devinfo).unwrap();
+
+        sysfs.scrub_speed_max_set(1, 500_000_000).unwrap();
+        let contents =
+            fs::read_to_string(devinfo.join("scrub_speed_max")).unwrap();
+        assert_eq!(contents, "500000000\n");
+    }
+
+    #[test]
+    fn reset_commit_stats() {
+        let (dir, sysfs) = setup();
+        fs::write(dir.path().join("commit_stats"), "old data").unwrap();
+
+        sysfs.reset_commit_stats().unwrap();
+        let contents =
+            fs::read_to_string(dir.path().join("commit_stats")).unwrap();
+        assert_eq!(contents, "0");
+    }
+
+    #[test]
+    fn quota_status_disabled() {
+        let (_dir, sysfs) = setup();
+        // No qgroups directory → disabled.
+        let status = sysfs.quota_status().unwrap();
+        assert!(!status.enabled);
+        assert!(status.mode.is_none());
+    }
+
+    #[test]
+    fn quota_status_enabled() {
+        let (dir, sysfs) = setup();
+        let qg = dir.path().join("qgroups");
+        fs::create_dir(&qg).unwrap();
+        fs::write(qg.join("mode"), "qgroup\n").unwrap();
+        fs::write(qg.join("inconsistent"), "0\n").unwrap();
+        fs::write(qg.join("drop_subtree_threshold"), "8\n").unwrap();
+        fs::write(dir.path().join("quota_override"), "0\n").unwrap();
+        // Level-0 qgroup entries.
+        fs::write(qg.join("0_5"), "").unwrap();
+        fs::write(qg.join("0_256"), "").unwrap();
+        // Level-1 qgroup.
+        fs::write(qg.join("1_50"), "").unwrap();
+
+        let status = sysfs.quota_status().unwrap();
+        assert!(status.enabled);
+        assert_eq!(status.mode.as_deref(), Some("qgroup"));
+        assert_eq!(status.inconsistent, Some(false));
+        assert_eq!(status.override_limits, Some(false));
+        assert_eq!(status.drop_subtree_threshold, Some(8));
+        assert_eq!(status.total_count, Some(3));
+        assert_eq!(status.level0_count, Some(2));
+    }
+
+    #[test]
+    fn parse_qgroup_entry_name_valid() {
+        assert_eq!(
+            parse_qgroup_entry_name(OsStr::new("0_256")),
+            Some((0, 256))
+        );
+        assert_eq!(parse_qgroup_entry_name(OsStr::new("1_50")), Some((1, 50)));
+    }
+
+    #[test]
+    fn parse_qgroup_entry_name_invalid() {
+        assert_eq!(parse_qgroup_entry_name(OsStr::new("mode")), None);
+        assert_eq!(parse_qgroup_entry_name(OsStr::new("inconsistent")), None);
+        assert_eq!(parse_qgroup_entry_name(OsStr::new("abc_def")), None);
+        assert_eq!(parse_qgroup_entry_name(OsStr::new("")), None);
+    }
 }
 
 /// Quota status for a mounted btrfs filesystem, read from sysfs under

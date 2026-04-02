@@ -654,6 +654,20 @@ fn device_stats_offline_json() {
     assert!(dev["devid"].as_u64().is_some(), "expected devid field");
 }
 
+#[test]
+fn device_stats_offline_tabular() {
+    let img = cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let out = btrfs_ok(&["device", "stats", "--offline", "-T", img_str]);
+    let lines: Vec<&str> = out.lines().collect();
+    assert!(lines.len() >= 2, "expected header + data row: {out}");
+    assert!(lines[0].contains("ID"), "header should contain ID: {out}");
+    assert!(
+        lines[0].contains("WRITE_ERR"),
+        "header should contain WRITE_ERR: {out}"
+    );
+}
+
 // ── restore (no privileges needed — reads raw image) ─────────────────
 
 #[test]

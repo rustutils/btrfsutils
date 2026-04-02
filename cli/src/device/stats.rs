@@ -8,6 +8,7 @@ use btrfs_uapi::{
     filesystem::filesystem_info,
 };
 use clap::Parser;
+use cols::Cols;
 use serde::Serialize;
 use std::{os::unix::io::AsFd, path::PathBuf};
 
@@ -29,6 +30,10 @@ pub struct DeviceStatsCommand {
     /// Print current values and then atomically reset all counters to zero
     #[clap(long, short = 'z', conflicts_with = "offline")]
     pub reset: bool,
+
+    /// Show stats in a tabular format with columns instead of per-device lines
+    #[clap(short = 'T')]
+    pub tabular: bool,
 
     /// Read stats from the on-disk device tree (no mount required)
     #[clap(long)]
@@ -131,6 +136,7 @@ impl Runnable for DeviceStatsCommand {
         }
 
         match format {
+            Format::Text if self.tabular => print_stats_table(&all_stats),
             Format::Text => {
                 for s in &all_stats {
                     print_stats_text(s);
@@ -216,6 +222,7 @@ impl DeviceStatsCommand {
         let any_nonzero = all_stats.iter().any(|s| !s.is_clean());
 
         match format {
+            Format::Text if self.tabular => print_stats_table(&all_stats),
             Format::Text => {
                 for s in &all_stats {
                     let label = format!("{}.devid.{}", s.device, s.devid);
@@ -233,6 +240,44 @@ impl DeviceStatsCommand {
 
         Ok(())
     }
+}
+
+#[derive(Cols)]
+struct StatsRow {
+    #[column(header = "ID", right)]
+    devid: u64,
+    #[column(header = "WRITE_ERR", right)]
+    write_errs: u64,
+    #[column(header = "READ_ERR", right)]
+    read_errs: u64,
+    #[column(header = "FLUSH_ERR", right)]
+    flush_errs: u64,
+    #[column(header = "CORRUPT_ERR", right)]
+    corruption_errs: u64,
+    #[column(header = "GEN_ERR", right)]
+    generation_errs: u64,
+    #[column(header = "PATH", wrap)]
+    path: String,
+}
+
+impl StatsRow {
+    fn from_json(s: &StatsJson) -> Self {
+        Self {
+            devid: s.devid,
+            path: s.device.clone(),
+            write_errs: s.write_io_errs,
+            read_errs: s.read_io_errs,
+            flush_errs: s.flush_io_errs,
+            corruption_errs: s.corruption_errs,
+            generation_errs: s.generation_errs,
+        }
+    }
+}
+
+fn print_stats_table(stats: &[StatsJson]) {
+    let rows: Vec<StatsRow> = stats.iter().map(StatsRow::from_json).collect();
+    let mut out = std::io::stdout().lock();
+    let _ = StatsRow::print_table(&rows, &mut out);
 }
 
 fn print_stats_text(s: &StatsJson) {
