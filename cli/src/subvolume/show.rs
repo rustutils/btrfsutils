@@ -1,6 +1,7 @@
 use crate::{
     Format, Runnable,
-    util::{ParsedUuid, format_time, human_bytes, open_path},
+    filesystem::UnitMode,
+    util::{ParsedUuid, SizeFormat, fmt_size, format_time, open_path},
 };
 use anyhow::{Context, Result};
 use btrfs_uapi::{
@@ -27,6 +28,9 @@ pub struct SubvolumeShowCommand {
     /// Look up subvolume by its UUID instead of path
     #[clap(short = 'u', long = "uuid", conflicts_with = "rootid")]
     pub uuid: Option<ParsedUuid>,
+
+    #[clap(flatten)]
+    pub units: UnitMode,
 
     /// Path to a subvolume or any file within it
     pub path: PathBuf,
@@ -77,11 +81,18 @@ impl Runnable for SubvolumeShowCommand {
 
         // Quota data: look up this subvolume's qgroup (level 0, id = subvol id).
         if let Some(qg) = query_qgroup(file.as_fd(), info.id) {
+            let mode = self.units.resolve();
             println!("\tQuota group:\t\t0/{}", info.id);
-            println!("\t  Limit referenced:\t{}", format_limit(qg.max_rfer));
-            println!("\t  Limit exclusive:\t{}", format_limit(qg.max_excl));
-            println!("\t  Usage referenced:\t{}", human_bytes(qg.rfer));
-            println!("\t  Usage exclusive:\t{}", human_bytes(qg.excl));
+            println!(
+                "\t  Limit referenced:\t{}",
+                format_limit(qg.max_rfer, &mode)
+            );
+            println!(
+                "\t  Limit exclusive:\t{}",
+                format_limit(qg.max_excl, &mode)
+            );
+            println!("\t  Usage referenced:\t{}", fmt_size(qg.rfer, &mode));
+            println!("\t  Usage exclusive:\t{}", fmt_size(qg.excl, &mode));
         }
 
         Ok(())
@@ -110,11 +121,11 @@ fn query_qgroup(
     })
 }
 
-/// Format a qgroup limit value: "-" if no limit, human-readable otherwise.
-fn format_limit(limit: u64) -> String {
+/// Format a qgroup limit value: "-" if no limit, formatted size otherwise.
+fn format_limit(limit: u64, mode: &SizeFormat) -> String {
     if limit == 0 || limit == u64::MAX {
         "-".to_string()
     } else {
-        human_bytes(limit)
+        fmt_size(limit, mode)
     }
 }
