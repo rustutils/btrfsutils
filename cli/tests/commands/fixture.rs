@@ -40,6 +40,17 @@ fn no_args_returns_error() {
 }
 
 #[test]
+fn dry_run_unsupported_command_returns_error() {
+    let (_stdout, stderr, code) =
+        super::btrfs(&["--dry-run", "filesystem", "df", "/"]);
+    assert_ne!(code, 0, "--dry-run should fail for unsupported commands");
+    assert!(
+        stderr.contains("--dry-run"),
+        "error should mention --dry-run: {stderr}"
+    );
+}
+
+#[test]
 fn subcommand_help_flag() {
     // --help on a subcommand should print usage for that subcommand.
     let out = btrfs_ok(&["filesystem", "df", "--help"]);

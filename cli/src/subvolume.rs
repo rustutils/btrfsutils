@@ -32,6 +32,10 @@ pub struct SubvolumeCommand {
 }
 
 impl Runnable for SubvolumeCommand {
+    fn supports_dry_run(&self) -> bool {
+        matches!(self.subcommand, SubvolumeSubcommand::Delete(_))
+    }
+
     fn run(&self, format: Format, dry_run: bool) -> Result<()> {
         match &self.subcommand {
             SubvolumeSubcommand::Create(cmd) => cmd.run(format, dry_run),

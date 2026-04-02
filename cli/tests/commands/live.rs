@@ -526,31 +526,30 @@ fn subvolume_create_parents_mixed() {
 
 // ── dry-run ─────────────────────────────────────────────────────────
 
-// TODO: enable when --dry-run is implemented for subvolume delete.
-// #[test]
-// #[ignore = "requires elevated privileges"]
-// fn dry_run_subvolume_delete() {
-//     let (_td, mnt) = single_mount();
-//     let mp = mnt.path().to_str().unwrap();
-//
-//     let subvol = format!("{mp}/dry_target");
-//     btrfs_ok(&["subvolume", "create", &subvol]);
-//     assert!(Path::new(&subvol).is_dir());
-//
-//     // --dry-run should not actually delete.
-//     btrfs_ok(&["--dry-run", "subvolume", "delete", &subvol]);
-//     assert!(
-//         Path::new(&subvol).is_dir(),
-//         "subvolume should still exist after --dry-run delete"
-//     );
-//
-//     // Without --dry-run, it should actually delete.
-//     btrfs_ok(&["subvolume", "delete", &subvol]);
-//     assert!(
-//         !Path::new(&subvol).exists(),
-//         "subvolume should be gone after real delete"
-//     );
-// }
+#[test]
+#[ignore = "requires elevated privileges"]
+fn dry_run_subvolume_delete() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    let subvol = format!("{mp}/dry_target");
+    btrfs_ok(&["subvolume", "create", &subvol]);
+    assert!(Path::new(&subvol).is_dir());
+
+    // --dry-run should not actually delete.
+    btrfs_ok(&["--dry-run", "subvolume", "delete", &subvol]);
+    assert!(
+        Path::new(&subvol).is_dir(),
+        "subvolume should still exist after --dry-run delete"
+    );
+
+    // Without --dry-run, it should actually delete.
+    btrfs_ok(&["subvolume", "delete", &subvol]);
+    assert!(
+        !Path::new(&subvol).exists(),
+        "subvolume should be gone after real delete"
+    );
+}
 
 // ── property ─────────────────────────────────────────────────────────
 

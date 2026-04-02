@@ -15,6 +15,10 @@ All notable changes to this project will be documented in this file.
   `qgroup show`, `subvolume show`, `subvolume list`, and
   `subvolume get-default`, using the btrfs-progs wrapper format
   with `__header`
+- `--dry-run` support for `subvolume delete`: print what would be
+  deleted without actually removing subvolumes. Using `--dry-run`
+  with commands that do not support it now returns an error instead
+  of silently doing nothing
 
 ## 0.8.0
 

@@ -47,7 +47,11 @@ pub struct SubvolumeDeleteCommand {
 }
 
 impl Runnable for SubvolumeDeleteCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn supports_dry_run(&self) -> bool {
+        true
+    }
+
+    fn run(&self, _format: Format, dry_run: bool) -> Result<()> {
         if self.subvolid.is_some() && self.paths.len() != 1 {
             bail!(
                 "--subvolid requires exactly one path argument (the filesystem mount point)"
@@ -59,14 +63,14 @@ impl Runnable for SubvolumeDeleteCommand {
         let mut commit_after_fd: Option<File> = None;
 
         if let Some(subvolid) = self.subvolid {
-            let (ok, fd) = self.delete_by_id(subvolid, &self.paths[0]);
+            let (ok, fd) = self.delete_by_id(subvolid, &self.paths[0], dry_run);
             had_error |= !ok;
             if self.commit_after {
                 commit_after_fd = fd;
             }
         } else {
             for path in &self.paths {
-                let (ok, fd) = self.delete_by_path(path);
+                let (ok, fd) = self.delete_by_path(path, dry_run);
                 had_error |= !ok;
                 if self.commit_after && fd.is_some() {
                     commit_after_fd = fd;
@@ -75,7 +79,8 @@ impl Runnable for SubvolumeDeleteCommand {
         }
 
         // --commit-after: sync once at the end.
-        if let Some(ref file) = commit_after_fd
+        if !dry_run
+            && let Some(ref file) = commit_after_fd
             && let Err(e) = wait_for_commit(file.as_fd())
         {
             eprintln!("error: failed to commit: {e:#}");
@@ -92,7 +97,11 @@ impl Runnable for SubvolumeDeleteCommand {
 
 impl SubvolumeDeleteCommand {
     /// Delete a subvolume by path. Returns (success, optional fd for commit-after).
-    fn delete_by_path(&self, path: &PathBuf) -> (bool, Option<File>) {
+    fn delete_by_path(
+        &self,
+        path: &PathBuf,
+        dry_run: bool,
+    ) -> (bool, Option<File>) {
         let result = (|| -> Result<File> {
             let parent = path.parent().ok_or_else(|| {
                 anyhow::anyhow!("'{}' has no parent directory", path.display())
@@ -115,17 +124,19 @@ impl SubvolumeDeleteCommand {
             })?;
             let fd = parent_file.as_fd();
 
-            if self.recursive {
+            if self.recursive && !dry_run {
                 self.delete_children(path)?;
             }
 
-            log::info!("Delete subvolume '{}'", path.display());
+            println!("Delete subvolume '{}'", path.display());
+
+            if dry_run {
+                return Ok(parent_file);
+            }
 
             subvolume_delete(fd, &cname).with_context(|| {
                 format!("failed to delete '{}'", path.display())
             })?;
-
-            println!("Delete subvolume '{}'", path.display());
 
             if self.commit_each {
                 wait_for_commit(fd).with_context(|| {
@@ -150,6 +161,7 @@ impl SubvolumeDeleteCommand {
         &self,
         subvolid: u64,
         fs_path: &PathBuf,
+        dry_run: bool,
     ) -> (bool, Option<File>) {
         let result = (|| -> Result<File> {
             let file = File::open(fs_path).with_context(|| {
@@ -157,7 +169,11 @@ impl SubvolumeDeleteCommand {
             })?;
             let fd = file.as_fd();
 
-            log::info!("Delete subvolume (subvolid={subvolid})");
+            println!("Delete subvolume (subvolid={subvolid})");
+
+            if dry_run {
+                return Ok(file);
+            }
 
             subvolume_delete_by_id(fd, subvolid).with_context(|| {
                 format!(
@@ -165,8 +181,6 @@ impl SubvolumeDeleteCommand {
                     fs_path.display()
                 )
             })?;
-
-            println!("Delete subvolume (subvolid={subvolid})");
 
             if self.commit_each {
                 wait_for_commit(fd).with_context(|| {

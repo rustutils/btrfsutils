@@ -101,6 +101,10 @@ pub struct RestoreCommand {
 }
 
 impl Runnable for RestoreCommand {
+    fn supports_dry_run(&self) -> bool {
+        true
+    }
+
     #[allow(clippy::too_many_lines)]
     fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
         if let Some(m) = self.super_mirror

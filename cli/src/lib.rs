@@ -114,6 +114,15 @@ pub trait Runnable {
     ///
     /// Returns an error if the command fails.
     fn run(&self, format: Format, dry_run: bool) -> Result<()>;
+
+    /// Whether this command supports the global --dry-run flag.
+    ///
+    /// Commands that do not support dry-run will cause an error if the user
+    /// passes --dry-run. Override this to return `true` in commands that
+    /// handle the flag.
+    fn supports_dry_run(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -141,6 +150,14 @@ pub enum Command {
 }
 
 impl Runnable for Command {
+    fn supports_dry_run(&self) -> bool {
+        match self {
+            Command::Restore(cmd) => cmd.supports_dry_run(),
+            Command::Subvolume(cmd) => cmd.supports_dry_run(),
+            _ => false,
+        }
+    }
+
     fn run(&self, format: Format, dry_run: bool) -> Result<()> {
         match self {
             Command::Balance(cmd) => cmd.run(format, dry_run),
@@ -191,6 +208,13 @@ impl Arguments {
             }
         };
         env_logger::Builder::new().filter_level(level).init();
+
+        if self.global.dry_run && !self.command.supports_dry_run() {
+            anyhow::bail!(
+                "the --dry-run option is not supported by this command"
+            );
+        }
+
         self.command
             .run(self.global.format.unwrap_or_default(), self.global.dry_run)
     }
