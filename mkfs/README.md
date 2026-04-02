@@ -47,6 +47,12 @@ btrfs-mkfs -f /dev/sda1
 | `-f`, `--force` | Force overwrite existing filesystem |
 | `-K`, `--nodiscard` | Skip TRIM/discard before writing |
 | `-q`, `--quiet` | Suppress progress output |
+| `--rootdir <DIR>` | Populate from an existing directory tree |
+| `--compress <ALGO>` | Compress rootdir data (zlib, zstd, lzo) |
+| `--subvol <[TYPE:]DIR>` | Create subdirectory as a subvolume (rw, ro, default, default-ro) |
+| `--reflink` | Clone extents instead of copying bytes (requires same filesystem) |
+| `--shrink` | Truncate image to minimal size after populating |
+| `--inode-flags <FLAGS:PATH>` | Set NODATACOW/NODATASUM on specific paths |
 
 ## What's implemented
 
@@ -58,12 +64,18 @@ btrfs-mkfs -f /dev/sda1
 - Device validation: mounted check, existing FS detection, TRIM
 - Minimum device size enforcement (~133 MiB)
 - Default features: extref, skinny-metadata, no-holes, free-space-tree
+- `--rootdir` population: regular files (inline + regular extents up to 1 MiB),
+  directories, symlinks, hardlinks, xattrs, special files
+- `--rootdir` compression: zlib, zstd, LZO (per-sector framed format)
+- `--rootdir` subvolumes: separate FS trees, ROOT_REF/ROOT_BACKREF, rw/ro/default
+- `--rootdir --reflink`: FICLONERANGE extent cloning
+- `--rootdir --shrink`: truncate to actual used size
+- `--rootdir --inode-flags`: NODATACOW/NODATASUM per-path
 - Output passes `btrfs check` with zero errors
 
 ## What's not yet implemented
 
-- `--rootdir` (populate filesystem from a directory tree)
-- RAID0/5/6/10 profiles
+- RAID5/6/10 profiles
 - Zoned device support
 - Mixed data+metadata mode (`-M`)
 

@@ -35,10 +35,10 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 - **rescue**: super-recover, zero-log, create-control-device
 - **restore**: file recovery from damaged/unmounted filesystems with metadata, xattrs, snapshots, compression, path filtering
 - **subvolume**: create, delete, snapshot, show, list, get-default, set-default, get-flags, set-flags, find-new, sync
+- **check**: read-only filesystem verification with 7 phases (superblock, tree structure, extent refs, chunk/block group, FS tree inodes, checksum tree, root refs)
 
 ### Stubs (argument parsing only)
 
-- **check**: full arg parsing scaffolded
 - **rescue**: fix-device-size, chunk-recover, clear-space-cache, clear-uuid-tree, clear-ino-cache, clear-free-space-tree
 
 ### Notable missing flags
