@@ -384,20 +384,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
-name = "cols"
-version = "0.3.1"
+name = "colored"
+version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c00f89c1aeefec50b0318530a7e2112b69928f33e59e96363feb2bfaa7b83f0"
+checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "cols"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaa43599b33420e11264f87c2bc43cfce64e1e5db783b2d0cd4529232378aeff"
+dependencies = [
+ "colored",
  "cols-derive",
  "unicode-width",
 ]
 
 [[package]]
 name = "cols-derive"
-version = "0.1.0"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2686c016dbc1d1a24eee97e5d29d9f529b53682ce4a449486f0104ca78c80044"
+checksum = "1e1def6ebe9dfa8eed7cb563e4fd5f04cdd0459c5379b124f67e741051d5c01d"
 dependencies = [
  "proc-macro2",
  "quote",

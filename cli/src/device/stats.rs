@@ -140,10 +140,11 @@ impl Runnable for DeviceStatsCommand {
         }
 
         match ctx.format {
-            Format::Modern | Format::Text if self.tabular => {
-                print_stats_table(&all_stats);
+            Format::Modern => print_stats_modern(&all_stats),
+            Format::Text if self.tabular => {
+                print_stats_tabular(&all_stats);
             }
-            Format::Modern | Format::Text => {
+            Format::Text => {
                 for s in &all_stats {
                     print_stats_text(s);
                 }
@@ -228,10 +229,11 @@ impl DeviceStatsCommand {
         let any_nonzero = all_stats.iter().any(|s| !s.is_clean());
 
         match format {
-            Format::Modern | Format::Text if self.tabular => {
-                print_stats_table(&all_stats);
+            Format::Modern => print_stats_modern(&all_stats),
+            Format::Text if self.tabular => {
+                print_stats_tabular(&all_stats);
             }
-            Format::Modern | Format::Text => {
+            Format::Text => {
                 for s in &all_stats {
                     let label = format!("{}.devid.{}", s.device, s.devid);
                     print_stats_text_labeled(&label, s);
@@ -282,10 +284,75 @@ impl StatsRow {
     }
 }
 
-fn print_stats_table(stats: &[StatsJson]) {
+/// Modern output: cols-based adaptive table.
+fn print_stats_modern(stats: &[StatsJson]) {
     let rows: Vec<StatsRow> = stats.iter().map(StatsRow::from_json).collect();
     let mut out = std::io::stdout().lock();
     let _ = StatsRow::print_table(&rows, &mut out);
+}
+
+/// Legacy tabular output matching btrfs-progs `-T` format exactly.
+fn print_stats_tabular(stats: &[StatsJson]) {
+    const HEADERS: [&str; 7] = [
+        "Id",
+        "Path",
+        "Write errors",
+        "Read errors",
+        "Flush errors",
+        "Corruption errors",
+        "Generation errors",
+    ];
+
+    let rows: Vec<[String; 7]> = stats
+        .iter()
+        .map(|s| {
+            [
+                s.devid.to_string(),
+                s.device.clone(),
+                s.write_io_errs.to_string(),
+                s.read_io_errs.to_string(),
+                s.flush_io_errs.to_string(),
+                s.corruption_errs.to_string(),
+                s.generation_errs.to_string(),
+            ]
+        })
+        .collect();
+
+    let mut widths = HEADERS.map(str::len);
+    for row in &rows {
+        for (i, cell) in row.iter().enumerate() {
+            widths[i] = widths[i].max(cell.len());
+        }
+    }
+
+    // Header (left-aligned).
+    for (i, hdr) in HEADERS.iter().enumerate() {
+        if i > 0 {
+            print!("  ");
+        }
+        print!("{hdr:<w$}", w = widths[i]);
+    }
+    println!();
+
+    // Separator.
+    for (i, w) in widths.iter().enumerate() {
+        if i > 0 {
+            print!("  ");
+        }
+        print!("{}", "-".repeat(*w));
+    }
+    println!();
+
+    // Data rows (right-aligned).
+    for row in &rows {
+        for (i, cell) in row.iter().enumerate() {
+            if i > 0 {
+                print!("  ");
+            }
+            print!("{cell:>w$}", w = widths[i]);
+        }
+        println!();
+    }
 }
 
 fn print_stats_text(s: &StatsJson) {

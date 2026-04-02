@@ -9,6 +9,10 @@ test:
     #!/usr/bin/env bash
     set -euo pipefail
 
+    # clear all env variables that influence the btrfs command output
+    # format.
+    unset BTRFS_OUTPUT_FORMAT
+
     # Build first so the user sees compile progress/warnings on stderr.
     cargo test --all-features
 

@@ -674,12 +674,29 @@ fn device_stats_offline_tabular() {
     let img_str = img.to_str().unwrap();
     let out = btrfs_ok(&["device", "stats", "--offline", "-T", img_str]);
     let lines: Vec<&str> = out.lines().collect();
-    assert!(lines.len() >= 2, "expected header + data row: {out}");
-    assert!(lines[0].contains("ID"), "header should contain ID: {out}");
+    assert!(lines.len() >= 3, "expected header + separator + data row: {out}");
+    assert!(lines[0].contains("Id"), "header should contain Id: {out}");
     assert!(
-        lines[0].contains("WRITE_ERR"),
-        "header should contain WRITE_ERR: {out}"
+        lines[0].contains("Write errors"),
+        "header should contain Write errors: {out}"
     );
+    assert!(
+        lines[1].chars().all(|c| c == '-' || c == ' '),
+        "second line should be separator: {out}"
+    );
+}
+
+#[test]
+fn device_stats_offline_modern() {
+    let img = cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let out = btrfs_ok(&[
+        "device", "stats", "--offline", "--format", "modern", img_str,
+    ]);
+    let lines: Vec<&str> = out.lines().collect();
+    assert!(lines.len() >= 2, "expected header + data row: {out}");
+    // Modern uses cols with compact headers.
+    assert!(lines[0].contains("ID"), "header should contain ID: {out}");
 }
 
 // ── restore (no privileges needed — reads raw image) ─────────────────

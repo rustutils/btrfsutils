@@ -27,6 +27,11 @@ All notable changes to this project will be documented in this file.
 - Sysfs module unit tests covering all accessors (numeric, string,
   boolean, commit stats, features, quota status, scrub speed,
   qgroup entry parsing)
+- `--format modern` output mode (`BTRFS_OUTPUT_FORMAT=modern` env):
+  opt-in improved formatting with adaptive column widths via `cols`
+- `RunContext` struct for passing runtime options through commands
+- `Runnable::supported_formats()`: commands declare which formats
+  they support; unsupported formats produce a clear error
 
 ## 0.8.0
 
