@@ -81,6 +81,9 @@
           btrfs = craneLib.buildPackage (commonArgs // {
             inherit cargoArtifacts;
 
+            # Tests are run separately via `nix flake check` (cargo-test).
+            doCheck = false;
+
             # After building, generate man pages and install them
             postInstall = ''
               # btrfs-gen is publish=false and not in default-members, so the
