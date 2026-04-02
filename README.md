@@ -24,6 +24,26 @@ and produce output matching the C original.
 Currently, `btrfs check` and `btrfs rescue` are not implemented, and exist
 only as stubs.
 
+## Installation
+
+Install the individual tools as separate binaries:
+
+```sh
+cargo install btrfs-cli btrfs-mkfs btrfs-tune
+```
+
+Or install a single `btrfs` binary with mkfs, tune, and multicall support:
+
+```sh
+cargo install btrfs-cli --features mkfs,tune,multicall
+```
+
+With the `mkfs` and `tune` features, `btrfs mkfs` and `btrfs tune` are
+available as subcommands. With the `multicall` feature, the binary also
+dispatches by program name: symlink or hardlink it to `mkfs.btrfs`,
+`btrfs-mkfs`, `btrfstune`, or `btrfs-tune` and it will behave as that
+tool directly.
+
 ## Building
 
 Requires a Rust toolchain (edition 2024) and Linux kernel headers.

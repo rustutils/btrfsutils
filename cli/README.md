@@ -15,10 +15,27 @@ btrfs <command> [<subcommand>] [<args>]
 
 Most commands require root privileges or `CAP_SYS_ADMIN`.
 
-If you enable the `tune` or `mkfs` features, then the binary will embed
-the `btrfs-tune` and `btrfs-mkfs` crates as subcommands.
-
 Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
+
+## Installation
+
+Install the individual tools as separate binaries:
+
+```sh
+cargo install btrfs-cli btrfs-mkfs btrfs-tune
+```
+
+Or install a single `btrfs` binary with mkfs, tune, and multicall support:
+
+```sh
+cargo install btrfs-cli --features mkfs,tune,multicall
+```
+
+With the `mkfs` and `tune` features, `btrfs mkfs` and `btrfs tune` are
+available as subcommands. With the `multicall` feature, the binary also
+dispatches by program name: symlink or hardlink it to `mkfs.btrfs`,
+`btrfs-mkfs`, `btrfstune`, or `btrfs-tune` and it will behave as that
+tool directly.
 
 ## What's implemented
 

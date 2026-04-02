@@ -82,6 +82,8 @@ check:
     cargo clippy --all-features -- -Dwarnings
     cargo check --target x86_64-unknown-linux-gnu
     cargo check --target x86_64-unknown-linux-musl
+    cargo check --features mkfs
+    cargo check --features tune
 
 # Build deb and rpm packages from the nix build output.
 #
