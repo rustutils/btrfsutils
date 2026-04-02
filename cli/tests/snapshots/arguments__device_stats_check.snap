@@ -16,6 +16,7 @@ Arguments {
                 DeviceStatsCommand {
                     check: true,
                     reset: false,
+                    offline: false,
                     path: "/mnt",
                 },
             ),

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `btrfs device stats --offline`: read device error statistics directly
+  from the on-disk device tree without requiring a mounted filesystem
+- `btrfs subvolume show`: display quota group usage and limits
+  (referenced/exclusive bytes) with unit flag support
+  (`--raw`, `--iec`, `--si`, `--kbytes`, `--mbytes`, `--gbytes`, `--tbytes`)
+
 ## 0.8.0
 
 ### Added

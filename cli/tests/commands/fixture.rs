@@ -583,6 +583,38 @@ fn inspect_tree_stats_single_tree() {
     );
 }
 
+// ── device stats --offline (no privileges needed) ───────────────────
+
+#[test]
+fn device_stats_offline_clean_image() {
+    let img = cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    let out = btrfs_ok(&["device", "stats", "--offline", img_str]);
+
+    // A clean image should have all zero counters.
+    for line in out.lines() {
+        let val: u64 = line
+            .rsplit_once(char::is_whitespace)
+            .expect("expected key-value line")
+            .1
+            .trim()
+            .parse()
+            .expect("expected numeric value");
+        assert_eq!(val, 0, "expected zero counter in: {line}");
+    }
+
+    // Should have 5 counter lines (one device).
+    assert_eq!(out.lines().count(), 5, "expected 5 counter lines");
+}
+
+#[test]
+fn device_stats_offline_check_clean_succeeds() {
+    let img = cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    // --check should succeed (exit 0) on a clean image.
+    btrfs_ok(&["device", "stats", "--offline", "--check", img_str]);
+}
+
 // ── restore (no privileges needed — reads raw image) ─────────────────
 
 #[test]
