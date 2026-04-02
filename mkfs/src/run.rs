@@ -198,6 +198,9 @@ pub fn run(args: &Arguments) -> Result<()> {
     if !args.subvol.is_empty() && args.rootdir.is_none() {
         bail!("--subvol requires --rootdir");
     }
+    if args.reflink && args.rootdir.is_none() {
+        bail!("--reflink requires --rootdir");
+    }
 
     if let Some(ref rootdir) = args.rootdir {
         if !rootdir.is_dir() {
@@ -245,6 +248,9 @@ pub fn run(args: &Arguments) -> Result<()> {
                  (btrfs LZO uses a per-sector format that is not yet implemented)"
             );
         }
+        if args.reflink && algorithm != CompressAlgorithm::No {
+            bail!("--reflink and --compress cannot be used together");
+        }
         let compress = CompressConfig {
             algorithm,
             level: args.compress.as_ref().and_then(|c| c.level),
@@ -264,7 +270,9 @@ pub fn run(args: &Arguments) -> Result<()> {
             compress,
             &args.inode_flags,
             &args.subvol,
-            args.shrink,
+            mkfs::RootdirOptions::new()
+                .reflink(args.reflink)
+                .shrink(args.shrink),
         )?;
     } else {
         mkfs::make_btrfs(&cfg)?;

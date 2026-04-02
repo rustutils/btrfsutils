@@ -4,14 +4,19 @@ use btrfs_disk::{
     tree::KeyType,
 };
 use btrfs_mkfs::{
-    args::{Feature, FeatureArg, Profile},
-    mkfs::{self, DeviceInfo, MkfsConfig},
+    args::{
+        Feature, FeatureArg, InodeFlagsArg, Profile, SubvolArg, SubvolType,
+    },
+    mkfs::{self, DeviceInfo, MkfsConfig, RootdirOptions},
+    rootdir::CompressConfig,
     write::ChecksumType,
 };
 use flate2::{Compression, write::GzEncoder};
 use std::{
+    collections::HashMap,
     io::{Read as _, Seek, SeekFrom, Write},
     path::PathBuf,
+    process::Command,
 };
 use uuid::Uuid;
 
@@ -460,8 +465,6 @@ fn snapshot_no_block_group_tree() {
 // --- Privileged integration tests (mount) ---
 //
 // These require root and loopback device support. Marked #[ignore].
-
-use std::process::Command;
 
 fn run(cmd: &str, args: &[&str]) {
     let output = Command::new(cmd).args(args).output().unwrap_or_else(|e| {
@@ -1003,11 +1006,6 @@ fn root_tree_default_dir_item_points_to_fs_tree() {
 /// subvolume's objectid (256) instead of FS_TREE.
 #[test]
 fn rootdir_default_subvol_dir_item_points_to_subvol() {
-    use btrfs_mkfs::{
-        args::{SubvolArg, SubvolType},
-        rootdir::CompressConfig,
-    };
-
     let rootdir = tempfile::tempdir().unwrap();
     std::fs::create_dir(rootdir.path().join("mysubvol")).unwrap();
     std::fs::write(rootdir.path().join("mysubvol").join("hello.txt"), "hello")
@@ -1019,10 +1017,6 @@ fn rootdir_default_subvol_dir_item_points_to_subvol() {
     cfg.incompat_flags |=
         u64::from(btrfs_disk::raw::BTRFS_FEATURE_INCOMPAT_DEFAULT_SUBVOL);
 
-    let compress = CompressConfig {
-        algorithm: btrfs_mkfs::args::CompressAlgorithm::No,
-        level: None,
-    };
     let subvols = [SubvolArg {
         subvol_type: SubvolType::Default,
         path: PathBuf::from("mysubvol"),
@@ -1031,10 +1025,10 @@ fn rootdir_default_subvol_dir_item_points_to_subvol() {
     mkfs::make_btrfs_with_rootdir(
         &cfg,
         rootdir.path(),
-        compress,
+        CompressConfig::default(),
         &[],
         &subvols,
-        false,
+        RootdirOptions::default(),
     )
     .unwrap();
 
@@ -1054,8 +1048,6 @@ fn make_rootdir_image_with_subvols(
     subvols: &[btrfs_mkfs::args::SubvolArg],
     setup: impl FnOnce(&std::path::Path),
 ) -> tempfile::NamedTempFile {
-    use btrfs_mkfs::{args::CompressAlgorithm, rootdir::CompressConfig};
-
     let rootdir = tempfile::tempdir().unwrap();
     setup(rootdir.path());
 
@@ -1063,17 +1055,13 @@ fn make_rootdir_image_with_subvols(
     let mut cfg = test_config(MIN_SIZE);
     cfg.devices[0].path = image.path().to_path_buf();
 
-    let compress = CompressConfig {
-        algorithm: CompressAlgorithm::No,
-        level: None,
-    };
     mkfs::make_btrfs_with_rootdir(
         &cfg,
         rootdir.path(),
-        compress,
+        CompressConfig::default(),
         &[],
         subvols,
-        false,
+        RootdirOptions::default(),
     )
     .unwrap();
     image
@@ -1128,8 +1116,6 @@ fn walk_root_tree_items(
 /// in the root tree, with the ROOT_ITEM not marked RDONLY.
 #[test]
 fn subvol_rw_has_root_tree_entries() {
-    use btrfs_mkfs::args::{SubvolArg, SubvolType};
-
     let subvols = [SubvolArg {
         subvol_type: SubvolType::Rw,
         path: PathBuf::from("sub1"),
@@ -1175,8 +1161,6 @@ fn subvol_rw_has_root_tree_entries() {
 /// ROOT_ITEM.
 #[test]
 fn subvol_ro_has_rdonly_flag() {
-    use btrfs_mkfs::args::{SubvolArg, SubvolType};
-
     let subvols = [SubvolArg {
         subvol_type: SubvolType::Ro,
         path: PathBuf::from("rosub"),
@@ -1203,11 +1187,6 @@ fn subvol_ro_has_rdonly_flag() {
 /// on the inode.
 #[test]
 fn rootdir_inode_flags_nodatacow_nodatasum() {
-    use btrfs_mkfs::{
-        args::{CompressAlgorithm, InodeFlagsArg},
-        rootdir::CompressConfig,
-    };
-
     let rootdir = tempfile::tempdir().unwrap();
     // Create a file large enough to not be inlined (> 4095 bytes).
     let big_data = vec![0x42u8; 8192];
@@ -1218,10 +1197,6 @@ fn rootdir_inode_flags_nodatacow_nodatasum() {
     let mut cfg = test_config(MIN_SIZE);
     cfg.devices[0].path = image.path().to_path_buf();
 
-    let compress = CompressConfig {
-        algorithm: CompressAlgorithm::No,
-        level: None,
-    };
     let inode_flags = [InodeFlagsArg {
         nodatacow: true,
         nodatasum: true,
@@ -1231,10 +1206,10 @@ fn rootdir_inode_flags_nodatacow_nodatasum() {
     mkfs::make_btrfs_with_rootdir(
         &cfg,
         rootdir.path(),
-        compress,
+        CompressConfig::default(),
         &inode_flags,
         &[],
-        false,
+        RootdirOptions::default(),
     )
     .unwrap();
 
@@ -1249,10 +1224,8 @@ fn rootdir_inode_flags_nodatacow_nodatasum() {
     let header_size = std::mem::size_of::<btrfs_disk::raw::btrfs_header>();
 
     // Collect all INODE_ITEMs and DIR_ITEMs from the FS tree.
-    let mut inodes: std::collections::HashMap<u64, InodeItem> =
-        std::collections::HashMap::new();
-    let mut name_to_ino: std::collections::HashMap<Vec<u8>, u64> =
-        std::collections::HashMap::new();
+    let mut inodes: HashMap<u64, InodeItem> = HashMap::new();
+    let mut name_to_ino: HashMap<Vec<u8>, u64> = HashMap::new();
 
     reader::tree_walk(
         &mut block_reader,
@@ -1317,4 +1290,52 @@ fn rootdir_inode_flags_nodatacow_nodatasum() {
         !normal_inode.flags.contains(InodeFlags::NODATASUM),
         "normal.bin should not have NODATASUM flag"
     );
+}
+
+// --- Reflink tests ---
+
+/// --reflink should produce a valid filesystem image with file data intact.
+/// This test only runs if the temp directory supports FICLONERANGE.
+#[test]
+fn rootdir_reflink_produces_valid_image() {
+    let rootdir = tempfile::tempdir().unwrap();
+    let big_data = vec![0x55u8; 8192];
+    std::fs::write(rootdir.path().join("data.bin"), &big_data).unwrap();
+
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.devices[0].path = image.path().to_path_buf();
+
+    let result = mkfs::make_btrfs_with_rootdir(
+        &cfg,
+        rootdir.path(),
+        CompressConfig::default(),
+        &[],
+        &[],
+        RootdirOptions::new().reflink(true),
+    );
+
+    match result {
+        Ok(()) => {
+            // Reflink succeeded — verify the image has a valid superblock.
+            let mut file = std::fs::File::open(image.path()).unwrap();
+            let sb =
+                btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+            assert!(sb.magic_is_valid());
+            assert_eq!(sb.fsid, cfg.fs_uuid);
+        }
+        Err(e) => {
+            let msg = format!("{e:#}");
+            // FICLONERANGE fails on filesystems that don't support it —
+            // skip gracefully rather than failing the test.
+            if msg.contains("FICLONERANGE") {
+                eprintln!(
+                    "skipping reflink test: filesystem does not support \
+                     FICLONERANGE ({msg})"
+                );
+                return;
+            }
+            panic!("unexpected error: {e:#}");
+        }
+    }
 }

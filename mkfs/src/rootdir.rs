@@ -24,11 +24,58 @@ use std::{
 /// Maximum size of a single file extent (1 MiB).
 const MAX_EXTENT_SIZE: u64 = 1024 * 1024;
 
+/// Clone a range from `src_fd` at `src_offset` to `dst_fd` at `dst_offset`.
+///
+/// Uses the `FICLONERANGE` ioctl to share extents at the filesystem level
+/// instead of copying bytes. Both file descriptors must be on the same
+/// filesystem (or a filesystem that supports cross-file reflink).
+#[allow(clippy::cast_possible_wrap)] // ioctl request codes and fd fit in c_int/c_long
+fn ficlonerange(
+    src_fd: std::os::unix::io::RawFd,
+    src_offset: u64,
+    src_length: u64,
+    dst_fd: std::os::unix::io::RawFd,
+    dst_offset: u64,
+) -> std::io::Result<()> {
+    // FICLONERANGE = _IOW(0x94, 13, struct file_clone_range) = 0x4020940D
+    #[allow(overflowing_literals)] // musl uses c_int for Ioctl, value fits as i32
+    const FICLONERANGE: libc::Ioctl = 0x4020_940D as libc::Ioctl;
+
+    #[repr(C)]
+    struct FileCloneRange {
+        src_fd: i64,
+        src_offset: u64,
+        src_length: u64,
+        dest_offset: u64,
+    }
+    let fcr = FileCloneRange {
+        src_fd: i64::from(src_fd),
+        src_offset,
+        src_length,
+        dest_offset: dst_offset,
+    };
+    // SAFETY: ioctl with a valid pointer to a stack-allocated struct.
+    let ret = unsafe { libc::ioctl(dst_fd, FICLONERANGE, &raw const fcr) };
+    if ret < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Compression configuration passed through from CLI args.
 #[derive(Debug, Clone, Copy)]
 pub struct CompressConfig {
     pub algorithm: CompressAlgorithm,
     pub level: Option<u32>,
+}
+
+impl Default for CompressConfig {
+    fn default() -> Self {
+        Self {
+            algorithm: CompressAlgorithm::No,
+            level: None,
+        }
+    }
 }
 
 impl CompressConfig {
@@ -653,6 +700,7 @@ pub fn write_file_data(
     generation: u64,
     csum_type: ChecksumType,
     compress: CompressConfig,
+    reflink: bool,
     files: &[std::fs::File],
     chunks: &crate::layout::ChunkLayout,
 ) -> Result<DataOutput> {
@@ -700,10 +748,34 @@ pub fn write_file_data(
 
             for (devid, phys) in chunks.logical_to_physical(disk_bytenr) {
                 let file_idx = (devid - 1) as usize;
-                crate::write::pwrite_all(&files[file_idx], &padded, phys)
+                if reflink {
+                    use std::os::unix::io::AsRawFd;
+                    let src_fd = file.as_raw_fd();
+                    let dst_fd = files[file_idx].as_raw_fd();
+                    // Clone the sector-aligned portion.
+                    let clone_len = aligned_disk.min(extent_size);
+                    let clone_aligned =
+                        align_up(clone_len, u64::from(sectorsize));
+                    ficlonerange(
+                        src_fd,
+                        file_offset,
+                        clone_aligned,
+                        dst_fd,
+                        phys,
+                    )
                     .with_context(|| {
+                        format!(
+                            "FICLONERANGE failed for '{}' to device {devid}; \
+                             source and image must be on the same filesystem",
+                            alloc.host_path.display()
+                        )
+                    })?;
+                } else {
+                    crate::write::pwrite_all(&files[file_idx], &padded, phys)
+                        .with_context(|| {
                         format!("failed to write file data to device {devid}")
                     })?;
+                }
             }
 
             if !alloc.nodatasum {

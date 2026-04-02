@@ -23,6 +23,34 @@ use std::{
     path::Path,
     time::SystemTime,
 };
+
+/// Options for `make_btrfs_with_rootdir`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RootdirOptions {
+    /// Clone file extents via `FICLONERANGE` instead of copying bytes.
+    pub reflink: bool,
+    /// Truncate the image to minimal size after populating.
+    pub shrink: bool,
+}
+
+impl RootdirOptions {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn reflink(mut self, yes: bool) -> Self {
+        self.reflink = yes;
+        self
+    }
+
+    #[must_use]
+    pub fn shrink(mut self, yes: bool) -> Self {
+        self.shrink = yes;
+        self
+    }
+}
 use uuid::Uuid;
 
 /// Bytes used in each block group, used to parameterize tree builders
@@ -439,7 +467,7 @@ pub fn make_btrfs_with_rootdir(
     compress: rootdir::CompressConfig,
     inode_flags: &[crate::args::InodeFlagsArg],
     subvol_args: &[crate::args::SubvolArg],
-    shrink: bool,
+    opts: RootdirOptions,
 ) -> Result<()> {
     if !cfg.sectorsize.is_power_of_two() || cfg.sectorsize < 4096 {
         bail!(
@@ -525,6 +553,7 @@ pub fn make_btrfs_with_rootdir(
         generation,
         cfg.csum_type,
         compress,
+        opts.reflink,
         &files,
         &chunks,
     )?;
@@ -835,6 +864,7 @@ pub fn make_btrfs_with_rootdir(
     // If shrinking, compute the final device size now and create a config
     // with updated total_bytes so the chunk tree DEV_ITEM and superblock agree.
     let effective_cfg;
+    let shrink = opts.shrink;
     let cfg = if shrink && cfg.devices.len() == 1 {
         let dev = &cfg.devices[0];
         let mut phys_end = SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
