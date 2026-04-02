@@ -1,8 +1,6 @@
 use btrfs_disk::{
     items::{DirItem, InodeFlags, InodeItem, RootItem, RootItemFlags, RootRef},
-    raw::{
-        btrfs_header, BTRFS_FIRST_FREE_OBJECTID, BTRFS_FS_TREE_OBJECTID,
-    },
+    raw::{BTRFS_FIRST_FREE_OBJECTID, BTRFS_FS_TREE_OBJECTID, btrfs_header},
     reader::{self, Traversal},
     superblock::read_superblock,
     tree::{KeyType, TreeBlock},
@@ -1002,8 +1000,7 @@ fn root_tree_default_dir_item_points_to_fs_tree() {
 
     let dir_item = find_default_dir_item(image.path());
     assert_eq!(
-        dir_item.location.objectid,
-        BTRFS_FS_TREE_OBJECTID as u64,
+        dir_item.location.objectid, BTRFS_FS_TREE_OBJECTID as u64,
         "default DIR_ITEM should point to FS_TREE"
     );
     assert_eq!(dir_item.location.key_type, KeyType::RootItem);

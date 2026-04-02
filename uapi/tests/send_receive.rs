@@ -1,5 +1,6 @@
 use crate::common::{single_mount, write_compressible_data};
 use btrfs_uapi::{
+    defrag,
     filesystem::sync,
     send_receive::encoded_read,
     subvolume::{SubvolumeFlags, subvolume_create, subvolume_flags_set},
@@ -71,14 +72,12 @@ fn encoded_read_compressed() {
         .write(true)
         .open(subvol_path.join("zeros.bin"))
         .unwrap();
-    let _ = btrfs_uapi::defrag::defrag_range(
+    let _ = defrag::defrag_range(
         file.as_fd(),
-        &btrfs_uapi::defrag::DefragRangeArgs::new().compress(
-            btrfs_uapi::defrag::CompressSpec {
-                compress_type: btrfs_uapi::defrag::CompressType::Zstd,
-                level: None,
-            },
-        ),
+        &defrag::DefragRangeArgs::new().compress(defrag::CompressSpec {
+            compress_type: defrag::CompressType::Zstd,
+            level: None,
+        }),
     );
     drop(file);
     sync(mnt.fd()).unwrap();

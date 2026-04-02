@@ -4,7 +4,7 @@ use btrfs_uapi::{
     filesystem::sync,
     subvolume::{snapshot_create, subvolume_create},
 };
-use std::{ffi::CStr, fs::File, os::unix::io::AsFd};
+use std::{ffi::CStr, fs::File, os::unix::io::AsFd, process::Command};
 
 /// file_extents on a regular file should report non-zero total bytes and zero
 /// shared bytes when no snapshots or reflinks exist.
@@ -73,7 +73,7 @@ fn fiemap_shared_after_reflink() {
     // cp --reflink creates a CoW copy that shares all extents.
     let original = mnt.path().join("original.bin");
     let reflinked = mnt.path().join("reflinked.bin");
-    let output = std::process::Command::new("cp")
+    let output = Command::new("cp")
         .args(["--reflink=always"])
         .arg(&original)
         .arg(&reflinked)

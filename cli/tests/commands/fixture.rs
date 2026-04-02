@@ -13,7 +13,11 @@
 //!   - snap1/ (read-only snapshot of subvol1)
 //!   - subvol2/ (subvolume with zeros.bin)
 
-use super::{btrfs_ok, common, redact_paths};
+use super::{
+    btrfs_ok,
+    common::{cached_broken_image, cached_fixture_image, fixture_mount},
+    redact_paths,
+};
 
 // ── basic CLI (no filesystem needed) ─────────────────────────────────
 
@@ -56,7 +60,7 @@ fn invalid_subcommand_fails() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn filesystem_df() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs filesystem df <MOUNT>",
@@ -67,7 +71,7 @@ fn filesystem_df() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn filesystem_show() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs filesystem show <MOUNT>",
@@ -78,7 +82,7 @@ fn filesystem_show() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn filesystem_usage() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs filesystem usage <MOUNT>",
@@ -89,7 +93,7 @@ fn filesystem_usage() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn filesystem_label() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs filesystem label <MOUNT>",
@@ -100,7 +104,7 @@ fn filesystem_label() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn filesystem_du() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs filesystem du <MOUNT>/subvol1",
@@ -111,7 +115,7 @@ fn filesystem_du() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn filesystem_du_summarize() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs filesystem du -s <MOUNT>/subvol1",
@@ -124,7 +128,7 @@ fn filesystem_du_summarize() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_list() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs subvolume list <MOUNT>",
@@ -135,7 +139,7 @@ fn subvolume_list() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_show() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs subvolume show <MOUNT>/subvol1",
@@ -146,7 +150,7 @@ fn subvolume_show() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_show_snapshot() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let snap1 = format!("{}/snap1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs subvolume show <MOUNT>/snap1",
@@ -157,7 +161,7 @@ fn subvolume_show_snapshot() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_get_default() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs subvolume get-default <MOUNT>",
@@ -168,7 +172,7 @@ fn subvolume_get_default() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_get_flags_readonly() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let snap1 = format!("{}/snap1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs subvolume get-flags <MOUNT>/snap1",
@@ -179,7 +183,7 @@ fn subvolume_get_flags_readonly() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_get_flags_writable() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs subvolume get-flags <MOUNT>/subvol1",
@@ -190,7 +194,7 @@ fn subvolume_get_flags_writable() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_list_table() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs subvolume list -t <MOUNT>",
@@ -201,7 +205,7 @@ fn subvolume_list_table() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_list_only_below() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs subvolume list -o <MOUNT>",
@@ -212,7 +216,7 @@ fn subvolume_list_only_below() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_list_sort_path() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs subvolume list --sort=path <MOUNT>",
@@ -226,7 +230,7 @@ fn subvolume_list_sort_path() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_list_sort_rootid_desc() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs subvolume list --sort=-rootid <MOUNT>",
@@ -240,7 +244,7 @@ fn subvolume_list_sort_rootid_desc() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_show_by_rootid() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     // subvol1 is ID 256.
     snap!(
@@ -254,7 +258,7 @@ fn subvolume_show_by_rootid() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn device_stats() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs device stats <MOUNT>",
@@ -265,7 +269,7 @@ fn device_stats() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn device_usage() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs device usage <MOUNT>",
@@ -276,7 +280,7 @@ fn device_usage() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn device_usage_raw() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs device usage --raw <MOUNT>",
@@ -287,7 +291,7 @@ fn device_usage_raw() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn device_usage_kbytes() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs device usage --kbytes <MOUNT>",
@@ -298,7 +302,7 @@ fn device_usage_kbytes() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn device_usage_gbytes() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs device usage --gbytes <MOUNT>",
@@ -311,7 +315,7 @@ fn device_usage_gbytes() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_rootid() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs inspect-internal rootid <MOUNT>",
@@ -322,7 +326,7 @@ fn inspect_rootid() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_rootid_subvol() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs inspect-internal rootid <MOUNT>/subvol1",
@@ -333,7 +337,7 @@ fn inspect_rootid_subvol() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_list_chunks() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs inspect-internal list-chunks <MOUNT>",
@@ -344,7 +348,7 @@ fn inspect_list_chunks() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_min_dev_size() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs inspect-internal min-dev-size <MOUNT>",
@@ -355,7 +359,7 @@ fn inspect_min_dev_size() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_dump_super() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let dev = mnt.loopback().path().to_str().unwrap();
     snap!(
         "btrfs inspect-internal dump-super <DEV>",
@@ -366,7 +370,7 @@ fn inspect_dump_super() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_dump_super_full() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let dev = mnt.loopback().path().to_str().unwrap();
     snap!(
         "btrfs inspect-internal dump-super -f <DEV>",
@@ -382,7 +386,7 @@ fn inspect_dump_super_full() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_inode_resolve() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     // Inode 257 (BTRFS_FIRST_FREE_OBJECTID) is the first user inode — should
     // resolve to a file in the top-level subvolume.
@@ -397,7 +401,7 @@ fn inspect_inode_resolve() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_subvolid_resolve() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     // subvol1 was the first subvolume created, should be ID 256.
     let out = btrfs_ok(&["inspect-internal", "subvolid-resolve", "256", mp]);
@@ -412,7 +416,7 @@ fn inspect_subvolid_resolve() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn property_get_ro_snapshot() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let snap1 = format!("{}/snap1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs property get -t subvol <MOUNT>/snap1 ro",
@@ -423,7 +427,7 @@ fn property_get_ro_snapshot() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn property_get_ro_writable() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs property get -t subvol <MOUNT>/subvol1 ro",
@@ -434,7 +438,7 @@ fn property_get_ro_writable() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn property_get_label() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs property get -t filesystem <MOUNT> label",
@@ -445,7 +449,7 @@ fn property_get_label() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn property_get_compression_file() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let file = format!("{}/toplevel.txt", mnt.path().to_str().unwrap());
     snap!(
         "btrfs property get <MOUNT>/toplevel.txt compression",
@@ -456,7 +460,7 @@ fn property_get_compression_file() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn property_get_all_inode() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let file = format!("{}/toplevel.txt", mnt.path().to_str().unwrap());
     snap!(
         "btrfs property get <MOUNT>/toplevel.txt (all)",
@@ -467,7 +471,7 @@ fn property_get_all_inode() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn property_list_subvol() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs property list -t subvol <MOUNT>/subvol1",
@@ -478,7 +482,7 @@ fn property_list_subvol() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn property_list_inode() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let file = format!("{}/toplevel.txt", mnt.path().to_str().unwrap());
     snap!(
         "btrfs property list <MOUNT>/toplevel.txt",
@@ -489,7 +493,7 @@ fn property_list_inode() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn property_list_filesystem() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     snap!(
         "btrfs property list -t filesystem <MOUNT>",
@@ -501,7 +505,7 @@ fn property_list_filesystem() {
 
 #[test]
 fn inspect_dump_tree_roots() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     snap!(
         "btrfs inspect-internal dump-tree --roots <IMG>",
@@ -511,7 +515,7 @@ fn inspect_dump_tree_roots() {
 
 #[test]
 fn inspect_dump_tree_root_tree() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     snap!(
         "btrfs inspect-internal dump-tree -t root <IMG>",
@@ -521,7 +525,7 @@ fn inspect_dump_tree_root_tree() {
 
 #[test]
 fn inspect_dump_tree_chunk_tree() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     snap!(
         "btrfs inspect-internal dump-tree -t chunk <IMG>",
@@ -531,7 +535,7 @@ fn inspect_dump_tree_chunk_tree() {
 
 #[test]
 fn inspect_dump_tree() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     snap!(
         "btrfs inspect-internal dump-tree <IMG>",
@@ -549,7 +553,7 @@ fn redact_timing(output: &str) -> String {
 
 #[test]
 fn inspect_tree_stats() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     snap!(
         "btrfs inspect-internal tree-stats -b <IMG>",
@@ -564,7 +568,7 @@ fn inspect_tree_stats() {
 
 #[test]
 fn inspect_tree_stats_single_tree() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     snap!(
         "btrfs inspect-internal tree-stats -b -t fs <IMG>",
@@ -583,7 +587,7 @@ fn inspect_tree_stats_single_tree() {
 
 #[test]
 fn restore_list_roots() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     snap!(
         "btrfs restore --list-roots <IMG>",
@@ -593,7 +597,7 @@ fn restore_list_roots() {
 
 #[test]
 fn restore_dry_run() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let out_str = tmp.path().to_str().unwrap();
@@ -605,7 +609,7 @@ fn restore_dry_run() {
 
 #[test]
 fn restore_toplevel_file() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let out_str = tmp.path().to_str().unwrap();
@@ -619,7 +623,7 @@ fn restore_toplevel_file() {
 
 #[test]
 fn restore_subvolume_files() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let out_str = tmp.path().to_str().unwrap();
@@ -640,7 +644,7 @@ fn redact_img(output: &str, img: &std::path::Path) -> String {
 
 #[test]
 fn check_clean_image() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     let (stdout, stderr, code) = super::btrfs(&["check", img_str]);
     assert_eq!(code, 0, "btrfs check on clean image failed:\n{stderr}");
@@ -650,7 +654,7 @@ fn check_clean_image() {
 
 #[test]
 fn check_with_data_csum() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     let (stdout, stderr, code) =
         super::btrfs(&["check", "--check-data-csum", img_str]);
@@ -667,7 +671,7 @@ fn check_with_data_csum() {
 
 #[test]
 fn check_with_super_mirror() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     let (stdout, stderr, code) =
         super::btrfs(&["check", "--super", "0", img_str]);
@@ -684,7 +688,7 @@ fn check_with_super_mirror() {
 
 #[test]
 fn check_invalid_super_mirror() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     let (_stdout, stderr, code) =
         super::btrfs(&["check", "--super", "5", img_str]);
@@ -704,7 +708,7 @@ fn check_nonexistent_device() {
 
 #[test]
 fn check_unsupported_repair() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     let (_stdout, stderr, code) = super::btrfs(&["check", "--repair", img_str]);
     assert_ne!(code, 0, "expected failure for --repair");
@@ -716,7 +720,7 @@ fn check_unsupported_repair() {
 
 #[test]
 fn check_readonly_flag() {
-    let img = common::cached_fixture_image();
+    let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     let (stdout, stderr, code) =
         super::btrfs(&["check", "--readonly", img_str]);
@@ -735,7 +739,7 @@ fn check_readonly_flag() {
 
 #[test]
 fn check_broken_image() {
-    let img = common::cached_broken_image();
+    let img = cached_broken_image();
     let img_str = img.to_str().unwrap();
     let (stdout, stderr, code) = super::btrfs(&["check", img_str]);
     assert_ne!(code, 0, "btrfs check on broken image should fail");
@@ -751,7 +755,7 @@ fn check_broken_image() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn quota_status_disabled() {
-    let (_td, mnt) = common::fixture_mount();
+    let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
     // The fixture image does not have quotas enabled, so status should
     // report disabled.

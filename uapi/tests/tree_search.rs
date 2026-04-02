@@ -1,6 +1,7 @@
 use crate::common::single_mount;
 use btrfs_uapi::{
     filesystem::sync,
+    raw::{BTRFS_ROOT_ITEM_KEY, BTRFS_ROOT_TREE_OBJECTID},
     subvolume::{subvolume_create, subvolume_info},
     tree_search::{SearchKey, tree_search, tree_search_v2},
 };
@@ -35,8 +36,8 @@ fn tree_search_enumerate_root_items() {
     tree_search(
         mnt.fd(),
         SearchKey::for_type(
-            btrfs_uapi::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
-            btrfs_uapi::raw::BTRFS_ROOT_ITEM_KEY as u32,
+            BTRFS_ROOT_TREE_OBJECTID as u64,
+            BTRFS_ROOT_ITEM_KEY as u32,
         ),
         |hdr, _data| {
             found_ids.push(hdr.objectid);
@@ -80,8 +81,8 @@ fn tree_search_objectid_range() {
     tree_search(
         mnt.fd(),
         SearchKey::for_objectid_range(
-            btrfs_uapi::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
-            btrfs_uapi::raw::BTRFS_ROOT_ITEM_KEY as u32,
+            BTRFS_ROOT_TREE_OBJECTID as u64,
+            BTRFS_ROOT_ITEM_KEY as u32,
             target_id,
             target_id,
         ),
@@ -117,8 +118,8 @@ fn tree_search_empty_result() {
     tree_search(
         mnt.fd(),
         SearchKey::for_objectid_range(
-            btrfs_uapi::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
-            btrfs_uapi::raw::BTRFS_ROOT_ITEM_KEY as u32,
+            BTRFS_ROOT_TREE_OBJECTID as u64,
+            BTRFS_ROOT_ITEM_KEY as u32,
             0,
             0,
         ),
@@ -159,8 +160,8 @@ fn tree_search_large_result_no_duplicates() {
     tree_search(
         mnt.fd(),
         SearchKey::for_type(
-            btrfs_uapi::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
-            btrfs_uapi::raw::BTRFS_ROOT_ITEM_KEY as u32,
+            BTRFS_ROOT_TREE_OBJECTID as u64,
+            BTRFS_ROOT_ITEM_KEY as u32,
         ),
         |hdr, _data| {
             found_items.push((hdr.objectid, hdr.offset));
@@ -209,8 +210,8 @@ fn tree_search_v2_matches_v1() {
     sync(mnt.fd()).unwrap();
 
     let key = SearchKey::for_type(
-        btrfs_uapi::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
-        btrfs_uapi::raw::BTRFS_ROOT_ITEM_KEY as u32,
+        BTRFS_ROOT_TREE_OBJECTID as u64,
+        BTRFS_ROOT_ITEM_KEY as u32,
     );
 
     let mut v1_items: Vec<(u64, u32, u64)> = Vec::new();
@@ -246,8 +247,8 @@ fn tree_search_v2_small_buffer() {
     sync(mnt.fd()).unwrap();
 
     let key = SearchKey::for_type(
-        btrfs_uapi::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
-        btrfs_uapi::raw::BTRFS_ROOT_ITEM_KEY as u32,
+        BTRFS_ROOT_TREE_OBJECTID as u64,
+        BTRFS_ROOT_ITEM_KEY as u32,
     );
 
     // Use a small buffer (one root item is ~439 bytes, so 512 bytes can
@@ -272,8 +273,8 @@ fn tree_search_v2_large_buffer() {
     let (_td, mnt) = single_mount();
 
     let key = SearchKey::for_type(
-        btrfs_uapi::raw::BTRFS_ROOT_TREE_OBJECTID as u64,
-        btrfs_uapi::raw::BTRFS_ROOT_ITEM_KEY as u32,
+        BTRFS_ROOT_TREE_OBJECTID as u64,
+        BTRFS_ROOT_ITEM_KEY as u32,
     );
 
     let mut items: Vec<u64> = Vec::new();

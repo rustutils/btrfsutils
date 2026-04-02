@@ -4,17 +4,28 @@
 //! others use snapshot testing for output verification.
 
 use super::{btrfs, btrfs_ok, common, redact};
+use btrfs_uapi::{
+    device::device_info_all,
+    filesystem::filesystem_info,
+    subvolume::{self, SubvolumeFlags, subvolume_flags_get},
+};
 use common::{
     BackingFile, LoopbackDevice, Mount, single_mount, verify_test_data,
     write_compressible_data, write_test_data,
 };
+use nix::sys::stat;
+use regex_lite::Regex;
 use std::{
+    fs,
+    io::{Read as _, Seek, SeekFrom},
     os::unix::{
-        fs::{FileTypeExt, MetadataExt},
+        fs::{FileTypeExt, MetadataExt, symlink},
         io::AsFd,
     },
-    path::Path,
+    path::{Path, PathBuf},
+    process::Command,
 };
+use tempfile::tempdir;
 
 // ── filesystem (assertions) ──────────────────────────────────────────
 
@@ -63,9 +74,8 @@ fn filesystem_resize_grow_shrink() {
     );
 
     // Verify via uapi: after resize max, device should be close to 768MB
-    let fs_info = btrfs_uapi::filesystem::filesystem_info(mnt.fd()).unwrap();
-    let devices =
-        btrfs_uapi::device::device_info_all(mnt.fd(), &fs_info).unwrap();
+    let fs_info = filesystem_info(mnt.fd()).unwrap();
+    let devices = device_info_all(mnt.fd(), &fs_info).unwrap();
     let total: u64 = devices.iter().map(|d| d.total_bytes).sum();
     assert!(
         total > 700_000_000,
@@ -75,9 +85,8 @@ fn filesystem_resize_grow_shrink() {
     btrfs_ok(&["filesystem", "resize", "512m", mp]);
 
     // Verify via uapi: after resize 512m
-    let fs_info = btrfs_uapi::filesystem::filesystem_info(mnt.fd()).unwrap();
-    let devices =
-        btrfs_uapi::device::device_info_all(mnt.fd(), &fs_info).unwrap();
+    let fs_info = filesystem_info(mnt.fd()).unwrap();
+    let devices = device_info_all(mnt.fd(), &fs_info).unwrap();
     let total: u64 = devices.iter().map(|d| d.total_bytes).sum();
     assert!(
         total <= 512 * 1024 * 1024,
@@ -144,7 +153,7 @@ fn filesystem_mkswapfile() {
     btrfs_ok(&["filesystem", "mkswapfile", "-s", "16m", &swapfile]);
     assert!(Path::new(&swapfile).exists(), "swapfile not created");
 
-    let meta = std::fs::metadata(&swapfile).unwrap();
+    let meta = fs::metadata(&swapfile).unwrap();
     assert!(
         meta.len() >= 16 * 1024 * 1024,
         "swapfile too small: {} bytes",
@@ -290,7 +299,7 @@ fn subvolume_create_show_delete() {
     assert!(Path::new(&subvol).is_dir());
 
     // Verify via uapi: subvolume appears in list
-    let list = btrfs_uapi::subvolume::subvolume_list(mnt.fd()).unwrap();
+    let list = subvolume::subvolume_list(mnt.fd()).unwrap();
     assert!(
         list.iter().any(|s| s.name.contains("testvol")),
         "subvolume should appear in uapi list"
@@ -306,7 +315,7 @@ fn subvolume_create_show_delete() {
     assert!(!Path::new(&subvol).exists());
 
     // Verify via uapi: subvolume gone from list
-    let list = btrfs_uapi::subvolume::subvolume_list(mnt.fd()).unwrap();
+    let list = subvolume::subvolume_list(mnt.fd()).unwrap();
     assert!(
         !list.iter().any(|s| s.name.contains("testvol")),
         "subvolume should not appear in uapi list after delete"
@@ -454,7 +463,7 @@ fn subvolume_create_over_file_fails() {
     let mp = mnt.path().to_str().unwrap();
 
     let file = format!("{mp}/afile");
-    std::fs::write(&file, b"hello").unwrap();
+    fs::write(&file, b"hello").unwrap();
 
     // Creating a subvolume where a regular file exists should fail.
     let (_, _, code) = btrfs(&["subvolume", "create", &file]);
@@ -562,19 +571,17 @@ fn property_get_set_ro() {
     assert!(out.contains("true"), "expected ro=true:\n{out}");
 
     // Verify via uapi: RDONLY flag should be set
-    let subvol_file = std::fs::File::open(&subvol).unwrap();
-    let flags = btrfs_uapi::subvolume::subvolume_flags_get(subvol_file.as_fd())
-        .unwrap();
-    assert!(flags.contains(btrfs_uapi::subvolume::SubvolumeFlags::RDONLY));
+    let subvol_file = fs::File::open(&subvol).unwrap();
+    let flags = subvolume_flags_get(subvol_file.as_fd()).unwrap();
+    assert!(flags.contains(SubvolumeFlags::RDONLY));
 
     btrfs_ok(&["property", "set", "-t", "subvol", &subvol, "ro", "false"]);
     let out = btrfs_ok(&["property", "get", "-t", "subvol", &subvol, "ro"]);
     assert!(out.contains("false"), "expected ro=false:\n{out}");
 
     // Verify via uapi: RDONLY flag should be cleared
-    let flags = btrfs_uapi::subvolume::subvolume_flags_get(subvol_file.as_fd())
-        .unwrap();
-    assert!(!flags.contains(btrfs_uapi::subvolume::SubvolumeFlags::RDONLY));
+    let flags = subvolume_flags_get(subvol_file.as_fd()).unwrap();
+    assert!(!flags.contains(SubvolumeFlags::RDONLY));
 }
 
 #[test]
@@ -584,7 +591,7 @@ fn property_set_compression() {
     let mp = mnt.path().to_str().unwrap();
 
     let file = format!("{mp}/comptest.txt");
-    std::fs::write(&file, "hello").unwrap();
+    fs::write(&file, "hello").unwrap();
 
     // Set compression to zlib
     btrfs_ok(&["property", "set", &file, "compression", "zlib"]);
@@ -648,7 +655,7 @@ fn property_wrong_property_for_type() {
     let mp = mnt.path().to_str().unwrap();
 
     let file = format!("{mp}/wrongprop.txt");
-    std::fs::write(&file, "test").unwrap();
+    fs::write(&file, "test").unwrap();
 
     // "ro" is not valid on an inode
     let (_stdout, stderr, code) = btrfs(&["property", "get", &file, "ro"]);
@@ -779,15 +786,15 @@ fn send_receive_dump() {
 
     let out = btrfs_ok(&["receive", "--dump", "-f", &stream_file]);
 
-    let re_uuid = regex_lite::Regex::new(
+    let re_uuid = Regex::new(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
     )
     .unwrap();
-    let re_offset = regex_lite::Regex::new(r"offset=\d+").unwrap();
-    let re_len = regex_lite::Regex::new(r"len=\d+").unwrap();
-    let re_mode = regex_lite::Regex::new(r"mode=\d+").unwrap();
-    let re_uid = regex_lite::Regex::new(r"uid=\d+").unwrap();
-    let re_gid = regex_lite::Regex::new(r"gid=\d+").unwrap();
+    let re_offset = Regex::new(r"offset=\d+").unwrap();
+    let re_len = Regex::new(r"len=\d+").unwrap();
+    let re_mode = Regex::new(r"mode=\d+").unwrap();
+    let re_uid = Regex::new(r"uid=\d+").unwrap();
+    let re_gid = Regex::new(r"gid=\d+").unwrap();
 
     let mut redacted = redact(&out, &mnt);
     redacted = re_uuid.replace_all(&redacted, "<UUID>").into_owned();
@@ -814,7 +821,7 @@ fn send_receive_roundtrip() {
 
     write_test_data(Path::new(&src), "file1.bin", 65536);
     write_test_data(Path::new(&src), "file2.bin", 1024);
-    std::fs::create_dir(format!("{src}/dir")).unwrap();
+    fs::create_dir(format!("{src}/dir")).unwrap();
     write_test_data(Path::new(&format!("{src}/dir")), "file3.bin", 32768);
 
     btrfs_ok(&["property", "set", "-t", "subvol", &src, "ro", "true"]);
@@ -846,7 +853,7 @@ fn send_receive_incremental() {
     write_test_data(Path::new(&src), "unchanged.bin", 8192);
     write_test_data(Path::new(&src), "modified.bin", 4096);
     write_test_data(Path::new(&src), "deleted.bin", 2048);
-    std::fs::create_dir(format!("{src}/subdir")).unwrap();
+    fs::create_dir(format!("{src}/subdir")).unwrap();
     write_test_data(Path::new(&format!("{src}/subdir")), "nested.bin", 1024);
 
     // Take a read-only snapshot as the base.
@@ -857,8 +864,8 @@ fn send_receive_incremental() {
     write_test_data(Path::new(&src), "added.bin", 16384);
     // Overwrite modified.bin with different size.
     write_test_data(Path::new(&src), "modified.bin", 32768);
-    std::fs::remove_file(format!("{src}/deleted.bin")).unwrap();
-    std::fs::create_dir(format!("{src}/newdir")).unwrap();
+    fs::remove_file(format!("{src}/deleted.bin")).unwrap();
+    fs::create_dir(format!("{src}/newdir")).unwrap();
     write_test_data(Path::new(&format!("{src}/newdir")), "fresh.bin", 4096);
 
     // Take a second read-only snapshot.
@@ -884,7 +891,7 @@ fn send_receive_incremental() {
     btrfs_ok(&["send", "-p", &base_snap, "-f", &incr_stream, &incr_snap]);
 
     // The incremental stream should be non-empty.
-    let incr_size = std::fs::metadata(&incr_stream).unwrap().len();
+    let incr_size = fs::metadata(&incr_stream).unwrap().len();
     assert!(incr_size > 0, "incremental stream is empty");
 
     // Receive the incremental stream.
@@ -931,7 +938,7 @@ fn send_receive_incremental() {
 #[ignore = "requires elevated privileges"]
 fn send_receive_v2_compressed() {
     // Source: mount with zstd compression so writes produce compressed extents.
-    let td1 = tempfile::tempdir().unwrap();
+    let td1 = tempdir().unwrap();
     let file1 = BackingFile::new(td1.path(), "disk.img", 512_000_000);
     file1.mkfs();
     let lo1 = LoopbackDevice::new(file1);
@@ -971,7 +978,7 @@ fn send_receive_v2_compressed() {
     assert!(Path::new(&received).is_dir(), "received subvol not found");
 
     // zeros.bin: 256KB of all zeros.
-    let zeros = std::fs::read(format!("{received}/zeros.bin")).unwrap();
+    let zeros = fs::read(format!("{received}/zeros.bin")).unwrap();
     assert_eq!(zeros.len(), 256 * 1024);
     assert!(
         zeros.iter().all(|&b| b == 0),
@@ -1068,7 +1075,7 @@ fn device_add_remove() {
     );
 
     // Verify via uapi: should have 2 devices
-    let fs_info = btrfs_uapi::filesystem::filesystem_info(mnt.fd()).unwrap();
+    let fs_info = filesystem_info(mnt.fd()).unwrap();
     assert_eq!(fs_info.num_devices, 2, "expected 2 devices after add");
 
     btrfs_ok(&["device", "remove", dev2_path, mp]);
@@ -1077,7 +1084,7 @@ fn device_add_remove() {
     assert!(!out.contains(dev2_path), "device should be removed:\n{out}");
 
     // Verify via uapi: should be back to 1 device
-    let fs_info = btrfs_uapi::filesystem::filesystem_info(mnt.fd()).unwrap();
+    let fs_info = filesystem_info(mnt.fd()).unwrap();
     assert_eq!(fs_info.num_devices, 1, "expected 1 device after remove");
 }
 
@@ -1092,7 +1099,7 @@ fn device_add_force() {
     let dev2 = LoopbackDevice::new(dev2_file);
     let dev2_path = dev2.path().to_str().unwrap();
 
-    std::process::Command::new("mkfs.btrfs")
+    Command::new("mkfs.btrfs")
         .args(["-f", dev2_path])
         .output()
         .expect("mkfs.btrfs failed");
@@ -1113,6 +1120,10 @@ fn device_add_force() {
         out.contains(dev2_path),
         "expected new device in show output:\n{out}"
     );
+
+    // Verify via uapi: should have 2 devices.
+    let fs_info = filesystem_info(mnt.fd()).unwrap();
+    assert_eq!(fs_info.num_devices, 2, "expected 2 devices after force add");
 }
 
 #[test]
@@ -1133,6 +1144,13 @@ fn device_add_nodiscard() {
         out.contains(dev2_path),
         "expected new device in show output:\n{out}"
     );
+
+    // Verify via uapi.
+    let fs_info = filesystem_info(mnt.fd()).unwrap();
+    assert_eq!(
+        fs_info.num_devices, 2,
+        "expected 2 devices after nodiscard add"
+    );
 }
 
 #[test]
@@ -1152,6 +1170,13 @@ fn device_add_enqueue() {
     assert!(
         out.contains(dev2_path),
         "expected new device in show output:\n{out}"
+    );
+
+    // Verify via uapi.
+    let fs_info = filesystem_info(mnt.fd()).unwrap();
+    assert_eq!(
+        fs_info.num_devices, 2,
+        "expected 2 devices after enqueue add"
     );
 }
 
@@ -1297,7 +1322,7 @@ fn quota_enable_disable() {
     );
 
     // Verify via uapi/sysfs
-    let fs_info = btrfs_uapi::filesystem::filesystem_info(mnt.fd()).unwrap();
+    let fs_info = filesystem_info(mnt.fd()).unwrap();
     let sysfs = btrfs_uapi::sysfs::SysfsBtrfs::new(&fs_info.uuid);
     let status = sysfs.quota_status().unwrap();
     assert!(status.enabled, "quota should be enabled via sysfs");
@@ -1636,6 +1661,14 @@ fn subvolume_delete_commit_each() {
     ]);
     assert!(!Path::new(&format!("{mp}/each1")).exists());
     assert!(!Path::new(&format!("{mp}/each2")).exists());
+
+    // Verify via uapi: no user subvolumes should remain.
+    let list = subvolume::subvolume_list(mnt.fd()).unwrap();
+    assert!(
+        list.is_empty(),
+        "expected no subvolumes after delete, got {}",
+        list.len()
+    );
 }
 
 #[test]
@@ -1764,17 +1797,13 @@ fn send_receive_special_files() {
 
     // Create various special files.
     write_test_data(Path::new(&src), "regular.bin", 4096);
-    std::os::unix::fs::symlink("regular.bin", format!("{src}/link.sym"))
+    symlink("regular.bin", format!("{src}/link.sym")).unwrap();
+    fs::hard_link(format!("{src}/regular.bin"), format!("{src}/hardlink.bin"))
         .unwrap();
-    std::fs::hard_link(
-        format!("{src}/regular.bin"),
-        format!("{src}/hardlink.bin"),
-    )
-    .unwrap();
     // FIFO (named pipe).
     nix::unistd::mkfifo(
-        &std::path::PathBuf::from(format!("{src}/pipe")),
-        nix::sys::stat::Mode::from_bits_truncate(0o644),
+        &PathBuf::from(format!("{src}/pipe")),
+        stat::Mode::from_bits_truncate(0o644),
     )
     .unwrap();
 
@@ -1788,16 +1817,16 @@ fn send_receive_special_files() {
     verify_test_data(Path::new(&recv), "regular.bin", 4096);
 
     // Symlink.
-    let link_target = std::fs::read_link(format!("{recv}/link.sym")).unwrap();
+    let link_target = fs::read_link(format!("{recv}/link.sym")).unwrap();
     assert_eq!(link_target.to_str().unwrap(), "regular.bin");
 
     // Hard link (should share inode with regular.bin).
-    let meta_orig = std::fs::metadata(format!("{recv}/regular.bin")).unwrap();
-    let meta_hard = std::fs::metadata(format!("{recv}/hardlink.bin")).unwrap();
+    let meta_orig = fs::metadata(format!("{recv}/regular.bin")).unwrap();
+    let meta_hard = fs::metadata(format!("{recv}/hardlink.bin")).unwrap();
     assert_eq!(meta_orig.ino(), meta_hard.ino());
 
     // FIFO.
-    let fifo_meta = std::fs::symlink_metadata(format!("{recv}/pipe")).unwrap();
+    let fifo_meta = fs::symlink_metadata(format!("{recv}/pipe")).unwrap();
     assert!(
         fifo_meta.file_type().is_fifo(),
         "expected FIFO, got {:?}",
@@ -1818,10 +1847,10 @@ fn send_receive_xattrs() {
     btrfs_ok(&["subvolume", "create", &src]);
 
     let file_path = format!("{src}/testfile");
-    std::fs::write(&file_path, b"xattr test content").unwrap();
+    fs::write(&file_path, b"xattr test content").unwrap();
 
     // Set xattrs using the setfattr command.
-    let status = std::process::Command::new("setfattr")
+    let status = Command::new("setfattr")
         .args(["-n", "user.myattr", "-v", "hello", &file_path])
         .status()
         .expect("setfattr not found");
@@ -1833,7 +1862,7 @@ fn send_receive_xattrs() {
 
     // Verify xattr was preserved.
     let recv_file = format!("{mp2}/xattr_test/testfile");
-    let output = std::process::Command::new("getfattr")
+    let output = Command::new("getfattr")
         .args(["--only-values", "-n", "user.myattr", &recv_file])
         .output()
         .expect("getfattr not found");
@@ -1849,7 +1878,7 @@ fn send_receive_xattrs() {
 #[ignore = "requires elevated privileges"]
 fn send_receive_force_decompress() {
     // Source: mount with zstd compression.
-    let td1 = tempfile::tempdir().unwrap();
+    let td1 = tempdir().unwrap();
     let file1 = BackingFile::new(td1.path(), "disk.img", 512_000_000);
     file1.mkfs();
     let lo1 = LoopbackDevice::new(file1);
@@ -1875,7 +1904,7 @@ fn send_receive_force_decompress() {
     let recv = format!("{mp2}/decomp_test");
     assert!(Path::new(&recv).is_dir(), "received subvol not found");
 
-    let data = std::fs::read(format!("{recv}/data.bin")).unwrap();
+    let data = fs::read(format!("{recv}/data.bin")).unwrap();
     assert_eq!(data.len(), 128 * 1024);
     assert!(data.iter().all(|&b| b == 0), "data.bin should be all zeros");
     verify_test_data(Path::new(&recv), "pattern.bin", 64 * 1024);
@@ -1901,7 +1930,7 @@ fn send_receive_truncate() {
     btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap1]);
 
     // Truncate the file to a smaller size.
-    let f = std::fs::OpenOptions::new()
+    let f = fs::OpenOptions::new()
         .write(true)
         .open(format!("{src}/shrink.bin"))
         .unwrap();
@@ -1917,7 +1946,7 @@ fn send_receive_truncate() {
     btrfs_ok(&["receive", "-f", &incr_stream, mp2]);
 
     let recv = format!("{mp2}/trunc_snap2/shrink.bin");
-    let meta = std::fs::metadata(&recv).unwrap();
+    let meta = fs::metadata(&recv).unwrap();
     assert_eq!(meta.len(), 1024, "truncated file should be 1024 bytes");
 }
 
@@ -1934,11 +1963,11 @@ fn send_receive_mknod_mksock() {
     btrfs_ok(&["subvolume", "create", &src]);
 
     // Create a character device node (null device: 1,3) and a unix socket.
-    nix::sys::stat::mknod(
-        &std::path::PathBuf::from(format!("{src}/chardev")),
-        nix::sys::stat::SFlag::S_IFCHR,
-        nix::sys::stat::Mode::from_bits_truncate(0o666),
-        nix::sys::stat::makedev(1, 3),
+    stat::mknod(
+        &PathBuf::from(format!("{src}/chardev")),
+        stat::SFlag::S_IFCHR,
+        stat::Mode::from_bits_truncate(0o666),
+        stat::makedev(1, 3),
     )
     .unwrap();
 
@@ -1954,16 +1983,14 @@ fn send_receive_mknod_mksock() {
     let recv = format!("{mp2}/devnodes");
 
     // Verify character device.
-    let chardev_meta =
-        std::fs::symlink_metadata(format!("{recv}/chardev")).unwrap();
+    let chardev_meta = fs::symlink_metadata(format!("{recv}/chardev")).unwrap();
     assert!(
         chardev_meta.file_type().is_char_device(),
         "expected char device"
     );
 
     // Verify socket.
-    let sock_meta =
-        std::fs::symlink_metadata(format!("{recv}/mysock")).unwrap();
+    let sock_meta = fs::symlink_metadata(format!("{recv}/mysock")).unwrap();
     assert!(sock_meta.file_type().is_socket(), "expected socket");
 }
 
@@ -1981,15 +2008,15 @@ fn send_receive_rmdir() {
 
     let src = format!("{mp1}/rmdir_src");
     btrfs_ok(&["subvolume", "create", &src]);
-    std::fs::create_dir(format!("{src}/mydir")).unwrap();
+    fs::create_dir(format!("{src}/mydir")).unwrap();
     write_test_data(Path::new(&format!("{src}/mydir")), "file.bin", 1024);
 
     let snap1 = format!("{mp1}/rmdir_snap1");
     btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap1]);
 
     // Remove the directory and its contents.
-    std::fs::remove_file(format!("{src}/mydir/file.bin")).unwrap();
-    std::fs::remove_dir(format!("{src}/mydir")).unwrap();
+    fs::remove_file(format!("{src}/mydir/file.bin")).unwrap();
+    fs::remove_dir(format!("{src}/mydir")).unwrap();
 
     let snap2 = format!("{mp1}/rmdir_snap2");
     btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap2]);
@@ -2021,10 +2048,10 @@ fn send_receive_remove_xattr() {
     let src = format!("{mp1}/xattr_rm_src");
     btrfs_ok(&["subvolume", "create", &src]);
     let file_path = format!("{src}/testfile");
-    std::fs::write(&file_path, b"content").unwrap();
+    fs::write(&file_path, b"content").unwrap();
 
     // Set an xattr, then take a snapshot.
-    let status = std::process::Command::new("setfattr")
+    let status = Command::new("setfattr")
         .args(["-n", "user.remove_me", "-v", "val", &file_path])
         .status()
         .expect("setfattr not found");
@@ -2034,7 +2061,7 @@ fn send_receive_remove_xattr() {
     btrfs_ok(&["subvolume", "snapshot", "-r", &src, &snap1]);
 
     // Remove the xattr and take another snapshot.
-    let status = std::process::Command::new("setfattr")
+    let status = Command::new("setfattr")
         .args(["-x", "user.remove_me", &file_path])
         .status()
         .expect("setfattr not found");
@@ -2058,7 +2085,7 @@ fn send_receive_remove_xattr() {
 
     // Verify the xattr is gone on the received side.
     let recv_file = format!("{mp2}/xattr_snap2/testfile");
-    let output = std::process::Command::new("getfattr")
+    let output = Command::new("getfattr")
         .args(["-n", "user.remove_me", &recv_file])
         .output()
         .expect("getfattr not found");
@@ -2088,7 +2115,7 @@ fn send_receive_fallocate() {
 
     // Punch a hole in the middle of the file.
     let file_path = format!("{src}/holey.bin");
-    let status = std::process::Command::new("fallocate")
+    let status = Command::new("fallocate")
         .args([
             "--punch-hole",
             "--offset",
@@ -2121,12 +2148,11 @@ fn send_receive_fallocate() {
 
     // Verify the file size is preserved but the hole exists.
     let recv_file = format!("{mp2}/falloc_snap2/holey.bin");
-    let meta = std::fs::metadata(&recv_file).unwrap();
+    let meta = fs::metadata(&recv_file).unwrap();
     assert_eq!(meta.len(), 256 * 1024);
 
     // Read the hole region — should be zeros.
-    use std::io::{Read, Seek, SeekFrom};
-    let mut f = std::fs::File::open(&recv_file).unwrap();
+    let mut f = fs::File::open(&recv_file).unwrap();
     f.seek(SeekFrom::Start(65536)).unwrap();
     let mut hole = vec![0u8; 65536];
     f.read_exact(&mut hole).unwrap();
@@ -2140,9 +2166,9 @@ fn send_receive_fallocate() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn mkfs_rootdir_end_to_end() {
-    let td = tempfile::tempdir().unwrap();
+    let td = tempdir().unwrap();
     let rootdir = td.path().join("rootdir");
-    std::fs::create_dir_all(&rootdir).unwrap();
+    fs::create_dir_all(&rootdir).unwrap();
 
     // Regular files: small (inline) and large (regular extent).
     write_test_data(&rootdir, "small.bin", 100);
@@ -2150,14 +2176,14 @@ fn mkfs_rootdir_end_to_end() {
 
     // Subdirectory with a file.
     let sub = rootdir.join("subdir");
-    std::fs::create_dir_all(&sub).unwrap();
+    fs::create_dir_all(&sub).unwrap();
     write_test_data(&sub, "nested.bin", 8192);
 
     // Symlink.
-    std::os::unix::fs::symlink("small.bin", rootdir.join("link.txt")).unwrap();
+    symlink("small.bin", rootdir.join("link.txt")).unwrap();
 
     // Empty file.
-    std::fs::File::create(rootdir.join("empty")).unwrap();
+    fs::File::create(rootdir.join("empty")).unwrap();
 
     // Create image, format with --rootdir, mount.
     let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
@@ -2172,11 +2198,11 @@ fn mkfs_rootdir_end_to_end() {
     verify_test_data(&mp.join("subdir"), "nested.bin", 8192);
 
     // Verify symlink.
-    let link_target = std::fs::read_link(mp.join("link.txt")).unwrap();
+    let link_target = fs::read_link(mp.join("link.txt")).unwrap();
     assert_eq!(link_target.to_str().unwrap(), "small.bin");
 
     // Verify empty file exists and is empty.
-    let empty_meta = std::fs::metadata(mp.join("empty")).unwrap();
+    let empty_meta = fs::metadata(mp.join("empty")).unwrap();
     assert_eq!(empty_meta.len(), 0);
 
     // Verify subdirectory exists.
@@ -2187,9 +2213,9 @@ fn mkfs_rootdir_end_to_end() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn mkfs_rootdir_compressed() {
-    let td = tempfile::tempdir().unwrap();
+    let td = tempdir().unwrap();
     let rootdir = td.path().join("rootdir");
-    std::fs::create_dir_all(&rootdir).unwrap();
+    fs::create_dir_all(&rootdir).unwrap();
 
     // Compressible data (zeros compress well).
     write_compressible_data(&rootdir, "zeros.bin", 1024 * 1024);
@@ -2203,7 +2229,7 @@ fn mkfs_rootdir_compressed() {
     let mp = mnt.path();
 
     // Verify data reads back correctly (kernel handles decompression).
-    let zeros = std::fs::read(mp.join("zeros.bin")).unwrap();
+    let zeros = fs::read(mp.join("zeros.bin")).unwrap();
     assert_eq!(zeros.len(), 1024 * 1024);
     assert!(zeros.iter().all(|&b| b == 0), "decompressed zeros mismatch");
 
@@ -2214,9 +2240,9 @@ fn mkfs_rootdir_compressed() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn mkfs_rootdir_shrink() {
-    let td = tempfile::tempdir().unwrap();
+    let td = tempdir().unwrap();
     let rootdir = td.path().join("rootdir");
-    std::fs::create_dir_all(&rootdir).unwrap();
+    fs::create_dir_all(&rootdir).unwrap();
 
     write_test_data(&rootdir, "data.bin", 4096);
 
@@ -2224,7 +2250,7 @@ fn mkfs_rootdir_shrink() {
     file.mkfs_rootdir(&rootdir, &["--shrink"]);
 
     // Image should be much smaller than 512 MB.
-    let img_size = std::fs::metadata(td.path().join("disk.img")).unwrap().len();
+    let img_size = fs::metadata(td.path().join("disk.img")).unwrap().len();
     assert!(
         img_size < 200_000_000,
         "shrunk image should be < 200 MB, got {img_size}"
@@ -2241,15 +2267,14 @@ fn mkfs_rootdir_shrink() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn mkfs_rootdir_lzo_compressed() {
-    let td = tempfile::tempdir().unwrap();
+    let td = tempdir().unwrap();
     let rootdir = td.path().join("rootdir");
-    std::fs::create_dir_all(&rootdir).unwrap();
+    fs::create_dir_all(&rootdir).unwrap();
 
     // Compressible data (zeros compress well with LZO).
     write_compressible_data(&rootdir, "zeros.bin", 1024 * 1024);
     // Small inline file (uses single-segment LZO format).
-    std::fs::write(rootdir.join("small.txt"), "hello LZO compression test")
-        .unwrap();
+    fs::write(rootdir.join("small.txt"), "hello LZO compression test").unwrap();
     // Incompressible data (pseudo-random pattern).
     write_test_data(&rootdir, "random.bin", 64 * 1024);
 
@@ -2260,11 +2285,11 @@ fn mkfs_rootdir_lzo_compressed() {
     let mp = mnt.path();
 
     // Verify data reads back correctly (kernel handles LZO decompression).
-    let zeros = std::fs::read(mp.join("zeros.bin")).unwrap();
+    let zeros = fs::read(mp.join("zeros.bin")).unwrap();
     assert_eq!(zeros.len(), 1024 * 1024);
     assert!(zeros.iter().all(|&b| b == 0), "decompressed zeros mismatch");
 
-    let small = std::fs::read_to_string(mp.join("small.txt")).unwrap();
+    let small = fs::read_to_string(mp.join("small.txt")).unwrap();
     assert_eq!(small, "hello LZO compression test");
 
     verify_test_data(mp, "random.bin", 64 * 1024);

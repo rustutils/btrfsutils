@@ -5,7 +5,10 @@ use btrfs_uapi::{
 };
 use std::{
     fs::{self, File},
-    os::unix::io::AsFd,
+    os::{
+        fd::AsRawFd,
+        unix::io::{AsFd, BorrowedFd},
+    },
 };
 
 /// Deduplicating identical files should report success with bytes deduped.
@@ -28,11 +31,7 @@ fn dedupe_identical_files() {
 
     // SAFETY: we need a 'static BorrowedFd for DedupeTarget. The fd lives
     // for the duration of this test, so this is safe.
-    let dst_fd = unsafe {
-        std::os::unix::io::BorrowedFd::borrow_raw(
-            std::os::fd::AsRawFd::as_raw_fd(&dst),
-        )
-    };
+    let dst_fd = unsafe { BorrowedFd::borrow_raw(AsRawFd::as_raw_fd(&dst)) };
 
     let targets = [DedupeTarget {
         fd: dst_fd,
@@ -72,11 +71,7 @@ fn dedupe_different_files() {
     let src = File::open(mnt.path().join("src.bin")).unwrap();
     let dst = File::options().read(true).write(true).open(&path).unwrap();
 
-    let dst_fd = unsafe {
-        std::os::unix::io::BorrowedFd::borrow_raw(
-            std::os::fd::AsRawFd::as_raw_fd(&dst),
-        )
-    };
+    let dst_fd = unsafe { BorrowedFd::borrow_raw(AsRawFd::as_raw_fd(&dst)) };
 
     let targets = [DedupeTarget {
         fd: dst_fd,
@@ -118,16 +113,8 @@ fn dedupe_multiple_targets() {
         .open(&different_path)
         .unwrap();
 
-    let dst1_fd = unsafe {
-        std::os::unix::io::BorrowedFd::borrow_raw(
-            std::os::fd::AsRawFd::as_raw_fd(&dst1),
-        )
-    };
-    let dst2_fd = unsafe {
-        std::os::unix::io::BorrowedFd::borrow_raw(
-            std::os::fd::AsRawFd::as_raw_fd(&dst2),
-        )
-    };
+    let dst1_fd = unsafe { BorrowedFd::borrow_raw(AsRawFd::as_raw_fd(&dst1)) };
+    let dst2_fd = unsafe { BorrowedFd::borrow_raw(AsRawFd::as_raw_fd(&dst2)) };
 
     let targets = [
         DedupeTarget {

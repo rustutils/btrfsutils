@@ -3,7 +3,10 @@ use btrfs_uapi::{
     defrag::{CompressSpec, CompressType, DefragRangeArgs, defrag_range},
     filesystem::sync,
 };
-use std::{fs::File, os::unix::io::AsFd};
+use std::{
+    fs::{File, metadata},
+    os::unix::{fs::MetadataExt, io::AsFd},
+};
 
 /// Defragmenting with compression should reduce the on-disk block usage of a
 /// compressible file, and the file content should remain intact.
@@ -16,15 +19,13 @@ use std::{fs::File, os::unix::io::AsFd};
 #[ignore = "requires elevated privileges"]
 #[should_panic] // currently broken, see FIXME
 fn defrag_compress() {
-    use std::os::unix::fs::MetadataExt;
-
     let (_td, mnt) = single_mount();
 
     write_compressible_data(mnt.path(), "zeros.bin", 10_000_000);
     sync(mnt.fd()).unwrap();
 
     let path = mnt.path().join("zeros.bin");
-    let blocks_before = std::fs::metadata(&path).unwrap().blocks();
+    let blocks_before = metadata(&path).unwrap().blocks();
 
     let file = File::options()
         .read(true)
@@ -50,7 +51,7 @@ fn defrag_compress() {
 
     // st_blocks reflects actual disk usage (in 512-byte units), which
     // decreases when btrfs stores compressed extents.
-    let blocks_after = std::fs::metadata(&path).unwrap().blocks();
+    let blocks_after = metadata(&path).unwrap().blocks();
 
     assert!(
         blocks_after < blocks_before,
