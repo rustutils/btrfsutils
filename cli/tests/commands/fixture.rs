@@ -674,7 +674,10 @@ fn device_stats_offline_tabular() {
     let img_str = img.to_str().unwrap();
     let out = btrfs_ok(&["device", "stats", "--offline", "-T", img_str]);
     let lines: Vec<&str> = out.lines().collect();
-    assert!(lines.len() >= 3, "expected header + separator + data row: {out}");
+    assert!(
+        lines.len() >= 3,
+        "expected header + separator + data row: {out}"
+    );
     assert!(lines[0].contains("Id"), "header should contain Id: {out}");
     assert!(
         lines[0].contains("Write errors"),
@@ -691,7 +694,12 @@ fn device_stats_offline_modern() {
     let img = cached_fixture_image();
     let img_str = img.to_str().unwrap();
     let out = btrfs_ok(&[
-        "device", "stats", "--offline", "--format", "modern", img_str,
+        "device",
+        "stats",
+        "--offline",
+        "--format",
+        "modern",
+        img_str,
     ]);
     let lines: Vec<&str> = out.lines().collect();
     assert!(lines.len() >= 2, "expected header + data row: {out}");

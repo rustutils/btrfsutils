@@ -7,10 +7,11 @@ use btrfs_uapi::subvolume::{
     SubvolumeFlags, SubvolumeListItem, subvolume_list,
 };
 use clap::Parser;
+use cols::Cols;
 use serde::Serialize;
 use std::{
-    cmp::Ordering, fmt::Write as _, os::unix::io::AsFd, path::PathBuf,
-    str::FromStr,
+    cmp::Ordering, collections::BTreeMap, fmt::Write as _, os::unix::io::AsFd,
+    path::PathBuf, str::FromStr,
 };
 
 const HEADING_PATH_FILTERING: &str = "Path filtering";
@@ -209,7 +210,8 @@ impl Runnable for SubvolumeListCommand {
         }
 
         match ctx.format {
-            Format::Modern | Format::Text => {
+            Format::Modern => self.print_modern(&items),
+            Format::Text => {
                 if self.table {
                     self.print_table(&items);
                 } else {
@@ -337,6 +339,131 @@ impl SubvolumeListCommand {
 
             println!("{}", cols.join("\t"));
         }
+    }
+}
+
+#[derive(Cols)]
+struct SubvolRow {
+    #[column(right)]
+    id: u64,
+    #[column(header = "GEN", right)]
+    generation: u64,
+    #[column(header = "CGEN", right)]
+    cgen: u64,
+    #[column(right)]
+    parent: u64,
+    #[column(tree)]
+    path: String,
+    uuid: String,
+    parent_uuid: String,
+    received_uuid: String,
+    #[column(children)]
+    children: Vec<Self>,
+}
+
+impl SubvolRow {
+    fn from_item(item: &SubvolumeListItem) -> Self {
+        let name = if item.name.is_empty() {
+            "<unknown>".to_string()
+        } else {
+            item.name.clone()
+        };
+        Self {
+            id: item.root_id,
+            generation: item.generation,
+            cgen: item.otransid,
+            parent: item.parent_id,
+            path: name,
+            uuid: fmt_uuid(&item.uuid),
+            parent_uuid: fmt_uuid(&item.parent_uuid),
+            received_uuid: fmt_uuid(&item.received_uuid),
+            children: Vec::new(),
+        }
+    }
+}
+
+/// Recursively remove a row from the map and attach its children.
+fn attach_children(
+    id: u64,
+    rows: &mut BTreeMap<u64, SubvolRow>,
+    children_map: &BTreeMap<u64, Vec<u64>>,
+) -> Option<SubvolRow> {
+    let mut row = rows.remove(&id)?;
+    if let Some(child_ids) = children_map.get(&id) {
+        for &child_id in child_ids {
+            if let Some(child) = attach_children(child_id, rows, children_map) {
+                row.children.push(child);
+            }
+        }
+    }
+    Some(row)
+}
+
+/// Build a tree of `SubvolRow` from a flat list of items.
+///
+/// Items whose `parent_id` matches `top_id` become roots. All other items
+/// are nested under their parent. Items with no matching parent are added
+/// as roots to avoid losing them.
+fn build_tree(items: &[SubvolumeListItem]) -> Vec<SubvolRow> {
+    let mut rows: BTreeMap<u64, SubvolRow> = items
+        .iter()
+        .map(|i| (i.root_id, SubvolRow::from_item(i)))
+        .collect();
+
+    let mut children_map: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    let mut roots = Vec::new();
+
+    // An item is a root if its parent is not in the item set (e.g.
+    // parent_id == 5 for FS_TREE which is not listed, or parent_id == 0
+    // for deleted subvolumes).
+    for item in items {
+        if rows.contains_key(&item.parent_id) {
+            children_map
+                .entry(item.parent_id)
+                .or_default()
+                .push(item.root_id);
+        } else {
+            roots.push(item.root_id);
+        }
+    }
+
+    let mut result: Vec<SubvolRow> = roots
+        .iter()
+        .filter_map(|&id| attach_children(id, &mut rows, &children_map))
+        .collect();
+
+    // Any remaining items (orphans with no matching parent) go at the root.
+    for (_, row) in rows {
+        result.push(row);
+    }
+
+    result
+}
+
+impl SubvolumeListCommand {
+    fn print_modern(&self, items: &[SubvolumeListItem]) {
+        let tree = build_tree(items);
+
+        let mut headers =
+            vec![SubvolRowHeader::Id, SubvolRowHeader::Generation];
+        if self.ogeneration {
+            headers.push(SubvolRowHeader::Cgen);
+        }
+        headers.push(SubvolRowHeader::Parent);
+        headers.push(SubvolRowHeader::Path);
+        if self.uuid {
+            headers.push(SubvolRowHeader::Uuid);
+        }
+        if self.parent_uuid {
+            headers.push(SubvolRowHeader::ParentUuid);
+        }
+        if self.received_uuid {
+            headers.push(SubvolRowHeader::ReceivedUuid);
+        }
+
+        let table = SubvolRow::to_table_with(&tree, &headers);
+        let mut out = std::io::stdout().lock();
+        let _ = cols::print_table(&table, &mut out);
     }
 }
 
