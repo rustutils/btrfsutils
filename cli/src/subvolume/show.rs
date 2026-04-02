@@ -1,9 +1,10 @@
 use crate::{
     Format, Runnable,
-    util::{ParsedUuid, format_time, open_path},
+    util::{ParsedUuid, format_time, human_bytes, open_path},
 };
 use anyhow::{Context, Result};
 use btrfs_uapi::{
+    quota::{self, QgroupInfo},
     send_receive::subvolume_search_by_uuid,
     subvolume::{subvolume_info, subvolume_info_by_id},
 };
@@ -74,6 +75,15 @@ impl Runnable for SubvolumeShowCommand {
         println!("\tReceive transid: \t{}", info.rtransid);
         println!("\tReceive time: \t\t{}", format_time(info.rtime));
 
+        // Quota data: look up this subvolume's qgroup (level 0, id = subvol id).
+        if let Some(qg) = query_qgroup(file.as_fd(), info.id) {
+            println!("\tQuota group:\t\t0/{}", info.id);
+            println!("\t  Limit referenced:\t{}", format_limit(qg.max_rfer));
+            println!("\t  Limit exclusive:\t{}", format_limit(qg.max_excl));
+            println!("\t  Usage referenced:\t{}", human_bytes(qg.rfer));
+            println!("\t  Usage exclusive:\t{}", human_bytes(qg.excl));
+        }
+
         Ok(())
     }
 }
@@ -83,5 +93,28 @@ fn format_uuid(uuid: &uuid::Uuid) -> String {
         "-".to_string()
     } else {
         uuid.hyphenated().to_string()
+    }
+}
+
+/// Query the qgroup entry for a specific subvolume ID.
+///
+/// Returns `None` if quotas are not enabled or the subvolume has no qgroup.
+fn query_qgroup(
+    fd: std::os::unix::io::BorrowedFd,
+    subvol_id: u64,
+) -> Option<QgroupInfo> {
+    let list = quota::qgroup_list(fd).ok()?;
+    list.qgroups.into_iter().find(|q| {
+        quota::qgroupid_level(q.qgroupid) == 0
+            && quota::qgroupid_subvolid(q.qgroupid) == subvol_id
+    })
+}
+
+/// Format a qgroup limit value: "-" if no limit, human-readable otherwise.
+fn format_limit(limit: u64) -> String {
+    if limit == 0 || limit == u64::MAX {
+        "-".to_string()
+    } else {
+        human_bytes(limit)
     }
 }
