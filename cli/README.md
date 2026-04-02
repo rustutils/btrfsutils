@@ -15,6 +15,9 @@ btrfs <command> [<subcommand>] [<args>]
 
 Most commands require root privileges or `CAP_SYS_ADMIN`.
 
+If you enable the `tune` or `mkfs` features, then the binary will embed
+the `btrfs-tune` and `btrfs-mkfs` crates as subcommands.
+
 Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## What's implemented

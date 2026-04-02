@@ -2,11 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+## Unreleased
 
-## [Unreleased]
+## 0.8.0
 
 ### Added
+
 - `btrfs check`: read-only filesystem verification with all 7 phases:
   superblock validation, tree structure checks, extent reference verification,
   chunk/block group cross-checks, FS tree inode consistency, checksum tree
@@ -48,6 +49,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (label, resize, quota, subvolume, property, device, qgroup)
 
 ### Changed
+
 - `mkfs` argument help organized into headings: Block layout, Features,
   Identity, and Rootdir population
 - `mkfs` Profile, ChecksumArg, and Feature enums migrated from manual
@@ -68,6 +70,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   allocating a contiguous buffer per command
 
 ### Fixed
+
 - `btrfs-disk`: CRC32C checksum computation for superblocks and tree blocks
   now uses standard CRC32C (matching the kernel's `hash_crc32c`) instead of
   raw CRC32C with seed=0
@@ -79,7 +82,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `mkfs --rootdir --shrink`: update `total_bytes` in chunk tree DEV_ITEM
   and all superblock mirrors, not just the primary superblock
 
-## [0.7.0] — 2026-03-31
+## 0.7.0
 
 ### Added
 - `btrfs restore`: file recovery from damaged/unmounted filesystems with support
@@ -98,9 +101,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `btrfs-disk`: `BlockReader::write_block` for writing tree blocks by
   logical address, `csum_tree_block` for recomputing tree block checksums
 
-## [0.6.0] — 2026-03-30
+## 0.6.0
 
 ### Added
+
 - `btrfs inspect-internal tree-stats`: walk any B-tree and report node counts,
   seek statistics, cluster sizes, and inline data bytes
 - `btrfs rescue super-recover`: scan all superblock mirrors and restore the
@@ -122,6 +126,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (previously only validated in the CLI entry point)
 
 ### Changed
+
 - CI migrated from manual cargo invocations to `nix flake check`
 - `mangen` binary renamed to `btrfs-gen` to consolidate generation tools
 - `btrfs-mkfs` binary renamed from `mkfs-btrfs` for consistency
@@ -131,18 +136,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Pedantic clippy lints fixed across `btrfs-disk`
 
 ### Fixed
+
 - LZO decompression sector alignment in `btrfs receive` for streams with
   non-4096-byte sectors
 
 ### Changed (licensing)
+
 - `btrfs-uapi`, `btrfs-disk`, and `btrfs-stream` relicensed from GPL-2.0-only
   to MIT OR Apache-2.0 so they can be used as library dependencies by non-GPL projects
 
----
-
-## [0.5.0] — 2026-03-29
+## 0.5.0
 
 ### Added
+
 - `mkfs.btrfs` multi-device support with RAID1 metadata (Phase 5): per-device
   superblocks, `DEV_ITEM` and `DEV_EXTENT` entries for all devices, block group
   flags derived from configured profiles
@@ -160,6 +166,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Multi-level `-v`/`-q` verbose/quiet flags via `env_logger`
 
 ### Changed
+
 - `btrfs filesystem defrag` and `btrfs subvolume delete` no longer declare their
   own `-v` flag; verbosity is controlled by the global flag
 - Stream parser now uses typed `StreamError` instead of `anyhow::Error`
@@ -168,13 +175,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - LE reader helpers deduplicated into `uapi/src/util.rs` and `disk/src/util.rs`
 
 ### Fixed
+
 - Nix build: include fixture image, add gzip dependency, pin test timezone
 
----
-
-## [0.4.0] — 2026-03-28
+## 0.4.0
 
 ### Added
+
 - `btrfs inspect-internal dump-tree`: full on-disk tree dumper reading directly from
   block device or image file (no `CAP_SYS_ADMIN` required); bootstrap via
   superblock → sys_chunk_array → chunk tree → root tree; 30+ item type formatters
@@ -192,14 +199,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixture snapshot tests for `subvolume list/show`, `dump-super`, and quota commands
 
 ### Changed
+
 - `dump-super` display logic moved from `disk/` to `cli/` to keep the disk crate
   free of formatting code
 
----
-
-## [0.3.0] — 2026-03-26
+## 0.3.0
 
 ### Added
+
 - `btrfs-stream` extracted as a standalone crate with platform-independent send
   stream parser and CRC32C validation; `receive` feature (Linux-only) adds
   `ReceiveContext`
@@ -214,13 +221,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Help text snapshot tests covering all subcommands
 
 ### Fixed
+
 - `btrfs property set ro` on a subvolume
 
----
-
-## [0.2.0] — 2026-03-26
+## 0.2.0
 
 ### Added
+
 - `btrfs send`: pipe + reader thread architecture; full and incremental sends;
   `-e`, `-p`, `-c`, `-f`, `--no-data`, `--proto`, `--compressed-data` flags;
   protocol version negotiation via sysfs
@@ -233,13 +240,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Man page generation via `btrfs-mangen` binary
 - CLI argument parsing tests
 
----
-
-## [0.1.0] — 2026-03-25
+## 0.1.0
 
 Initial release.
 
 ### Added
+
 - `btrfs filesystem df` — space usage by chunk type
 - `btrfs filesystem defrag` — single file and recursive directory defragmentation
 - `btrfs filesystem resize` — online resize
