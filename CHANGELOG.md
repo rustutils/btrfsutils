@@ -12,6 +12,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   chunk/block group cross-checks, FS tree inode consistency, checksum tree
   validation (with optional `--check-data-csum`), and ROOT_REF/ROOT_BACKREF
   consistency checking
+- `btrfs check`: directory inode size validation, file nbytes validation,
+  missing extent item detection, and bidirectional backref owner cross-checks
+- `mkfs --rootdir`: populate a new filesystem from an existing directory
+  tree with support for regular files (inline + regular extents up to 1 MiB),
+  directories, symlinks, hardlinks, xattrs, and special files
+- `mkfs --rootdir --compress`: zlib and zstd compression for rootdir
+  population (LZO not yet supported)
+- `mkfs --rootdir --inode-flags`: set NODATACOW/NODATASUM flags on
+  specific paths during rootdir population
+- `mkfs --rootdir --shrink`: truncate the image to the actual used size
+  after populating from rootdir
+- `btrfs mkfs` and `btrfs tune` optional CLI subcommands: enable with
+  cargo features `mkfs` and `tune` for a single-binary experience
+- `btrfs-disk`: `tree_walk_mut` for mutable DFS tree traversal with
+  automatic checksum recomputation (used by tune fsid rewrite)
+- `btrfs-uapi`: `filesystem::is_mounted` as the canonical mount check,
+  now returns `Result<bool>` for proper error propagation
+- Comprehensive btrfs internals specification documents in `docs/spec/`:
+  on-disk format, chunk/block group system, extent tree and backrefs,
+  check phases, and mkfs process
+- `#![warn(clippy::pedantic)]` enabled across all crates
+- Comprehensive rustdoc for all public types in `btrfs-disk` and
+  `btrfs-uapi`, including detailed btrfs on-disk format explanations
+- End-to-end integration tests for mkfs --rootdir (basic, compressed,
+  shrink) with mount + data verification
+- uapi-based effect verification added to 8 existing integration tests
+  (label, resize, quota, subvolume, property, device, qgroup)
+
+### Changed
+- `mkfs` argument help organized into headings: Block layout, Features,
+  Identity, and Rootdir population
+- `mkfs` Profile, ChecksumArg, and Feature enums migrated from manual
+  `FromStr` to clap `ValueEnum` with backward-compatible aliases
+- `mkfs` `--verbose` changed from bool to u8 (count-based) to match
+  the CLI's global `--verbose` type
+- `btrfs-uapi`: `device_remove` and `replace_start` take references
+  instead of owned values
+- `btrfs-tune`: refactored to use `tree_walk` and `tree_walk_mut`
+  from `btrfs-disk` instead of manual recursive tree traversal
+- Unified duplicated tree builder functions in mkfs (block-group,
+  free-space, superblock) via `UsedBytes` and `SuperblockParams` structs
+- Inode field patching in rootdir uses `offset_of!` instead of
+  hardcoded byte offsets
+- Workspace dependencies consolidated: flate2, zstd, lzokay moved
+  to workspace level
+- Stream CRC validation uses incremental `crc32c_append` instead of
+  allocating a contiguous buffer per command
 
 ### Fixed
 - `btrfs-disk`: CRC32C checksum computation for superblocks and tree blocks
@@ -19,6 +66,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   raw CRC32C with seed=0
 - `btrfs check`: item data extraction now correctly accounts for the tree
   block header offset
+- `mkfs --rootdir`: removed spurious CHUNK_TREE ROOT_ITEM that confused
+  the C btrfs-progs check's backref validation
+- `mkfs --rootdir`: include data extent bytes in superblock `bytes_used`
+- `mkfs --rootdir --shrink`: update `total_bytes` in chunk tree DEV_ITEM
+  and all superblock mirrors, not just the primary superblock
 
 ## [0.7.0] — 2026-03-31
 
