@@ -1,9 +1,13 @@
-use crate::{Format, Runnable, util::open_path};
+use crate::{
+    Format, Runnable,
+    util::{open_path, print_json},
+};
 use anyhow::{Context, Result};
 use btrfs_uapi::subvolume::{
     SubvolumeFlags, SubvolumeListItem, subvolume_list,
 };
 use clap::Parser;
+use serde::Serialize;
 use std::{
     cmp::Ordering, fmt::Write as _, os::unix::io::AsFd, path::PathBuf,
     str::FromStr,
@@ -98,8 +102,43 @@ pub struct SubvolumeListCommand {
     path: PathBuf,
 }
 
+#[derive(Serialize)]
+struct SubvolListJson {
+    id: u64,
+    generation: u64,
+    ogeneration: u64,
+    parent: u64,
+    top_level: u64,
+    path: String,
+    uuid: String,
+    parent_uuid: String,
+    received_uuid: String,
+    readonly: bool,
+}
+
+impl SubvolListJson {
+    fn from_item(item: &SubvolumeListItem) -> Self {
+        Self {
+            id: item.root_id,
+            generation: item.generation,
+            ogeneration: item.otransid,
+            parent: item.parent_id,
+            top_level: item.parent_id,
+            path: if item.name.is_empty() {
+                "<unknown>".to_string()
+            } else {
+                item.name.clone()
+            },
+            uuid: fmt_uuid(&item.uuid),
+            parent_uuid: fmt_uuid(&item.parent_uuid),
+            received_uuid: fmt_uuid(&item.received_uuid),
+            readonly: item.flags.contains(SubvolumeFlags::RDONLY),
+        }
+    }
+}
+
 impl Runnable for SubvolumeListCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, format: Format, _dry_run: bool) -> Result<()> {
         let file = open_path(&self.path)?;
 
         let mut items = subvolume_list(file.as_fd()).with_context(|| {
@@ -165,10 +204,19 @@ impl Runnable for SubvolumeListCommand {
             });
         }
 
-        if self.table {
-            self.print_table(&items);
-        } else {
-            self.print_default(&items);
+        match format {
+            Format::Text => {
+                if self.table {
+                    self.print_table(&items);
+                } else {
+                    self.print_default(&items);
+                }
+            }
+            Format::Json => {
+                let json: Vec<SubvolListJson> =
+                    items.iter().map(SubvolListJson::from_item).collect();
+                print_json("subvolume-list", &json)?;
+            }
         }
 
         Ok(())

@@ -11,8 +11,10 @@ All notable changes to this project will be documented in this file.
 - `btrfs subvolume show`: display quota group usage and limits
   (referenced/exclusive bytes) with unit flag support
   (`--raw`, `--iec`, `--si`, `--kbytes`, `--mbytes`, `--gbytes`, `--tbytes`)
-- `--format json` support for `device stats`, `filesystem df`, and
-  `qgroup show`, using the btrfs-progs wrapper format with `__header`
+- `--format json` support for `device stats`, `filesystem df`,
+  `qgroup show`, `subvolume show`, `subvolume list`, and
+  `subvolume get-default`, using the btrfs-progs wrapper format
+  with `__header`
 
 ## 0.8.0
 
