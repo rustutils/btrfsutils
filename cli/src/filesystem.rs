@@ -1,4 +1,4 @@
-use crate::{RunContext, Runnable, util::SizeFormat};
+use crate::{Format, RunContext, Runnable, util::SizeFormat};
 use anyhow::Result;
 use clap::{Args, Parser};
 
@@ -31,6 +31,13 @@ pub struct FilesystemCommand {
 }
 
 impl Runnable for FilesystemCommand {
+    fn supported_formats(&self) -> &[Format] {
+        match &self.subcommand {
+            FilesystemSubcommand::Df(cmd) => cmd.supported_formats(),
+            _ => &[Format::Text, Format::Modern],
+        }
+    }
+
     fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
             FilesystemSubcommand::Df(cmd) => cmd.run(ctx),

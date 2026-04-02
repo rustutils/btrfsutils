@@ -46,6 +46,7 @@ pub enum Format {
     #[default]
     Text,
     Json,
+    Modern,
 }
 
 /// Log verbosity level, ordered from most to least verbose.
@@ -102,7 +103,7 @@ pub struct GlobalOptions {
     pub log: Option<Level>,
 
     /// If supported, print subcommand output in that format
-    #[clap(global = true, long, help_heading = GLOBAL_OPTIONS)]
+    #[clap(global = true, long, help_heading = GLOBAL_OPTIONS, env = "BTRFS_OUTPUT_FORMAT")]
     pub format: Option<Format>,
 }
 
@@ -122,6 +123,14 @@ pub trait Runnable {
     ///
     /// Returns an error if the command fails.
     fn run(&self, ctx: &RunContext) -> Result<()>;
+
+    /// Output formats this command supports.
+    ///
+    /// The default is text and modern. Commands that also support JSON
+    /// should override this to include `Format::Json`.
+    fn supported_formats(&self) -> &[Format] {
+        &[Format::Text, Format::Modern]
+    }
 
     /// Whether this command supports the global --dry-run flag.
     ///
@@ -157,12 +166,51 @@ pub enum Command {
     Tune(btrfs_tune::args::Arguments),
 }
 
+impl Command {
+    fn leaf(&self) -> &dyn Runnable {
+        match self {
+            Command::Balance(cmd) => cmd,
+            Command::Check(cmd) => cmd,
+            Command::Device(cmd) => cmd,
+            Command::Filesystem(cmd) => cmd,
+            Command::Inspect(cmd) => cmd,
+            Command::Property(cmd) => cmd,
+            Command::Qgroup(cmd) => cmd,
+            Command::Quota(cmd) => cmd,
+            Command::Receive(cmd) => cmd,
+            Command::Replace(cmd) => cmd,
+            Command::Rescue(cmd) => cmd,
+            Command::Restore(cmd) => cmd,
+            Command::Scrub(cmd) => cmd,
+            Command::Send(cmd) => cmd,
+            Command::Subvolume(cmd) => cmd,
+            // mkfs and tune have their own entry points, not Runnable
+            #[cfg(feature = "mkfs")]
+            Command::Mkfs(_) => unreachable!(),
+            #[cfg(feature = "tune")]
+            Command::Tune(_) => unreachable!(),
+        }
+    }
+}
+
 impl Runnable for Command {
+    fn supported_formats(&self) -> &[Format] {
+        match self {
+            #[cfg(feature = "mkfs")]
+            Command::Mkfs(_) => &[Format::Text],
+            #[cfg(feature = "tune")]
+            Command::Tune(_) => &[Format::Text],
+            _ => self.leaf().supported_formats(),
+        }
+    }
+
     fn supports_dry_run(&self) -> bool {
         match self {
-            Command::Restore(cmd) => cmd.supports_dry_run(),
-            Command::Subvolume(cmd) => cmd.supports_dry_run(),
-            _ => false,
+            #[cfg(feature = "mkfs")]
+            Command::Mkfs(_) => false,
+            #[cfg(feature = "tune")]
+            Command::Tune(_) => false,
+            _ => self.leaf().supports_dry_run(),
         }
     }
 
@@ -223,8 +271,15 @@ impl Arguments {
             );
         }
 
+        let format = self.global.format.unwrap_or_default();
+        if !self.command.supported_formats().contains(&format) {
+            anyhow::bail!(
+                "the --format {format:?} option is not supported by this command",
+            );
+        }
+
         let ctx = RunContext {
-            format: self.global.format.unwrap_or_default(),
+            format,
             dry_run: self.global.dry_run,
         };
         self.command.run(&ctx)

@@ -110,6 +110,10 @@ fn subvol_to_json(
 }
 
 impl Runnable for SubvolumeShowCommand {
+    fn supported_formats(&self) -> &[Format] {
+        &[Format::Text, Format::Json, Format::Modern]
+    }
+
     fn run(&self, ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
@@ -138,7 +142,7 @@ impl Runnable for SubvolumeShowCommand {
         let qg = query_qgroup(file.as_fd(), info.id);
 
         match ctx.format {
-            Format::Text => {
+            Format::Modern | Format::Text => {
                 println!("{}", self.path.display());
                 println!("\tName: \t\t\t{}", info.name);
                 println!("\tUUID: \t\t\t{}", format_uuid(&info.uuid));

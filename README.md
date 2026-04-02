@@ -16,6 +16,21 @@ utility) that are compatible with the respective utilities from `btrfs-progs`.
 These aim to be drop-in replacements, but may be missing some advanced features
 or have a simpler implementation.
 
+## Goals
+
+**Drop-in compatibility.** The default output of every command matches
+btrfs-progs exactly. Scripts, monitoring tools, and muscle memory all
+work unchanged.
+
+**Modern output, when you want it.** Pass `--modern` or set
+`BTRFS_MODERN=1` to get improved formatting: adaptive column widths,
+cleaner tables, and (eventually) colors. This is opt-in and never
+changes the default behavior.
+
+**Reusable libraries.** The low-level crates (`btrfs-uapi`, `btrfs-disk`,
+`btrfs-stream`) are MIT/Apache-2.0 licensed and designed to be useful
+independently of the CLI tools.
+
 ## Status
 
 This project is under active development. Most commands are fully implemented

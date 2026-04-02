@@ -1,4 +1,4 @@
-use crate::{RunContext, Runnable};
+use crate::{Format, RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
@@ -29,6 +29,13 @@ pub struct QgroupCommand {
 }
 
 impl Runnable for QgroupCommand {
+    fn supported_formats(&self) -> &[Format] {
+        match &self.subcommand {
+            QgroupSubcommand::Show(cmd) => cmd.supported_formats(),
+            _ => &[Format::Text, Format::Modern],
+        }
+    }
+
     fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
             QgroupSubcommand::Assign(cmd) => cmd.run(ctx),

@@ -212,6 +212,10 @@ impl QgroupJson {
 }
 
 impl Runnable for QgroupShowCommand {
+    fn supported_formats(&self) -> &[Format] {
+        &[Format::Text, Format::Json, Format::Modern]
+    }
+
     #[allow(clippy::too_many_lines)]
     fn run(&self, ctx: &RunContext) -> Result<()> {
         // filter_all / filter_direct: not implemented, ignored
@@ -296,7 +300,7 @@ impl Runnable for QgroupShowCommand {
         }
 
         match ctx.format {
-            Format::Text => {
+            Format::Modern | Format::Text => {
                 print_qgroups_text(self, &qgroups, &mode);
             }
             Format::Json => {

@@ -28,6 +28,10 @@ struct SpaceEntryJson {
 }
 
 impl Runnable for FilesystemDfCommand {
+    fn supported_formats(&self) -> &[Format] {
+        &[Format::Text, Format::Json, Format::Modern]
+    }
+
     fn run(&self, ctx: &RunContext) -> Result<()> {
         let mode = self.units.resolve();
         let file = open_path(&self.path)?;
@@ -36,7 +40,7 @@ impl Runnable for FilesystemDfCommand {
         })?;
 
         match ctx.format {
-            Format::Text => {
+            Format::Modern | Format::Text => {
                 for entry in &entries {
                     println!(
                         "{}, {}: total={}, used={}",

@@ -1,4 +1,4 @@
-use crate::{RunContext, Runnable};
+use crate::{Format, RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
@@ -32,6 +32,15 @@ pub struct SubvolumeCommand {
 }
 
 impl Runnable for SubvolumeCommand {
+    fn supported_formats(&self) -> &[Format] {
+        match &self.subcommand {
+            SubvolumeSubcommand::Show(cmd) => cmd.supported_formats(),
+            SubvolumeSubcommand::List(cmd) => cmd.supported_formats(),
+            SubvolumeSubcommand::GetDefault(cmd) => cmd.supported_formats(),
+            _ => &[Format::Text, Format::Modern],
+        }
+    }
+
     fn supports_dry_run(&self) -> bool {
         matches!(self.subcommand, SubvolumeSubcommand::Delete(_))
     }

@@ -51,6 +51,20 @@ fn dry_run_unsupported_command_returns_error() {
 }
 
 #[test]
+fn json_unsupported_command_returns_error() {
+    let (_stdout, stderr, code) =
+        super::btrfs(&["--format", "json", "balance", "status", "/"]);
+    assert_ne!(
+        code, 0,
+        "--format json should fail for unsupported commands"
+    );
+    assert!(
+        stderr.contains("--format"),
+        "error should mention --format: {stderr}"
+    );
+}
+
+#[test]
 fn subcommand_help_flag() {
     // --help on a subcommand should print usage for that subcommand.
     let out = btrfs_ok(&["filesystem", "df", "--help"]);

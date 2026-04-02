@@ -1,4 +1,4 @@
-use crate::{RunContext, Runnable};
+use crate::{Format, RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
@@ -24,6 +24,13 @@ pub struct DeviceCommand {
 }
 
 impl Runnable for DeviceCommand {
+    fn supported_formats(&self) -> &[Format] {
+        match &self.subcommand {
+            DeviceSubcommand::Stats(cmd) => cmd.supported_formats(),
+            _ => &[Format::Text, Format::Modern],
+        }
+    }
+
     fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
             DeviceSubcommand::Add(cmd) => cmd.run(ctx),

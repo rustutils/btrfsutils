@@ -19,7 +19,12 @@ nix = { version = "0.31.2", features = ["ioctl", "fs"] }
 bitflags = "2"
 uuid = { version = "1", features = ["v4", "v7"] }
 anyhow = "1.0.102"
-clap = { version = "4.6.0", features = ["derive", "wrap_help", "suggestions"] }
+clap = { version = "4.6.0", features = [
+  "derive",
+  "wrap_help",
+  "suggestions",
+  "env",
+] }
 env_logger = "0.11.9"
 log = "0.4.29"
 bytes = "1"

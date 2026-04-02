@@ -138,6 +138,10 @@ impl SubvolListJson {
 }
 
 impl Runnable for SubvolumeListCommand {
+    fn supported_formats(&self) -> &[Format] {
+        &[Format::Text, Format::Json, Format::Modern]
+    }
+
     fn run(&self, ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
@@ -205,7 +209,7 @@ impl Runnable for SubvolumeListCommand {
         }
 
         match ctx.format {
-            Format::Text => {
+            Format::Modern | Format::Text => {
                 if self.table {
                     self.print_table(&items);
                 } else {

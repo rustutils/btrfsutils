@@ -22,6 +22,10 @@ struct DefaultSubvolJson {
 }
 
 impl Runnable for SubvolumeGetDefaultCommand {
+    fn supported_formats(&self) -> &[Format] {
+        &[Format::Text, Format::Json, Format::Modern]
+    }
+
     fn run(&self, ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
@@ -40,7 +44,7 @@ impl Runnable for SubvolumeGetDefaultCommand {
         };
 
         match ctx.format {
-            Format::Text => {
+            Format::Modern | Format::Text => {
                 if default_id == FS_TREE_OBJECTID {
                     println!("ID 5 (FS_TREE)");
                 } else {

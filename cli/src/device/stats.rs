@@ -93,6 +93,10 @@ impl StatsJson {
 }
 
 impl Runnable for DeviceStatsCommand {
+    fn supported_formats(&self) -> &[Format] {
+        &[Format::Text, Format::Json, Format::Modern]
+    }
+
     fn run(&self, ctx: &RunContext) -> Result<()> {
         if self.offline {
             return self.run_offline(ctx.format);
@@ -136,8 +140,10 @@ impl Runnable for DeviceStatsCommand {
         }
 
         match ctx.format {
-            Format::Text if self.tabular => print_stats_table(&all_stats),
-            Format::Text => {
+            Format::Modern | Format::Text if self.tabular => {
+                print_stats_table(&all_stats);
+            }
+            Format::Modern | Format::Text => {
                 for s in &all_stats {
                     print_stats_text(s);
                 }
@@ -222,8 +228,10 @@ impl DeviceStatsCommand {
         let any_nonzero = all_stats.iter().any(|s| !s.is_clean());
 
         match format {
-            Format::Text if self.tabular => print_stats_table(&all_stats),
-            Format::Text => {
+            Format::Modern | Format::Text if self.tabular => {
+                print_stats_table(&all_stats);
+            }
+            Format::Modern | Format::Text => {
                 for s in &all_stats {
                     let label = format!("{}.devid.{}", s.device, s.devid);
                     print_stats_text_labeled(&label, s);
