@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result, bail};
 use btrfs_disk::items::{ChunkItem, FileExtentBody, FileExtentType};
 use btrfs_uapi::{
@@ -35,7 +35,7 @@ pub struct MapSwapfileCommand {
 }
 
 impl Runnable for MapSwapfileCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = File::open(&self.path).with_context(|| {
             format!("cannot open '{}'", self.path.display())
         })?;

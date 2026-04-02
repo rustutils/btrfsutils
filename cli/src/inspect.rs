@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
@@ -50,18 +50,18 @@ pub enum InspectSubcommand {
 }
 
 impl Runnable for InspectCommand {
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
-            InspectSubcommand::Rootid(cmd) => cmd.run(format, dry_run),
-            InspectSubcommand::InodeResolve(cmd) => cmd.run(format, dry_run),
-            InspectSubcommand::LogicalResolve(cmd) => cmd.run(format, dry_run),
-            InspectSubcommand::SubvolidResolve(cmd) => cmd.run(format, dry_run),
-            InspectSubcommand::MapSwapfile(cmd) => cmd.run(format, dry_run),
-            InspectSubcommand::MinDevSize(cmd) => cmd.run(format, dry_run),
-            InspectSubcommand::DumpTree(cmd) => cmd.run(format, dry_run),
-            InspectSubcommand::DumpSuper(cmd) => cmd.run(format, dry_run),
-            InspectSubcommand::TreeStats(cmd) => cmd.run(format, dry_run),
-            InspectSubcommand::ListChunks(cmd) => cmd.run(format, dry_run),
+            InspectSubcommand::Rootid(cmd) => cmd.run(ctx),
+            InspectSubcommand::InodeResolve(cmd) => cmd.run(ctx),
+            InspectSubcommand::LogicalResolve(cmd) => cmd.run(ctx),
+            InspectSubcommand::SubvolidResolve(cmd) => cmd.run(ctx),
+            InspectSubcommand::MapSwapfile(cmd) => cmd.run(ctx),
+            InspectSubcommand::MinDevSize(cmd) => cmd.run(ctx),
+            InspectSubcommand::DumpTree(cmd) => cmd.run(ctx),
+            InspectSubcommand::DumpSuper(cmd) => cmd.run(ctx),
+            InspectSubcommand::TreeStats(cmd) => cmd.run(ctx),
+            InspectSubcommand::ListChunks(cmd) => cmd.run(ctx),
         }
     }
 }

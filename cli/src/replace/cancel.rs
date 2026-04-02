@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::open_path};
+use crate::{RunContext, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use btrfs_uapi::replace::replace_cancel;
 use clap::Parser;
@@ -17,7 +17,7 @@ pub struct ReplaceCancelCommand {
 }
 
 impl Runnable for ReplaceCancelCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.mount_point)?;
 
         let was_running = replace_cancel(file.as_fd()).with_context(|| {

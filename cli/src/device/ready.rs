@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::device::device_ready;
 use clap::Parser;
@@ -17,7 +17,7 @@ pub struct DeviceReadyCommand {
 }
 
 impl Runnable for DeviceReadyCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let path_str = self.device.to_str().ok_or_else(|| {
             anyhow::anyhow!(
                 "device path is not valid UTF-8: '{}'",

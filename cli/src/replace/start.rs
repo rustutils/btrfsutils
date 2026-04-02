@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{check_device_for_overwrite, open_path},
 };
 use anyhow::{Context, Result, bail};
@@ -53,7 +53,7 @@ pub struct ReplaceStartCommand {
 
 impl Runnable for ReplaceStartCommand {
     #[allow(clippy::too_many_lines)]
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         // Validate the target device before opening the filesystem.
         check_device_for_overwrite(&self.target, self.force)?;
 

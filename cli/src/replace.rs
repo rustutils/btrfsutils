@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
@@ -21,11 +21,11 @@ pub struct ReplaceCommand {
 }
 
 impl Runnable for ReplaceCommand {
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
-            ReplaceSubcommand::Start(cmd) => cmd.run(format, dry_run),
-            ReplaceSubcommand::Status(cmd) => cmd.run(format, dry_run),
-            ReplaceSubcommand::Cancel(cmd) => cmd.run(format, dry_run),
+            ReplaceSubcommand::Start(cmd) => cmd.run(ctx),
+            ReplaceSubcommand::Status(cmd) => cmd.run(ctx),
+            ReplaceSubcommand::Cancel(cmd) => cmd.run(ctx),
         }
     }
 }

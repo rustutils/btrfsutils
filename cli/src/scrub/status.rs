@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     filesystem::UnitMode,
     util::{fmt_size, open_path},
 };
@@ -29,7 +29,7 @@ pub struct ScrubStatusCommand {
 }
 
 impl Runnable for ScrubStatusCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let mode = self.units.resolve();
         let file = open_path(&self.path)?;
         let fd = file.as_fd();

@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
@@ -36,19 +36,19 @@ impl Runnable for SubvolumeCommand {
         matches!(self.subcommand, SubvolumeSubcommand::Delete(_))
     }
 
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
-            SubvolumeSubcommand::Create(cmd) => cmd.run(format, dry_run),
-            SubvolumeSubcommand::Delete(cmd) => cmd.run(format, dry_run),
-            SubvolumeSubcommand::Snapshot(cmd) => cmd.run(format, dry_run),
-            SubvolumeSubcommand::Show(cmd) => cmd.run(format, dry_run),
-            SubvolumeSubcommand::List(cmd) => cmd.run(format, dry_run),
-            SubvolumeSubcommand::GetDefault(cmd) => cmd.run(format, dry_run),
-            SubvolumeSubcommand::SetDefault(cmd) => cmd.run(format, dry_run),
-            SubvolumeSubcommand::GetFlags(cmd) => cmd.run(format, dry_run),
-            SubvolumeSubcommand::SetFlags(cmd) => cmd.run(format, dry_run),
-            SubvolumeSubcommand::FindNew(cmd) => cmd.run(format, dry_run),
-            SubvolumeSubcommand::Sync(cmd) => cmd.run(format, dry_run),
+            SubvolumeSubcommand::Create(cmd) => cmd.run(ctx),
+            SubvolumeSubcommand::Delete(cmd) => cmd.run(ctx),
+            SubvolumeSubcommand::Snapshot(cmd) => cmd.run(ctx),
+            SubvolumeSubcommand::Show(cmd) => cmd.run(ctx),
+            SubvolumeSubcommand::List(cmd) => cmd.run(ctx),
+            SubvolumeSubcommand::GetDefault(cmd) => cmd.run(ctx),
+            SubvolumeSubcommand::SetDefault(cmd) => cmd.run(ctx),
+            SubvolumeSubcommand::GetFlags(cmd) => cmd.run(ctx),
+            SubvolumeSubcommand::SetFlags(cmd) => cmd.run(ctx),
+            SubvolumeSubcommand::FindNew(cmd) => cmd.run(ctx),
+            SubvolumeSubcommand::Sync(cmd) => cmd.run(ctx),
         }
     }
 }

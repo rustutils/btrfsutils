@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{SizeFormat, fmt_size},
 };
 use anyhow::Result;
@@ -28,13 +28,13 @@ pub struct ScrubCommand {
 }
 
 impl Runnable for ScrubCommand {
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
-            ScrubSubcommand::Start(cmd) => cmd.run(format, dry_run),
-            ScrubSubcommand::Cancel(cmd) => cmd.run(format, dry_run),
-            ScrubSubcommand::Resume(cmd) => cmd.run(format, dry_run),
-            ScrubSubcommand::Status(cmd) => cmd.run(format, dry_run),
-            ScrubSubcommand::Limit(cmd) => cmd.run(format, dry_run),
+            ScrubSubcommand::Start(cmd) => cmd.run(ctx),
+            ScrubSubcommand::Cancel(cmd) => cmd.run(ctx),
+            ScrubSubcommand::Resume(cmd) => cmd.run(ctx),
+            ScrubSubcommand::Status(cmd) => cmd.run(ctx),
+            ScrubSubcommand::Limit(cmd) => cmd.run(ctx),
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{human_bytes, open_path},
 };
 use anyhow::{Context, Result};
@@ -23,7 +23,7 @@ pub struct MinDevSizeCommand {
 }
 
 impl Runnable for MinDevSizeCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
         let size = btrfs_uapi::device::device_min_size(

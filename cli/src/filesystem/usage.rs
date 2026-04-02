@@ -1,6 +1,6 @@
 use super::UnitMode;
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{SizeFormat, fmt_size},
 };
 use anyhow::{Context, Result};
@@ -85,7 +85,7 @@ fn has_multiple_profiles(spaces: &[SpaceInfo]) -> bool {
 }
 
 impl Runnable for FilesystemUsageCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let mut mode = self.units.resolve();
         if self.human_si {
             mode = SizeFormat::HumanSi;

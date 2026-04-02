@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::is_mounted};
+use crate::{RunContext, Runnable, util::is_mounted};
 use anyhow::{Context, Result, bail};
 use btrfs_disk::{
     items::{
@@ -106,7 +106,7 @@ impl Runnable for RestoreCommand {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         if let Some(m) = self.super_mirror
             && m >= u64::from(SUPER_MIRROR_MAX)
         {

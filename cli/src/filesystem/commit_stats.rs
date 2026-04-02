@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::open_path};
+use crate::{RunContext, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use btrfs_uapi::{filesystem::filesystem_info, sysfs::SysfsBtrfs};
 use clap::Parser;
@@ -16,7 +16,7 @@ pub struct FilesystemCommitStatsCommand {
 }
 
 impl Runnable for FilesystemCommitStatsCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
         let info = filesystem_info(file.as_fd()).with_context(|| {

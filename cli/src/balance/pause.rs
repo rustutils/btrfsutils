@@ -1,5 +1,5 @@
 use super::open_path;
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::balance::{BalanceCtl, balance_ctl};
 use clap::Parser;
@@ -13,7 +13,7 @@ pub struct BalancePauseCommand {
 }
 
 impl Runnable for BalancePauseCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
         match balance_ctl(file.as_fd(), BalanceCtl::Pause) {

@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::is_mounted};
+use crate::{RunContext, Runnable, util::is_mounted};
 use anyhow::{Result, bail};
 use btrfs_disk::{raw, reader, superblock::SUPER_MIRROR_MAX};
 use clap::Parser;
@@ -91,7 +91,7 @@ pub struct CheckCommand {
 
 impl Runnable for CheckCommand {
     #[allow(clippy::too_many_lines)]
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         // Reject unsupported flags.
         if self.repair {
             bail!("repair mode is not yet supported");

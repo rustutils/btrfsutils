@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{open_path, parse_qgroupid},
 };
 use anyhow::{Context, Result};
@@ -18,7 +18,7 @@ pub struct QgroupDestroyCommand {
 }
 
 impl Runnable for QgroupDestroyCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let qgroupid = parse_qgroupid(&self.qgroupid)?;
 
         let file = open_path(&self.path)?;

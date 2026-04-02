@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ pub struct RescueFixDeviceSizeCommand {
 }
 
 impl Runnable for RescueFixDeviceSizeCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         todo!("implement rescue fix-device-size")
     }
 }

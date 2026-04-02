@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     filesystem::UnitMode,
     util::{fmt_size, open_path},
 };
@@ -74,7 +74,7 @@ struct Row {
 
 impl Runnable for ListChunksCommand {
     #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let mode = self.units.resolve();
         let fmt = |bytes| fmt_size(bytes, &mode);
         let file = open_path(&self.path)?;

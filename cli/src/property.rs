@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 use std::{
@@ -40,11 +40,11 @@ pub struct PropertyCommand {
 }
 
 impl Runnable for PropertyCommand {
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
-            PropertySubcommand::Get(cmd) => cmd.run(format, dry_run),
-            PropertySubcommand::Set(cmd) => cmd.run(format, dry_run),
-            PropertySubcommand::List(cmd) => cmd.run(format, dry_run),
+            PropertySubcommand::Get(cmd) => cmd.run(ctx),
+            PropertySubcommand::Set(cmd) => cmd.run(ctx),
+            PropertySubcommand::List(cmd) => cmd.run(ctx),
         }
     }
 }

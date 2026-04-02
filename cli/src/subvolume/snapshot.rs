@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::parse_qgroupid};
+use crate::{RunContext, Runnable, util::parse_qgroupid};
 use anyhow::{Context, Result};
 use btrfs_uapi::subvolume::snapshot_create;
 use clap::Parser;
@@ -23,7 +23,7 @@ pub struct SubvolumeSnapshotCommand {
 }
 
 impl Runnable for SubvolumeSnapshotCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let qgroup_ids: Vec<u64> = self
             .qgroups
             .iter()

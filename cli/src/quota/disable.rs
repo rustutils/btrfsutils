@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::open_path};
+use crate::{RunContext, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::{os::unix::io::AsFd, path::PathBuf};
@@ -11,7 +11,7 @@ pub struct QuotaDisableCommand {
 }
 
 impl Runnable for QuotaDisableCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
         btrfs_uapi::quota::quota_disable(file.as_fd()).with_context(|| {

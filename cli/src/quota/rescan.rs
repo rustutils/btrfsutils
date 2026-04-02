@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::open_path};
+use crate::{RunContext, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use clap::Parser;
 use nix::errno::Errno;
@@ -24,7 +24,7 @@ pub struct QuotaRescanCommand {
 }
 
 impl Runnable for QuotaRescanCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
         let fd = file.as_fd();
 

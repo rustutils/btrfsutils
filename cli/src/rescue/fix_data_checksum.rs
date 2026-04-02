@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
@@ -23,7 +23,7 @@ pub struct RescueFixDataChecksumCommand {
 }
 
 impl Runnable for RescueFixDataChecksumCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         todo!("implement rescue fix-data-checksum")
     }
 }

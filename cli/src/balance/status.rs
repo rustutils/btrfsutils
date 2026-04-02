@@ -1,5 +1,5 @@
 use super::open_path;
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::balance::{BalanceState, balance_progress};
 use clap::Parser;
@@ -13,7 +13,7 @@ pub struct BalanceStatusCommand {
 }
 
 impl Runnable for BalanceStatusCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
         match balance_progress(file.as_fd()) {

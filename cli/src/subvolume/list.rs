@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    Format, RunContext, Runnable,
     util::{open_path, print_json},
 };
 use anyhow::{Context, Result};
@@ -138,7 +138,7 @@ impl SubvolListJson {
 }
 
 impl Runnable for SubvolumeListCommand {
-    fn run(&self, format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
         let mut items = subvolume_list(file.as_fd()).with_context(|| {
@@ -204,7 +204,7 @@ impl Runnable for SubvolumeListCommand {
             });
         }
 
-        match format {
+        match ctx.format {
             Format::Text => {
                 if self.table {
                     self.print_table(&items);

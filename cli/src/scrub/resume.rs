@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{SizeFormat, open_path},
 };
 use anyhow::{Context, Result};
@@ -45,7 +45,7 @@ pub struct ScrubResumeCommand {
 }
 
 impl Runnable for ScrubResumeCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         // Resume uses the same ioctl as start; the kernel tracks where it left
         // off via the scrub state on disk.
         let file = open_path(&self.path)?;

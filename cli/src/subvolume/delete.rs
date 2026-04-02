@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result, bail};
 use btrfs_uapi::{
     filesystem::{start_sync, wait_sync},
@@ -51,7 +51,7 @@ impl Runnable for SubvolumeDeleteCommand {
         true
     }
 
-    fn run(&self, _format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         if self.subvolid.is_some() && self.paths.len() != 1 {
             bail!(
                 "--subvolid requires exactly one path argument (the filesystem mount point)"
@@ -63,14 +63,15 @@ impl Runnable for SubvolumeDeleteCommand {
         let mut commit_after_fd: Option<File> = None;
 
         if let Some(subvolid) = self.subvolid {
-            let (ok, fd) = self.delete_by_id(subvolid, &self.paths[0], dry_run);
+            let (ok, fd) =
+                self.delete_by_id(subvolid, &self.paths[0], ctx.dry_run);
             had_error |= !ok;
             if self.commit_after {
                 commit_after_fd = fd;
             }
         } else {
             for path in &self.paths {
-                let (ok, fd) = self.delete_by_path(path, dry_run);
+                let (ok, fd) = self.delete_by_path(path, ctx.dry_run);
                 had_error |= !ok;
                 if self.commit_after && fd.is_some() {
                     commit_after_fd = fd;
@@ -79,7 +80,7 @@ impl Runnable for SubvolumeDeleteCommand {
         }
 
         // --commit-after: sync once at the end.
-        if !dry_run
+        if !ctx.dry_run
             && let Some(ref file) = commit_after_fd
             && let Err(e) = wait_for_commit(file.as_fd())
         {

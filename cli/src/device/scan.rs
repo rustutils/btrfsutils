@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::device::{device_forget, device_scan};
 use clap::Parser;
@@ -29,7 +29,7 @@ pub struct DeviceScanCommand {
 }
 
 impl Runnable for DeviceScanCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         if self.forget {
             if self.devices.is_empty() {
                 device_forget(None).context(

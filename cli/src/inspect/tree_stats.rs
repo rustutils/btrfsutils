@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{SizeFormat, fmt_size},
 };
 use anyhow::{Context, Result};
@@ -140,7 +140,7 @@ fn print_stats(
 }
 
 impl Runnable for TreeStatsCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = crate::util::open_path(&self.device)?;
         let mut fs = reader::filesystem_open(file).with_context(|| {
             format!("failed to open '{}'", self.device.display())

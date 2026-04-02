@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::open_path};
+use crate::{RunContext, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use btrfs_uapi::scrub::scrub_cancel;
 use clap::Parser;
@@ -12,7 +12,7 @@ pub struct ScrubCancelCommand {
 }
 
 impl Runnable for ScrubCancelCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
         scrub_cancel(file.as_fd()).with_context(|| {

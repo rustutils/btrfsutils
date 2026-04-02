@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::defrag::{
     CompressSpec, CompressType, DefragRangeArgs, defrag_range,
@@ -59,7 +59,7 @@ pub struct FilesystemDefragCommand {
 }
 
 impl Runnable for FilesystemDefragCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let compress = self.compress.as_ref().map(|ct| CompressSpec {
             compress_type: ct.unwrap_or(CompressType::Zlib),
             level: self.compress_level,

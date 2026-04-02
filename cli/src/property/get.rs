@@ -1,5 +1,5 @@
 use super::{PropertyObjectType, detect_object_types, property_names};
-use crate::{Format, Runnable, util::open_path};
+use crate::{RunContext, Runnable, util::open_path};
 use anyhow::{Context, Result, anyhow, bail};
 use btrfs_uapi::{filesystem::label_get, subvolume::subvolume_flags_get};
 use clap::Parser;
@@ -26,7 +26,7 @@ pub struct PropertyGetCommand {
 }
 
 impl Runnable for PropertyGetCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.object)?;
 
         // Detect object type if not specified

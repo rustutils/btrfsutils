@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
@@ -29,15 +29,15 @@ pub struct QgroupCommand {
 }
 
 impl Runnable for QgroupCommand {
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
-            QgroupSubcommand::Assign(cmd) => cmd.run(format, dry_run),
-            QgroupSubcommand::Remove(cmd) => cmd.run(format, dry_run),
-            QgroupSubcommand::Create(cmd) => cmd.run(format, dry_run),
-            QgroupSubcommand::Destroy(cmd) => cmd.run(format, dry_run),
-            QgroupSubcommand::Show(cmd) => cmd.run(format, dry_run),
-            QgroupSubcommand::Limit(cmd) => cmd.run(format, dry_run),
-            QgroupSubcommand::ClearStale(cmd) => cmd.run(format, dry_run),
+            QgroupSubcommand::Assign(cmd) => cmd.run(ctx),
+            QgroupSubcommand::Remove(cmd) => cmd.run(ctx),
+            QgroupSubcommand::Create(cmd) => cmd.run(ctx),
+            QgroupSubcommand::Destroy(cmd) => cmd.run(ctx),
+            QgroupSubcommand::Show(cmd) => cmd.run(ctx),
+            QgroupSubcommand::Limit(cmd) => cmd.run(ctx),
+            QgroupSubcommand::ClearStale(cmd) => cmd.run(ctx),
         }
     }
 }

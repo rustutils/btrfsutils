@@ -1,5 +1,5 @@
 use super::{filters::parse_filters, open_path};
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::balance::{BalanceFlags, balance};
 use clap::Parser;
@@ -50,7 +50,7 @@ pub struct BalanceStartCommand {
 }
 
 impl Runnable for BalanceStartCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         // TODO: background mode (requires daemonizing the process)
         if self.background {
             anyhow::bail!("--background is not yet implemented");

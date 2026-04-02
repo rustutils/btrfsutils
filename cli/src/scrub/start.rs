@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{SizeFormat, open_path, parse_size_with_suffix},
 };
 use anyhow::{Context, Result, bail};
@@ -57,7 +57,7 @@ pub struct ScrubStartCommand {
 }
 
 impl Runnable for ScrubStartCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
         let fd = file.as_fd();
 

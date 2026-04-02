@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::check_device_for_overwrite};
+use crate::{RunContext, Runnable, util::check_device_for_overwrite};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::device_add, filesystem::filesystem_info, sysfs::SysfsBtrfs,
@@ -34,7 +34,7 @@ pub struct DeviceAddCommand {
 }
 
 impl Runnable for DeviceAddCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = fs::File::open(&self.target).with_context(|| {
             format!("failed to open '{}'", self.target.display())
         })?;

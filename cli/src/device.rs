@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
@@ -24,16 +24,16 @@ pub struct DeviceCommand {
 }
 
 impl Runnable for DeviceCommand {
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
-            DeviceSubcommand::Add(cmd) => cmd.run(format, dry_run),
+            DeviceSubcommand::Add(cmd) => cmd.run(ctx),
             DeviceSubcommand::Remove(cmd) | DeviceSubcommand::Delete(cmd) => {
-                cmd.run(format, dry_run)
+                cmd.run(ctx)
             }
-            DeviceSubcommand::Stats(cmd) => cmd.run(format, dry_run),
-            DeviceSubcommand::Scan(cmd) => cmd.run(format, dry_run),
-            DeviceSubcommand::Ready(cmd) => cmd.run(format, dry_run),
-            DeviceSubcommand::Usage(cmd) => cmd.run(format, dry_run),
+            DeviceSubcommand::Stats(cmd) => cmd.run(ctx),
+            DeviceSubcommand::Scan(cmd) => cmd.run(ctx),
+            DeviceSubcommand::Ready(cmd) => cmd.run(ctx),
+            DeviceSubcommand::Usage(cmd) => cmd.run(ctx),
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::SizeFormat};
+use crate::{RunContext, Runnable, util::SizeFormat};
 use anyhow::Result;
 use clap::{Args, Parser};
 
@@ -31,18 +31,18 @@ pub struct FilesystemCommand {
 }
 
 impl Runnable for FilesystemCommand {
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
-            FilesystemSubcommand::Df(cmd) => cmd.run(format, dry_run),
-            FilesystemSubcommand::Du(cmd) => cmd.run(format, dry_run),
-            FilesystemSubcommand::Show(cmd) => cmd.run(format, dry_run),
-            FilesystemSubcommand::Sync(cmd) => cmd.run(format, dry_run),
-            FilesystemSubcommand::Defragment(cmd) => cmd.run(format, dry_run),
-            FilesystemSubcommand::Resize(cmd) => cmd.run(format, dry_run),
-            FilesystemSubcommand::Label(cmd) => cmd.run(format, dry_run),
-            FilesystemSubcommand::Usage(cmd) => cmd.run(format, dry_run),
-            FilesystemSubcommand::Mkswapfile(cmd) => cmd.run(format, dry_run),
-            FilesystemSubcommand::CommitStats(cmd) => cmd.run(format, dry_run),
+            FilesystemSubcommand::Df(cmd) => cmd.run(ctx),
+            FilesystemSubcommand::Du(cmd) => cmd.run(ctx),
+            FilesystemSubcommand::Show(cmd) => cmd.run(ctx),
+            FilesystemSubcommand::Sync(cmd) => cmd.run(ctx),
+            FilesystemSubcommand::Defragment(cmd) => cmd.run(ctx),
+            FilesystemSubcommand::Resize(cmd) => cmd.run(ctx),
+            FilesystemSubcommand::Label(cmd) => cmd.run(ctx),
+            FilesystemSubcommand::Usage(cmd) => cmd.run(ctx),
+            FilesystemSubcommand::Mkswapfile(cmd) => cmd.run(ctx),
+            FilesystemSubcommand::CommitStats(cmd) => cmd.run(ctx),
         }
     }
 }

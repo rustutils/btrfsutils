@@ -1,5 +1,5 @@
 use super::UnitMode;
-use crate::{Format, Runnable, util::fmt_size};
+use crate::{RunContext, Runnable, util::fmt_size};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::device_info_all,
@@ -28,7 +28,7 @@ pub struct FilesystemShowCommand {
 }
 
 impl Runnable for FilesystemShowCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         if self.all_devices {
             anyhow::bail!("--all-devices is not yet implemented");
         }

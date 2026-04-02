@@ -2,7 +2,7 @@ use super::{
     PropertyObjectType, detect_object_types, property_description,
     property_names,
 };
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Result, anyhow, bail};
 use clap::Parser;
 use std::path::PathBuf;
@@ -19,7 +19,7 @@ pub struct PropertyListCommand {
 }
 
 impl Runnable for PropertyListCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         // Detect object type if not specified
         let detected_types = detect_object_types(&self.object);
         let target_type = if let Some(t) = self.object_type {

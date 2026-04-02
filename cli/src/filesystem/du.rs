@@ -14,7 +14,7 @@
 
 use super::UnitMode;
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{SizeFormat, fmt_size},
 };
 use anyhow::{Context, Result};
@@ -49,7 +49,7 @@ pub struct FilesystemDuCommand {
 }
 
 impl Runnable for FilesystemDuCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let mode = self.units.resolve();
         println!(
             "{:>10}  {:>10}  {:>10}  Filename",

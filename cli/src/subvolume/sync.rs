@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::open_path};
+use crate::{RunContext, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use btrfs_uapi::subvolume::{subvolume_info_by_id, subvolume_list};
 use clap::Parser;
@@ -24,7 +24,7 @@ pub struct SubvolumeSyncCommand {
 }
 
 impl Runnable for SubvolumeSyncCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
         let interval = Duration::from_secs(self.sleep.unwrap_or(1));

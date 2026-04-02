@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
@@ -22,12 +22,12 @@ pub struct QuotaCommand {
 }
 
 impl Runnable for QuotaCommand {
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
-            QuotaSubcommand::Enable(cmd) => cmd.run(format, dry_run),
-            QuotaSubcommand::Disable(cmd) => cmd.run(format, dry_run),
-            QuotaSubcommand::Rescan(cmd) => cmd.run(format, dry_run),
-            QuotaSubcommand::Status(cmd) => cmd.run(format, dry_run),
+            QuotaSubcommand::Enable(cmd) => cmd.run(ctx),
+            QuotaSubcommand::Disable(cmd) => cmd.run(ctx),
+            QuotaSubcommand::Rescan(cmd) => cmd.run(ctx),
+            QuotaSubcommand::Status(cmd) => cmd.run(ctx),
         }
     }
 }

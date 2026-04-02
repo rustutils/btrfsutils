@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{open_path, parse_qgroupid},
 };
 use anyhow::{Context, Result, bail};
@@ -26,7 +26,7 @@ pub struct QgroupAssignCommand {
 }
 
 impl Runnable for QgroupAssignCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let src = parse_qgroupid(&self.src)?;
         let dst = parse_qgroupid(&self.dst)?;
 

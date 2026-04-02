@@ -1,5 +1,5 @@
 pub(crate) use crate::util::open_path;
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
@@ -26,13 +26,13 @@ pub struct BalanceCommand {
 }
 
 impl Runnable for BalanceCommand {
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
-            BalanceSubcommand::Start(cmd) => cmd.run(format, dry_run),
-            BalanceSubcommand::Pause(cmd) => cmd.run(format, dry_run),
-            BalanceSubcommand::Cancel(cmd) => cmd.run(format, dry_run),
-            BalanceSubcommand::Resume(cmd) => cmd.run(format, dry_run),
-            BalanceSubcommand::Status(cmd) => cmd.run(format, dry_run),
+            BalanceSubcommand::Start(cmd) => cmd.run(ctx),
+            BalanceSubcommand::Pause(cmd) => cmd.run(ctx),
+            BalanceSubcommand::Cancel(cmd) => cmd.run(ctx),
+            BalanceSubcommand::Resume(cmd) => cmd.run(ctx),
+            BalanceSubcommand::Status(cmd) => cmd.run(ctx),
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result, anyhow};
 use btrfs_uapi::subvolume::{
     FS_TREE_OBJECTID, subvolume_default_set, subvolume_info,
@@ -21,7 +21,7 @@ pub struct SubvolumeSetDefaultCommand {
 }
 
 impl Runnable for SubvolumeSetDefaultCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         if let Ok(id) = self.subvol_or_id.parse::<u64>() {
             let mount = self.path.as_ref().ok_or_else(|| {
                 anyhow!("a filesystem path is required when specifying a subvolume ID")

@@ -106,6 +106,14 @@ pub struct GlobalOptions {
     pub format: Option<Format>,
 }
 
+/// Runtime context passed to every command.
+pub struct RunContext {
+    /// Output format (text or json).
+    pub format: Format,
+    /// Whether the user requested a dry run.
+    pub dry_run: bool,
+}
+
 /// A CLI subcommand that can be executed.
 pub trait Runnable {
     /// Execute this command.
@@ -113,7 +121,7 @@ pub trait Runnable {
     /// # Errors
     ///
     /// Returns an error if the command fails.
-    fn run(&self, format: Format, dry_run: bool) -> Result<()>;
+    fn run(&self, ctx: &RunContext) -> Result<()>;
 
     /// Whether this command supports the global --dry-run flag.
     ///
@@ -158,25 +166,25 @@ impl Runnable for Command {
         }
     }
 
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match self {
-            Command::Balance(cmd) => cmd.run(format, dry_run),
-            Command::Check(cmd) => cmd.run(format, dry_run),
-            Command::Device(cmd) => cmd.run(format, dry_run),
-            Command::Filesystem(cmd) => cmd.run(format, dry_run),
-            Command::Inspect(cmd) => cmd.run(format, dry_run),
+            Command::Balance(cmd) => cmd.run(ctx),
+            Command::Check(cmd) => cmd.run(ctx),
+            Command::Device(cmd) => cmd.run(ctx),
+            Command::Filesystem(cmd) => cmd.run(ctx),
+            Command::Inspect(cmd) => cmd.run(ctx),
             #[cfg(feature = "mkfs")]
             Command::Mkfs(args) => btrfs_mkfs::run::run(args),
-            Command::Property(cmd) => cmd.run(format, dry_run),
-            Command::Qgroup(cmd) => cmd.run(format, dry_run),
-            Command::Quota(cmd) => cmd.run(format, dry_run),
-            Command::Receive(cmd) => cmd.run(format, dry_run),
-            Command::Replace(cmd) => cmd.run(format, dry_run),
-            Command::Rescue(cmd) => cmd.run(format, dry_run),
-            Command::Restore(cmd) => cmd.run(format, dry_run),
-            Command::Scrub(cmd) => cmd.run(format, dry_run),
-            Command::Send(cmd) => cmd.run(format, dry_run),
-            Command::Subvolume(cmd) => cmd.run(format, dry_run),
+            Command::Property(cmd) => cmd.run(ctx),
+            Command::Qgroup(cmd) => cmd.run(ctx),
+            Command::Quota(cmd) => cmd.run(ctx),
+            Command::Receive(cmd) => cmd.run(ctx),
+            Command::Replace(cmd) => cmd.run(ctx),
+            Command::Rescue(cmd) => cmd.run(ctx),
+            Command::Restore(cmd) => cmd.run(ctx),
+            Command::Scrub(cmd) => cmd.run(ctx),
+            Command::Send(cmd) => cmd.run(ctx),
+            Command::Subvolume(cmd) => cmd.run(ctx),
             #[cfg(feature = "tune")]
             Command::Tune(args) => btrfs_tune::run::run(args),
         }
@@ -215,7 +223,10 @@ impl Arguments {
             );
         }
 
-        self.command
-            .run(self.global.format.unwrap_or_default(), self.global.dry_run)
+        let ctx = RunContext {
+            format: self.global.format.unwrap_or_default(),
+            dry_run: self.global.dry_run,
+        };
+        self.command.run(&ctx)
     }
 }

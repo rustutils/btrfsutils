@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    Format, RunContext, Runnable,
     util::{open_path, print_json},
 };
 use anyhow::{Context, Result};
@@ -22,7 +22,7 @@ struct DefaultSubvolJson {
 }
 
 impl Runnable for SubvolumeGetDefaultCommand {
-    fn run(&self, format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
         let default_id =
@@ -39,7 +39,7 @@ impl Runnable for SubvolumeGetDefaultCommand {
             format!("{default_id}")
         };
 
-        match format {
+        match ctx.format {
             Format::Text => {
                 if default_id == FS_TREE_OBJECTID {
                     println!("ID 5 (FS_TREE)");

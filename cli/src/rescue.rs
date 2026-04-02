@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::Result;
 use clap::Parser;
 
@@ -32,19 +32,17 @@ pub struct RescueCommand {
 }
 
 impl Runnable for RescueCommand {
-    fn run(&self, format: Format, dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         match &self.subcommand {
-            RescueSubcommand::ChunkRecover(cmd) => cmd.run(format, dry_run),
-            RescueSubcommand::SuperRecover(cmd) => cmd.run(format, dry_run),
-            RescueSubcommand::ZeroLog(cmd) => cmd.run(format, dry_run),
-            RescueSubcommand::FixDeviceSize(cmd) => cmd.run(format, dry_run),
-            RescueSubcommand::FixDataChecksum(cmd) => cmd.run(format, dry_run),
-            RescueSubcommand::CreateControlDevice(cmd) => {
-                cmd.run(format, dry_run)
-            }
-            RescueSubcommand::ClearInoCache(cmd) => cmd.run(format, dry_run),
-            RescueSubcommand::ClearSpaceCache(cmd) => cmd.run(format, dry_run),
-            RescueSubcommand::ClearUuidTree(cmd) => cmd.run(format, dry_run),
+            RescueSubcommand::ChunkRecover(cmd) => cmd.run(ctx),
+            RescueSubcommand::SuperRecover(cmd) => cmd.run(ctx),
+            RescueSubcommand::ZeroLog(cmd) => cmd.run(ctx),
+            RescueSubcommand::FixDeviceSize(cmd) => cmd.run(ctx),
+            RescueSubcommand::FixDataChecksum(cmd) => cmd.run(ctx),
+            RescueSubcommand::CreateControlDevice(cmd) => cmd.run(ctx),
+            RescueSubcommand::ClearInoCache(cmd) => cmd.run(ctx),
+            RescueSubcommand::ClearSpaceCache(cmd) => cmd.run(ctx),
+            RescueSubcommand::ClearUuidTree(cmd) => cmd.run(ctx),
         }
     }
 }

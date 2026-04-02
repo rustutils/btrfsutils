@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::open_path};
+use crate::{RunContext, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use btrfs_uapi::filesystem::{label_get, label_set};
 use clap::Parser;
@@ -19,7 +19,7 @@ pub struct FilesystemLabelCommand {
 }
 
 impl Runnable for FilesystemLabelCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
         match &self.new_label {
             None => {

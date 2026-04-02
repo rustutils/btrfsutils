@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{format_time_short, open_path},
 };
 use anyhow::{Context, Result};
@@ -26,7 +26,7 @@ pub struct ReplaceStatusCommand {
 
 impl Runnable for ReplaceStatusCommand {
     #[allow(clippy::cast_precision_loss)]
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.mount_point)?;
         let fd = file.as_fd();
 

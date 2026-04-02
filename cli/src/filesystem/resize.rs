@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{open_path, parse_size_with_suffix},
 };
 use anyhow::{Context, Result};
@@ -58,7 +58,7 @@ fn parse_resize_args(s: &str) -> Result<ResizeArgs> {
 }
 
 impl Runnable for FilesystemResizeCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         if self.offline {
             anyhow::bail!("--offline is not yet implemented");
         }

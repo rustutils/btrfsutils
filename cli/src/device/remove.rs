@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::{DeviceSpec, device_remove},
@@ -31,7 +31,7 @@ pub struct DeviceRemoveCommand {
 }
 
 impl Runnable for DeviceRemoveCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         // The last argument is the mount point; everything before it is a device spec.
         // split_last() returns (&last, &[..rest]), so mount_str is first.
         let (mount_str, specs) = self

@@ -1,6 +1,6 @@
 use super::UnitMode;
 use crate::{
-    Format, Runnable,
+    Format, RunContext, Runnable,
     util::{fmt_size, open_path, print_json},
 };
 use anyhow::{Context, Result};
@@ -28,14 +28,14 @@ struct SpaceEntryJson {
 }
 
 impl Runnable for FilesystemDfCommand {
-    fn run(&self, format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         let mode = self.units.resolve();
         let file = open_path(&self.path)?;
         let entries = space_info(file.as_fd()).with_context(|| {
             format!("failed to get space info for '{}'", self.path.display())
         })?;
 
-        match format {
+        match ctx.format {
             Format::Text => {
                 for entry in &entries {
                     println!(

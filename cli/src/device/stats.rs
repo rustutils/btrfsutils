@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    Format, RunContext, Runnable,
     util::{open_path, print_json},
 };
 use anyhow::{Context, Result, bail};
@@ -93,9 +93,9 @@ impl StatsJson {
 }
 
 impl Runnable for DeviceStatsCommand {
-    fn run(&self, format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         if self.offline {
-            return self.run_offline(format);
+            return self.run_offline(ctx.format);
         }
 
         let file = open_path(&self.path)?;
@@ -135,7 +135,7 @@ impl Runnable for DeviceStatsCommand {
             all_stats.push(entry);
         }
 
-        match format {
+        match ctx.format {
             Format::Text if self.tabular => print_stats_table(&all_stats),
             Format::Text => {
                 for s in &all_stats {

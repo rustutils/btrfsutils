@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{open_path, parse_qgroupid, parse_size_with_suffix},
 };
 use anyhow::{Context, Result};
@@ -50,7 +50,7 @@ pub struct QgroupLimitCommand {
 }
 
 impl Runnable for QgroupLimitCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let (fs_path, qgroupid) = match &self.path {
             None => {
                 // target is the path; apply limit to the subvolume that fd refers to (qgroupid 0)

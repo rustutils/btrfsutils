@@ -1,5 +1,5 @@
 use super::print_super;
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result, bail};
 use btrfs_disk::superblock::{self, SUPER_MIRROR_MAX};
 use clap::Parser;
@@ -39,7 +39,7 @@ pub struct DumpSuperCommand {
 }
 
 impl Runnable for DumpSuperCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let mut file = File::open(&self.path).with_context(|| {
             format!("failed to open '{}'", self.path.display())
         })?;

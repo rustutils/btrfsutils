@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::open_path};
+use crate::{RunContext, Runnable, util::open_path};
 use anyhow::{Context, Result};
 use btrfs_uapi::sysfs::SysfsBtrfs;
 use clap::Parser;
@@ -24,7 +24,7 @@ fn describe_mode(mode: &str) -> &str {
 }
 
 impl Runnable for QuotaStatusCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
         let fd = file.as_fd();
 

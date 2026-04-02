@@ -1,4 +1,4 @@
-use crate::{Format, Runnable, util::is_mounted};
+use crate::{RunContext, Runnable, util::is_mounted};
 use anyhow::{Context, Result, bail};
 use btrfs_disk::superblock::{
     SUPER_MIRROR_MAX, read_superblock_bytes_at, super_mirror_offset,
@@ -35,7 +35,7 @@ struct MirrorRecord {
 }
 
 impl Runnable for RescueSuperRecoverCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         if is_mounted(&self.device) {
             bail!("{} is currently mounted", self.device.display());
         }

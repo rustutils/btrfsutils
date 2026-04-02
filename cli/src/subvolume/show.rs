@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    Format, RunContext, Runnable,
     filesystem::UnitMode,
     util::{
         ParsedUuid, SizeFormat, fmt_size, format_time, open_path, print_json,
@@ -110,7 +110,7 @@ fn subvol_to_json(
 }
 
 impl Runnable for SubvolumeShowCommand {
-    fn run(&self, format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
         let info = if let Some(rootid) = self.rootid {
@@ -137,7 +137,7 @@ impl Runnable for SubvolumeShowCommand {
 
         let qg = query_qgroup(file.as_fd(), info.id);
 
-        match format {
+        match ctx.format {
             Format::Text => {
                 println!("{}", self.path.display());
                 println!("\tName: \t\t\t{}", info.name);

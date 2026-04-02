@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::ffi::CString;
@@ -13,7 +13,7 @@ use std::ffi::CString;
 pub struct RescueCreateControlDeviceCommand {}
 
 impl Runnable for RescueCreateControlDeviceCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         const PATH: &str = "/dev/btrfs-control";
         let dev = libc::makedev(10, 234);
         let path = CString::new(PATH).unwrap();

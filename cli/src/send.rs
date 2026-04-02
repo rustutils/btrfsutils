@@ -1,4 +1,4 @@
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result, bail};
 use btrfs_uapi::{
     send_receive::SendFlags,
@@ -183,7 +183,7 @@ fn open_output(outfile: Option<&PathBuf>) -> Result<Box<dyn Write + Send>> {
 
 impl Runnable for SendCommand {
     #[allow(clippy::too_many_lines)]
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         // Validate output destination.
         if let Some(path) = &self.outfile {
             // Try opening existing file first, then create. Truncate since

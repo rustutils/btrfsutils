@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    Format, RunContext, Runnable,
     util::{SizeFormat, fmt_size, open_path, print_json},
 };
 use anyhow::{Context, Result};
@@ -213,7 +213,7 @@ impl QgroupJson {
 
 impl Runnable for QgroupShowCommand {
     #[allow(clippy::too_many_lines)]
-    fn run(&self, format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         // filter_all / filter_direct: not implemented, ignored
         let _ = self.filter_all;
         let _ = self.filter_direct;
@@ -295,7 +295,7 @@ impl Runnable for QgroupShowCommand {
             }
         }
 
-        match format {
+        match ctx.format {
             Format::Text => {
                 print_qgroups_text(self, &qgroups, &mode);
             }

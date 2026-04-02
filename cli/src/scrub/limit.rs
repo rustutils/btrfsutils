@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     filesystem::UnitMode,
     util::{open_path, parse_size_with_suffix},
 };
@@ -38,7 +38,7 @@ pub struct ScrubLimitCommand {
 
 impl Runnable for ScrubLimitCommand {
     #[allow(clippy::too_many_lines)]
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let mode = self.units.resolve();
         let file = open_path(&self.path)?;
         let fd = file.as_fd();

@@ -1,5 +1,5 @@
 use crate::{
-    Format, Runnable,
+    RunContext, Runnable,
     util::{ParsedUuid, parse_size_with_suffix},
 };
 use anyhow::{Context, Result};
@@ -65,7 +65,7 @@ fn write_swap_header(
 }
 
 impl Runnable for FilesystemMkswapfileCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let size = parse_size_with_suffix(&self.size)
             .with_context(|| format!("invalid size: '{}'", self.size))?;
 

@@ -1,5 +1,5 @@
 use super::open_path;
-use crate::{Format, Runnable};
+use crate::{RunContext, Runnable};
 use anyhow::{Context, Result};
 use btrfs_uapi::balance::{BalanceFlags, balance};
 use clap::Parser;
@@ -13,7 +13,7 @@ pub struct BalanceResumeCommand {
 }
 
 impl Runnable for BalanceResumeCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
         // Resume is just a balance start with the RESUME flag and no type
