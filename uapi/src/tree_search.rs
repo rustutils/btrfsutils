@@ -33,35 +33,60 @@ use std::{
     os::{fd::AsRawFd, unix::io::BorrowedFd},
 };
 
-/// Parameters specifying which items to return from a tree search.
+/// A compound B-tree key: `(objectid, item_type, offset)`.
 ///
-/// The kernel searches a 136-bit key space ordered as
-/// `(objectid << 72) | (type << 64) | offset`.
-/// All items whose key falls in the inclusive range `[min_key, max_key]` are
-/// returned.
+/// Items in a btrfs tree are ordered by this 136-bit compound value:
+/// `(objectid << 72) | (item_type << 64) | offset`.
+/// The three fields are not independent ranges — they form a single
+/// ordered tuple.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Key {
+    /// Object this key belongs to (e.g. inode number, tree ID, device ID).
+    pub objectid: u64,
+    /// Item type: a `BTRFS_*_KEY` constant from `crate::raw`.
+    pub item_type: u32,
+    /// Type-specific offset (e.g. byte offset for extents, parent ID for
+    /// backrefs).
+    pub offset: u64,
+}
+
+impl Key {
+    /// The smallest possible key.
+    pub const MIN: Self = Self {
+        objectid: 0,
+        item_type: 0,
+        offset: 0,
+    };
+
+    /// The largest possible key.
+    pub const MAX: Self = Self {
+        objectid: u64::MAX,
+        item_type: u32::MAX,
+        offset: u64::MAX,
+    };
+}
+
+/// Filter specifying which items to return from a tree search.
 ///
-/// Build a key for common cases with [`SearchKey::for_type`] or
-/// [`SearchKey::for_objectid_range`].
+/// The kernel searches the compound key space `(objectid, item_type, offset)`.
+/// All items whose compound key falls in the inclusive range `[start, end]`
+/// are returned.  The three components of `start` and `end` are NOT
+/// independent filters — they form compound bounds on the B-tree key order.
+///
+/// Build a filter for common cases with [`SearchFilter::for_type`] or
+/// [`SearchFilter::for_objectid_range`].
 ///
 /// Tree IDs and item type codes are the `BTRFS_*_OBJECTID` and `BTRFS_*_KEY`
 /// constants from `crate::raw`, cast to `u64` and `u32` respectively at the
 /// call site.
 #[derive(Debug, Clone)]
-pub struct SearchKey {
+pub struct SearchFilter {
     /// Tree to search: use a `BTRFS_*_TREE_OBJECTID` constant from `crate::raw`.
     pub tree_id: u64,
-    /// Lower bound of the objectid range to search (inclusive).
-    pub min_objectid: u64,
-    /// Upper bound of the objectid range to search (inclusive).
-    pub max_objectid: u64,
-    /// Lower bound of the item type range: use a `BTRFS_*_KEY` constant.
-    pub min_type: u32,
-    /// Upper bound of the item type range: use a `BTRFS_*_KEY` constant.
-    pub max_type: u32,
-    /// Lower bound of the offset range to search (inclusive).
-    pub min_offset: u64,
-    /// Upper bound of the offset range to search (inclusive).
-    pub max_offset: u64,
+    /// Lower bound of the key range (inclusive).
+    pub start: Key,
+    /// Upper bound of the key range (inclusive).
+    pub end: Key,
     /// Lower bound on the transaction ID of the metadata block holding the
     /// item (not the transaction that created the item itself).
     pub min_transid: u64,
@@ -69,19 +94,23 @@ pub struct SearchKey {
     pub max_transid: u64,
 }
 
-impl SearchKey {
+impl SearchFilter {
     /// Return all items of `item_type` in `tree_id`, across every objectid
     /// and offset.
     #[must_use]
     pub fn for_type(tree_id: u64, item_type: u32) -> Self {
         Self {
             tree_id,
-            min_objectid: 0,
-            max_objectid: u64::MAX,
-            min_type: item_type,
-            max_type: item_type,
-            min_offset: 0,
-            max_offset: u64::MAX,
+            start: Key {
+                objectid: 0,
+                item_type,
+                offset: 0,
+            },
+            end: Key {
+                objectid: u64::MAX,
+                item_type,
+                offset: u64::MAX,
+            },
             min_transid: 0,
             max_transid: u64::MAX,
         }
@@ -97,12 +126,26 @@ impl SearchKey {
         max_objectid: u64,
     ) -> Self {
         Self {
-            min_objectid,
-            max_objectid,
-            ..Self::for_type(tree_id, item_type)
+            tree_id,
+            start: Key {
+                objectid: min_objectid,
+                item_type,
+                offset: 0,
+            },
+            end: Key {
+                objectid: max_objectid,
+                item_type,
+                offset: u64::MAX,
+            },
+            min_transid: 0,
+            max_transid: u64::MAX,
         }
     }
 }
+
+// Backward-compatible alias.
+#[doc(hidden)]
+pub type SearchKey = SearchFilter;
 
 /// Metadata returned for each item found by [`tree_search`].
 ///
@@ -141,6 +184,14 @@ const SEARCH_HEADER_SIZE: usize = mem::size_of::<btrfs_ioctl_search_header>();
 /// * the underlying `BTRFS_IOC_TREE_SEARCH` ioctl fails
 ///
 /// Returns `Ok(())` when the entire requested range has been scanned.
+///
+/// **Important:** the kernel treats `(min_objectid, min_type, min_offset)` and
+/// `(max_objectid, max_type, max_offset)` as compound tuple keys, not three
+/// independent range filters.  This means items whose type falls outside
+/// `[min_type, max_type]` CAN be returned when their compound key is between
+/// the min and max bounds (e.g. a type-144 item with a lower objectid than a
+/// type-132 item with a higher objectid).  Callbacks that need a single item
+/// type must filter on `hdr.item_type` themselves.
 ///
 /// # Errors
 ///
@@ -377,16 +428,16 @@ pub fn tree_search_v2(
     Ok(())
 }
 
-fn fill_search_key(sk: &mut btrfs_ioctl_search_key, key: &SearchKey) {
-    sk.tree_id = key.tree_id;
-    sk.min_objectid = key.min_objectid;
-    sk.max_objectid = key.max_objectid;
-    sk.min_type = key.min_type;
-    sk.max_type = key.max_type;
-    sk.min_offset = key.min_offset;
-    sk.max_offset = key.max_offset;
-    sk.min_transid = key.min_transid;
-    sk.max_transid = key.max_transid;
+fn fill_search_key(sk: &mut btrfs_ioctl_search_key, filter: &SearchFilter) {
+    sk.tree_id = filter.tree_id;
+    sk.min_objectid = filter.start.objectid;
+    sk.max_objectid = filter.end.objectid;
+    sk.min_type = filter.start.item_type;
+    sk.max_type = filter.end.item_type;
+    sk.min_offset = filter.start.offset;
+    sk.max_offset = filter.end.offset;
+    sk.min_transid = filter.min_transid;
+    sk.max_transid = filter.max_transid;
 }
 
 /// Advance the search cursor past `last` so the next batch begins from the
@@ -448,51 +499,55 @@ mod tests {
         unsafe { mem::zeroed() }
     }
 
-    // --- SearchKey constructors ---
+    // --- SearchFilter constructors ---
 
     #[test]
     fn for_type_covers_all_objectids_and_offsets() {
-        let sk = SearchKey::for_type(5, 132);
-        assert_eq!(sk.tree_id, 5);
-        assert_eq!(sk.min_objectid, 0);
-        assert_eq!(sk.max_objectid, u64::MAX);
-        assert_eq!(sk.min_type, 132);
-        assert_eq!(sk.max_type, 132);
-        assert_eq!(sk.min_offset, 0);
-        assert_eq!(sk.max_offset, u64::MAX);
-        assert_eq!(sk.min_transid, 0);
-        assert_eq!(sk.max_transid, u64::MAX);
+        let f = SearchFilter::for_type(5, 132);
+        assert_eq!(f.tree_id, 5);
+        assert_eq!(f.start.objectid, 0);
+        assert_eq!(f.end.objectid, u64::MAX);
+        assert_eq!(f.start.item_type, 132);
+        assert_eq!(f.end.item_type, 132);
+        assert_eq!(f.start.offset, 0);
+        assert_eq!(f.end.offset, u64::MAX);
+        assert_eq!(f.min_transid, 0);
+        assert_eq!(f.max_transid, u64::MAX);
     }
 
     #[test]
     fn for_objectid_range_restricts_objectids() {
-        let sk = SearchKey::for_objectid_range(1, 84, 100, 200);
-        assert_eq!(sk.tree_id, 1);
-        assert_eq!(sk.min_objectid, 100);
-        assert_eq!(sk.max_objectid, 200);
-        assert_eq!(sk.min_type, 84);
-        assert_eq!(sk.max_type, 84);
-        assert_eq!(sk.min_offset, 0);
-        assert_eq!(sk.max_offset, u64::MAX);
+        let f = SearchFilter::for_objectid_range(1, 84, 100, 200);
+        assert_eq!(f.tree_id, 1);
+        assert_eq!(f.start.objectid, 100);
+        assert_eq!(f.end.objectid, 200);
+        assert_eq!(f.start.item_type, 84);
+        assert_eq!(f.end.item_type, 84);
+        assert_eq!(f.start.offset, 0);
+        assert_eq!(f.end.offset, u64::MAX);
     }
 
     // --- fill_search_key ---
 
     #[test]
     fn fill_search_key_copies_all_fields() {
-        let key = SearchKey {
+        let filter = SearchFilter {
             tree_id: 1,
-            min_objectid: 10,
-            max_objectid: 20,
-            min_type: 30,
-            max_type: 40,
-            min_offset: 50,
-            max_offset: 60,
+            start: Key {
+                objectid: 10,
+                item_type: 30,
+                offset: 50,
+            },
+            end: Key {
+                objectid: 20,
+                item_type: 40,
+                offset: 60,
+            },
             min_transid: 70,
             max_transid: 80,
         };
         let mut sk = zeroed_search_key();
-        fill_search_key(&mut sk, &key);
+        fill_search_key(&mut sk, &filter);
         assert_eq!(sk.tree_id, 1);
         assert_eq!(sk.min_objectid, 10);
         assert_eq!(sk.max_objectid, 20);

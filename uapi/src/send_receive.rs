@@ -322,10 +322,10 @@ fn search_uuid_tree(
         u64::from(raw::BTRFS_UUID_TREE_OBJECTID),
         item_type,
     );
-    key.min_objectid = objectid;
-    key.max_objectid = objectid;
-    key.min_offset = offset;
-    key.max_offset = offset;
+    key.start.objectid = objectid;
+    key.end.objectid = objectid;
+    key.start.offset = offset;
+    key.end.offset = offset;
 
     let mut result: Option<u64> = None;
 

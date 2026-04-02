@@ -7,7 +7,7 @@ use btrfs_uapi::{
         BTRFS_CHUNK_TREE_OBJECTID, BTRFS_EXTENT_DATA_KEY,
         BTRFS_FIRST_CHUNK_TREE_OBJECTID,
     },
-    tree_search::{SearchKey, tree_search},
+    tree_search::{Key, SearchFilter, SearchKey, tree_search},
 };
 use clap::Parser;
 use std::{
@@ -189,14 +189,18 @@ fn map_physical_start(
 
     tree_search(
         fd,
-        SearchKey {
+        SearchFilter {
             tree_id,
-            min_objectid: ino,
-            max_objectid: ino,
-            min_type: BTRFS_EXTENT_DATA_KEY,
-            max_type: BTRFS_EXTENT_DATA_KEY,
-            min_offset: 0,
-            max_offset: u64::MAX,
+            start: Key {
+                objectid: ino,
+                item_type: BTRFS_EXTENT_DATA_KEY,
+                offset: 0,
+            },
+            end: Key {
+                objectid: ino,
+                item_type: BTRFS_EXTENT_DATA_KEY,
+                offset: u64::MAX,
+            },
             min_transid: 0,
             max_transid: u64::MAX,
         },

@@ -16,7 +16,7 @@ use crate::{
         BTRFS_FIRST_CHUNK_TREE_OBJECTID,
     },
     space::BlockGroupFlags,
-    tree_search::{SearchKey, tree_search},
+    tree_search::{Key, SearchFilter, SearchKey, tree_search},
 };
 use btrfs_disk::items::ChunkItem;
 use std::os::unix::io::BorrowedFd;
@@ -159,14 +159,18 @@ fn block_group_used(fd: BorrowedFd, logical_start: u64) -> Option<u64> {
     let mut used: Option<u64> = None;
     tree_search(
         fd,
-        SearchKey {
+        SearchFilter {
             tree_id: u64::from(BTRFS_EXTENT_TREE_OBJECTID),
-            min_objectid: logical_start,
-            max_objectid: logical_start,
-            min_type: BTRFS_BLOCK_GROUP_ITEM_KEY,
-            max_type: BTRFS_BLOCK_GROUP_ITEM_KEY,
-            min_offset: 0,
-            max_offset: u64::MAX,
+            start: Key {
+                objectid: logical_start,
+                item_type: BTRFS_BLOCK_GROUP_ITEM_KEY,
+                offset: 0,
+            },
+            end: Key {
+                objectid: logical_start,
+                item_type: BTRFS_BLOCK_GROUP_ITEM_KEY,
+                offset: u64::MAX,
+            },
             min_transid: 0,
             max_transid: u64::MAX,
         },

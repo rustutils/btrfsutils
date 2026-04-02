@@ -33,7 +33,7 @@ use crate::{
         btrfs_ioctl_quota_ctl_args, btrfs_ioctl_quota_rescan_args,
         btrfs_qgroup_limit,
     },
-    tree_search::{SearchKey, tree_search},
+    tree_search::{Key, SearchFilter, SearchKey, tree_search},
 };
 use bitflags::bitflags;
 use nix::errno::Errno;
@@ -417,14 +417,18 @@ pub fn qgroup_list(fd: BorrowedFd) -> nix::Result<QgroupList> {
     let mut status_flags = QgroupStatusFlags::empty();
 
     // Scan the quota tree for STATUS / INFO / LIMIT / RELATION items in one pass.
-    let quota_key = SearchKey {
+    let quota_key = SearchFilter {
         tree_id: u64::from(BTRFS_QUOTA_TREE_OBJECTID),
-        min_objectid: 0,
-        max_objectid: u64::MAX,
-        min_type: BTRFS_QGROUP_STATUS_KEY,
-        max_type: BTRFS_QGROUP_RELATION_KEY,
-        min_offset: 0,
-        max_offset: u64::MAX,
+        start: Key {
+            objectid: 0,
+            item_type: BTRFS_QGROUP_STATUS_KEY,
+            offset: 0,
+        },
+        end: Key {
+            objectid: u64::MAX,
+            item_type: BTRFS_QGROUP_RELATION_KEY,
+            offset: u64::MAX,
+        },
         min_transid: 0,
         max_transid: u64::MAX,
     };
