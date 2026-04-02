@@ -6,7 +6,7 @@
 //! backrefs for the extent and csum trees.
 
 use crate::{
-    args::{CompressAlgorithm, InodeFlagsArg},
+    args::{CompressAlgorithm, InodeFlagsArg, SubvolArg, SubvolType},
     items,
     tree::Key,
     write::ChecksumType,
@@ -14,7 +14,7 @@ use crate::{
 use anyhow::{Context, Result};
 use btrfs_disk::{raw, util::raw_crc32c};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs,
     io::Read,
     os::unix::fs::MetadataExt,
@@ -116,40 +116,78 @@ pub struct FileAllocation {
     pub size: u64,
     /// Whether to skip checksum generation (NODATASUM).
     pub nodatasum: bool,
+    /// Tree objectid that owns this file (main FS tree or subvolume ID).
+    pub root_objectid: u64,
 }
 
-/// Output of the directory walk: items for the FS tree plus file allocations.
+/// Output of the directory walk: per-tree item sets plus file allocations.
 pub struct RootdirPlan {
-    /// Sorted FS tree items (`INODE_ITEM`, `INODE_REF`, `DIR_ITEM`, `DIR_INDEX`,
-    /// `FILE_EXTENT_ITEM` for inline files, `XATTR_ITEM`).
-    pub fs_items: Vec<(Key, Vec<u8>)>,
-    /// Files that need regular (non-inline) data extents.
-    pub file_extents: Vec<FileAllocation>,
-    /// Total data bytes needed in the data chunk.
+    /// Plans for each tree: index 0 = main FS tree, rest = subvolumes.
+    pub subvols: Vec<SubvolPlan>,
+    /// Subvolume metadata needed for root tree construction.
+    pub subvol_meta: Vec<SubvolMeta>,
+    /// Aggregate data bytes needed across all subvolumes.
     pub data_bytes_needed: u64,
-    /// Updated nlink for the root directory (inode 256).
+}
+
+/// Plan for a single tree (main FS tree or a subvolume).
+pub struct SubvolPlan {
+    /// Tree objectid (5 for main FS tree, 256+ for subvolumes).
+    pub root_objectid: u64,
+    /// Sorted FS tree items for this tree.
+    pub fs_items: Vec<(Key, Vec<u8>)>,
+    /// Files needing non-inline data extents in this tree.
+    pub file_extents: Vec<FileAllocation>,
+    /// Total data bytes needed for this tree.
+    pub data_bytes_needed: u64,
+    /// Root directory nlink (always 1 for btrfs directories).
     pub root_dir_nlink: u32,
-    /// Updated inode size for the root directory.
+    /// Root directory accumulated inode size.
     pub root_dir_size: u64,
-    /// Number of subdirectory entries directly under root (for nbytes).
+    /// Root directory nbytes.
     pub root_dir_nbytes: u64,
 }
 
-/// Walk the source directory and build all FS tree items.
+/// Metadata about a subvolume, used for root tree entries.
+pub struct SubvolMeta {
+    /// Subvolume objectid (256+).
+    pub subvol_id: u64,
+    /// Root objectid of the parent tree.
+    pub parent_root_id: u64,
+    /// Inode of the directory in the parent tree containing this subvolume.
+    pub parent_dirid: u64,
+    /// Directory index in the parent (matches `DIR_INDEX` offset).
+    pub dir_index: u64,
+    /// Subvolume directory name.
+    pub name: Vec<u8>,
+    /// Whether this is a read-only subvolume.
+    pub readonly: bool,
+    /// Whether this is the default subvolume.
+    pub is_default: bool,
+}
+
+/// A deferred subvolume walk discovered during the parent tree walk.
+struct DeferredSubvol {
+    host_path: PathBuf,
+    subvol_id: u64,
+    subvol_type: SubvolType,
+    parent_root_id: u64,
+    parent_dirid: u64,
+    dir_index: u64,
+    name: Vec<u8>,
+}
+
+/// Walk the source directory and build all FS tree items, handling subvolumes.
 ///
 /// Assigns inode numbers starting at 257 (256 = root directory, handled
 /// separately). Detects hardlinks via host `(dev, ino)`. Collects xattrs.
+/// Subvolume boundaries are detected and walked as separate trees.
 ///
 /// # Errors
 ///
 /// Returns an error if any file cannot be stat'd, read, or is otherwise inaccessible.
-///
-/// # Panics
-///
-/// Panics if a directory entry has no filename.
 #[allow(clippy::too_many_lines)]
-#[allow(clippy::cast_possible_truncation)] // key types fit in u8, name lengths fit in u64
-#[allow(clippy::cast_sign_loss)] // stat timestamps are non-negative in practice
+#[allow(clippy::too_many_arguments)]
 pub fn walk_directory(
     rootdir: &Path,
     sectorsize: u32,
@@ -158,53 +196,181 @@ pub fn walk_directory(
     now_sec: u64,
     compress: CompressConfig,
     inode_flags: &[InodeFlagsArg],
+    subvol_args: &[SubvolArg],
 ) -> Result<RootdirPlan> {
-    let max_inline = max_inline_data_size(sectorsize, nodesize);
-
     // Build inode flags lookup: relative path → (nodatacow, nodatasum).
     let inode_flags_map: HashMap<PathBuf, (bool, bool)> = inode_flags
         .iter()
         .map(|f| (f.path.clone(), (f.nodatacow, f.nodatasum)))
         .collect();
 
+    // Assign subvolume IDs starting at BTRFS_FIRST_FREE_OBJECTID (256).
+    let mut next_subvol_id = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID);
+    let mut subvol_id_map: HashMap<PathBuf, (u64, SubvolType)> = HashMap::new();
+    for arg in subvol_args {
+        subvol_id_map
+            .insert(arg.path.clone(), (next_subvol_id, arg.subvol_type));
+        next_subvol_id += 1;
+    }
+
+    // Determine which subvolume boundaries belong to the main FS tree
+    // (direct children, not nested under another subvolume).
+    let main_tree_boundaries = direct_subvol_boundaries(&subvol_id_map, None);
+
+    // Walk the main FS tree.
+    let main_root_id = u64::from(raw::BTRFS_FS_TREE_OBJECTID);
+    let (main_plan, deferred) = walk_single_tree(
+        rootdir,
+        rootdir,
+        main_root_id,
+        &main_tree_boundaries,
+        &inode_flags_map,
+        sectorsize,
+        nodesize,
+        generation,
+        now_sec,
+        compress,
+    )?;
+
+    let mut subvols = vec![main_plan];
+    let mut subvol_meta: Vec<SubvolMeta> = Vec::new();
+    let mut total_data = subvols[0].data_bytes_needed;
+
+    // Process deferred subvolumes (may produce nested deferred subvols).
+    let mut pending = deferred;
+    while let Some(def) = pending.pop() {
+        let sub_boundaries =
+            direct_subvol_boundaries(&subvol_id_map, Some(&def.host_path));
+
+        let (plan, nested_deferred) = walk_single_tree(
+            rootdir,
+            &def.host_path,
+            def.subvol_id,
+            &sub_boundaries,
+            &inode_flags_map,
+            sectorsize,
+            nodesize,
+            generation,
+            now_sec,
+            compress,
+        )?;
+
+        total_data += plan.data_bytes_needed;
+        subvols.push(plan);
+
+        subvol_meta.push(SubvolMeta {
+            subvol_id: def.subvol_id,
+            parent_root_id: def.parent_root_id,
+            parent_dirid: def.parent_dirid,
+            dir_index: def.dir_index,
+            name: def.name,
+            readonly: matches!(
+                def.subvol_type,
+                SubvolType::Ro | SubvolType::DefaultRo
+            ),
+            is_default: matches!(
+                def.subvol_type,
+                SubvolType::Default | SubvolType::DefaultRo
+            ),
+        });
+
+        pending.extend(nested_deferred);
+    }
+
+    Ok(RootdirPlan {
+        subvols,
+        subvol_meta,
+        data_bytes_needed: total_data,
+    })
+}
+
+/// Find subvolume boundaries that are direct children of `parent_subvol_path`.
+///
+/// If `parent_subvol_path` is `None`, returns boundaries at the top level
+/// (not nested under any other subvolume).
+fn direct_subvol_boundaries(
+    all_subvols: &HashMap<PathBuf, (u64, SubvolType)>,
+    parent_subvol_path: Option<&Path>,
+) -> HashMap<PathBuf, (u64, SubvolType)> {
+    let mut result = HashMap::new();
+    for (path, &(id, typ)) in all_subvols {
+        let is_child = match parent_subvol_path {
+            Some(parent) => path.starts_with(parent) && path != parent,
+            None => true,
+        };
+        if !is_child {
+            continue;
+        }
+        // Check that no other subvolume is an intermediate ancestor.
+        let is_direct = !all_subvols.keys().any(|other| {
+            other != path
+                && path.starts_with(other)
+                && match parent_subvol_path {
+                    Some(parent) => {
+                        other.starts_with(parent) && other != parent
+                    }
+                    None => true,
+                }
+        });
+        if is_direct {
+            let rel = match parent_subvol_path {
+                Some(parent) => {
+                    path.strip_prefix(parent).unwrap_or(path).to_path_buf()
+                }
+                None => path.clone(),
+            };
+            result.insert(rel, (id, typ));
+        }
+    }
+    result
+}
+
+/// Walk a single tree (main FS tree or a subvolume tree).
+///
+/// Returns the items for this tree and any deferred subvolume walks
+/// discovered at subvolume boundary directories.
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::cast_possible_truncation)] // key types fit in u8, name lengths fit in u64
+#[allow(clippy::cast_sign_loss)] // stat timestamps are non-negative in practice
+fn walk_single_tree(
+    rootdir: &Path,
+    tree_root: &Path,
+    root_objectid: u64,
+    subvol_boundaries: &HashMap<PathBuf, (u64, SubvolType)>,
+    inode_flags_map: &HashMap<PathBuf, (bool, bool)>,
+    sectorsize: u32,
+    nodesize: u32,
+    generation: u64,
+    now_sec: u64,
+    compress: CompressConfig,
+) -> Result<(SubvolPlan, Vec<DeferredSubvol>)> {
+    let max_inline = max_inline_data_size(sectorsize, nodesize);
+
     let mut next_ino: u64 = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID) + 1; // 257
     let root_ino: u64 = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID); // 256
 
-    // Maps host (dev, ino) → btrfs ino for hardlink detection.
     let mut hardlink_map: HashMap<(u64, u64), u64> = HashMap::new();
-    // Maps host (dev, ino) → count of links seen so far (for nlink tracking).
     let mut nlink_count: HashMap<u64, u32> = HashMap::new();
-
-    // Maps btrfs parent_ino → next dir_index counter.
     let mut dir_index_map: HashMap<u64, u64> = HashMap::new();
-    // Start root dir index at 2 (0 and 1 reserved for . and ..).
     dir_index_map.insert(root_ino, 2);
-
-    // Maps btrfs ino → accumulated directory inode size (for non-root dirs).
     let mut dir_sizes: HashMap<u64, u64> = HashMap::new();
-
-    // All FS tree items (unsorted — we sort at the end).
     let mut fs_items: Vec<(Key, Vec<u8>)> = Vec::new();
-
-    // File allocations for non-inline data.
     let mut file_extents: Vec<FileAllocation> = Vec::new();
     let mut data_bytes_needed: u64 = 0;
+    let mut deferred_subvols: Vec<DeferredSubvol> = Vec::new();
 
-    // In btrfs, directory nlink is always 1 (no POSIX 2+subdirs convention).
     let root_dir_nlink: u32 = 1;
     let mut root_dir_size: u64 = 0;
 
-    // Recursive walk stack: (host_path, parent_ino, btrfs_ino).
-    // The root directory (ino 256) is the starting parent.
     let mut stack: Vec<(PathBuf, u64)> = Vec::new();
 
-    // Read root directory entries.
-    let _root_meta = fs::symlink_metadata(rootdir).with_context(|| {
-        format!("cannot stat rootdir '{}'", rootdir.display())
+    let _root_meta = fs::symlink_metadata(tree_root).with_context(|| {
+        format!("cannot stat rootdir '{}'", tree_root.display())
     })?;
 
     // Add xattrs for the root directory itself.
-    let root_xattrs = read_xattrs(rootdir)?;
+    let root_xattrs = read_xattrs(tree_root)?;
     for (xname, xvalue) in &root_xattrs {
         let name_hash = btrfs_name_hash(xname);
         let key =
@@ -212,10 +378,7 @@ pub fn walk_directory(
         fs_items.push((key, items::xattr_item(xname, xvalue)));
     }
 
-    // Walk root directory children.
-    let mut root_entries = read_dir_sorted(rootdir)?;
-
-    // Process root directory entries onto the stack.
+    let mut root_entries = read_dir_sorted(tree_root)?;
     for entry in root_entries.drain(..) {
         stack.push((entry, root_ino));
     }
@@ -224,6 +387,64 @@ pub fn walk_directory(
         let meta = fs::symlink_metadata(&host_path).with_context(|| {
             format!("cannot stat '{}'", host_path.display())
         })?;
+
+        // Check if this directory is a subvolume boundary.
+        let rel_to_tree =
+            host_path.strip_prefix(tree_root).unwrap_or(&host_path);
+        if meta.is_dir()
+            && let Some(&(subvol_id, subvol_type)) =
+                subvol_boundaries.get(rel_to_tree)
+        {
+            // Emit DIR_ITEM + DIR_INDEX pointing to subvolume root.
+            let name = host_path
+                .file_name()
+                .expect("entry has no filename")
+                .as_encoded_bytes();
+            let name_hash = btrfs_name_hash(name);
+            let location =
+                Key::new(subvol_id, raw::BTRFS_ROOT_ITEM_KEY as u8, 0);
+            let dir_item_data = items::dir_item(
+                &location,
+                generation,
+                name,
+                raw::BTRFS_FT_DIR as u8,
+            );
+            fs_items.push((
+                Key::new(parent_ino, raw::BTRFS_DIR_ITEM_KEY as u8, name_hash),
+                dir_item_data.clone(),
+            ));
+
+            let dir_index = dir_index_map.entry(parent_ino).or_insert(2);
+            let current_index = *dir_index;
+            *dir_index += 1;
+
+            fs_items.push((
+                Key::new(
+                    parent_ino,
+                    raw::BTRFS_DIR_INDEX_KEY as u8,
+                    current_index,
+                ),
+                dir_item_data,
+            ));
+
+            if parent_ino == root_ino {
+                root_dir_size += name.len() as u64 * 2;
+            } else {
+                *dir_sizes.entry(parent_ino).or_insert(0u64) +=
+                    name.len() as u64 * 2;
+            }
+
+            deferred_subvols.push(DeferredSubvol {
+                host_path: host_path.clone(),
+                subvol_id,
+                subvol_type,
+                parent_root_id: root_objectid,
+                parent_dirid: parent_ino,
+                dir_index: current_index,
+                name: name.to_vec(),
+            });
+            continue;
+        }
 
         let host_dev_ino = (meta.dev(), meta.ino());
         let is_hardlink = meta.nlink() > 1
@@ -245,7 +466,6 @@ pub fn walk_directory(
         let name_hash = btrfs_name_hash(name);
         let file_type = mode_to_btrfs_type(meta.mode());
 
-        // DIR_ITEM in parent (keyed by name hash).
         let location = Key::new(btrfs_ino, raw::BTRFS_INODE_ITEM_KEY as u8, 0);
         let dir_item_data =
             items::dir_item(&location, generation, name, file_type);
@@ -254,7 +474,6 @@ pub fn walk_directory(
             Key::new(parent_ino, raw::BTRFS_DIR_ITEM_KEY as u8, name_hash);
         fs_items.push((dir_item_key, dir_item_data.clone()));
 
-        // DIR_INDEX in parent (keyed by sequential index).
         let dir_index = dir_index_map.entry(parent_ino).or_insert(2);
         let current_index = *dir_index;
         *dir_index += 1;
@@ -263,7 +482,6 @@ pub fn walk_directory(
             Key::new(parent_ino, raw::BTRFS_DIR_INDEX_KEY as u8, current_index);
         fs_items.push((dir_index_key, dir_item_data));
 
-        // Update parent inode size: each entry adds name_len * 2.
         if parent_ino == root_ino {
             root_dir_size += name.len() as u64 * 2;
         } else {
@@ -272,32 +490,23 @@ pub fn walk_directory(
         }
 
         if is_hardlink {
-            // Hardlink: add INODE_REF but not a new INODE_ITEM.
             let ref_key =
                 Key::new(btrfs_ino, raw::BTRFS_INODE_REF_KEY as u8, parent_ino);
             fs_items.push((ref_key, items::inode_ref(current_index, name)));
-
-            // Increment nlink counter.
             *nlink_count.entry(btrfs_ino).or_insert(1) += 1;
             continue;
         }
 
-        // Track for hardlink detection (only for files with nlink > 1).
         if meta.nlink() > 1 && !meta.is_dir() {
             hardlink_map.insert(host_dev_ino, btrfs_ino);
             nlink_count.insert(btrfs_ino, 1);
         }
 
-        // INODE_REF for this entry.
         let ref_key =
             Key::new(btrfs_ino, raw::BTRFS_INODE_REF_KEY as u8, parent_ino);
         fs_items.push((ref_key, items::inode_ref(current_index, name)));
 
-        // INODE_ITEM.
-        // In btrfs, nlink = number of INODE_REF entries for this inode.
-        // Start at 1 (one ref from parent). Hardlinks add more via fixup.
         let nlink = 1u32;
-
         let mode = meta.mode();
         let size = if meta.is_dir() { 0 } else { meta.size() };
         let rdev = if is_special_file(mode) {
@@ -312,7 +521,6 @@ pub fn walk_directory(
             .get(rel_path)
             .copied()
             .unwrap_or((false, false));
-        // NODATACOW implies NODATASUM for regular files.
         let nodatasum = nodatasum || (nodatacow && meta.is_file());
         let mut iflags = 0u64;
         if nodatacow {
@@ -326,7 +534,7 @@ pub fn walk_directory(
             generation,
             transid: generation,
             size,
-            nbytes: 0, // updated later for files with data
+            nbytes: 0,
             nlink,
             uid: meta.uid(),
             gid: meta.gid(),
@@ -341,7 +549,6 @@ pub fn walk_directory(
         let inode_key = Key::new(btrfs_ino, raw::BTRFS_INODE_ITEM_KEY as u8, 0);
         fs_items.push((inode_key, inode_data));
 
-        // Extended attributes.
         let xattrs = read_xattrs(&host_path)?;
         for (xname, xvalue) in &xattrs {
             let xhash = btrfs_name_hash(xname);
@@ -350,27 +557,21 @@ pub fn walk_directory(
             fs_items.push((key, items::xattr_item(xname, xvalue)));
         }
 
-        // Type-specific items.
         if meta.is_dir() {
-            // Initialize dir_index for this directory.
             dir_index_map.insert(btrfs_ino, 2);
-
-            // Push children onto the stack (reverse order for DFS).
             let mut children = read_dir_sorted(&host_path)?;
             for child in children.drain(..).rev() {
                 stack.push((child, btrfs_ino));
             }
         } else if meta.is_symlink() {
-            // Symlink: inline extent with link target (never compressed).
             let target = fs::read_link(&host_path).with_context(|| {
                 format!("cannot readlink '{}'", host_path.display())
             })?;
             let target_bytes = target.as_os_str().as_encoded_bytes();
-
             let extent_data = items::file_extent_inline(
                 generation,
                 target_bytes.len() as u64,
-                0, // symlinks are never compressed
+                0,
                 target_bytes,
             );
             let extent_key =
@@ -378,14 +579,11 @@ pub fn walk_directory(
             fs_items.push((extent_key, extent_data));
         } else if meta.is_file() && size > 0 {
             if size <= max_inline as u64 {
-                // Inline extent: read file and embed in item.
                 let mut data = Vec::with_capacity(size as usize);
                 let mut f = fs::File::open(&host_path).with_context(|| {
                     format!("cannot open '{}'", host_path.display())
                 })?;
                 f.read_to_end(&mut data)?;
-
-                // Try to compress inline data.
                 let (stored_data, comp_type) =
                     if let Some(compressed) = try_compress(&data, compress) {
                         (compressed, compress.extent_type_byte())
@@ -394,7 +592,7 @@ pub fn walk_directory(
                     };
                 let extent_data = items::file_extent_inline(
                     generation,
-                    data.len() as u64, // ram_bytes = uncompressed size
+                    data.len() as u64,
                     comp_type,
                     &stored_data,
                 );
@@ -402,9 +600,6 @@ pub fn walk_directory(
                     Key::new(btrfs_ino, raw::BTRFS_EXTENT_DATA_KEY as u8, 0);
                 fs_items.push((extent_key, extent_data));
             } else {
-                // Regular extent: defer data writing.
-                // The FILE_EXTENT_ITEM will be created during the data write phase
-                // once we know the disk_bytenr.
                 let aligned_size = align_up(size, u64::from(sectorsize));
                 data_bytes_needed += aligned_size;
                 file_extents.push(FileAllocation {
@@ -412,43 +607,37 @@ pub fn walk_directory(
                     ino: btrfs_ino,
                     size,
                     nodatasum,
+                    root_objectid,
                 });
             }
         }
-        // Special files (fifo, socket, char/block dev): INODE_ITEM only, no extent.
     }
 
-    // Fix up nlink for hardlinked files.
     for (&ino, &nlink) in &nlink_count {
         fixup_inode_nlink(&mut fs_items, ino, nlink);
     }
-
-    // Fix up inode size for non-root directories.
     for (&ino, &size) in &dir_sizes {
         fixup_inode_size(&mut fs_items, ino, size);
     }
-
-    // Fix up nbytes for files with inline extents and symlinks.
     fixup_inline_nbytes(&mut fs_items);
-
-    // Sort all items by key.
     fs_items.sort_by_key(|(k, _)| *k);
 
-    Ok(RootdirPlan {
+    let plan = SubvolPlan {
+        root_objectid,
         fs_items,
         file_extents,
         data_bytes_needed,
         root_dir_nlink,
         root_dir_size,
         root_dir_nbytes: 0,
-    })
+    };
+    Ok((plan, deferred_subvols))
 }
 
 /// Write file data to the data chunk and create extent/csum items.
 ///
-/// Returns additional FS tree items (`FILE_EXTENT_ITEM` for regular extents),
-/// extent tree items (`EXTENT_ITEM` + `EXTENT_DATA_REF`), and csum tree items.
-/// Also returns a map of inode to nbytes for patching `INODE_ITEM` entries.
+/// Processes all file extents across all subvolumes. Returns per-tree
+/// FS items, combined extent/csum items, and per-tree nbytes updates.
 ///
 /// # Errors
 ///
@@ -468,13 +657,17 @@ pub fn write_file_data(
     chunks: &crate::layout::ChunkLayout,
 ) -> Result<DataOutput> {
     let mut offset = 0u64;
-    let mut fs_items: Vec<(Key, Vec<u8>)> = Vec::new();
+    let mut fs_items: BTreeMap<u64, Vec<(Key, Vec<u8>)>> = BTreeMap::new();
     let mut extent_items: Vec<(Key, Vec<u8>)> = Vec::new();
     let mut csum_items: Vec<(Key, Vec<u8>)> = Vec::new();
-    let mut nbytes_updates: HashMap<u64, u64> = HashMap::new();
+    let mut nbytes_updates: HashMap<(u64, u64), u64> = HashMap::new();
     let csum_size = csum_type.size();
 
-    for alloc in &plan.file_extents {
+    // Collect all file extents across all subvolumes.
+    let all_extents: Vec<&FileAllocation> =
+        plan.subvols.iter().flat_map(|s| &s.file_extents).collect();
+
+    for alloc in &all_extents {
         let mut file = fs::File::open(&alloc.host_path).with_context(|| {
             format!("cannot open '{}'", alloc.host_path.display())
         })?;
@@ -486,13 +679,11 @@ pub fn write_file_data(
         while bytes_left > 0 {
             let extent_size = bytes_left.min(MAX_EXTENT_SIZE);
 
-            // Read the raw (uncompressed) data.
             let mut raw_data = vec![0u8; extent_size as usize];
             file.read_exact(&mut raw_data).with_context(|| {
                 format!("short read from '{}'", alloc.host_path.display())
             })?;
 
-            // Try compression.
             let (disk_data, comp_type) =
                 if let Some(compressed) = try_compress(&raw_data, compress) {
                     (compressed, compress.extent_type_byte())
@@ -500,7 +691,6 @@ pub fn write_file_data(
                     (raw_data, 0u8)
                 };
 
-            // Pad to sectorsize alignment for on-disk storage.
             let aligned_disk =
                 align_up(disk_data.len() as u64, u64::from(sectorsize));
             let mut padded = disk_data;
@@ -508,7 +698,6 @@ pub fn write_file_data(
 
             let disk_bytenr = data_logical + offset;
 
-            // Write data to physical locations.
             for (devid, phys) in chunks.logical_to_physical(disk_bytenr) {
                 let file_idx = (devid - 1) as usize;
                 crate::write::pwrite_all(&files[file_idx], &padded, phys)
@@ -517,7 +706,6 @@ pub fn write_file_data(
                     })?;
             }
 
-            // Compute checksums (skip for NODATASUM files).
             if !alloc.nodatasum {
                 let num_csums = (aligned_disk / u64::from(sectorsize)) as usize;
                 let mut csums = Vec::with_capacity(num_csums * csum_size);
@@ -538,7 +726,7 @@ pub fn write_file_data(
                 ));
             }
 
-            fs_items.push((
+            fs_items.entry(alloc.root_objectid).or_default().push((
                 Key::new(
                     alloc.ino,
                     raw::BTRFS_EXTENT_DATA_KEY as u8,
@@ -547,10 +735,10 @@ pub fn write_file_data(
                 items::file_extent_reg(
                     generation,
                     disk_bytenr,
-                    aligned_disk, // compressed + aligned size on disk
+                    aligned_disk,
                     0,
-                    extent_size, // logical file bytes this extent covers
-                    extent_size, // ram_bytes = uncompressed size
+                    extent_size,
+                    extent_size,
                     comp_type,
                 ),
             ));
@@ -564,7 +752,7 @@ pub fn write_file_data(
                 items::data_extent_item(
                     1,
                     generation,
-                    u64::from(raw::BTRFS_FS_TREE_OBJECTID),
+                    alloc.root_objectid,
                     alloc.ino,
                     file_offset,
                     1,
@@ -577,10 +765,12 @@ pub fn write_file_data(
             bytes_left -= extent_size;
         }
 
-        nbytes_updates.insert(alloc.ino, disk_allocated);
+        nbytes_updates.insert((alloc.root_objectid, alloc.ino), disk_allocated);
     }
 
-    fs_items.sort_by_key(|(k, _)| *k);
+    for items in fs_items.values_mut() {
+        items.sort_by_key(|(k, _)| *k);
+    }
     extent_items.sort_by_key(|(k, _)| *k);
     csum_items.sort_by_key(|(k, _)| *k);
 
@@ -595,16 +785,16 @@ pub fn write_file_data(
 
 /// Output of the data writing phase.
 pub struct DataOutput {
-    /// `FILE_EXTENT_ITEM` entries for regular extents (to merge into FS tree).
-    pub fs_items: Vec<(Key, Vec<u8>)>,
+    /// `FILE_EXTENT_ITEM` entries per tree (keyed by root objectid).
+    pub fs_items: BTreeMap<u64, Vec<(Key, Vec<u8>)>>,
     /// `EXTENT_ITEM` entries for data extents (to merge into extent tree).
     pub extent_items: Vec<(Key, Vec<u8>)>,
     /// `EXTENT_CSUM` entries (for csum tree).
     pub csum_items: Vec<(Key, Vec<u8>)>,
     /// Total data bytes allocated (aligned).
     pub data_used: u64,
-    /// Inode → nbytes updates for files with regular extents.
-    pub nbytes_updates: HashMap<u64, u64>,
+    /// `(root_objectid, inode)` → nbytes for files with regular extents.
+    pub nbytes_updates: HashMap<(u64, u64), u64>,
 }
 
 /// Maximum inline data size for files.
@@ -791,16 +981,20 @@ fn fixup_inline_nbytes(fs_items: &mut [(Key, Vec<u8>)]) {
 }
 
 /// Apply nbytes updates from data writing to `INODE_ITEM` entries.
+///
+/// The `updates` map is keyed by `(root_objectid, ino)`, but since we call
+/// this per-subvolume, we filter by `root_objectid` and match on `ino`.
 #[allow(clippy::cast_possible_truncation)] // key type fits in u8
 #[allow(clippy::implicit_hasher)]
 pub fn apply_nbytes_updates(
     fs_items: &mut [(Key, Vec<u8>)],
-    updates: &HashMap<u64, u64>,
+    root_objectid: u64,
+    updates: &HashMap<(u64, u64), u64>,
 ) {
     let nbytes_off = std::mem::offset_of!(raw::btrfs_inode_item, nbytes);
     for (key, data) in fs_items.iter_mut() {
         if key.key_type == raw::BTRFS_INODE_ITEM_KEY as u8
-            && let Some(&nbytes) = updates.get(&key.objectid)
+            && let Some(&nbytes) = updates.get(&(root_objectid, key.objectid))
             && data.len() >= nbytes_off + 8
         {
             data[nbytes_off..nbytes_off + 8]

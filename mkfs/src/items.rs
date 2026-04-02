@@ -472,6 +472,22 @@ pub fn data_extent_item(
     buf
 }
 
+/// Serialize a `ROOT_REF` or `ROOT_BACKREF` item.
+///
+/// Both key types share the same on-disk format:
+/// `dirid` (u64) + `sequence` (u64) + `name_len` (u16) + name bytes.
+/// `ROOT_REF` keys link parent to child, `ROOT_BACKREF` keys link child to parent.
+#[must_use]
+#[allow(clippy::cast_possible_truncation)] // name length fits in u16
+pub fn root_ref(dirid: u64, sequence: u64, name: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(18 + name.len());
+    buf.put_u64_le(dirid);
+    buf.put_u64_le(sequence);
+    buf.put_u16_le(name.len() as u16);
+    buf.put_slice(name);
+    buf
+}
+
 /// Serialize a `DiskKey` into 17 bytes (for embedding in other items).
 #[must_use]
 pub fn disk_key(key: &Key) -> Vec<u8> {
@@ -782,5 +798,14 @@ mod tests {
         let data = data_extent_item(1, 1, 5, 257, 0, 1);
         // 24 (extent_item) + 1 (ref type) + 28 (extent_data_ref) = 53
         assert_eq!(data.len(), 53);
+    }
+
+    #[test]
+    fn roundtrip_root_ref() {
+        let data = root_ref(256, 3, b"mysubvol");
+        let parsed = items::RootRef::parse(&data).unwrap();
+        assert_eq!(parsed.dirid, 256);
+        assert_eq!(parsed.sequence, 3);
+        assert_eq!(parsed.name, b"mysubvol");
     }
 }

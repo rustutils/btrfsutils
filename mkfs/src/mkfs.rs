@@ -11,7 +11,7 @@ use crate::{
     },
     rootdir,
     tree::{Key, LeafBuilder, LeafHeader},
-    treebuilder::TreeBuilder,
+    treebuilder::{TreeBlocks, TreeBuilder},
     write,
 };
 use anyhow::{Context, Result, bail};
@@ -438,6 +438,7 @@ pub fn make_btrfs_with_rootdir(
     rootdir: &Path,
     compress: rootdir::CompressConfig,
     inode_flags: &[crate::args::InodeFlagsArg],
+    subvol_args: &[crate::args::SubvolArg],
     shrink: bool,
 ) -> Result<()> {
     if !cfg.sectorsize.is_power_of_two() || cfg.sectorsize < 4096 {
@@ -465,7 +466,7 @@ pub fn make_btrfs_with_rootdir(
     let root_ino = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID);
 
     // Walk rootdir to plan all items and compute data needs.
-    let mut plan = rootdir::walk_directory(
+    let plan = rootdir::walk_directory(
         rootdir,
         cfg.sectorsize,
         cfg.nodesize,
@@ -473,6 +474,7 @@ pub fn make_btrfs_with_rootdir(
         now,
         compress,
         inode_flags,
+        subvol_args,
     )?;
 
     // Compute chunk layout.
@@ -527,40 +529,63 @@ pub fn make_btrfs_with_rootdir(
         &chunks,
     )?;
 
-    // Apply nbytes updates to INODE_ITEMs for files with regular extents.
-    rootdir::apply_nbytes_updates(
-        &mut plan.fs_items,
-        &data_output.nbytes_updates,
-    );
+    // Build per-subvolume item sets: merge root dir inode + walk items + data items.
+    let tb = TreeBuilder {
+        nodesize: cfg.nodesize,
+        owner: 0,
+        fsid: cfg.fs_uuid,
+        chunk_tree_uuid: cfg.chunk_tree_uuid,
+        generation,
+    };
 
-    // Merge root dir inode (ino 256) + rootdir items + data extent file items.
-    let mut all_fs_items: Vec<(Key, Vec<u8>)> = Vec::new();
-    all_fs_items.push((
-        Key::new(root_ino, raw::BTRFS_INODE_ITEM_KEY as u8, 0),
-        items::inode_item(&items::InodeItemArgs {
-            generation,
-            transid: generation,
-            size: plan.root_dir_size,
-            nbytes: 0, // nbytes=0 for dirs
-            nlink: plan.root_dir_nlink,
-            uid: 0,
-            gid: 0,
-            mode: 0o40755,
-            rdev: 0,
-            flags: 0,
-            atime: (now, 0),
-            ctime: (now, 0),
-            mtime: (now, 0),
-            otime: (now, 0),
-        }),
-    ));
-    all_fs_items.push((
-        Key::new(root_ino, raw::BTRFS_INODE_REF_KEY as u8, root_ino),
-        items::inode_ref(0, b".."),
-    ));
-    all_fs_items.append(&mut plan.fs_items);
-    all_fs_items.extend(data_output.fs_items);
-    all_fs_items.sort_by_key(|(k, _)| *k);
+    let mut subvol_trees: Vec<(u64, TreeBlocks)> = Vec::new();
+    for sp in &plan.subvols {
+        let mut sp_items = sp.fs_items.clone();
+
+        // Apply nbytes updates for this subvolume.
+        rootdir::apply_nbytes_updates(
+            &mut sp_items,
+            sp.root_objectid,
+            &data_output.nbytes_updates,
+        );
+
+        let mut all_items: Vec<(Key, Vec<u8>)> = Vec::new();
+        all_items.push((
+            Key::new(root_ino, raw::BTRFS_INODE_ITEM_KEY as u8, 0),
+            items::inode_item(&items::InodeItemArgs {
+                generation,
+                transid: generation,
+                size: sp.root_dir_size,
+                nbytes: 0,
+                nlink: sp.root_dir_nlink,
+                uid: 0,
+                gid: 0,
+                mode: 0o40755,
+                rdev: 0,
+                flags: 0,
+                atime: (now, 0),
+                ctime: (now, 0),
+                mtime: (now, 0),
+                otime: (now, 0),
+            }),
+        ));
+        all_items.push((
+            Key::new(root_ino, raw::BTRFS_INODE_REF_KEY as u8, root_ino),
+            items::inode_ref(0, b".."),
+        ));
+        all_items.append(&mut sp_items);
+        if let Some(data_fs) = data_output.fs_items.get(&sp.root_objectid) {
+            all_items.extend(data_fs.iter().cloned());
+        }
+        all_items.sort_by_key(|(k, _)| *k);
+
+        let tree = tb.clone_with_owner(sp.root_objectid).build(&all_items);
+        subvol_trees.push((sp.root_objectid, tree));
+    }
+
+    let csum_tree = tb
+        .clone_with_owner(u64::from(raw::BTRFS_CSUM_TREE_OBJECTID))
+        .build(&data_output.csum_items);
 
     // Data-reloc tree items (same as normal mkfs).
     let data_reloc_items: Vec<(Key, Vec<u8>)> = vec![
@@ -573,25 +598,15 @@ pub fn make_btrfs_with_rootdir(
             items::inode_ref(0, b".."),
         ),
     ];
-
-    let tb = TreeBuilder {
-        nodesize: cfg.nodesize,
-        owner: 0,
-        fsid: cfg.fs_uuid,
-        chunk_tree_uuid: cfg.chunk_tree_uuid,
-        generation,
-    };
-
-    // Build variable-size trees to determine their block counts.
-    let fs_tree = tb
-        .clone_with_owner(u64::from(raw::BTRFS_FS_TREE_OBJECTID))
-        .build(&all_fs_items);
-    let csum_tree = tb
-        .clone_with_owner(u64::from(raw::BTRFS_CSUM_TREE_OBJECTID))
-        .build(&data_output.csum_items);
     let data_reloc_tree = tb
         .clone_with_owner(raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64)
         .build(&data_reloc_items);
+
+    // Collect block counts for convergence loop: all subvol trees.
+    let tree_block_counts: Vec<(u64, usize)> = subvol_trees
+        .iter()
+        .map(|(oid, tree)| (*oid, tree.blocks.len()))
+        .collect();
 
     // Find stable extent tree block count via convergence loop.
     let extent_tree_block_count = converge_extent_tree_block_count(
@@ -602,7 +617,7 @@ pub fn make_btrfs_with_rootdir(
         cfg.nodesize,
         has_free_space,
         has_block_group,
-        fs_tree.blocks.len(),
+        &tree_block_counts,
         csum_tree.blocks.len(),
         data_reloc_tree.blocks.len(),
         &data_output.extent_items,
@@ -624,9 +639,14 @@ pub fn make_btrfs_with_rootdir(
 
     let dev_tree_addr = alloc.alloc_metadata()?;
 
-    let mut fs_addrs = Vec::with_capacity(fs_tree.blocks.len());
-    for _ in 0..fs_tree.blocks.len() {
-        fs_addrs.push(alloc.alloc_metadata()?);
+    // Allocate addresses for all subvolume trees (main FS tree first).
+    let mut subvol_addrs: Vec<(u64, Vec<u64>)> = Vec::new();
+    for (oid, tree) in &subvol_trees {
+        let mut addrs = Vec::with_capacity(tree.blocks.len());
+        for _ in 0..tree.blocks.len() {
+            addrs.push(alloc.alloc_metadata()?);
+        }
+        subvol_addrs.push((*oid, addrs));
     }
 
     let mut csum_addrs = Vec::with_capacity(csum_tree.blocks.len());
@@ -684,14 +704,16 @@ pub fn make_btrfs_with_rootdir(
         u64::from(raw::BTRFS_DEV_TREE_OBJECTID),
         cfg.nodesize,
     ));
-    for &a in &fs_addrs {
-        extent_items.push(metadata_extent_item(
-            a,
-            skinny,
-            generation,
-            u64::from(raw::BTRFS_FS_TREE_OBJECTID),
-            cfg.nodesize,
-        ));
+    for (oid, addrs) in &subvol_addrs {
+        for &a in addrs {
+            extent_items.push(metadata_extent_item(
+                a,
+                skinny,
+                generation,
+                *oid,
+                cfg.nodesize,
+            ));
+        }
     }
     for &a in &csum_addrs {
         extent_items.push(metadata_extent_item(
@@ -763,18 +785,17 @@ pub fn make_btrfs_with_rootdir(
             .unwrap(),
     );
 
-    let mut fs_tree = fs_tree;
-    let mut fi = 0;
-    TreeBuilder::assign_addresses(&mut fs_tree, || {
-        let a = fs_addrs[fi];
-        fi += 1;
-        a
-    });
-    let fs_root_addr = u64::from_le_bytes(
-        fs_tree.blocks.last().unwrap().buf[48..56]
-            .try_into()
-            .unwrap(),
-    );
+    // Assign addresses to subvolume trees.
+    for ((_oid, tree), (_oid2, addrs)) in
+        subvol_trees.iter_mut().zip(subvol_addrs.iter())
+    {
+        let mut idx = 0;
+        TreeBuilder::assign_addresses(tree, || {
+            let a = addrs[idx];
+            idx += 1;
+            a
+        });
+    }
 
     let mut csum_tree = csum_tree;
     let mut ci = 0;
@@ -902,29 +923,34 @@ pub fn make_btrfs_with_rootdir(
         })
         .transpose()?;
 
+    // Build root tree: standard trees + all subvolume trees.
+    let mut root_trees: Vec<(u64, u64, u8)> = vec![
+        (
+            u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
+            extent_root_addr,
+            extent_tree.root_level,
+        ),
+        (u64::from(raw::BTRFS_DEV_TREE_OBJECTID), dev_tree_addr, 0),
+        (
+            u64::from(raw::BTRFS_CSUM_TREE_OBJECTID),
+            csum_root_addr,
+            csum_tree.root_level,
+        ),
+    ];
+    for (oid, tree) in &subvol_trees {
+        let root_addr = u64::from_le_bytes(
+            tree.blocks.last().unwrap().buf[48..56].try_into().unwrap(),
+        );
+        root_trees.push((*oid, root_addr, tree.root_level));
+    }
+
     let root_tree_buf = build_root_tree_rootdir(&RootTreeRootdirArgs {
         cfg,
         generation,
         now,
         addr: root_tree_addr,
-        trees: &[
-            (
-                u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
-                extent_root_addr,
-                extent_tree.root_level,
-            ),
-            (u64::from(raw::BTRFS_DEV_TREE_OBJECTID), dev_tree_addr, 0),
-            (
-                u64::from(raw::BTRFS_FS_TREE_OBJECTID),
-                fs_root_addr,
-                fs_tree.root_level,
-            ),
-            (
-                u64::from(raw::BTRFS_CSUM_TREE_OBJECTID),
-                csum_root_addr,
-                csum_tree.root_level,
-            ),
-        ],
+        trees: &root_trees,
+        subvol_meta: &plan.subvol_meta,
         free_space_addr,
         data_reloc_addr,
         data_reloc_level: data_reloc_tree.root_level,
@@ -942,7 +968,7 @@ pub fn make_btrfs_with_rootdir(
         &root_tree_buf,
         &dev_tree_buf,
         &mut extent_tree,
-        &mut fs_tree,
+        &mut subvol_trees,
         &mut csum_tree,
         &mut data_reloc_tree,
         free_space_buf,
@@ -1007,7 +1033,7 @@ fn converge_extent_tree_block_count(
     nodesize: u32,
     has_free_space: bool,
     has_block_group: bool,
-    fs_block_count: usize,
+    tree_block_counts: &[(u64, usize)],
     csum_block_count: usize,
     data_reloc_block_count: usize,
     data_extent_items: &[(Key, Vec<u8>)],
@@ -1059,16 +1085,14 @@ fn converge_extent_tree_block_count(
         ));
         addr += ns;
 
-        // FS tree blocks
-        for _ in 0..fs_block_count {
-            trial_items.push(metadata_extent_item(
-                addr,
-                skinny,
-                generation,
-                u64::from(raw::BTRFS_FS_TREE_OBJECTID),
-                nodesize,
-            ));
-            addr += ns;
+        // All subvolume / FS tree blocks
+        for &(oid, count) in tree_block_counts {
+            for _ in 0..count {
+                trial_items.push(metadata_extent_item(
+                    addr, skinny, generation, oid, nodesize,
+                ));
+                addr += ns;
+            }
         }
 
         // Csum tree blocks
@@ -1164,10 +1188,10 @@ fn write_rootdir_trees(
     chunk_tree_buf: &[u8],
     root_tree_buf: &[u8],
     dev_tree_buf: &[u8],
-    extent_tree: &mut crate::treebuilder::TreeBlocks,
-    fs_tree: &mut crate::treebuilder::TreeBlocks,
-    csum_tree: &mut crate::treebuilder::TreeBlocks,
-    data_reloc_tree: &mut crate::treebuilder::TreeBlocks,
+    extent_tree: &mut TreeBlocks,
+    subvol_trees: &mut [(u64, TreeBlocks)],
+    csum_tree: &mut TreeBlocks,
+    data_reloc_tree: &mut TreeBlocks,
     free_space_buf: Option<Vec<u8>>,
     free_space_addr: Option<u64>,
     block_group_buf: Option<Vec<u8>>,
@@ -1180,28 +1204,29 @@ fn write_rootdir_trees(
         }
         Ok(())
     };
-    let write_tree_blocks =
-        |tree: &mut crate::treebuilder::TreeBlocks| -> Result<()> {
-            for block in &mut tree.blocks {
-                let addr =
-                    u64::from_le_bytes(block.buf[48..56].try_into().unwrap());
-                write::fill_csum(&mut block.buf, csum_type);
-                for (devid, phys) in chunks.logical_to_physical(addr) {
-                    write::pwrite_all(
-                        &files[(devid - 1) as usize],
-                        &block.buf,
-                        phys,
-                    )?;
-                }
+    let write_tree_blocks = |tree: &mut TreeBlocks| -> Result<()> {
+        for block in &mut tree.blocks {
+            let addr =
+                u64::from_le_bytes(block.buf[48..56].try_into().unwrap());
+            write::fill_csum(&mut block.buf, csum_type);
+            for (devid, phys) in chunks.logical_to_physical(addr) {
+                write::pwrite_all(
+                    &files[(devid - 1) as usize],
+                    &block.buf,
+                    phys,
+                )?;
             }
-            Ok(())
-        };
+        }
+        Ok(())
+    };
 
     write_block(&mut chunk_tree_buf.to_vec(), chunk_tree_addr)?;
     write_block(&mut root_tree_buf.to_vec(), root_tree_addr)?;
     write_block(&mut dev_tree_buf.to_vec(), dev_tree_addr)?;
     write_tree_blocks(extent_tree)?;
-    write_tree_blocks(fs_tree)?;
+    for (_, tree) in subvol_trees.iter_mut() {
+        write_tree_blocks(tree)?;
+    }
     write_tree_blocks(csum_tree)?;
     write_tree_blocks(data_reloc_tree)?;
     if let Some(mut buf) = free_space_buf {
@@ -1286,15 +1311,49 @@ struct RootTreeRootdirArgs<'a> {
     now: u64,
     addr: u64,
     trees: &'a [(u64, u64, u8)],
+    subvol_meta: &'a [rootdir::SubvolMeta],
     free_space_addr: Option<u64>,
     data_reloc_addr: u64,
     data_reloc_level: u8,
     block_group_addr: Option<u64>,
 }
 
+/// Patch a `ROOT_ITEM` with FS-tree-like fields (`INODE_ROOT_ITEM_INIT`,
+/// size=3, nbytes=nodesize, timestamps). Used for FS tree and subvolume trees.
+fn patch_root_item_fs(
+    data: &mut [u8],
+    uuid: &uuid::Uuid,
+    flags: u64,
+    nodesize: u32,
+    now: u64,
+) {
+    let uo = mem::offset_of!(raw::btrfs_root_item, uuid);
+    data[uo..uo + 16].copy_from_slice(uuid.as_bytes());
+    let fo = mem::offset_of!(raw::btrfs_inode_item, flags);
+    data[fo..fo + 8].copy_from_slice(
+        &(u64::from(raw::BTRFS_INODE_ROOT_ITEM_INIT)).to_le_bytes(),
+    );
+    // inode.size = 3
+    data[16..24].copy_from_slice(&3u64.to_le_bytes());
+    // inode.nbytes = nodesize
+    data[24..32].copy_from_slice(&(u64::from(nodesize)).to_le_bytes());
+    // root_item.flags (RDONLY etc.)
+    let rf = mem::offset_of!(raw::btrfs_root_item, flags);
+    data[rf..rf + 8].copy_from_slice(&flags.to_le_bytes());
+    // ctime, otime
+    for off in [
+        mem::offset_of!(raw::btrfs_root_item, ctime),
+        mem::offset_of!(raw::btrfs_root_item, otime),
+    ] {
+        data[off..off + 8].copy_from_slice(&now.to_le_bytes());
+        data[off + 8..off + 12].copy_from_slice(&0u32.to_le_bytes());
+    }
+}
+
 #[allow(clippy::cast_possible_truncation)] // key type fits in u8
 #[allow(clippy::cast_sign_loss)] // DATA_RELOC_TREE_OBJECTID is positive
 #[allow(clippy::items_after_statements)]
+#[allow(clippy::too_many_lines)]
 fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
     let cfg = args.cfg;
     let header = LeafHeader {
@@ -1306,11 +1365,15 @@ fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
     };
     let mut leaf = LeafBuilder::new(cfg.nodesize, &header);
 
+    // Collect all items that go into the root tree, sorted by key.
+    let mut root_items: Vec<(Key, Vec<u8>)> = Vec::new();
+
+    // Standard tree ROOT_ITEM entries.
     struct E {
         oid: u64,
         addr: u64,
         level: u8,
-        is_fs: bool,
+        is_fs_like: bool,
     }
     let mut entries: Vec<E> = args
         .trees
@@ -1319,7 +1382,8 @@ fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
             oid: o,
             addr: a,
             level: l,
-            is_fs: o == u64::from(raw::BTRFS_FS_TREE_OBJECTID),
+            is_fs_like: o == u64::from(raw::BTRFS_FS_TREE_OBJECTID)
+                || o >= u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
         })
         .collect();
     if let Some(a) = args.free_space_addr {
@@ -1327,25 +1391,25 @@ fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
             oid: u64::from(raw::BTRFS_FREE_SPACE_TREE_OBJECTID),
             addr: a,
             level: 0,
-            is_fs: false,
+            is_fs_like: false,
         });
     }
     entries.push(E {
         oid: raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64,
         addr: args.data_reloc_addr,
         level: args.data_reloc_level,
-        is_fs: false,
+        is_fs_like: false,
     });
     if let Some(a) = args.block_group_addr {
         entries.push(E {
             oid: u64::from(raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID),
             addr: a,
             level: 0,
-            is_fs: false,
+            is_fs_like: false,
         });
     }
-    entries.sort_by_key(|e| e.oid);
 
+    // Build ROOT_ITEM for each tree.
     for e in &entries {
         let key = Key::new(e.oid, raw::BTRFS_ROOT_ITEM_KEY as u8, 0);
         let mut data = items::root_item(
@@ -1356,29 +1420,58 @@ fn build_root_tree_rootdir(args: &RootTreeRootdirArgs<'_>) -> Result<Vec<u8>> {
         );
         data[mem::offset_of!(raw::btrfs_root_item, level)] = e.level;
 
-        if e.is_fs {
-            let mut ub = *cfg.fs_uuid.as_bytes();
-            for b in &mut ub {
-                *b ^= 0xFF;
-            }
-            let uo = mem::offset_of!(raw::btrfs_root_item, uuid);
-            data[uo..uo + 16].copy_from_slice(&ub);
-            let fo = mem::offset_of!(raw::btrfs_inode_item, flags);
-            data[fo..fo + 8].copy_from_slice(
-                &(u64::from(raw::BTRFS_INODE_ROOT_ITEM_INIT)).to_le_bytes(),
-            );
-            data[16..24].copy_from_slice(&3u64.to_le_bytes());
-            data[24..32]
-                .copy_from_slice(&(u64::from(cfg.nodesize)).to_le_bytes());
-            for off in [
-                mem::offset_of!(raw::btrfs_root_item, ctime),
-                mem::offset_of!(raw::btrfs_root_item, otime),
-            ] {
-                data[off..off + 8].copy_from_slice(&args.now.to_le_bytes());
-                data[off + 8..off + 12].copy_from_slice(&0u32.to_le_bytes());
-            }
+        if e.is_fs_like {
+            // Determine UUID and flags for this tree.
+            let (uuid, flags) =
+                if e.oid == u64::from(raw::BTRFS_FS_TREE_OBJECTID) {
+                    // Main FS tree: UUID derived from fs_uuid by bit-flipping.
+                    let mut ub = *cfg.fs_uuid.as_bytes();
+                    for b in &mut ub {
+                        *b ^= 0xFF;
+                    }
+                    (uuid::Uuid::from_bytes(ub), 0u64)
+                } else {
+                    // Subvolume: look up metadata.
+                    let meta =
+                        args.subvol_meta.iter().find(|m| m.subvol_id == e.oid);
+                    let flags = if meta.is_some_and(|m| m.readonly) {
+                        u64::from(raw::BTRFS_ROOT_SUBVOL_RDONLY)
+                    } else {
+                        0
+                    };
+                    (uuid::Uuid::new_v4(), flags)
+                };
+            patch_root_item_fs(&mut data, &uuid, flags, cfg.nodesize, args.now);
         }
-        leaf.push(key, &data)
+        root_items.push((key, data));
+    }
+
+    // ROOT_REF and ROOT_BACKREF entries for subvolumes.
+    for meta in args.subvol_meta {
+        // ROOT_BACKREF: child → parent
+        root_items.push((
+            Key::new(
+                meta.subvol_id,
+                raw::BTRFS_ROOT_BACKREF_KEY as u8,
+                meta.parent_root_id,
+            ),
+            items::root_ref(meta.parent_dirid, meta.dir_index, &meta.name),
+        ));
+        // ROOT_REF: parent → child
+        root_items.push((
+            Key::new(
+                meta.parent_root_id,
+                raw::BTRFS_ROOT_REF_KEY as u8,
+                meta.subvol_id,
+            ),
+            items::root_ref(meta.parent_dirid, meta.dir_index, &meta.name),
+        ));
+    }
+
+    // Sort all items by key and push into the leaf.
+    root_items.sort_by_key(|(k, _)| *k);
+    for (key, data) in &root_items {
+        leaf.push(*key, data)
             .map_err(|e| anyhow::anyhow!("root tree: {e}"))?;
     }
     Ok(leaf.finish())

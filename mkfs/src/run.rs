@@ -195,10 +195,41 @@ pub fn run(args: &Arguments) -> Result<()> {
         }
     }
 
+    if !args.subvol.is_empty() && args.rootdir.is_none() {
+        bail!("--subvol requires --rootdir");
+    }
+
     if let Some(ref rootdir) = args.rootdir {
         if !rootdir.is_dir() {
             bail!("'{}' is not a directory", rootdir.display());
         }
+
+        // Validate --subvol args.
+        for sv in &args.subvol {
+            let full = rootdir.join(&sv.path);
+            if !full.is_dir() {
+                bail!(
+                    "--subvol path '{}' does not exist as a directory under '{}'",
+                    sv.path.display(),
+                    rootdir.display()
+                );
+            }
+        }
+        let default_count = args
+            .subvol
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.subvol_type,
+                    crate::args::SubvolType::Default
+                        | crate::args::SubvolType::DefaultRo
+                )
+            })
+            .count();
+        if default_count > 1 {
+            bail!("at most one subvolume may be marked as default");
+        }
+
         let algorithm = args
             .compress
             .as_ref()
@@ -218,12 +249,16 @@ pub fn run(args: &Arguments) -> Result<()> {
             if compress.algorithm != CompressAlgorithm::No {
                 eprintln!("  Compression:    {:?}", compress.algorithm);
             }
+            if !args.subvol.is_empty() {
+                eprintln!("  Subvolumes:     {}", args.subvol.len());
+            }
         }
         mkfs::make_btrfs_with_rootdir(
             &cfg,
             rootdir,
             compress,
             &args.inode_flags,
+            &args.subvol,
             args.shrink,
         )?;
     } else {
