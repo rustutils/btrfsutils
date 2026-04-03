@@ -47,6 +47,9 @@ All notable changes to this project will be documented in this file.
   computing full totals (0 is equivalent to --summarize)
 - `btrfs filesystem du --sort`: sort entries within each directory
   by path, total, exclusive, or shared (modern output only)
+- `btrfs filesystem df --format modern`: cols-based adaptive table
+- `btrfs quota status --format modern`: key-value table with UUID
+  and rescan progress (extensions not in the text output)
 - `RunContext` struct for passing runtime options through commands
 - `Runnable::supported_formats()`: commands declare which formats
   they support; unsupported formats produce a clear error

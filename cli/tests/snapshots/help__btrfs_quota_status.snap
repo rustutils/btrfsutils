@@ -4,6 +4,36 @@ expression: text
 ---
 Show status information about quota on the filesystem
 
+Displays the current quota configuration and accounting state. The fields shown
+when quotas are enabled:
+
+Enabled: whether quota accounting is active on this filesystem.
+
+Mode: the accounting mode. "qgroup" (full accounting) tracks every extent
+backref and provides accurate shared/exclusive byte counts. "squota" (simple
+quotas, kernel 6.7+) uses lighter-weight lifetime tracking that avoids the
+overhead of full backref walking but does not distinguish shared vs exclusive
+usage.
+
+Inconsistent: if "yes", the qgroup numbers are stale and a rescan is needed
+(btrfs quota rescan). This happens after unclean shutdowns or when qgroups are
+first enabled on an existing filesystem.
+
+Override limits: when enabled, qgroup limits are not enforced for the current
+mount. Writes will succeed even if they exceed the configured limits. Useful for
+emergency recovery.
+
+Drop subtree threshold: controls how deep the kernel tracks qgroup changes when
+deleting subvolumes. Levels below this threshold skip detailed per-extent
+accounting during heavy delete workloads, trading accuracy for performance. A
+value of 0 means full tracking.
+
+Total count: the total number of qgroup entries in the quota tree.
+
+Level 0: the number of level-0 qgroups. Each subvolume automatically gets a
+level-0 qgroup (e.g. 0/256, 0/257). Higher-level qgroups (1/0, 2/0, ...) are
+user-created containers for hierarchical limits.
+
 Usage: status [OPTIONS] <PATH>
 
 Arguments:
@@ -15,4 +45,4 @@ Options:
           Only check if quotas are enabled, without printing full status
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
