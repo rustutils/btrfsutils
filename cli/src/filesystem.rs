@@ -24,6 +24,7 @@ pub use self::{
 /// synchronization. These commands provide views into filesystem state and
 /// allow configuration of filesystem-wide settings.
 #[derive(Parser, Debug)]
+#[clap(arg_required_else_help = true)]
 pub struct FilesystemCommand {
     #[clap(subcommand)]
     pub subcommand: FilesystemSubcommand,

@@ -14,6 +14,7 @@ pub use self::{cancel::*, start::*, status::*};
 /// operation can be monitored and cancelled. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
+#[clap(arg_required_else_help = true)]
 pub struct ReplaceCommand {
     #[clap(subcommand)]
     pub subcommand: ReplaceSubcommand,

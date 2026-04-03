@@ -49,6 +49,14 @@ pub enum Format {
     Modern,
 }
 
+impl std::str::FromStr for Format {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        <Self as clap::ValueEnum>::from_str(s, true).map_err(|e| e.clone())
+    }
+}
+
 /// Log verbosity level, ordered from most to least verbose.
 #[derive(
     Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum,
@@ -72,7 +80,7 @@ pub enum Level {
 /// the specific filesystem.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
-#[clap(version, infer_subcommands = true)]
+#[clap(version, infer_subcommands = true, arg_required_else_help = true)]
 pub struct Arguments {
     #[clap(flatten)]
     pub global: GlobalOptions,
@@ -102,8 +110,8 @@ pub struct GlobalOptions {
     #[clap(global = true, long, help_heading = GLOBAL_OPTIONS)]
     pub log: Option<Level>,
 
-    /// If supported, print subcommand output in that format
-    #[clap(global = true, long, help_heading = GLOBAL_OPTIONS, env = "BTRFS_OUTPUT_FORMAT")]
+    /// If supported, print subcommand output in that format. [env: BTRFS_OUTPUT_FORMAT]
+    #[clap(global = true, long, help_heading = GLOBAL_OPTIONS)]
     pub format: Option<Format>,
 }
 
@@ -261,7 +269,19 @@ impl Arguments {
             );
         }
 
-        let format = self.global.format.unwrap_or_default();
+        let format = self
+            .global
+            .format
+            // Resolve from env manually rather than via clap's `env`
+            // attribute. Using `env` on a global flag makes clap treat
+            // the env var as a provided argument, which defeats
+            // `arg_required_else_help` on parent commands.
+            .or_else(|| {
+                std::env::var("BTRFS_OUTPUT_FORMAT")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+            })
+            .unwrap_or_default();
         if !self.command.supported_formats().contains(&format) {
             anyhow::bail!(
                 "the --format {format:?} option is not supported by this command",

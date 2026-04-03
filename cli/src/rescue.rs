@@ -25,6 +25,7 @@ pub use self::{
 /// Most rescue operations require CAP_SYS_ADMIN and an unmounted filesystem.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
+#[clap(arg_required_else_help = true)]
 pub struct RescueCommand {
     #[clap(subcommand)]
     pub subcommand: RescueSubcommand,

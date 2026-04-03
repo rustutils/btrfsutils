@@ -22,6 +22,7 @@ pub use self::{
 /// in the subvolume hierarchy. Most operations require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
+#[clap(arg_required_else_help = true)]
 pub struct QgroupCommand {
     #[clap(subcommand)]
     pub subcommand: QgroupSubcommand,

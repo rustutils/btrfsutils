@@ -53,6 +53,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Running `btrfs` or any command group (`btrfs filesystem`, `btrfs device`,
+  etc.) without a subcommand now shows help instead of an error
+- `BTRFS_OUTPUT_FORMAT` env var is now resolved manually instead of via
+  clap's `env` attribute, so it no longer interferes with
+  `arg_required_else_help`
 - `SearchKey` renamed to `SearchFilter` with compound `Key` struct:
   the `(objectid, item_type, offset)` triple is now a single `Key`
   type, and `SearchFilter` uses `start`/`end` keys instead of six

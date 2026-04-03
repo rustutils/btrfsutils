@@ -34,6 +34,7 @@ pub enum PropertyObjectType {
 /// filesystem permissions.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
+#[clap(arg_required_else_help = true)]
 pub struct PropertyCommand {
     #[clap(subcommand)]
     pub subcommand: PropertySubcommand,

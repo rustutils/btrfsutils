@@ -29,6 +29,7 @@ pub use self::{
 /// require CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
+#[clap(arg_required_else_help = true)]
 pub struct InspectCommand {
     #[clap(subcommand)]
     pub subcommand: InspectSubcommand,

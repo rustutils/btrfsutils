@@ -21,6 +21,7 @@ pub use self::{cancel::*, limit::*, resume::*, start::*, status::*};
 /// be queried, and speed limits can be configured. Requires CAP_SYS_ADMIN.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
+#[clap(arg_required_else_help = true)]
 pub struct ScrubCommand {
     #[clap(subcommand)]
     pub subcommand: ScrubSubcommand,
