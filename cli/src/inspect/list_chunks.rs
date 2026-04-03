@@ -1,11 +1,12 @@
 use crate::{
-    RunContext, Runnable,
+    Format, RunContext, Runnable,
     filesystem::UnitMode,
     util::{fmt_size, open_path},
 };
 use anyhow::{Context, Result, bail};
 use btrfs_uapi::{chunk::chunk_list, filesystem::filesystem_info};
 use clap::Parser;
+use cols::Cols;
 use std::{cmp::Ordering, os::unix::io::AsFd, path::PathBuf};
 
 /// List all chunks in the filesystem, one row per stripe
@@ -74,7 +75,7 @@ struct Row {
 
 impl Runnable for ListChunksCommand {
     #[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
-    fn run(&self, _ctx: &RunContext) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         let mode = self.units.resolve();
         let fmt = |bytes| fmt_size(bytes, &mode);
         let file = open_path(&self.path)?;
@@ -152,55 +153,14 @@ impl Runnable for ListChunksCommand {
             rows.sort_by(|a, b| compare_rows(a, b, &specs));
         }
 
-        // Compute column widths.
-        let devid_w = col_w("Devid", rows.iter().map(|r| digits(r.devid)));
-        let pnum_w = col_w("PNumber", rows.iter().map(|r| digits(r.pnumber)));
-        let type_w =
-            col_w("Type/profile", rows.iter().map(|r| r.flags_str.len()));
-        let pstart_w =
-            col_w("PStart", rows.iter().map(|r| fmt(r.physical_start).len()));
-        let length_w =
-            col_w("Length", rows.iter().map(|r| fmt(r.length).len()));
-        let pend_w =
-            col_w("PEnd", rows.iter().map(|r| fmt(r.physical_end).len()));
-        let lnum_w = col_w("LNumber", rows.iter().map(|r| digits(r.lnumber)));
-        let lstart_w =
-            col_w("LStart", rows.iter().map(|r| fmt(r.logical_start).len()));
-        let usage_w = "Usage%".len().max("100.00".len());
-
-        // Header
-        println!(
-            "{:>devid_w$}  {:>pnum_w$}  {:type_w$}  {:>pstart_w$}  {:>length_w$}  {:>pend_w$}  {:>lnum_w$}  {:>lstart_w$}  {:>usage_w$}",
-            "Devid",
-            "PNumber",
-            "Type/profile",
-            "PStart",
-            "Length",
-            "PEnd",
-            "LNumber",
-            "LStart",
-            "Usage%",
-        );
-        // Separator
-        println!(
-            "{:->devid_w$}  {:->pnum_w$}  {:->type_w$}  {:->pstart_w$}  {:->length_w$}  {:->pend_w$}  {:->lnum_w$}  {:->lstart_w$}  {:->usage_w$}",
-            "", "", "", "", "", "", "", "", "",
-        );
-
-        // Rows
-        for r in &rows {
-            println!(
-                "{:>devid_w$}  {:>pnum_w$}  {:type_w$}  {:>pstart_w$}  {:>length_w$}  {:>pend_w$}  {:>lnum_w$}  {:>lstart_w$}  {:>usage_w$.2}",
-                r.devid,
-                r.pnumber,
-                r.flags_str,
-                fmt(r.physical_start),
-                fmt(r.length),
-                fmt(r.physical_end),
-                r.lnumber,
-                fmt(r.logical_start),
-                r.usage_pct,
-            );
+        match ctx.format {
+            Format::Modern => {
+                print_chunks_modern(&rows, &fmt);
+            }
+            Format::Text => {
+                print_chunks_text(&rows, &fmt);
+            }
+            Format::Json => unreachable!(),
         }
 
         Ok(())
@@ -362,4 +322,80 @@ fn col_w(header: &str, values: impl Iterator<Item = usize>) -> usize {
 /// Number of decimal digits in `n` (minimum 1).
 fn digits(n: u64) -> usize {
     if n == 0 { 1 } else { n.ilog10() as usize + 1 }
+}
+
+#[derive(Cols)]
+struct ChunkRow {
+    #[column(header = "DEVID", right)]
+    devid: u64,
+    #[column(header = "PNUM", right)]
+    pnumber: u64,
+    #[column(header = "TYPE/PROFILE")]
+    flags: String,
+    #[column(header = "PSTART", right)]
+    pstart: String,
+    #[column(header = "LENGTH", right)]
+    length: String,
+    #[column(header = "PEND", right)]
+    pend: String,
+    #[column(header = "LNUM", right)]
+    lnumber: u64,
+    #[column(header = "LSTART", right)]
+    lstart: String,
+    #[column(header = "USAGE%", right)]
+    usage: String,
+}
+
+fn print_chunks_modern(rows: &[Row], fmt: &dyn Fn(u64) -> String) {
+    let chunk_rows: Vec<ChunkRow> = rows
+        .iter()
+        .map(|r| ChunkRow {
+            devid: r.devid,
+            pnumber: r.pnumber,
+            flags: r.flags_str.clone(),
+            pstart: fmt(r.physical_start),
+            length: fmt(r.length),
+            pend: fmt(r.physical_end),
+            lnumber: r.lnumber,
+            lstart: fmt(r.logical_start),
+            usage: format!("{:.2}", r.usage_pct),
+        })
+        .collect();
+    let mut out = std::io::stdout().lock();
+    let _ = ChunkRow::print_table(&chunk_rows, &mut out);
+}
+
+fn print_chunks_text(rows: &[Row], fmt: &dyn Fn(u64) -> String) {
+    let devid_w = col_w("Devid", rows.iter().map(|r| digits(r.devid)));
+    let pnum_w = col_w("PNumber", rows.iter().map(|r| digits(r.pnumber)));
+    let type_w =
+        col_w("Type/profile", rows.iter().map(|r| r.flags_str.len()));
+    let pstart_w =
+        col_w("PStart", rows.iter().map(|r| fmt(r.physical_start).len()));
+    let length_w =
+        col_w("Length", rows.iter().map(|r| fmt(r.length).len()));
+    let pend_w =
+        col_w("PEnd", rows.iter().map(|r| fmt(r.physical_end).len()));
+    let lnum_w = col_w("LNumber", rows.iter().map(|r| digits(r.lnumber)));
+    let lstart_w =
+        col_w("LStart", rows.iter().map(|r| fmt(r.logical_start).len()));
+    let usage_w = "Usage%".len().max("100.00".len());
+
+    println!(
+        "{:>devid_w$}  {:>pnum_w$}  {:type_w$}  {:>pstart_w$}  {:>length_w$}  {:>pend_w$}  {:>lnum_w$}  {:>lstart_w$}  {:>usage_w$}",
+        "Devid", "PNumber", "Type/profile", "PStart", "Length", "PEnd",
+        "LNumber", "LStart", "Usage%",
+    );
+    println!(
+        "{:->devid_w$}  {:->pnum_w$}  {:->type_w$}  {:->pstart_w$}  {:->length_w$}  {:->pend_w$}  {:->lnum_w$}  {:->lstart_w$}  {:->usage_w$}",
+        "", "", "", "", "", "", "", "", "",
+    );
+    for r in rows {
+        println!(
+            "{:>devid_w$}  {:>pnum_w$}  {:type_w$}  {:>pstart_w$}  {:>length_w$}  {:>pend_w$}  {:>lnum_w$}  {:>lstart_w$}  {:>usage_w$.2}",
+            r.devid, r.pnumber, r.flags_str, fmt(r.physical_start),
+            fmt(r.length), fmt(r.physical_end), r.lnumber,
+            fmt(r.logical_start), r.usage_pct,
+        );
+    }
 }
