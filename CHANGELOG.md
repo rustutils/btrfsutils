@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.9.0
+
 ### Added
 
 - `mkfs.btrfs`: all RAID profiles (RAID0, RAID1C3, RAID1C4, RAID10,
