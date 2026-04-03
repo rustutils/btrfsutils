@@ -4,10 +4,24 @@ use crate::{
     util::{fmt_size, open_path},
 };
 use anyhow::{Context, Result, bail};
-use btrfs_uapi::{chunk::chunk_list, filesystem::filesystem_info};
+use btrfs_disk::{
+    items::BlockGroupItem,
+    reader,
+    tree::{KeyType, TreeBlock},
+};
+use btrfs_uapi::{
+    chunk::chunk_list, filesystem::filesystem_info, space::BlockGroupFlags,
+};
 use clap::Parser;
 use cols::Cols;
-use std::{cmp::Ordering, os::unix::io::AsFd, path::PathBuf};
+use std::{
+    cmp::Ordering,
+    collections::HashMap,
+    fs::File,
+    io::{Read, Seek},
+    os::unix::io::AsFd,
+    path::PathBuf,
+};
 
 /// List all chunks in the filesystem, one row per stripe
 ///
@@ -18,7 +32,7 @@ use std::{cmp::Ordering, os::unix::io::AsFd, path::PathBuf};
 /// device, so it also appears twice. For single and non-striped profiles
 /// there is a 1:1 correspondence between logical chunks and rows.
 ///
-/// Requires CAP_SYS_ADMIN.
+/// Requires CAP_SYS_ADMIN (unless --offline is used).
 ///
 /// Columns:
 ///
@@ -56,7 +70,13 @@ pub struct ListChunksCommand {
     #[clap(long, value_name = "KEYS")]
     pub sort: Option<String>,
 
-    /// Path to a file or directory on the btrfs filesystem
+    /// Read directly from an unmounted device or image file instead of
+    /// a mounted filesystem. Does not require CAP_SYS_ADMIN.
+    #[clap(long)]
+    pub offline: bool,
+
+    /// Path to a file or directory on the btrfs filesystem, or a block
+    /// device / image file when --device is used
     path: PathBuf,
 }
 
@@ -78,6 +98,42 @@ impl Runnable for ListChunksCommand {
     fn run(&self, ctx: &RunContext) -> Result<()> {
         let mode = self.units.resolve();
         let fmt = |bytes| fmt_size(bytes, &mode);
+
+        let mut rows = if self.offline {
+            self.collect_offline()?
+        } else {
+            self.collect_online()?
+        };
+
+        if rows.is_empty() {
+            println!("no chunks found");
+            return Ok(());
+        }
+
+        // Apply user-specified sort if given.
+        if let Some(ref sort_str) = self.sort {
+            let specs = parse_sort_specs(sort_str)?;
+            rows.sort_by(|a, b| compare_rows(a, b, &specs));
+        }
+
+        match ctx.format {
+            Format::Modern => {
+                print_chunks_modern(&rows, &fmt);
+            }
+            Format::Text => {
+                print_chunks_text(&rows, &fmt);
+            }
+            Format::Json => unreachable!(),
+        }
+
+        Ok(())
+    }
+}
+
+impl ListChunksCommand {
+    /// Collect chunk data from a mounted filesystem via ioctls.
+    #[allow(clippy::cast_precision_loss)]
+    fn collect_online(&self) -> Result<Vec<Row>> {
         let file = open_path(&self.path)?;
         let fd = file.as_fd();
 
@@ -87,7 +143,6 @@ impl Runnable for ListChunksCommand {
                 self.path.display()
             )
         })?;
-
         println!("UUID: {}", fs.uuid.as_hyphenated());
 
         let mut entries = chunk_list(fd).with_context(|| {
@@ -95,26 +150,17 @@ impl Runnable for ListChunksCommand {
         })?;
 
         if entries.is_empty() {
-            println!("no chunks found");
-            return Ok(());
+            return Ok(Vec::new());
         }
 
-        // Sort by (devid, physical_start) to assign pnumber sequentially
-        // per device in physical order.
         entries.sort_by_key(|e| (e.devid, e.physical_start));
 
-        // Assign pnumber (1-based, per devid) and lnumber (1-based,
-        // per devid, in the order we encounter logical chunks).
         let mut rows: Vec<Row> = Vec::with_capacity(entries.len());
-        let mut pcount: Vec<(u64, u64)> = Vec::new(); // (devid, count)
+        let mut pcount: Vec<(u64, u64)> = Vec::new();
 
-        // Build lnumber by iterating in the original (logical) order first.
-        // Re-sort a copy by (devid, logical_start) to assign lnumbers.
         let mut logical_order = entries.clone();
         logical_order.sort_by_key(|e| (e.devid, e.logical_start));
-        // Map (devid, logical_start) -> lnumber (1-based).
-        let mut lnumber_map: std::collections::HashMap<(u64, u64), u64> =
-            std::collections::HashMap::new();
+        let mut lnumber_map: HashMap<(u64, u64), u64> = HashMap::new();
         {
             let mut lcnt: Vec<(u64, u64)> = Vec::new();
             for e in &logical_order {
@@ -147,24 +193,154 @@ impl Runnable for ListChunksCommand {
             });
         }
 
-        // Apply user-specified sort if given.
-        if let Some(ref sort_str) = self.sort {
-            let specs = parse_sort_specs(sort_str)?;
-            rows.sort_by(|a, b| compare_rows(a, b, &specs));
-        }
-
-        match ctx.format {
-            Format::Modern => {
-                print_chunks_modern(&rows, &fmt);
-            }
-            Format::Text => {
-                print_chunks_text(&rows, &fmt);
-            }
-            Format::Json => unreachable!(),
-        }
-
-        Ok(())
+        Ok(rows)
     }
+
+    /// Collect chunk data by reading directly from a device or image file.
+    #[allow(clippy::cast_precision_loss)]
+    fn collect_offline(&self) -> Result<Vec<Row>> {
+        let file = File::open(&self.path).with_context(|| {
+            format!("failed to open '{}'", self.path.display())
+        })?;
+
+        let mut open = reader::filesystem_open(file).with_context(|| {
+            format!(
+                "failed to open btrfs filesystem on '{}'",
+                self.path.display()
+            )
+        })?;
+
+        println!("UUID: {}", open.superblock.fsid.as_hyphenated());
+
+        // Collect block group usage from the extent tree.
+        let bg_used =
+            collect_block_group_usage(&mut open.reader, &open.tree_roots);
+
+        // Build one entry per stripe from the chunk cache.
+        let mut entries: Vec<OfflineEntry> = Vec::new();
+        for chunk in open.reader.chunk_cache().iter() {
+            let flags = BlockGroupFlags::from_bits_truncate(chunk.chunk_type);
+            let used = bg_used.get(&chunk.logical).copied().unwrap_or(0);
+            for stripe in &chunk.stripes {
+                entries.push(OfflineEntry {
+                    devid: stripe.devid,
+                    physical_start: stripe.offset,
+                    logical_start: chunk.logical,
+                    length: chunk.length,
+                    flags,
+                    used,
+                });
+            }
+        }
+
+        if entries.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        entries.sort_by_key(|e| (e.devid, e.physical_start));
+
+        let mut rows: Vec<Row> = Vec::with_capacity(entries.len());
+        let mut pcount: Vec<(u64, u64)> = Vec::new();
+
+        let mut logical_order = entries.clone();
+        logical_order.sort_by_key(|e| (e.devid, e.logical_start));
+        let mut lnumber_map: HashMap<(u64, u64), u64> = HashMap::new();
+        {
+            let mut lcnt: Vec<(u64, u64)> = Vec::new();
+            for e in &logical_order {
+                let key = (e.devid, e.logical_start);
+                lnumber_map
+                    .entry(key)
+                    .or_insert_with(|| get_or_insert_count(&mut lcnt, e.devid));
+            }
+        }
+
+        for e in &entries {
+            let pnumber = get_or_insert_count(&mut pcount, e.devid);
+            let lnumber =
+                *lnumber_map.get(&(e.devid, e.logical_start)).unwrap_or(&1);
+            let usage_pct = if e.length > 0 {
+                e.used as f64 / e.length as f64 * 100.0
+            } else {
+                0.0
+            };
+            rows.push(Row {
+                devid: e.devid,
+                pnumber,
+                flags_str: format_flags(e.flags),
+                physical_start: e.physical_start,
+                length: e.length,
+                physical_end: e.physical_start + e.length,
+                lnumber,
+                logical_start: e.logical_start,
+                usage_pct,
+            });
+        }
+
+        Ok(rows)
+    }
+}
+
+/// Intermediate entry for offline chunk data, mirroring `ChunkEntry` from uapi.
+#[derive(Clone)]
+struct OfflineEntry {
+    devid: u64,
+    physical_start: u64,
+    logical_start: u64,
+    length: u64,
+    flags: BlockGroupFlags,
+    used: u64,
+}
+
+/// Walk the block group tree (or extent tree as fallback) to collect
+/// block group usage (logical_start -> used bytes).
+///
+/// Modern filesystems with `BLOCK_GROUP_TREE` (tree 11) store block group
+/// items there instead of the extent tree.
+fn collect_block_group_usage<R: Read + Seek>(
+    block_reader: &mut reader::BlockReader<R>,
+    tree_roots: &std::collections::BTreeMap<u64, (u64, u64)>,
+) -> HashMap<u64, u64> {
+    let mut bg_used: HashMap<u64, u64> = HashMap::new();
+
+    // Prefer the dedicated block group tree; fall back to the extent tree.
+    let bg_root = tree_roots
+        .get(&u64::from(btrfs_disk::raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID))
+        .or_else(|| {
+            tree_roots
+                .get(&u64::from(btrfs_disk::raw::BTRFS_EXTENT_TREE_OBJECTID))
+        })
+        .map(|&(bytenr, _)| bytenr);
+
+    let Some(bg_root) = bg_root else {
+        return bg_used;
+    };
+
+    let mut visitor = |_raw: &[u8], block: &TreeBlock| {
+        if let TreeBlock::Leaf { items, data, .. } = block {
+            for item in items {
+                if item.key.key_type != KeyType::BlockGroupItem {
+                    continue;
+                }
+                let start =
+                    std::mem::size_of::<btrfs_disk::raw::btrfs_header>()
+                        + item.offset as usize;
+                let item_data = &data[start..][..item.size as usize];
+                if let Some(bg) = BlockGroupItem::parse(item_data) {
+                    bg_used.insert(item.key.objectid, bg.used);
+                }
+            }
+        }
+    };
+
+    let _ = reader::tree_walk_tolerant(
+        block_reader,
+        bg_root,
+        &mut visitor,
+        &mut |_, _| {},
+    );
+
+    bg_used
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -368,14 +544,11 @@ fn print_chunks_modern(rows: &[Row], fmt: &dyn Fn(u64) -> String) {
 fn print_chunks_text(rows: &[Row], fmt: &dyn Fn(u64) -> String) {
     let devid_w = col_w("Devid", rows.iter().map(|r| digits(r.devid)));
     let pnum_w = col_w("PNumber", rows.iter().map(|r| digits(r.pnumber)));
-    let type_w =
-        col_w("Type/profile", rows.iter().map(|r| r.flags_str.len()));
+    let type_w = col_w("Type/profile", rows.iter().map(|r| r.flags_str.len()));
     let pstart_w =
         col_w("PStart", rows.iter().map(|r| fmt(r.physical_start).len()));
-    let length_w =
-        col_w("Length", rows.iter().map(|r| fmt(r.length).len()));
-    let pend_w =
-        col_w("PEnd", rows.iter().map(|r| fmt(r.physical_end).len()));
+    let length_w = col_w("Length", rows.iter().map(|r| fmt(r.length).len()));
+    let pend_w = col_w("PEnd", rows.iter().map(|r| fmt(r.physical_end).len()));
     let lnum_w = col_w("LNumber", rows.iter().map(|r| digits(r.lnumber)));
     let lstart_w =
         col_w("LStart", rows.iter().map(|r| fmt(r.logical_start).len()));
@@ -383,8 +556,15 @@ fn print_chunks_text(rows: &[Row], fmt: &dyn Fn(u64) -> String) {
 
     println!(
         "{:>devid_w$}  {:>pnum_w$}  {:type_w$}  {:>pstart_w$}  {:>length_w$}  {:>pend_w$}  {:>lnum_w$}  {:>lstart_w$}  {:>usage_w$}",
-        "Devid", "PNumber", "Type/profile", "PStart", "Length", "PEnd",
-        "LNumber", "LStart", "Usage%",
+        "Devid",
+        "PNumber",
+        "Type/profile",
+        "PStart",
+        "Length",
+        "PEnd",
+        "LNumber",
+        "LStart",
+        "Usage%",
     );
     println!(
         "{:->devid_w$}  {:->pnum_w$}  {:->type_w$}  {:->pstart_w$}  {:->length_w$}  {:->pend_w$}  {:->lnum_w$}  {:->lstart_w$}  {:->usage_w$}",
@@ -393,9 +573,15 @@ fn print_chunks_text(rows: &[Row], fmt: &dyn Fn(u64) -> String) {
     for r in rows {
         println!(
             "{:>devid_w$}  {:>pnum_w$}  {:type_w$}  {:>pstart_w$}  {:>length_w$}  {:>pend_w$}  {:>lnum_w$}  {:>lstart_w$}  {:>usage_w$.2}",
-            r.devid, r.pnumber, r.flags_str, fmt(r.physical_start),
-            fmt(r.length), fmt(r.physical_end), r.lnumber,
-            fmt(r.logical_start), r.usage_pct,
+            r.devid,
+            r.pnumber,
+            r.flags_str,
+            fmt(r.physical_start),
+            fmt(r.length),
+            fmt(r.physical_end),
+            r.lnumber,
+            fmt(r.logical_start),
+            r.usage_pct,
         );
     }
 }

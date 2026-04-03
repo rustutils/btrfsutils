@@ -371,6 +371,16 @@ fn inspect_list_chunks() {
 }
 
 #[test]
+fn inspect_list_chunks_offline() {
+    let img = cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    snap!(
+        "btrfs inspect-internal list-chunks --offline <IMG>",
+        btrfs_ok(&["inspect-internal", "list-chunks", "--offline", img_str])
+    );
+}
+
+#[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_min_dev_size() {
     let (_td, mnt) = fixture_mount();

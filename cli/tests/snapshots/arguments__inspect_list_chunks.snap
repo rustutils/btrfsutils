@@ -25,6 +25,7 @@ Arguments {
                         tbytes: false,
                     },
                     sort: None,
+                    offline: false,
                     path: "/mnt",
                 },
             ),

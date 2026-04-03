@@ -11,7 +11,7 @@ logical chunk maps to two physical stripes on the same device, so it also
 appears twice. For single and non-striped profiles there is a 1:1 correspondence
 between logical chunks and rows.
 
-Requires CAP_SYS_ADMIN.
+Requires CAP_SYS_ADMIN (unless --offline is used).
 
 Columns:
 
@@ -41,7 +41,8 @@ Usage: list-chunks [OPTIONS] <PATH>
 
 Arguments:
   <PATH>
-          Path to a file or directory on the btrfs filesystem
+          Path to a file or directory on the btrfs filesystem, or a block device
+          / image file when --device is used
 
 Options:
       --raw
@@ -72,6 +73,10 @@ Options:
           Sort output by the given columns (comma-separated). Prepend - for
           descending order. Keys: devid, pstart, lstart, usage, length, type,
           profile. Default: devid,pstart
+
+      --offline
+          Read directly from an unmounted device or image file instead of a
+          mounted filesystem. Does not require CAP_SYS_ADMIN
 
   -h, --help
           Print help (see a summary with '-h')
