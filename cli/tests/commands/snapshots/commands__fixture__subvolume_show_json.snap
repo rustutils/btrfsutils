@@ -1,0 +1,26 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs --format json subvolume show <MOUNT>/subvol1
+expression: "redact_paths(&btrfs_ok(&[\"--format\", \"json\", \"subvolume\", \"show\", &subvol]),\n&mnt,)"
+---
+{
+  "__header": {
+    "version": "1"
+  },
+  "subvolume-show": {
+    "creation_time": "2026-03-26 00:37:47 +0100",
+    "flags": "-",
+    "gen_at_creation": 9,
+    "generation": 9,
+    "name": "subvol1",
+    "parent_id": 5,
+    "parent_uuid": "-",
+    "receive_time": "-",
+    "receive_transid": 0,
+    "received_uuid": "-",
+    "send_time": "-",
+    "send_transid": 0,
+    "subvolume_id": 256,
+    "uuid": "63b095b9-2b65-ca41-87aa-a939e17e7679"
+  }
+}

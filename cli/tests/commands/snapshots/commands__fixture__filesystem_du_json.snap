@@ -1,0 +1,36 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs --format json filesystem du <MOUNT>/subvol1
+expression: "redact_paths(&btrfs_ok(&[\"--format\", \"json\", \"filesystem\", \"du\", &subvol]),\n&mnt,)"
+---
+{
+  "__header": {
+    "version": "1"
+  },
+  "filesystem-du": [
+    {
+      "exclusive": 0,
+      "path": "<MOUNT>/subvol1/hello.txt",
+      "set_shared": null,
+      "total": 0
+    },
+    {
+      "exclusive": 0,
+      "path": "<MOUNT>/subvol1/nested/deep.txt",
+      "set_shared": null,
+      "total": 0
+    },
+    {
+      "exclusive": 0,
+      "path": "<MOUNT>/subvol1/nested",
+      "set_shared": null,
+      "total": 0
+    },
+    {
+      "exclusive": 0,
+      "path": "<MOUNT>/subvol1",
+      "set_shared": 0,
+      "total": 0
+    }
+  ]
+}

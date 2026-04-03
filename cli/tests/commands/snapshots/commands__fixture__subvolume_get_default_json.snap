@@ -1,0 +1,14 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs --format json subvolume get-default <MOUNT>
+expression: "btrfs_ok(&[\"--format\", \"json\", \"subvolume\", \"get-default\", mp])"
+---
+{
+  "__header": {
+    "version": "1"
+  },
+  "default-subvolume": {
+    "id": 5,
+    "name": "FS_TREE"
+  }
+}

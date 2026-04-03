@@ -1,0 +1,21 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs --format json device stats <MOUNT>
+expression: "redact_paths(&btrfs_ok(&[\"--format\", \"json\", \"device\", \"stats\", mp]), &mnt,)"
+---
+{
+  "__header": {
+    "version": "1"
+  },
+  "device-stats": [
+    {
+      "corruption_errs": 0,
+      "device": "<DEV>",
+      "devid": 1,
+      "flush_io_errs": 0,
+      "generation_errs": 0,
+      "read_io_errs": 0,
+      "write_io_errs": 0
+    }
+  ]
+}

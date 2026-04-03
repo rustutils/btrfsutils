@@ -1,0 +1,36 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs --format json filesystem df <MOUNT>
+expression: "redact_paths(&btrfs_ok(&[\"--format\", \"json\", \"filesystem\", \"df\", mp]), &mnt,)"
+---
+{
+  "__header": {
+    "version": "1"
+  },
+  "filesystem-df": [
+    {
+      "profile": "single",
+      "total": 8388608,
+      "type": "Data",
+      "used": 1024000
+    },
+    {
+      "profile": "DUP",
+      "total": 8388608,
+      "type": "System",
+      "used": 16384
+    },
+    {
+      "profile": "DUP",
+      "total": 33554432,
+      "type": "Metadata",
+      "used": 524288
+    },
+    {
+      "profile": "single",
+      "total": 6029312,
+      "type": "GlobalReserve",
+      "used": 0
+    }
+  ]
+}

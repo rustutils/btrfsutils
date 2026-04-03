@@ -95,6 +95,20 @@ fn filesystem_df() {
 
 #[test]
 #[ignore = "requires elevated privileges"]
+fn filesystem_df_json() {
+    let (_td, mnt) = fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs --format json filesystem df <MOUNT>",
+        redact_paths(
+            &btrfs_ok(&["--format", "json", "filesystem", "df", mp]),
+            &mnt,
+        )
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
 fn filesystem_show() {
     let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
@@ -148,6 +162,20 @@ fn filesystem_du_summarize() {
     );
 }
 
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_du_json() {
+    let (_td, mnt) = fixture_mount();
+    let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
+    snap!(
+        "btrfs --format json filesystem du <MOUNT>/subvol1",
+        redact_paths(
+            &btrfs_ok(&["--format", "json", "filesystem", "du", &subvol]),
+            &mnt,
+        )
+    );
+}
+
 // ── subvolume ────────────────────────────────────────────────────────
 
 #[test]
@@ -163,12 +191,40 @@ fn subvolume_list() {
 
 #[test]
 #[ignore = "requires elevated privileges"]
+fn subvolume_list_json() {
+    let (_td, mnt) = fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs --format json subvolume list <MOUNT>",
+        redact_paths(
+            &btrfs_ok(&["--format", "json", "subvolume", "list", mp]),
+            &mnt,
+        )
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
 fn subvolume_show() {
     let (_td, mnt) = fixture_mount();
     let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
     snap!(
         "btrfs subvolume show <MOUNT>/subvol1",
         redact_paths(&btrfs_ok(&["subvolume", "show", &subvol]), &mnt)
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_show_json() {
+    let (_td, mnt) = fixture_mount();
+    let subvol = format!("{}/subvol1", mnt.path().to_str().unwrap());
+    snap!(
+        "btrfs --format json subvolume show <MOUNT>/subvol1",
+        redact_paths(
+            &btrfs_ok(&["--format", "json", "subvolume", "show", &subvol]),
+            &mnt,
+        )
     );
 }
 
@@ -191,6 +247,17 @@ fn subvolume_get_default() {
     snap!(
         "btrfs subvolume get-default <MOUNT>",
         btrfs_ok(&["subvolume", "get-default", mp])
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn subvolume_get_default_json() {
+    let (_td, mnt) = fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs --format json subvolume get-default <MOUNT>",
+        btrfs_ok(&["--format", "json", "subvolume", "get-default", mp])
     );
 }
 
@@ -288,6 +355,20 @@ fn device_stats() {
     snap!(
         "btrfs device stats <MOUNT>",
         redact_paths(&btrfs_ok(&["device", "stats", mp]), &mnt)
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn device_stats_json() {
+    let (_td, mnt) = fixture_mount();
+    let mp = mnt.path().to_str().unwrap();
+    snap!(
+        "btrfs --format json device stats <MOUNT>",
+        redact_paths(
+            &btrfs_ok(&["--format", "json", "device", "stats", mp]),
+            &mnt,
+        )
     );
 }
 
