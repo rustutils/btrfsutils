@@ -1,5 +1,9 @@
 # Installation
 
+While these tools are still in their beta (pre-1.0 release) phase, you can
+already install them and try them out. Currently, the recommended way to
+install them is using Cargo, there are no binary builds to download.
+
 ## Cargo
 
 If you have cargo installed, you can install the utilities with it.
@@ -16,19 +20,19 @@ If you use Nix with flakes enabled, you can run the tool directly without
 installing it:
 
 ```sh
-nix run github:rustprojectprimer/btrfsutils -- filesystem show /mnt
+nix run github:rustutils/btrfsutils -- filesystem show /mnt
 ```
 
 Or install it into your profile:
 
 ```sh
-nix profile install github:rustprojectprimer/btrfsutils
+nix profile install github:rustutils/btrfsutils
 ```
 
 ## From source
 
 See [Building from Source](building.md) for instructions on compiling btrfsutils
-yourself.
+yourself from the repository.
 
 ## Requirements
 

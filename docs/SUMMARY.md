@@ -8,6 +8,7 @@
 - [Building from Source](user/building.md)
 - [Concepts](user/concepts.md)
 - [Commands](user/commands.md)
+- [Differences from btrfs-progs](user/differences.md)
 
 # Developer Guide
 

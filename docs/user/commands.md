@@ -178,10 +178,10 @@ Emergency recovery tools for damaged filesystems.
 
 Six additional subcommands (`fix-device-size`, `chunk-recover`,
 `clear-space-cache`, `clear-uuid-tree`, `clear-ino-cache`,
-`clear-free-space-tree`) have argument parsing scaffolded but are not yet
+`fix-data-checksum`) have argument parsing scaffolded but are not yet
 implemented.
 
-## mkfs.btrfs
+## btrfs-mkfs
 
 Create a new btrfs filesystem on a block device or image file.
 
@@ -189,12 +189,13 @@ Create a new btrfs filesystem on a block device or image file.
 btrfs-mkfs [options] <device> [device...]
 ```
 
-Supports single-device and multi-device filesystems, metadata DUP and RAID1
-profiles, data SINGLE/RAID0/RAID1 profiles, all four checksum algorithms
-(crc32c, xxhash, sha256, blake2b), custom nodesize/sectorsize, labels, UUIDs,
-and feature flags.
+Supports single-device and multi-device filesystems with all RAID profiles
+(SINGLE, DUP, RAID0, RAID1, RAID1C3, RAID1C4, RAID10, RAID5, RAID6), all
+four checksum algorithms (crc32c, xxhash, sha256, blake2b), quota and simple
+quota setup, custom nodesize/sectorsize, labels, UUIDs, feature flags, and
+directory population via `--rootdir`.
 
-## btrfstune
+## btrfs-tune
 
 Modify btrfs filesystem parameters on an unmounted device.
 
@@ -221,3 +222,9 @@ These flags are accepted by all `btrfs` commands:
 |------|-------------|
 | `-v` / `--verbose` | Increase verbosity (repeatable) |
 | `-q` / `--quiet` | Suppress non-error output |
+| `-f`, `--format` | Set the format, one of: text, json, modern |
+
+## Output Format
+
+Many commands accept a `--format json` which will cause them to
+output JSON-formatte data.
