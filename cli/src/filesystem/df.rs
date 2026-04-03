@@ -6,6 +6,7 @@ use crate::{
 use anyhow::{Context, Result};
 use btrfs_uapi::space::space_info;
 use clap::Parser;
+use cols::Cols;
 use serde::Serialize;
 use std::{os::unix::io::AsFd, path::PathBuf};
 
@@ -40,7 +41,20 @@ impl Runnable for FilesystemDfCommand {
         })?;
 
         match ctx.format {
-            Format::Modern | Format::Text => {
+            Format::Modern => {
+                let rows: Vec<DfRow> = entries
+                    .iter()
+                    .map(|e| DfRow {
+                        bg_type: e.flags.type_name().to_string(),
+                        profile: e.flags.profile_name().to_string(),
+                        total: fmt_size(e.total_bytes, &mode),
+                        used: fmt_size(e.used_bytes, &mode),
+                    })
+                    .collect();
+                let mut out = std::io::stdout().lock();
+                let _ = DfRow::print_table(&rows, &mut out);
+            }
+            Format::Text => {
                 for entry in &entries {
                     println!(
                         "{}, {}: total={}, used={}",
@@ -67,4 +81,16 @@ impl Runnable for FilesystemDfCommand {
 
         Ok(())
     }
+}
+
+#[derive(Cols)]
+struct DfRow {
+    #[column(header = "TYPE")]
+    bg_type: String,
+    #[column(header = "PROFILE")]
+    profile: String,
+    #[column(header = "TOTAL", right)]
+    total: String,
+    #[column(header = "USED", right)]
+    used: String,
 }
