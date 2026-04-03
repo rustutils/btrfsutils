@@ -15,6 +15,8 @@ Arguments {
             subcommand: Du(
                 FilesystemDuCommand {
                     summarize: false,
+                    depth: None,
+                    sort: None,
                     units: UnitMode {
                         raw: false,
                         human_readable: false,

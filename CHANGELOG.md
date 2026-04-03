@@ -12,8 +12,8 @@ All notable changes to this project will be documented in this file.
   (referenced/exclusive bytes) with unit flag support
   (`--raw`, `--iec`, `--si`, `--kbytes`, `--mbytes`, `--gbytes`, `--tbytes`)
 - `--format json` support for `device stats`, `filesystem df`,
-  `qgroup show`, `subvolume show`, `subvolume list`, and
-  `subvolume get-default`, using the btrfs-progs wrapper format
+  `filesystem du`, `qgroup show`, `subvolume show`, `subvolume list`,
+  and `subvolume get-default`, using the btrfs-progs wrapper format
   with `__header`
 - `--dry-run` support for `subvolume delete`: print what would be
   deleted without actually removing subvolumes. Using `--dry-run`
@@ -39,6 +39,14 @@ All notable changes to this project will be documented in this file.
 - `btrfs inspect min-dev-size --offline`: compute minimum device
   size from an unmounted device or image file by walking the device
   tree directly. Does not require CAP_SYS_ADMIN
+- `btrfs filesystem du --format modern`: tree-view output with
+  unicode connectors showing directory hierarchy via `cols`
+- `btrfs filesystem du --format json`: structured JSON output with
+  per-entry total/exclusive/set_shared byte counts
+- `btrfs filesystem du --depth N`: limit display depth while still
+  computing full totals (0 is equivalent to --summarize)
+- `btrfs filesystem du --sort`: sort entries within each directory
+  by path, total, exclusive, or shared (modern output only)
 - `RunContext` struct for passing runtime options through commands
 - `Runnable::supported_formats()`: commands declare which formats
   they support; unsupported formats produce a clear error

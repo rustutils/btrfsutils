@@ -20,6 +20,24 @@ Options:
   -s, --summarize
           Display only a total for each argument, not per-file lines
 
+  -d, --depth <DEPTH>
+          Maximum depth of entries to display.
+          
+          0 is equivalent to --summarize, 1 shows only immediate children, etc.
+          All levels are still computed for totals.
+
+      --sort <SORT>
+          Sort entries within each directory (modern output only). [default:
+          path]
+          
+          Size keys sort largest first, path sorts alphabetically.
+
+          Possible values:
+          - path:      Alphabetical by path (ascending)
+          - total:     By total size (largest first)
+          - exclusive: By exclusive size (largest first)
+          - shared:    By shared size (largest first)
+
       --raw
           Show raw numbers in bytes
 

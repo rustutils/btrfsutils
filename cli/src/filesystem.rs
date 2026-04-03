@@ -30,27 +30,30 @@ pub struct FilesystemCommand {
     pub subcommand: FilesystemSubcommand,
 }
 
+impl FilesystemCommand {
+    fn leaf(&self) -> &dyn Runnable {
+        match &self.subcommand {
+            FilesystemSubcommand::Df(cmd) => cmd,
+            FilesystemSubcommand::Du(cmd) => cmd,
+            FilesystemSubcommand::Show(cmd) => cmd,
+            FilesystemSubcommand::Sync(cmd) => cmd,
+            FilesystemSubcommand::Defragment(cmd) => cmd,
+            FilesystemSubcommand::Resize(cmd) => cmd,
+            FilesystemSubcommand::Label(cmd) => cmd,
+            FilesystemSubcommand::Usage(cmd) => cmd,
+            FilesystemSubcommand::Mkswapfile(cmd) => cmd,
+            FilesystemSubcommand::CommitStats(cmd) => cmd,
+        }
+    }
+}
+
 impl Runnable for FilesystemCommand {
     fn supported_formats(&self) -> &[Format] {
-        match &self.subcommand {
-            FilesystemSubcommand::Df(cmd) => cmd.supported_formats(),
-            _ => &[Format::Text, Format::Modern],
-        }
+        self.leaf().supported_formats()
     }
 
     fn run(&self, ctx: &RunContext) -> Result<()> {
-        match &self.subcommand {
-            FilesystemSubcommand::Df(cmd) => cmd.run(ctx),
-            FilesystemSubcommand::Du(cmd) => cmd.run(ctx),
-            FilesystemSubcommand::Show(cmd) => cmd.run(ctx),
-            FilesystemSubcommand::Sync(cmd) => cmd.run(ctx),
-            FilesystemSubcommand::Defragment(cmd) => cmd.run(ctx),
-            FilesystemSubcommand::Resize(cmd) => cmd.run(ctx),
-            FilesystemSubcommand::Label(cmd) => cmd.run(ctx),
-            FilesystemSubcommand::Usage(cmd) => cmd.run(ctx),
-            FilesystemSubcommand::Mkswapfile(cmd) => cmd.run(ctx),
-            FilesystemSubcommand::CommitStats(cmd) => cmd.run(ctx),
-        }
+        self.leaf().run(ctx)
     }
 }
 
