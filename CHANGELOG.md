@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `mkfs.btrfs`: all RAID profiles (RAID0, RAID1C3, RAID1C4, RAID10,
+  RAID5, RAID6) for both metadata and data block groups, with
+  profile-specific stripe mapping in `logical_to_physical()`
+- `mkfs.btrfs -O quota`: create quota tree with status, info, and limit
+  items for the filesystem tree (INCONSISTENT flag, requires rescan)
+- `mkfs.btrfs -O squota`: create simple quota tree with SIMPLE_MODE
+  flag, `enable_gen` field, and pre-populated qgroup usage info
 - `btrfs device stats --offline`: read device error statistics directly
   from the on-disk device tree without requiring a mounted filesystem
 - `btrfs subvolume show`: display quota group usage and limits

@@ -165,6 +165,7 @@ use crate::layout::StripeInfo;
 /// instead (see `chunk_item_bootstrap`).
 #[must_use]
 #[allow(clippy::cast_possible_truncation)] // stripe count fits in u16
+#[allow(clippy::too_many_arguments)]
 pub fn chunk_item(
     length: u64,
     owner: u64,
@@ -172,6 +173,7 @@ pub fn chunk_item(
     io_align: u32,
     io_width: u32,
     sector_size: u32,
+    sub_stripes: u16,
     stripes: &[StripeInfo],
 ) -> Vec<u8> {
     let mut buf = Vec::new();
@@ -184,7 +186,7 @@ pub fn chunk_item(
     buf.put_u32_le(io_width);
     buf.put_u32_le(sector_size);
     buf.put_u16_le(stripes.len() as u16);
-    buf.put_u16_le(0); // sub_stripes
+    buf.put_u16_le(sub_stripes);
 
     for stripe in stripes {
         buf.put_u64_le(stripe.devid);
@@ -211,6 +213,7 @@ pub fn chunk_item_bootstrap(
         sector_size,
         sector_size,
         sector_size,
+        1, // system chunk: single stripe, no sub-stripes
         &[StripeInfo {
             devid: stripe.devid,
             offset: stripe.offset,
@@ -242,6 +245,67 @@ pub fn dev_extent(
 pub fn dev_stats_zeroed() -> Vec<u8> {
     // 5 u64 counters: write_errs, read_errs, flush_errs, corruption_errs, generation
     vec![0u8; 5 * 8]
+}
+
+/// Serialize a `QGROUP_STATUS_ITEM`.
+///
+/// The `enable_gen` field is only written for simple quota mode (squota),
+/// producing a 40-byte item. Without it the item is 32 bytes.
+#[must_use]
+pub fn qgroup_status(
+    version: u64,
+    generation: u64,
+    flags: u64,
+    enable_gen: Option<u64>,
+) -> Vec<u8> {
+    let cap = if enable_gen.is_some() {
+        mem::size_of::<raw::btrfs_qgroup_status_item>()
+    } else {
+        // 4 x u64 = 32 bytes (without enable_gen)
+        4 * 8
+    };
+    let mut buf = Vec::with_capacity(cap);
+    buf.put_u64_le(version);
+    buf.put_u64_le(generation);
+    buf.put_u64_le(flags);
+    buf.put_u64_le(0); // rescan progress
+    if let Some(eg) = enable_gen {
+        buf.put_u64_le(eg);
+    }
+    buf
+}
+
+/// Serialize a zeroed `QGROUP_INFO_ITEM` (40 bytes).
+///
+/// All fields are zero.
+#[must_use]
+pub fn qgroup_info_zeroed() -> Vec<u8> {
+    vec![0u8; mem::size_of::<raw::btrfs_qgroup_info_item>()]
+}
+
+/// Serialize a `QGROUP_INFO_ITEM` with the given referenced/exclusive bytes.
+#[must_use]
+pub fn qgroup_info(
+    generation: u64,
+    referenced: u64,
+    exclusive: u64,
+) -> Vec<u8> {
+    let mut buf =
+        Vec::with_capacity(mem::size_of::<raw::btrfs_qgroup_info_item>());
+    buf.put_u64_le(generation);
+    buf.put_u64_le(referenced); // rfer
+    buf.put_u64_le(referenced); // rfer_cmpr (same as rfer for uncompressed)
+    buf.put_u64_le(exclusive); // excl
+    buf.put_u64_le(exclusive); // excl_cmpr (same as excl for uncompressed)
+    buf
+}
+
+/// Serialize a zeroed `QGROUP_LIMIT_ITEM` (40 bytes).
+///
+/// All fields are zero.
+#[must_use]
+pub fn qgroup_limit_zeroed() -> Vec<u8> {
+    vec![0u8; mem::size_of::<raw::btrfs_qgroup_limit_item>()]
 }
 
 /// Serialize a `FREE_SPACE_INFO`.
@@ -665,6 +729,7 @@ mod tests {
             crate::layout::STRIPE_LEN as u32,
             crate::layout::STRIPE_LEN as u32,
             4096,
+            1,
             &stripes,
         );
         let parsed = items::ChunkItem::parse(&data).unwrap();
@@ -699,6 +764,7 @@ mod tests {
             crate::layout::STRIPE_LEN as u32,
             crate::layout::STRIPE_LEN as u32,
             4096,
+            1,
             &stripes,
         );
         let parsed = items::ChunkItem::parse(&data).unwrap();
@@ -807,5 +873,48 @@ mod tests {
         assert_eq!(parsed.dirid, 256);
         assert_eq!(parsed.sequence, 3);
         assert_eq!(parsed.name, b"mysubvol");
+    }
+
+    #[test]
+    fn roundtrip_qgroup_status_quota() {
+        let data = qgroup_status(1, 42, 0x5, None);
+        assert_eq!(data.len(), 32); // 4 x u64 without enable_gen
+        let parsed = items::QgroupStatus::parse(&data).unwrap();
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.generation, 42);
+        assert_eq!(parsed.flags, 0x5);
+        assert_eq!(parsed.scan, 0);
+        assert!(parsed.enable_gen.is_none());
+    }
+
+    #[test]
+    fn roundtrip_qgroup_status_squota() {
+        let data = qgroup_status(1, 42, 0x9, Some(42));
+        assert_eq!(data.len(), 40); // 5 x u64 with enable_gen
+        let parsed = items::QgroupStatus::parse(&data).unwrap();
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.generation, 42);
+        assert_eq!(parsed.flags, 0x9);
+        assert_eq!(parsed.enable_gen, Some(42));
+    }
+
+    #[test]
+    fn qgroup_info_zeroed_size() {
+        let data = qgroup_info_zeroed();
+        assert_eq!(data.len(), 40); // 5 x u64
+        let parsed = items::QgroupInfo::parse(&data).unwrap();
+        assert_eq!(parsed.generation, 0);
+        assert_eq!(parsed.referenced, 0);
+        assert_eq!(parsed.exclusive, 0);
+    }
+
+    #[test]
+    fn qgroup_limit_zeroed_size() {
+        let data = qgroup_limit_zeroed();
+        assert_eq!(data.len(), 40); // 5 x u64
+        let parsed = items::QgroupLimit::parse(&data).unwrap();
+        assert_eq!(parsed.flags, 0);
+        assert_eq!(parsed.max_referenced, 0);
+        assert_eq!(parsed.max_exclusive, 0);
     }
 }

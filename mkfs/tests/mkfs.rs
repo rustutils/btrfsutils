@@ -48,27 +48,31 @@ fn test_config(total_bytes: u64) -> MkfsConfig {
         metadata_profile: Profile::Dup,
         csum_type: ChecksumType::Crc32c,
         creation_time: None,
+        quota: false,
+        squota: false,
     }
 }
 
 fn test_config_two_devices(per_device_bytes: u64) -> MkfsConfig {
+    test_config_n_devices(2, per_device_bytes)
+}
+
+/// Build a config for N equal-sized devices with RAID1 metadata and SINGLE data.
+fn test_config_n_devices(n: usize, per_device_bytes: u64) -> MkfsConfig {
+    assert!(n >= 1);
+    let dev_uuids: [u8; 8] = [0xAB, 0xBC, 0xCD, 0xDE, 0xEF, 0xF0, 0x01, 0x12];
+    let devices = (0..n)
+        .map(|i| DeviceInfo {
+            devid: (i + 1) as u64,
+            path: PathBuf::new(),
+            total_bytes: per_device_bytes,
+            dev_uuid: Uuid::from_bytes([dev_uuids[i % dev_uuids.len()]; 16]),
+        })
+        .collect();
     MkfsConfig {
         nodesize: 16384,
         sectorsize: 4096,
-        devices: vec![
-            DeviceInfo {
-                devid: 1,
-                path: PathBuf::new(),
-                total_bytes: per_device_bytes,
-                dev_uuid: Uuid::from_bytes([0xAB; 16]),
-            },
-            DeviceInfo {
-                devid: 2,
-                path: PathBuf::new(),
-                total_bytes: per_device_bytes,
-                dev_uuid: Uuid::from_bytes([0xBC; 16]),
-            },
-        ],
+        devices,
         label: None,
         fs_uuid: Uuid::from_bytes([0xDE; 16]),
         chunk_tree_uuid: Uuid::from_bytes([0xCD; 16]),
@@ -78,6 +82,8 @@ fn test_config_two_devices(per_device_bytes: u64) -> MkfsConfig {
         metadata_profile: Profile::Raid1,
         csum_type: ChecksumType::Crc32c,
         creation_time: None,
+        quota: false,
+        squota: false,
     }
 }
 
@@ -106,6 +112,15 @@ fn make_btrfs_two_devices(
 ) {
     cfg.devices[0].path = img1.path().to_path_buf();
     cfg.devices[1].path = img2.path().to_path_buf();
+    make_btrfs(cfg).unwrap();
+}
+
+/// Set paths on all device images and call make_btrfs.
+fn make_btrfs_n_devices(images: &[NamedTempFile], cfg: &mut MkfsConfig) {
+    assert_eq!(images.len(), cfg.devices.len());
+    for (i, img) in images.iter().enumerate() {
+        cfg.devices[i].path = img.path().to_path_buf();
+    }
     make_btrfs(cfg).unwrap();
 }
 
@@ -397,6 +412,498 @@ fn mkfs_raid0_data_two_devices() {
     assert_eq!(sb.num_devices, 2);
 }
 
+// --- RAID1C3 tests (3 devices) ---
+
+#[test]
+fn mkfs_raid1c3_valid_superblocks() {
+    let images: Vec<_> = (0..3).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c3;
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    for (i, img) in images.iter().enumerate() {
+        let mut f = File::open(img.path()).unwrap();
+        let sb = read_superblock(&mut f, 0).unwrap();
+        assert!(sb.magic_is_valid(), "device {i} superblock invalid");
+        assert_eq!(sb.num_devices, 3);
+        assert_eq!(sb.dev_item.devid, (i + 1) as u64);
+    }
+}
+
+#[test]
+fn mkfs_raid1c3_three_meta_stripes() {
+    let images: Vec<_> = (0..3).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c3;
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let mut f = File::open(images[0].path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    // total_bytes should be sum of all 3 devices
+    assert_eq!(sb.total_bytes, 3 * MIN_SIZE);
+}
+
+#[test]
+fn mkfs_raid1c3_too_few_devices() {
+    let images: Vec<_> = (0..2).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c3;
+    for (i, img) in images.iter().enumerate() {
+        cfg.devices[i].path = img.path().to_path_buf();
+    }
+    let err = make_btrfs(&cfg).unwrap_err();
+    assert!(
+        err.to_string().contains("too small")
+            || err.to_string().contains("devices")
+            || err.to_string().contains("layout"),
+        "expected layout/device error, got: {err}"
+    );
+}
+
+// --- RAID1C4 tests (4 devices) ---
+
+#[test]
+fn mkfs_raid1c4_valid_superblocks() {
+    let images: Vec<_> = (0..4).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(4, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c4;
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    for (i, img) in images.iter().enumerate() {
+        let mut f = File::open(img.path()).unwrap();
+        let sb = read_superblock(&mut f, 0).unwrap();
+        assert!(sb.magic_is_valid(), "device {i} superblock invalid");
+        assert_eq!(sb.num_devices, 4);
+        assert_eq!(sb.dev_item.devid, (i + 1) as u64);
+    }
+}
+
+#[test]
+fn mkfs_raid1c4_total_bytes_is_sum() {
+    let images: Vec<_> = (0..4).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(4, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c4;
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let mut f = File::open(images[0].path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert_eq!(sb.total_bytes, 4 * MIN_SIZE);
+}
+
+#[test]
+fn mkfs_raid1c3_data_three_devices() {
+    let images: Vec<_> = (0..3).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c3;
+    cfg.data_profile = Profile::Raid1c3;
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let mut f = File::open(images[0].path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.num_devices, 3);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_raid1c3_metadata() {
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c3;
+    make_check_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_raid1c4_metadata() {
+    let mut cfg = test_config_n_devices(4, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c4;
+    make_check_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_raid1c3_metadata_and_data() {
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c3;
+    cfg.data_profile = Profile::Raid1c3;
+    make_check_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_raid1_metadata_and_data() {
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1;
+    cfg.data_profile = Profile::Raid1;
+    make_check_mount_verify(&mut cfg);
+}
+
+// --- RAID0 tests ---
+
+#[test]
+fn mkfs_raid0_metadata_two_devices() {
+    let images: Vec<_> = (0..2).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid0;
+    cfg.data_profile = Profile::Raid0;
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let mut f = File::open(images[0].path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.num_devices, 2);
+}
+
+#[test]
+fn mkfs_raid0_three_devices() {
+    let images: Vec<_> = (0..3).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid0;
+    cfg.data_profile = Profile::Raid0;
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let mut f = File::open(images[0].path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.num_devices, 3);
+    assert_eq!(sb.total_bytes, 3 * MIN_SIZE);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_raid0_data() {
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.data_profile = Profile::Raid0;
+    make_check_mount_verify(&mut cfg);
+}
+
+// --- RAID10 tests ---
+
+#[test]
+fn mkfs_raid10_four_devices() {
+    let images: Vec<_> = (0..4).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(4, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid10;
+    cfg.data_profile = Profile::Raid10;
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let mut f = File::open(images[0].path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.num_devices, 4);
+}
+
+#[test]
+fn mkfs_raid10_two_devices() {
+    let images: Vec<_> = (0..2).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid10;
+    cfg.data_profile = Profile::Raid10;
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let mut f = File::open(images[0].path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.num_devices, 2);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_raid10_data_four_devices() {
+    let mut cfg = test_config_n_devices(4, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1;
+    cfg.data_profile = Profile::Raid10;
+    make_check_mount_verify(&mut cfg);
+}
+
+// --- RAID5/6 tests ---
+
+#[test]
+fn mkfs_raid5_two_devices() {
+    let images: Vec<_> = (0..2).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid5;
+    cfg.data_profile = Profile::Raid5;
+    cfg.apply_profile_flags();
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let mut f = File::open(images[0].path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.num_devices, 2);
+}
+
+#[test]
+fn mkfs_raid6_three_devices() {
+    let images: Vec<_> = (0..3).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid6;
+    cfg.data_profile = Profile::Raid6;
+    cfg.apply_profile_flags();
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let mut f = File::open(images[0].path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.num_devices, 3);
+}
+
+#[test]
+fn mkfs_raid5_four_devices() {
+    let images: Vec<_> = (0..4).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(4, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid5;
+    cfg.data_profile = Profile::Raid5;
+    cfg.apply_profile_flags();
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let mut f = File::open(images[0].path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    assert_eq!(sb.num_devices, 4);
+    assert_eq!(sb.total_bytes, 4 * MIN_SIZE);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_raid5_two_devices() {
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1;
+    cfg.data_profile = Profile::Raid5;
+    cfg.apply_profile_flags();
+    make_check_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_raid6_three_devices() {
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c3;
+    cfg.data_profile = Profile::Raid6;
+    cfg.apply_profile_flags();
+    make_check_mount_verify(&mut cfg);
+}
+
+// --- btrfs check tests for RAID profiles ---
+//
+// btrfs check reads a single device, so it can verify all profiles where
+// device 1 has all tree blocks (mirror metadata). For non-mirror metadata
+// (RAID0, RAID5/6, RAID10), tree blocks may reside on other devices, but
+// at mkfs time they all fit within the first STRIPE_LEN (64K) on stripe 0,
+// which is always on device 1.
+
+/// Format with the given profile and run `btrfs check` on device 1.
+fn make_and_check(cfg: &mut MkfsConfig) {
+    let images: Vec<_> = cfg
+        .devices
+        .iter()
+        .map(|dev| create_image(dev.total_bytes))
+        .collect();
+    for (i, img) in images.iter().enumerate() {
+        cfg.devices[i].path = img.path().to_path_buf();
+    }
+    make_btrfs(cfg).unwrap();
+    btrfs_check(images[0].path());
+}
+
+#[test]
+fn check_raid1_meta_single_data() {
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1;
+    cfg.data_profile = Profile::Single;
+    make_and_check(&mut cfg);
+}
+
+#[test]
+fn check_raid1_meta_raid0_data() {
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1;
+    cfg.data_profile = Profile::Raid0;
+    make_and_check(&mut cfg);
+}
+
+#[test]
+fn check_raid1_meta_raid1_data() {
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1;
+    cfg.data_profile = Profile::Raid1;
+    make_and_check(&mut cfg);
+}
+
+#[test]
+fn check_raid1c3_meta_single_data() {
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c3;
+    cfg.data_profile = Profile::Single;
+    make_and_check(&mut cfg);
+}
+
+#[test]
+fn check_raid1c3_meta_raid1c3_data() {
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c3;
+    cfg.data_profile = Profile::Raid1c3;
+    make_and_check(&mut cfg);
+}
+
+#[test]
+fn check_raid1c4_meta_single_data() {
+    let mut cfg = test_config_n_devices(4, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c4;
+    cfg.data_profile = Profile::Single;
+    make_and_check(&mut cfg);
+}
+
+#[test]
+fn check_raid1_meta_raid10_data() {
+    let mut cfg = test_config_n_devices(4, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1;
+    cfg.data_profile = Profile::Raid10;
+    make_and_check(&mut cfg);
+}
+
+#[test]
+fn check_raid1_meta_raid5_data() {
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1;
+    cfg.data_profile = Profile::Raid5;
+    cfg.apply_profile_flags();
+    make_and_check(&mut cfg);
+}
+
+#[test]
+fn check_raid1c3_meta_raid6_data() {
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid1c3;
+    cfg.data_profile = Profile::Raid6;
+    cfg.apply_profile_flags();
+    make_and_check(&mut cfg);
+}
+
+#[test]
+fn check_dup_meta_single_data() {
+    let mut cfg = test_config(MIN_SIZE);
+    make_and_check(&mut cfg);
+}
+
+#[test]
+fn check_quota() {
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.quota = true;
+    make_and_check(&mut cfg);
+}
+
+#[test]
+fn check_squota() {
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.squota = true;
+    cfg.incompat_flags |=
+        u64::from(btrfs_disk::raw::BTRFS_FEATURE_INCOMPAT_SIMPLE_QUOTA);
+    make_and_check(&mut cfg);
+}
+
+// --- Quota/squota tests ---
+
+#[test]
+fn mkfs_quota_creates_valid_image() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.quota = true;
+    make_btrfs_on(&image, &mut cfg);
+
+    let mut f = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+}
+
+#[test]
+fn mkfs_squota_creates_valid_image() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.squota = true;
+    cfg.incompat_flags |=
+        u64::from(btrfs_disk::raw::BTRFS_FEATURE_INCOMPAT_SIMPLE_QUOTA);
+    make_btrfs_on(&image, &mut cfg);
+
+    let mut f = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+    // Simple quota incompat flag should be set.
+    assert_ne!(
+        sb.incompat_flags
+            & u64::from(btrfs_disk::raw::BTRFS_FEATURE_INCOMPAT_SIMPLE_QUOTA),
+        0
+    );
+}
+
+#[test]
+fn mkfs_quota_and_squota_mutual_exclusion() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.quota = true;
+    cfg.squota = true;
+    let err = make_btrfs_on_err(&image, &mut cfg);
+    assert!(
+        err.to_string().contains("quota"),
+        "expected quota mutual exclusion error, got: {err}"
+    );
+}
+
+#[test]
+fn mkfs_quota_via_features() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.apply_features(&[FeatureArg {
+        feature: Feature::Quota,
+        enabled: true,
+    }])
+    .unwrap();
+    assert!(cfg.has_quota_tree());
+    assert!(cfg.quota);
+    assert!(!cfg.squota);
+    make_btrfs_on(&image, &mut cfg);
+
+    let mut f = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+}
+
+#[test]
+fn mkfs_squota_via_features() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.apply_features(&[FeatureArg {
+        feature: Feature::Squota,
+        enabled: true,
+    }])
+    .unwrap();
+    assert!(cfg.has_quota_tree());
+    assert!(cfg.squota);
+    make_btrfs_on(&image, &mut cfg);
+
+    let mut f = File::open(image.path()).unwrap();
+    let sb = read_superblock(&mut f, 0).unwrap();
+    assert!(sb.magic_is_valid());
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_quota() {
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.quota = true;
+    make_check_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_squota() {
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.squota = true;
+    cfg.incompat_flags |=
+        u64::from(btrfs_disk::raw::BTRFS_FEATURE_INCOMPAT_SIMPLE_QUOTA);
+    make_check_mount_verify(&mut cfg);
+}
+
 // --- Deterministic image snapshot tests ---
 //
 // Create filesystem images with fixed UUIDs and timestamps, compress them,
@@ -422,6 +929,8 @@ fn deterministic_config(total_bytes: u64) -> MkfsConfig {
         metadata_profile: Profile::Dup,
         csum_type: ChecksumType::Crc32c,
         creation_time: Some(1700000000), // fixed timestamp
+        quota: false,
+        squota: false,
     }
 }
 
@@ -516,24 +1025,37 @@ impl Drop for LoopDev {
 
 struct MountPoint {
     dir: TempDir,
-    _loop_dev: LoopDev,
+    _loop_devs: Vec<LoopDev>,
 }
 
 impl MountPoint {
+    /// Mount a single-device btrfs filesystem.
+    #[allow(dead_code)]
     fn mount(loop_dev: LoopDev) -> Self {
+        Self::mount_multi(vec![loop_dev])
+    }
+
+    /// Mount a multi-device btrfs filesystem.
+    ///
+    /// Runs `btrfs device scan` on each loopback device so the kernel
+    /// knows about all members, then mounts via the first device.
+    fn mount_multi(loop_devs: Vec<LoopDev>) -> Self {
+        for dev in &loop_devs {
+            run("btrfs", &["device", "scan", &dev.path.to_string_lossy()]);
+        }
         let dir = TempDir::new().unwrap();
         run(
             "mount",
             &[
                 "-t",
                 "btrfs",
-                &loop_dev.path.to_string_lossy(),
+                &loop_devs[0].path.to_string_lossy(),
                 &dir.path().to_string_lossy(),
             ],
         );
         Self {
             dir,
-            _loop_dev: loop_dev,
+            _loop_devs: loop_devs,
         }
     }
 
@@ -565,6 +1087,14 @@ fn btrfs_check(image: &Path) {
 /// Create image files for all devices, format, run btrfs check, then mount
 /// and verify the filesystem is accessible.
 fn make_check_mount_verify(cfg: &mut MkfsConfig) {
+    // Use random UUIDs so concurrent/sequential tests don't collide
+    // in the kernel's device registry (which keys on fsid).
+    cfg.fs_uuid = Uuid::new_v4();
+    cfg.chunk_tree_uuid = Uuid::new_v4();
+    for dev in &mut cfg.devices {
+        dev.dev_uuid = Uuid::new_v4();
+    }
+
     // Create image files for all devices.
     let images: Vec<_> = cfg
         .devices
@@ -580,9 +1110,12 @@ fn make_check_mount_verify(cfg: &mut MkfsConfig) {
     // Verify with btrfs check before mounting.
     btrfs_check(images[0].path());
 
-    // Mount the first device and verify it's accessible.
-    let loop_dev = LoopDev::attach(images[0].path());
-    let mount = MountPoint::mount(loop_dev);
+    // Attach loopback devices for all images.
+    let loop_devs: Vec<_> = images
+        .iter()
+        .map(|img| LoopDev::attach(img.path()))
+        .collect();
+    let mount = MountPoint::mount_multi(loop_devs);
 
     // Verify we can list the root directory.
     let entries: Vec<_> = std::fs::read_dir(mount.path()).unwrap().collect();

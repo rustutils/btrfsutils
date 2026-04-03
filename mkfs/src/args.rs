@@ -255,7 +255,9 @@ impl Profile {
     /// Number of physical stripes for this profile with `n_devices` devices.
     ///
     /// For mirror-based profiles (DUP, RAID1, RAID1C3, RAID1C4) this is
-    /// fixed. For striping profiles (RAID0) it equals the device count.
+    /// fixed. For striping profiles (RAID0, RAID5, RAID6) it equals the
+    /// device count. For RAID10 it is the device count rounded down to
+    /// even (must be a multiple of `sub_stripes`).
     #[must_use]
     #[allow(clippy::cast_possible_truncation)] // device count fits in u16
     pub fn num_stripes(self, n_devices: usize) -> u16 {
@@ -264,12 +266,68 @@ impl Profile {
             Profile::Dup | Profile::Raid1 => 2,
             Profile::Raid1c3 => 3,
             Profile::Raid1c4 => 4,
-            Profile::Raid0 => n_devices as u16,
-            // RAID5/6/10 not yet supported.
-            Profile::Raid5 | Profile::Raid6 | Profile::Raid10 => {
+            Profile::Raid0 | Profile::Raid5 | Profile::Raid6 => {
                 n_devices as u16
             }
+            Profile::Raid10 => (n_devices as u16) & !1, // round down to even
         }
+    }
+
+    /// Number of sub-stripes (mirrors within a stripe group).
+    ///
+    /// Only RAID10 uses `sub_stripes`=2 (pairs of stripes are mirrors).
+    /// All other profiles use 1 (or 0 in the on-disk format, which the
+    /// kernel treats as 1).
+    #[must_use]
+    pub fn sub_stripes(self) -> u16 {
+        match self {
+            Profile::Raid10 => 2,
+            _ => 1,
+        }
+    }
+
+    /// Number of parity stripes.
+    #[must_use]
+    pub fn nparity(self) -> u16 {
+        match self {
+            Profile::Raid5 => 1,
+            Profile::Raid6 => 2,
+            _ => 0,
+        }
+    }
+
+    /// Number of data stripes (excludes parity) for the given device count.
+    ///
+    /// For RAID0: `num_stripes` (all stripes carry data).
+    /// For RAID10: `num_stripes` / `sub_stripes` (striped mirrors).
+    /// For RAID5/6: `num_stripes` - `nparity`.
+    /// For mirrors (SINGLE, DUP, RAID1, RAID1C3, RAID1C4): always 1.
+    #[must_use]
+    pub fn data_stripes(self, n_devices: usize) -> u16 {
+        let ns = self.num_stripes(n_devices);
+        match self {
+            Profile::Single
+            | Profile::Dup
+            | Profile::Raid1
+            | Profile::Raid1c3
+            | Profile::Raid1c4 => 1,
+            Profile::Raid0 => ns,
+            Profile::Raid10 => ns / self.sub_stripes(),
+            Profile::Raid5 | Profile::Raid6 => ns - self.nparity(),
+        }
+    }
+
+    /// Whether this is a mirror-only profile (all stripes hold identical data).
+    #[must_use]
+    pub fn is_mirror(self) -> bool {
+        matches!(
+            self,
+            Profile::Single
+                | Profile::Dup
+                | Profile::Raid1
+                | Profile::Raid1c3
+                | Profile::Raid1c4
+        )
     }
 
     /// Minimum number of devices required for this profile.
@@ -277,9 +335,12 @@ impl Profile {
     pub fn min_devices(self) -> usize {
         match self {
             Profile::Single | Profile::Dup => 1,
-            Profile::Raid0 | Profile::Raid1 | Profile::Raid5 => 2,
+            Profile::Raid0
+            | Profile::Raid1
+            | Profile::Raid5
+            | Profile::Raid10 => 2,
             Profile::Raid1c3 | Profile::Raid6 => 3,
-            Profile::Raid1c4 | Profile::Raid10 => 4,
+            Profile::Raid1c4 => 4,
         }
     }
 }
@@ -689,6 +750,12 @@ mod tests {
         assert_eq!(Profile::Raid1c3.num_stripes(3), 3);
         assert_eq!(Profile::Raid1c4.num_stripes(4), 4);
         assert_eq!(Profile::Raid0.num_stripes(5), 5);
+        assert_eq!(Profile::Raid5.num_stripes(4), 4);
+        assert_eq!(Profile::Raid6.num_stripes(4), 4);
+        // RAID10: rounded down to even
+        assert_eq!(Profile::Raid10.num_stripes(4), 4);
+        assert_eq!(Profile::Raid10.num_stripes(5), 4);
+        assert_eq!(Profile::Raid10.num_stripes(3), 2);
     }
 
     // --- Profile::min_devices ---
@@ -703,7 +770,35 @@ mod tests {
         assert_eq!(Profile::Raid1c3.min_devices(), 3);
         assert_eq!(Profile::Raid6.min_devices(), 3);
         assert_eq!(Profile::Raid1c4.min_devices(), 4);
-        assert_eq!(Profile::Raid10.min_devices(), 4);
+        assert_eq!(Profile::Raid10.min_devices(), 2);
+    }
+
+    #[test]
+    fn profile_data_stripes() {
+        assert_eq!(Profile::Single.data_stripes(1), 1);
+        assert_eq!(Profile::Dup.data_stripes(1), 1);
+        assert_eq!(Profile::Raid1.data_stripes(2), 1);
+        assert_eq!(Profile::Raid0.data_stripes(4), 4);
+        // RAID10: data_stripes = num_stripes / sub_stripes
+        assert_eq!(Profile::Raid10.data_stripes(4), 2);
+        assert_eq!(Profile::Raid10.data_stripes(6), 3);
+        // RAID5/6: data_stripes = num_stripes - nparity
+        assert_eq!(Profile::Raid5.data_stripes(4), 3);
+        assert_eq!(Profile::Raid6.data_stripes(4), 2);
+    }
+
+    #[test]
+    fn profile_sub_stripes() {
+        assert_eq!(Profile::Single.sub_stripes(), 1);
+        assert_eq!(Profile::Raid0.sub_stripes(), 1);
+        assert_eq!(Profile::Raid10.sub_stripes(), 2);
+    }
+
+    #[test]
+    fn profile_nparity() {
+        assert_eq!(Profile::Single.nparity(), 0);
+        assert_eq!(Profile::Raid5.nparity(), 1);
+        assert_eq!(Profile::Raid6.nparity(), 2);
     }
 
     // --- ChecksumArg::from_str ---

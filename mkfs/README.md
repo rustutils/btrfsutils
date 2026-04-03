@@ -35,7 +35,7 @@ btrfs-mkfs -f /dev/sda1
 
 | Flag | Description |
 |------|-------------|
-| `-d`, `--data <PROFILE>` | Data block group profile (single, dup, raid0, raid1, raid1c3, raid1c4) |
+| `-d`, `--data <PROFILE>` | Data block group profile (single, dup, raid0, raid1, raid1c3, raid1c4, raid10, raid5, raid6) |
 | `-m`, `--metadata <PROFILE>` | Metadata block group profile (default: DUP single-device, RAID1 multi-device) |
 | `-L`, `--label <LABEL>` | Filesystem label (max 255 bytes) |
 | `-n`, `--nodesize <SIZE>` | B-tree node size (default 16 KiB, max 64 KiB) |
@@ -57,9 +57,9 @@ btrfs-mkfs -f /dev/sda1
 ## What's implemented
 
 - Single and multi-device filesystems (up to N devices)
-- Metadata profiles: SINGLE, DUP, RAID1, RAID1C3, RAID1C4
-- Data profiles: SINGLE, DUP, RAID0, RAID1, RAID1C3, RAID1C4
+- All RAID profiles: SINGLE, DUP, RAID0, RAID1, RAID1C3, RAID1C4, RAID10, RAID5, RAID6
 - All four checksum algorithms: CRC32C, xxhash64, SHA256, BLAKE2b
+- Quota tree (`-O quota`) and simple quota tree (`-O squota`)
 - Free-space-tree and block-group-tree feature flags
 - Device validation: mounted check, existing FS detection, TRIM
 - Minimum device size enforcement (~133 MiB)
@@ -75,7 +75,6 @@ btrfs-mkfs -f /dev/sda1
 
 ## What's not yet implemented
 
-- RAID5/6/10 profiles
 - Zoned device support
 - Mixed data+metadata mode (`-M`)
 

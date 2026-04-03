@@ -93,6 +93,10 @@ pub struct MkfsConfig {
     /// Override for the current time (seconds since epoch). Used for
     /// deterministic output in tests. None means use `SystemTime::now()`.
     pub creation_time: Option<u64>,
+    /// Enable legacy quota tree (`-O quota`).
+    pub quota: bool,
+    /// Enable simple quota tree (`-O squota`).
+    pub squota: bool,
 }
 
 impl MkfsConfig {
@@ -209,10 +213,22 @@ impl MkfsConfig {
                             u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE),
                         ),
                     ),
-                    Feature::Zoned
-                    | Feature::Quota
-                    | Feature::Squota
-                    | Feature::RaidStripeTree => {
+                    Feature::Quota => {
+                        self.quota = f.enabled;
+                        continue;
+                    }
+                    Feature::Squota => {
+                        if f.enabled {
+                            self.squota = true;
+                        }
+                        (
+                            Some(u64::from(
+                                raw::BTRFS_FEATURE_INCOMPAT_SIMPLE_QUOTA,
+                            )),
+                            None,
+                        )
+                    }
+                    Feature::Zoned | Feature::RaidStripeTree => {
                         bail!(
                             "feature '{}' is not yet supported by mkfs",
                             f.feature
@@ -263,6 +279,25 @@ impl MkfsConfig {
             & u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE)
             != 0
     }
+
+    /// Whether a quota tree should be created (`-O quota` or `-O squota`).
+    #[must_use]
+    pub fn has_quota_tree(&self) -> bool {
+        self.quota || self.squota
+    }
+
+    /// Set incompat flags implied by the chosen RAID profiles.
+    ///
+    /// RAID5/6 requires the RAID56 incompat flag in the superblock.
+    pub fn apply_profile_flags(&mut self) {
+        use crate::args::Profile;
+        if matches!(self.metadata_profile, Profile::Raid5 | Profile::Raid6)
+            || matches!(self.data_profile, Profile::Raid5 | Profile::Raid6)
+        {
+            self.incompat_flags |=
+                u64::from(raw::BTRFS_FEATURE_INCOMPAT_RAID56);
+        }
+    }
 }
 
 /// Create a btrfs filesystem on one or more devices.
@@ -306,6 +341,9 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
             cfg.nodesize,
             cfg.sectorsize
         );
+    }
+    if cfg.quota && cfg.squota {
+        bail!("cannot enable both quota and squota simultaneously");
     }
 
     let chunk_devs: Vec<ChunkDevice> = cfg
@@ -363,7 +401,8 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
     let csum_tree = build_empty_tree(cfg.nodesize, &leaf_header(TreeId::Csum));
     let normal_used = UsedBytes {
         system: layout.system_used(),
-        metadata: layout.metadata_used(cfg.has_block_group_tree()),
+        metadata: layout
+            .metadata_used(cfg.has_block_group_tree(), cfg.has_quota_tree()),
         data: 0,
     };
     let free_space_tree = if cfg.has_free_space_tree() {
@@ -379,17 +418,31 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
     let data_reloc_tree =
         build_root_dir_tree(cfg, &leaf_header(TreeId::DataReloc))?;
 
-    let mut trees: Vec<(TreeId, Vec<u8>)> = vec![
-        (TreeId::Root, root_tree),
-        (TreeId::Extent, extent_tree),
-        (TreeId::Chunk, chunk_tree),
-        (TreeId::Dev, dev_tree),
-        (TreeId::Fs, fs_tree),
-        (TreeId::Csum, csum_tree),
-        (TreeId::FreeSpace, free_space_tree),
-        (TreeId::DataReloc, data_reloc_tree),
+    // (tree_id, block_data, logical_address)
+    let mut trees: Vec<(TreeId, Vec<u8>, u64)> = vec![
+        (TreeId::Root, root_tree, layout.block_addr(TreeId::Root)),
+        (
+            TreeId::Extent,
+            extent_tree,
+            layout.block_addr(TreeId::Extent),
+        ),
+        (TreeId::Chunk, chunk_tree, layout.block_addr(TreeId::Chunk)),
+        (TreeId::Dev, dev_tree, layout.block_addr(TreeId::Dev)),
+        (TreeId::Fs, fs_tree, layout.block_addr(TreeId::Fs)),
+        (TreeId::Csum, csum_tree, layout.block_addr(TreeId::Csum)),
+        (
+            TreeId::FreeSpace,
+            free_space_tree,
+            layout.block_addr(TreeId::FreeSpace),
+        ),
+        (
+            TreeId::DataReloc,
+            data_reloc_tree,
+            layout.block_addr(TreeId::DataReloc),
+        ),
     ];
 
+    let mut optional_slot: u64 = 0;
     if cfg.has_block_group_tree() {
         let bg_tree = build_block_group_tree_with_used(
             cfg,
@@ -397,13 +450,27 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
             &leaf_header(TreeId::BlockGroup),
             &normal_used,
         )?;
-        trees.push((TreeId::BlockGroup, bg_tree));
+        let addr =
+            layout.block_addr_with_offset(TreeId::BlockGroup, optional_slot);
+        trees.push((TreeId::BlockGroup, bg_tree, addr));
+        optional_slot += 1;
+    }
+    if cfg.has_quota_tree() {
+        let addr = layout.block_addr_with_offset(TreeId::Quota, optional_slot);
+        let quota_header = LeafHeader {
+            fsid: cfg.fs_uuid,
+            chunk_tree_uuid: cfg.chunk_tree_uuid,
+            generation,
+            owner: TreeId::Quota.objectid(),
+            bytenr: addr,
+        };
+        let quota_tree = build_quota_tree(cfg, &quota_header, generation)?;
+        trees.push((TreeId::Quota, quota_tree, addr));
     }
 
     // Write tree blocks to disk, routing each stripe to the correct device.
-    for (tree_id, mut block) in trees {
+    for (tree_id, mut block, logical) in trees {
         write::fill_csum(&mut block, cfg.csum_type);
-        let logical = layout.block_addr(tree_id);
         for (devid, phys) in chunks.logical_to_physical(logical) {
             let file_idx = (devid - 1) as usize;
             write::pwrite_all(&files[file_idx], &block, phys)
@@ -521,12 +588,12 @@ pub fn make_btrfs_with_rootdir(
             anyhow::anyhow!("device too small: {} bytes", cfg.total_bytes())
         })?;
 
-    if plan.data_bytes_needed > chunks.data_size {
+    if plan.data_bytes_needed > chunks.data_logical_size() {
         bail!(
             "rootdir requires {} bytes of data but data chunk is only {} bytes; \
              use a larger device or --byte-count",
             plan.data_bytes_needed,
-            chunks.data_size
+            chunks.data_logical_size()
         );
     }
 
@@ -656,7 +723,7 @@ pub fn make_btrfs_with_rootdir(
     let mut alloc = BlockAllocator::new(
         cfg.nodesize,
         chunks.meta_logical,
-        chunks.meta_size,
+        chunks.meta_logical_size(),
     );
     let chunk_tree_addr = alloc.alloc_system()?;
     let root_tree_addr = alloc.alloc_metadata()?;
@@ -897,6 +964,8 @@ pub fn make_btrfs_with_rootdir(
             metadata_profile: cfg.metadata_profile,
             csum_type: cfg.csum_type,
             creation_time: cfg.creation_time,
+            quota: cfg.quota,
+            squota: cfg.squota,
         };
         &effective_cfg
     } else {
@@ -1174,8 +1243,8 @@ fn converge_extent_tree_block_count(
         if !has_block_group {
             for &(logical, size) in &[
                 (SYSTEM_GROUP_OFFSET, SYSTEM_GROUP_SIZE),
-                (chunks.meta_logical, chunks.meta_size),
-                (chunks.data_logical, chunks.data_size),
+                (chunks.meta_logical, chunks.meta_logical_size()),
+                (chunks.data_logical, chunks.data_logical_size()),
             ] {
                 trial_items.push((
                     Key::new(
@@ -1311,7 +1380,7 @@ fn add_block_group_items(
         Key::new(
             chunks.meta_logical,
             raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
-            chunks.meta_size,
+            chunks.meta_logical_size(),
         ),
         items::block_group_item(
             alloc.metadata_used(),
@@ -1324,7 +1393,7 @@ fn add_block_group_items(
         Key::new(
             chunks.data_logical,
             raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
-            chunks.data_size,
+            chunks.data_logical_size(),
         ),
         items::block_group_item(
             data_used,
@@ -1587,10 +1656,20 @@ fn build_root_tree(
         })
         .collect();
 
+    let mut optional_slot: u64 = 0;
     if cfg.has_block_group_tree() {
         entries.push(RootEntry {
             objectid: TreeId::BlockGroup.objectid(),
-            bytenr: layout.block_addr(TreeId::BlockGroup),
+            bytenr: layout
+                .block_addr_with_offset(TreeId::BlockGroup, optional_slot),
+            is_fs_tree: false,
+        });
+        optional_slot += 1;
+    }
+    if cfg.has_quota_tree() {
+        entries.push(RootEntry {
+            objectid: TreeId::Quota.objectid(),
+            bytenr: layout.block_addr_with_offset(TreeId::Quota, optional_slot),
             is_fs_tree: false,
         });
     }
@@ -1660,14 +1739,28 @@ fn build_extent_tree(
     let mut extent_items: Vec<(Key, Vec<u8>)> = Vec::new();
 
     // For each tree block: METADATA_ITEM with inline TREE_BLOCK_REF
-    let mut all_trees: Vec<TreeId> = TreeId::ALL.to_vec();
-    if cfg.has_block_group_tree() {
-        all_trees.push(TreeId::BlockGroup);
+    let mut all_trees: Vec<(TreeId, u64)> = TreeId::ALL
+        .iter()
+        .map(|&t| (t, layout.block_addr(t)))
+        .collect();
+    {
+        let mut opt_slot: u64 = 0;
+        if cfg.has_block_group_tree() {
+            all_trees.push((
+                TreeId::BlockGroup,
+                layout.block_addr_with_offset(TreeId::BlockGroup, opt_slot),
+            ));
+            opt_slot += 1;
+        }
+        if cfg.has_quota_tree() {
+            all_trees.push((
+                TreeId::Quota,
+                layout.block_addr_with_offset(TreeId::Quota, opt_slot),
+            ));
+        }
     }
 
-    for &tree in &all_trees {
-        let addr = layout.block_addr(tree);
-
+    for &(tree, addr) in &all_trees {
         let item_type = if skinny {
             raw::BTRFS_METADATA_ITEM_KEY as u8
         } else {
@@ -1700,10 +1793,13 @@ fn build_extent_tree(
             Key::new(
                 chunks.meta_logical,
                 raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
-                chunks.meta_size,
+                chunks.meta_logical_size(),
             ),
             items::block_group_item(
-                layout.metadata_used(cfg.has_block_group_tree()),
+                layout.metadata_used(
+                    cfg.has_block_group_tree(),
+                    cfg.has_quota_tree(),
+                ),
                 u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
                 u64::from(raw::BTRFS_BLOCK_GROUP_METADATA)
                     | cfg.metadata_profile.block_group_flag(),
@@ -1715,7 +1811,7 @@ fn build_extent_tree(
             Key::new(
                 chunks.data_logical,
                 raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
-                chunks.data_size,
+                chunks.data_logical_size(),
             ),
             items::block_group_item(
                 0,
@@ -1789,13 +1885,14 @@ fn build_chunk_tree(
 
     // CHUNK_ITEM for metadata chunk
     let meta_chunk_data = items::chunk_item(
-        chunks.meta_size,
+        chunks.meta_logical_size(),
         u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
         u64::from(raw::BTRFS_BLOCK_GROUP_METADATA)
             | cfg.metadata_profile.block_group_flag(),
         crate::layout::STRIPE_LEN as u32,
         crate::layout::STRIPE_LEN as u32,
         cfg.sectorsize,
+        cfg.metadata_profile.sub_stripes(),
         &chunks.meta_stripes,
     );
     let meta_chunk_key = Key::new(
@@ -1808,13 +1905,14 @@ fn build_chunk_tree(
 
     // CHUNK_ITEM for data chunk
     let data_chunk_data = items::chunk_item(
-        chunks.data_size,
+        chunks.data_logical_size(),
         u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID),
         u64::from(raw::BTRFS_BLOCK_GROUP_DATA)
             | cfg.data_profile.block_group_flag(),
         crate::layout::STRIPE_LEN as u32,
         crate::layout::STRIPE_LEN as u32,
         cfg.sectorsize,
+        cfg.data_profile.sub_stripes(),
         &chunks.data_stripes,
     );
     let data_chunk_key = Key::new(
@@ -1980,13 +2078,14 @@ fn build_free_space_tree_with_used(
         .map_err(|e| anyhow::anyhow!("free space tree: {e}"))?;
 
     // Metadata block group
+    let meta_logical_size = chunks.meta_logical_size();
     let mfs = chunks.meta_logical + used.metadata;
-    let mfl = chunks.meta_size - used.metadata;
+    let mfl = meta_logical_size - used.metadata;
     leaf.push(
         Key::new(
             chunks.meta_logical,
             raw::BTRFS_FREE_SPACE_INFO_KEY as u8,
-            chunks.meta_size,
+            meta_logical_size,
         ),
         &items::free_space_info(1, 0),
     )
@@ -1995,14 +2094,15 @@ fn build_free_space_tree_with_used(
         .map_err(|e| anyhow::anyhow!("free space tree: {e}"))?;
 
     // Data block group
+    let data_logical_size = chunks.data_logical_size();
     let dfs = chunks.data_logical + used.data;
-    let dfl = chunks.data_size - used.data;
+    let dfl = data_logical_size - used.data;
     let dc = u32::from(dfl > 0);
     leaf.push(
         Key::new(
             chunks.data_logical,
             raw::BTRFS_FREE_SPACE_INFO_KEY as u8,
-            chunks.data_size,
+            data_logical_size,
         ),
         &items::free_space_info(dc, 0),
     )
@@ -2048,7 +2148,7 @@ fn build_block_group_tree_with_used(
         Key::new(
             chunks.meta_logical,
             raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
-            chunks.meta_size,
+            chunks.meta_logical_size(),
         ),
         &items::block_group_item(
             used.metadata,
@@ -2064,7 +2164,7 @@ fn build_block_group_tree_with_used(
         Key::new(
             chunks.data_logical,
             raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
-            chunks.data_size,
+            chunks.data_logical_size(),
         ),
         &items::block_group_item(
             used.data,
@@ -2257,6 +2357,58 @@ pub fn discard_device(path: &Path, size: u64) -> Result<()> {
 
 /// Minimum filesystem size.
 ///
+#[allow(clippy::cast_possible_truncation)] // key type fits in u8
+fn build_quota_tree(
+    cfg: &MkfsConfig,
+    header: &LeafHeader,
+    generation: u64,
+) -> Result<Vec<u8>> {
+    let mut leaf = LeafBuilder::new(cfg.nodesize, header);
+
+    // Qgroup status item.
+    let flags = if cfg.squota {
+        u64::from(raw::BTRFS_QGROUP_STATUS_FLAG_ON)
+            | u64::from(raw::BTRFS_QGROUP_STATUS_FLAG_SIMPLE_MODE)
+    } else {
+        u64::from(raw::BTRFS_QGROUP_STATUS_FLAG_ON)
+            | u64::from(raw::BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT)
+    };
+    let enable_gen = if cfg.squota { Some(generation) } else { None };
+    leaf.push(
+        Key::new(0, raw::BTRFS_QGROUP_STATUS_KEY as u8, 0),
+        &items::qgroup_status(1, generation, flags, enable_gen),
+    )
+    .map_err(|e| anyhow::anyhow!("quota tree: {e}"))?;
+
+    // Qgroup info for the filesystem tree (level 0, subvolid 5).
+    // For simple quota (squota), populate with the actual FS tree usage
+    // (one nodesize block) since squota expects accurate counts from the start.
+    let fs_tree_qgroupid = u64::from(raw::BTRFS_FS_TREE_OBJECTID);
+    let info_data = if cfg.squota {
+        items::qgroup_info(
+            generation,
+            u64::from(cfg.nodesize),
+            u64::from(cfg.nodesize),
+        )
+    } else {
+        items::qgroup_info_zeroed()
+    };
+    leaf.push(
+        Key::new(0, raw::BTRFS_QGROUP_INFO_KEY as u8, fs_tree_qgroupid),
+        &info_data,
+    )
+    .map_err(|e| anyhow::anyhow!("quota tree: {e}"))?;
+
+    // Qgroup limit for the filesystem tree.
+    leaf.push(
+        Key::new(0, raw::BTRFS_QGROUP_LIMIT_KEY as u8, fs_tree_qgroupid),
+        &items::qgroup_limit_zeroed(),
+    )
+    .map_err(|e| anyhow::anyhow!("quota tree: {e}"))?;
+
+    Ok(leaf.finish())
+}
+
 /// Must fit the system group (5 MiB), metadata DUP (2 x 32 MiB minimum),
 /// and data SINGLE (64 MiB minimum): 5 + 64 + 64 = 133 MiB.
 #[must_use]

@@ -27,6 +27,7 @@ pub enum TreeId {
     FreeSpace,
     DataReloc,
     BlockGroup,
+    Quota,
 }
 
 impl TreeId {
@@ -47,6 +48,7 @@ impl TreeId {
             TreeId::BlockGroup => {
                 u64::from(raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID)
             }
+            TreeId::Quota => u64::from(raw::BTRFS_QUOTA_TREE_OBJECTID),
         }
     }
 
@@ -108,23 +110,44 @@ impl BlockLayout {
 
     /// Logical byte address of the given tree block.
     ///
+    /// Returns the logical byte address for a tree block.
+    ///
+    /// Optional trees (`BlockGroup`, `Quota`) are placed after the 7 base
+    /// trees. When both are present, `BlockGroup` gets slot 7 and `Quota`
+    /// gets slot 8. When only `Quota` is present, it gets slot 7.
+    ///
+    /// The `optional_trees_before` parameter specifies how many optional
+    /// tree slots precede this one. For base trees and `Chunk`, it is
+    /// ignored.
+    ///
     /// # Panics
     ///
-    /// Panics if `tree` is not in `NON_CHUNK_TREES` and is not `Chunk` or `BlockGroup`.
+    /// Panics if `tree` is not in `NON_CHUNK_TREES` and is not `Chunk`,
+    /// `BlockGroup`, or `Quota`.
     #[must_use]
-    pub fn block_addr(&self, tree: TreeId) -> u64 {
+    pub fn block_addr_with_offset(
+        &self,
+        tree: TreeId,
+        optional_trees_before: u64,
+    ) -> u64 {
         if tree == TreeId::Chunk {
             SYSTEM_GROUP_OFFSET
-        } else if tree == TreeId::BlockGroup {
-            // Block-group tree is the 8th tree in the metadata chunk,
-            // after the 7 base trees.
+        } else if matches!(tree, TreeId::BlockGroup | TreeId::Quota) {
             self.meta_logical
-                + (NON_CHUNK_TREES.len() as u64) * u64::from(self.nodesize)
+                + (NON_CHUNK_TREES.len() as u64 + optional_trees_before)
+                    * u64::from(self.nodesize)
         } else {
             let index =
                 NON_CHUNK_TREES.iter().position(|&t| t == tree).unwrap();
             self.meta_logical + (index as u64) * u64::from(self.nodesize)
         }
+    }
+
+    /// Convenience wrapper: block address for base trees and `Chunk`.
+    /// For optional trees, use `block_addr_with_offset`.
+    #[must_use]
+    pub fn block_addr(&self, tree: TreeId) -> u64 {
+        self.block_addr_with_offset(tree, 0)
     }
 
     /// Bytes used in the system chunk (just the chunk tree block).
@@ -133,15 +156,21 @@ impl BlockLayout {
         u64::from(self.nodesize)
     }
 
-    /// Bytes used in the metadata chunk by the base trees (7 tree blocks).
-    /// When block-group-tree is enabled, add nodesize for the extra tree.
+    /// Bytes used in the metadata chunk by the base trees (7 tree blocks)
+    /// plus any optional trees (block-group-tree, quota tree).
     #[must_use]
-    pub fn metadata_used(&self, has_block_group_tree: bool) -> u64 {
-        let count = if has_block_group_tree {
-            NON_CHUNK_TREES.len() as u64 + 1
-        } else {
-            NON_CHUNK_TREES.len() as u64
-        };
+    pub fn metadata_used(
+        &self,
+        has_block_group_tree: bool,
+        has_quota_tree: bool,
+    ) -> u64 {
+        let mut count = NON_CHUNK_TREES.len() as u64;
+        if has_block_group_tree {
+            count += 1;
+        }
+        if has_quota_tree {
+            count += 1;
+        }
         count * u64::from(self.nodesize)
     }
 }
@@ -164,16 +193,20 @@ pub const CHUNK_START: u64 = SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
 pub struct ChunkLayout {
     /// Logical address of the metadata chunk.
     pub meta_logical: u64,
-    /// Logical size of the metadata chunk (one stripe).
+    /// Per-stripe physical size of the metadata chunk.
     pub meta_size: u64,
     /// Physical stripes for the metadata chunk.
     pub meta_stripes: Vec<StripeInfo>,
     /// Logical address of the data chunk.
     pub data_logical: u64,
-    /// Logical and physical size of the data chunk.
+    /// Per-stripe physical size of the data chunk.
     pub data_size: u64,
     /// Physical stripes for the data chunk.
     pub data_stripes: Vec<StripeInfo>,
+    /// Metadata RAID profile.
+    metadata_profile: Profile,
+    /// Data RAID profile.
+    data_profile: Profile,
 }
 
 /// Device info needed for chunk layout computation.
@@ -256,9 +289,33 @@ impl ChunkLayout {
                     dev_uuid: devices[0].dev_uuid,
                 }]
             }
-            _ => {
-                // Other profiles not yet supported for metadata.
-                return None;
+            Profile::Raid0 | Profile::Raid5 | Profile::Raid6 => {
+                // One stripe per device, all starting at CHUNK_START.
+                let n = metadata_profile.num_stripes(devices.len()) as usize;
+                if devices.len() < metadata_profile.min_devices() {
+                    return None;
+                }
+                (0..n)
+                    .map(|i| StripeInfo {
+                        devid: devices[i].devid,
+                        offset: CHUNK_START,
+                        dev_uuid: devices[i].dev_uuid,
+                    })
+                    .collect()
+            }
+            Profile::Raid10 => {
+                // Striped mirrors: num_stripes rounded to even, placed in pairs.
+                let n = metadata_profile.num_stripes(devices.len()) as usize;
+                if n < 2 || devices.len() < metadata_profile.min_devices() {
+                    return None;
+                }
+                (0..n)
+                    .map(|i| StripeInfo {
+                        devid: devices[i].devid,
+                        offset: CHUNK_START,
+                        dev_uuid: devices[i].dev_uuid,
+                    })
+                    .collect()
             }
         };
 
@@ -297,9 +354,12 @@ impl ChunkLayout {
             Profile::Raid1
             | Profile::Raid1c3
             | Profile::Raid1c4
-            | Profile::Raid0 => {
+            | Profile::Raid0
+            | Profile::Raid5
+            | Profile::Raid6
+            | Profile::Raid10 => {
                 let n = data_profile.num_stripes(devices.len()) as usize;
-                if devices.len() < n {
+                if n < 1 || devices.len() < data_profile.min_devices() {
                     return None;
                 }
                 (0..n)
@@ -318,9 +378,6 @@ impl ChunkLayout {
                     })
                     .collect()
             }
-            _ => {
-                return None;
-            }
         };
 
         // Validate everything fits on each device.
@@ -338,9 +395,11 @@ impl ChunkLayout {
         }
 
         // Logical addresses: metadata follows system group logically,
-        // data follows metadata.
+        // data follows metadata. Logical size depends on profile.
         let meta_logical = CHUNK_START;
-        let data_logical = CHUNK_START + meta_size;
+        let meta_logical_size =
+            meta_size * u64::from(metadata_profile.data_stripes(devices.len()));
+        let data_logical = CHUNK_START + meta_logical_size;
 
         Some(ChunkLayout {
             meta_logical,
@@ -349,6 +408,8 @@ impl ChunkLayout {
             data_logical,
             data_size,
             data_stripes,
+            metadata_profile,
+            data_profile,
         })
     }
 
@@ -407,12 +468,33 @@ impl ChunkLayout {
             + (self.data_stripes.len() as u64 * self.data_size)
     }
 
+    /// Logical size of the metadata chunk.
+    ///
+    /// For mirror profiles this equals the per-stripe size. For striped
+    /// profiles the logical size is the stripe size multiplied by the
+    /// number of data stripes.
+    #[must_use]
+    pub fn meta_logical_size(&self) -> u64 {
+        self.meta_size
+            * u64::from(
+                self.metadata_profile.data_stripes(self.meta_stripes.len()),
+            )
+    }
+
+    /// Logical size of the data chunk.
+    #[must_use]
+    pub fn data_logical_size(&self) -> u64 {
+        self.data_size
+            * u64::from(self.data_profile.data_stripes(self.data_stripes.len()))
+    }
+
     /// Map a logical address to its physical write locations.
     ///
     /// Returns `(devid, physical_offset)` pairs.
     /// System chunk: always device 1, logical == physical.
-    /// Metadata chunk: one pair per stripe.
-    /// Data chunk: one pair per stripe.
+    /// Mirror profiles: one pair per stripe (all get identical data).
+    /// RAID0/RAID5/RAID6: one pair (the single data stripe owning that offset).
+    /// RAID10: two pairs (the mirror pair for that stripe group).
     ///
     /// # Panics
     ///
@@ -421,26 +503,58 @@ impl ChunkLayout {
     pub fn logical_to_physical(&self, logical: u64) -> Vec<(u64, u64)> {
         let sys_range =
             SYSTEM_GROUP_OFFSET..SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
-        let meta_range = self.meta_logical..self.meta_logical + self.meta_size;
-        let data_range = self.data_logical..self.data_logical + self.data_size;
+        let meta_logical_size = self.meta_logical_size();
+        let data_logical_size = self.data_logical_size();
+        let meta_range =
+            self.meta_logical..self.meta_logical + meta_logical_size;
+        let data_range =
+            self.data_logical..self.data_logical + data_logical_size;
 
         if sys_range.contains(&logical) {
             // System chunk: device 1, logical == physical
             vec![(1, logical)]
         } else if meta_range.contains(&logical) {
             let off = logical - self.meta_logical;
-            self.meta_stripes
-                .iter()
-                .map(|s| (s.devid, s.offset + off))
-                .collect()
+            Self::map_offset(off, &self.meta_stripes, self.metadata_profile)
         } else if data_range.contains(&logical) {
             let off = logical - self.data_logical;
-            self.data_stripes
-                .iter()
-                .map(|s| (s.devid, s.offset + off))
-                .collect()
+            Self::map_offset(off, &self.data_stripes, self.data_profile)
         } else {
             panic!("logical address {logical:#x} not in any chunk")
+        }
+    }
+
+    /// Map a logical offset within a chunk to physical (devid, offset) pairs.
+    fn map_offset(
+        off: u64,
+        stripes: &[StripeInfo],
+        profile: Profile,
+    ) -> Vec<(u64, u64)> {
+        if profile.is_mirror() {
+            // Mirror profiles: all stripes get the same data.
+            stripes.iter().map(|s| (s.devid, s.offset + off)).collect()
+        } else if profile == Profile::Raid10 {
+            // Striped mirrors: find the mirror pair for this offset.
+            let sub = profile.sub_stripes() as usize;
+            let data_groups = stripes.len() / sub;
+            let group = ((off / STRIPE_LEN) % data_groups as u64) as usize;
+            let phys_off = (off / (STRIPE_LEN * data_groups as u64))
+                * STRIPE_LEN
+                + (off % STRIPE_LEN);
+            (0..sub)
+                .map(|s| {
+                    let stripe = &stripes[group * sub + s];
+                    (stripe.devid, stripe.offset + phys_off)
+                })
+                .collect()
+        } else {
+            // RAID0, RAID5, RAID6: data is striped, each offset maps to one stripe.
+            let data_count = u64::from(profile.data_stripes(stripes.len()));
+            let stripe_idx = ((off / STRIPE_LEN) % data_count) as usize;
+            let phys_off = (off / (STRIPE_LEN * data_count)) * STRIPE_LEN
+                + (off % STRIPE_LEN);
+            let stripe = &stripes[stripe_idx];
+            vec![(stripe.devid, stripe.offset + phys_off)]
         }
     }
 }
@@ -587,8 +701,9 @@ mod tests {
     fn system_and_metadata_used() {
         let layout = BlockLayout::new(16384, CHUNK_START);
         assert_eq!(layout.system_used(), 16384);
-        assert_eq!(layout.metadata_used(false), 7 * 16384);
-        assert_eq!(layout.metadata_used(true), 8 * 16384);
+        assert_eq!(layout.metadata_used(false, false), 7 * 16384);
+        assert_eq!(layout.metadata_used(true, false), 8 * 16384);
+        assert_eq!(layout.metadata_used(true, true), 9 * 16384);
     }
 
     fn test_uuid() -> uuid::Uuid {
@@ -738,5 +853,86 @@ mod tests {
         assert_eq!(meta.len(), 2);
         assert_eq!(meta[0].0, 1);
         assert_eq!(meta[1].0, 2);
+    }
+
+    #[test]
+    fn logical_to_physical_raid0_maps_to_single_stripe() {
+        let devs = two_devices(256 * 1024 * 1024);
+        let cl =
+            ChunkLayout::new(&devs, Profile::Raid0, Profile::Raid0).unwrap();
+        // First STRIPE_LEN of metadata maps to stripe 0 (device 1).
+        let r = cl.logical_to_physical(cl.meta_logical);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].0, 1); // device 1
+        // Second STRIPE_LEN maps to stripe 1 (device 2).
+        let r2 = cl.logical_to_physical(cl.meta_logical + STRIPE_LEN);
+        assert_eq!(r2.len(), 1);
+        assert_eq!(r2[0].0, 2); // device 2
+    }
+
+    #[test]
+    fn logical_to_physical_raid10_maps_to_mirror_pair() {
+        let uuid3 =
+            uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111")
+                .unwrap();
+        let uuid4 =
+            uuid::Uuid::parse_str("22222222-2222-2222-2222-222222222222")
+                .unwrap();
+        let devs = vec![
+            ChunkDevice {
+                devid: 1,
+                total_bytes: 256 * 1024 * 1024,
+                dev_uuid: test_uuid(),
+            },
+            ChunkDevice {
+                devid: 2,
+                total_bytes: 256 * 1024 * 1024,
+                dev_uuid: uuid3,
+            },
+            ChunkDevice {
+                devid: 3,
+                total_bytes: 256 * 1024 * 1024,
+                dev_uuid: uuid4,
+            },
+            ChunkDevice {
+                devid: 4,
+                total_bytes: 256 * 1024 * 1024,
+                dev_uuid: uuid::Uuid::parse_str(
+                    "cafebabe-cafe-babe-cafe-babecafebabe",
+                )
+                .unwrap(),
+            },
+        ];
+        let cl =
+            ChunkLayout::new(&devs, Profile::Raid10, Profile::Raid10).unwrap();
+        // RAID10 with 4 stripes: 2 data groups, each mirrored.
+        // First STRIPE_LEN maps to group 0 (stripes 0 and 1 = devices 1,2).
+        let r = cl.logical_to_physical(cl.meta_logical);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].0, 1);
+        assert_eq!(r[1].0, 2);
+        // Second STRIPE_LEN maps to group 1 (stripes 2 and 3 = devices 3,4).
+        let r2 = cl.logical_to_physical(cl.meta_logical + STRIPE_LEN);
+        assert_eq!(r2.len(), 2);
+        assert_eq!(r2[0].0, 3);
+        assert_eq!(r2[1].0, 4);
+    }
+
+    #[test]
+    fn raid0_logical_size_is_stripe_times_devices() {
+        let devs = two_devices(256 * 1024 * 1024);
+        let cl =
+            ChunkLayout::new(&devs, Profile::Raid0, Profile::Raid0).unwrap();
+        assert_eq!(cl.meta_logical_size(), cl.meta_size * 2);
+        assert_eq!(cl.data_logical_size(), cl.data_size * 2);
+    }
+
+    #[test]
+    fn mirror_logical_size_equals_stripe_size() {
+        let devs = two_devices(256 * 1024 * 1024);
+        let cl =
+            ChunkLayout::new(&devs, Profile::Raid1, Profile::Single).unwrap();
+        assert_eq!(cl.meta_logical_size(), cl.meta_size);
+        assert_eq!(cl.data_logical_size(), cl.data_size);
     }
 }

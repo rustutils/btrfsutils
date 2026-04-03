@@ -145,6 +145,7 @@ dependencies = [
  "chrono",
  "clap",
  "cols",
+ "console",
  "env_logger",
  "flate2",
  "insta",
@@ -423,6 +424,7 @@ dependencies = [
  "encode_unicode",
  "libc",
  "once_cell",
+ "unicode-width",
  "windows-sys 0.59.0",
 ]
 

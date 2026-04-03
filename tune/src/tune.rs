@@ -720,6 +720,8 @@ mod tests {
             metadata_profile: Profile::Dup,
             csum_type: ChecksumType::Crc32c,
             creation_time: Some(1000000),
+            quota: false,
+            squota: false,
         };
         btrfs_mkfs::mkfs::make_btrfs(&cfg).unwrap();
 

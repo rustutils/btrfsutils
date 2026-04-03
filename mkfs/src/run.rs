@@ -143,9 +143,12 @@ pub fn run(args: &Arguments) -> Result<()> {
         metadata_profile,
         csum_type,
         creation_time: None,
+        quota: false,
+        squota: false,
     };
 
     cfg.apply_features(&args.features)?;
+    cfg.apply_profile_flags();
 
     if !args.quiet {
         let device_names: Vec<_> = cfg
