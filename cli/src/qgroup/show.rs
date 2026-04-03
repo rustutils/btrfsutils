@@ -8,6 +8,7 @@ use btrfs_uapi::quota::{
     qgroupid_subvolid,
 };
 use clap::Parser;
+use cols::Cols;
 use serde::Serialize;
 use std::{fmt::Write as _, os::unix::io::AsFd, path::PathBuf};
 
@@ -16,6 +17,39 @@ const HEADING_FILTERING: &str = "Filtering";
 const HEADING_SIZE_UNITS: &str = "Size units";
 
 /// List subvolume quota groups
+///
+/// Shows all quota groups (qgroups) and their space accounting. Each
+/// subvolume automatically gets a level-0 qgroup (e.g. 0/256) that
+/// tracks its individual usage. Higher-level qgroups (1/0, 2/0, ...)
+/// can be created to group subvolumes and apply shared limits across
+/// them.
+///
+/// Columns:
+///
+/// qgroupid: the quota group identifier in level/id format. Level 0
+/// corresponds to individual subvolumes. Higher levels are user-created
+/// grouping containers.
+///
+/// rfer (referenced): total bytes of data referenced by this qgroup.
+/// For level-0 qgroups this is the logical size of all extents in the
+/// subvolume. Shared extents (e.g. from snapshots or reflinks) are
+/// counted in full by each qgroup that references them.
+///
+/// excl (exclusive): bytes used exclusively by this qgroup, not shared
+/// with any other qgroup at the same level. This is the space that
+/// would be freed if the subvolume were deleted (assuming no other
+/// references).
+///
+/// max_rfer: the configured limit on referenced bytes. Writes that
+/// would exceed this limit fail with EDQUOT. Shows "none" if no limit
+/// is set.
+///
+/// max_excl: the configured limit on exclusive bytes. Shows "none" if
+/// no limit is set.
+///
+/// In --format modern, the qgroup hierarchy is shown as a tree: higher-
+/// level qgroups appear as parents with their member qgroups nested
+/// below using tree connectors.
 #[derive(Parser, Debug)]
 #[allow(clippy::struct_excessive_bools, clippy::doc_markdown)]
 pub struct QgroupShowCommand {
@@ -300,7 +334,10 @@ impl Runnable for QgroupShowCommand {
         }
 
         match ctx.format {
-            Format::Modern | Format::Text => {
+            Format::Modern => {
+                print_qgroups_modern(self, &qgroups, &mode);
+            }
+            Format::Text => {
                 print_qgroups_text(self, &qgroups, &mode);
             }
             Format::Json => {
@@ -312,6 +349,104 @@ impl Runnable for QgroupShowCommand {
 
         Ok(())
     }
+}
+
+#[derive(Cols)]
+struct QgroupRow {
+    #[column(tree)]
+    qgroupid: String,
+    #[column(header = "RFER", right)]
+    rfer: String,
+    #[column(header = "EXCL", right)]
+    excl: String,
+    #[column(header = "MAX_RFER", right)]
+    max_rfer: String,
+    #[column(header = "MAX_EXCL", right)]
+    max_excl: String,
+    #[column(children)]
+    children: Vec<Self>,
+}
+
+impl QgroupRow {
+    fn from_info(q: &QgroupInfo, mode: &SizeFormat) -> Self {
+        Self {
+            qgroupid: format_qgroupid(q.qgroupid),
+            rfer: fmt_size(q.rfer, mode),
+            excl: fmt_size(q.excl, mode),
+            max_rfer: fmt_limit(
+                q.max_rfer,
+                q.limit_flags,
+                QgroupLimitFlags::MAX_RFER,
+                mode,
+            ),
+            max_excl: fmt_limit(
+                q.max_excl,
+                q.limit_flags,
+                QgroupLimitFlags::MAX_EXCL,
+                mode,
+            ),
+            children: Vec::new(),
+        }
+    }
+}
+
+/// Recursively remove a row from the map and attach its children.
+fn attach_qgroup_children(
+    id: u64,
+    rows: &mut std::collections::BTreeMap<u64, QgroupRow>,
+    qgroups: &[QgroupInfo],
+) -> Option<QgroupRow> {
+    let mut row = rows.remove(&id)?;
+    if let Some(q) = qgroups.iter().find(|q| q.qgroupid == id) {
+        for &child_id in &q.children {
+            if let Some(child) =
+                attach_qgroup_children(child_id, rows, qgroups)
+            {
+                row.children.push(child);
+            }
+        }
+    }
+    Some(row)
+}
+
+fn print_qgroups_modern(
+    _cmd: &QgroupShowCommand,
+    qgroups: &[QgroupInfo],
+    mode: &SizeFormat,
+) {
+    use std::collections::BTreeMap;
+
+    let mut rows: BTreeMap<u64, QgroupRow> = qgroups
+        .iter()
+        .map(|q| (q.qgroupid, QgroupRow::from_info(q, mode)))
+        .collect();
+
+    // A qgroup is a root if no other qgroup lists it as a child.
+    let mut is_child = std::collections::HashSet::new();
+    for q in qgroups {
+        for &child_id in &q.children {
+            is_child.insert(child_id);
+        }
+    }
+
+    let root_ids: Vec<u64> = qgroups
+        .iter()
+        .filter(|q| !is_child.contains(&q.qgroupid))
+        .map(|q| q.qgroupid)
+        .collect();
+
+    let mut tree: Vec<QgroupRow> = root_ids
+        .iter()
+        .filter_map(|&id| attach_qgroup_children(id, &mut rows, qgroups))
+        .collect();
+
+    // Any orphans (not reachable from roots) go at the top level.
+    for (_, row) in rows {
+        tree.push(row);
+    }
+
+    let mut out = std::io::stdout().lock();
+    let _ = QgroupRow::print_table(&tree, &mut out);
 }
 
 fn print_qgroups_text(

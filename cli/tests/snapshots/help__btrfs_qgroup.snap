@@ -4,10 +4,20 @@ expression: text
 ---
 Manage quota groups.
 
-Create, destroy, and configure quota groups to enforce storage limits and track
-usage for subvolumes and hierarchies of subvolumes. Quota groups provide
-flexible quota management that can be applied at different levels in the
-subvolume hierarchy. Most operations require CAP_SYS_ADMIN.
+Quota groups (qgroups) track and limit disk usage at the subvolume level. Each
+subvolume automatically gets a level-0 qgroup (e.g. 0/256 for subvolume 256)
+that tracks how much data it references and how much is exclusive to it. Qgroups
+cannot be applied to individual files or directories within a subvolume, only to
+whole subvolumes. This is why per-directory quotas on btrfs require creating
+separate subvolumes.
+
+Higher-level qgroups (1/0, 2/0, ...) are user-created containers that aggregate
+the usage of their member subvolumes and can enforce a shared limit across all
+of them. For example, assigning several user home subvolumes to a single level-1
+qgroup lets you cap their combined usage.
+
+Quotas must be enabled first with "btrfs quota enable". Most operations require
+CAP_SYS_ADMIN.
 
 Usage: qgroup <COMMAND>
 

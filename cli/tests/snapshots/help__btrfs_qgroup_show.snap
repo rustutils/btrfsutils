@@ -4,6 +4,35 @@ expression: text
 ---
 List subvolume quota groups
 
+Shows all quota groups (qgroups) and their space accounting. Each subvolume
+automatically gets a level-0 qgroup (e.g. 0/256) that tracks its individual
+usage. Higher-level qgroups (1/0, 2/0, ...) can be created to group subvolumes
+and apply shared limits across them.
+
+Columns:
+
+qgroupid: the quota group identifier in level/id format. Level 0 corresponds to
+individual subvolumes. Higher levels are user-created grouping containers.
+
+rfer (referenced): total bytes of data referenced by this qgroup. For level-0
+qgroups this is the logical size of all extents in the subvolume. Shared extents
+(e.g. from snapshots or reflinks) are counted in full by each qgroup that
+references them.
+
+excl (exclusive): bytes used exclusively by this qgroup, not shared with any
+other qgroup at the same level. This is the space that would be freed if the
+subvolume were deleted (assuming no other references).
+
+max_rfer: the configured limit on referenced bytes. Writes that would exceed
+this limit fail with EDQUOT. Shows "none" if no limit is set.
+
+max_excl: the configured limit on exclusive bytes. Shows "none" if no limit is
+set.
+
+In --format modern, the qgroup hierarchy is shown as a tree: higher- level
+qgroups appear as parents with their member qgroups nested below using tree
+connectors.
+
 Usage: show [OPTIONS] <PATH>
 
 Arguments:
@@ -19,7 +48,7 @@ Options:
           Force a sync before getting quota information
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 
 Column selection:
   -p, --print-parent

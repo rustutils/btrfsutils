@@ -50,6 +50,9 @@ All notable changes to this project will be documented in this file.
 - `btrfs filesystem df --format modern`: cols-based adaptive table
 - `btrfs quota status --format modern`: key-value table with UUID
   and rescan progress (extensions not in the text output)
+- `btrfs qgroup show --format modern`: tree-view output showing the
+  qgroup hierarchy with all columns (rfer, excl, max_rfer, max_excl)
+  always visible
 - `RunContext` struct for passing runtime options through commands
 - `Runnable::supported_formats()`: commands declare which formats
   they support; unsupported formats produce a clear error
