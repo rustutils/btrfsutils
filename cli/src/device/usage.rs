@@ -1,5 +1,5 @@
 use crate::{
-    RunContext, Runnable,
+    Format, RunContext, Runnable,
     util::{SizeFormat, fmt_size},
 };
 use anyhow::{Context, Result};
@@ -8,6 +8,7 @@ use btrfs_uapi::{
     filesystem::filesystem_info, space::BlockGroupFlags,
 };
 use clap::Parser;
+use cols::Cols;
 use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 
 /// Show detailed information about internal allocations in devices
@@ -102,13 +103,25 @@ impl DeviceUsageCommand {
 }
 
 impl Runnable for DeviceUsageCommand {
-    fn run(&self, _ctx: &RunContext) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         let mode = self.size_format();
-        for (i, path) in self.paths.iter().enumerate() {
-            if i > 0 {
-                println!();
+        match ctx.format {
+            Format::Modern => {
+                for (i, path) in self.paths.iter().enumerate() {
+                    if i > 0 {
+                        println!();
+                    }
+                    print_device_usage_modern(path, &mode)?;
+                }
             }
-            print_device_usage(path, &mode)?;
+            Format::Text | Format::Json => {
+                for (i, path) in self.paths.iter().enumerate() {
+                    if i > 0 {
+                        println!();
+                    }
+                    print_device_usage(path, &mode)?;
+                }
+            }
         }
         Ok(())
     }
@@ -180,4 +193,99 @@ fn print_device_usage(path: &std::path::Path, mode: &SizeFormat) -> Result<()> {
 fn print_line(label: &str, value: &str) {
     let padding = 20usize.saturating_sub(label.len());
     println!("   {label}:{:>pad$}{value:>10}", "", pad = padding);
+}
+
+#[derive(Cols)]
+struct UsageRow {
+    #[column(tree)]
+    name: String,
+    #[column(header = "SIZE", right)]
+    size: String,
+    #[column(children)]
+    children: Vec<Self>,
+}
+
+fn print_device_usage_modern(
+    path: &std::path::Path,
+    mode: &SizeFormat,
+) -> Result<()> {
+    let file = File::open(path)
+        .with_context(|| format!("failed to open '{}'", path.display()))?;
+    let fd = file.as_fd();
+
+    let fs = filesystem_info(fd).with_context(|| {
+        format!("failed to get filesystem info for '{}'", path.display())
+    })?;
+    let devices = device_info_all(fd, &fs).with_context(|| {
+        format!("failed to get device info for '{}'", path.display())
+    })?;
+    let allocs = device_chunk_allocations(fd).with_context(|| {
+        format!("failed to get chunk allocations for '{}'", path.display())
+    })?;
+
+    let mut roots: Vec<UsageRow> = Vec::new();
+
+    for dev in &devices {
+        let phys_size = physical_device_size(&dev.path);
+        let slack = if phys_size > 0 {
+            phys_size.saturating_sub(dev.total_bytes)
+        } else {
+            0
+        };
+
+        let mut children: Vec<UsageRow> = Vec::new();
+        let mut allocated: u64 = 0;
+
+        let mut dev_allocs: Vec<_> =
+            allocs.iter().filter(|a| a.devid == dev.devid).collect();
+        dev_allocs.sort_by_key(|a| {
+            let type_order = if a.flags.contains(BlockGroupFlags::DATA) {
+                0
+            } else if a.flags.contains(BlockGroupFlags::METADATA) {
+                1
+            } else {
+                2
+            };
+            (type_order, a.flags.bits())
+        });
+
+        for alloc in &dev_allocs {
+            allocated += alloc.bytes;
+            children.push(UsageRow {
+                name: format!(
+                    "{},{}",
+                    alloc.flags.type_name(),
+                    alloc.flags.profile_name()
+                ),
+                size: fmt_size(alloc.bytes, mode),
+                children: Vec::new(),
+            });
+        }
+
+        let unallocated = dev.total_bytes.saturating_sub(allocated);
+        children.push(UsageRow {
+            name: "Unallocated".to_string(),
+            size: fmt_size(unallocated, mode),
+            children: Vec::new(),
+        });
+
+        if slack > 0 {
+            children.push(UsageRow {
+                name: "Slack".to_string(),
+                size: fmt_size(slack, mode),
+                children: Vec::new(),
+            });
+        }
+
+        roots.push(UsageRow {
+            name: format!("{}, ID: {}", dev.path, dev.devid),
+            size: fmt_size(dev.total_bytes, mode),
+            children,
+        });
+    }
+
+    let mut out = std::io::stdout().lock();
+    let _ = UsageRow::print_table(&roots, &mut out);
+
+    Ok(())
 }

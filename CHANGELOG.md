@@ -59,6 +59,13 @@ All notable changes to this project will be documented in this file.
   tree with all kernel counters per device
 - `btrfs scrub status --format modern`: cols table with per-device
   scrubbed/allocated bytes and error summary
+- `btrfs filesystem show --format modern`: clean header with device
+  cols table (DEVID, SIZE, USED, PATH)
+- `btrfs device usage --format modern`: tree-view with each device as
+  a root node and per-profile allocations as children
+- `btrfs filesystem usage --format modern`: three-section layout with
+  key-value overall stats, profile summary table, and dynamic
+  per-device allocation table with runtime-generated profile columns
 - `RunContext` struct for passing runtime options through commands
 - `Runnable::supported_formats()`: commands declare which formats
   they support; unsupported formats produce a clear error

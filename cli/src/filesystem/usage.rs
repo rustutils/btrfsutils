@@ -1,6 +1,6 @@
 use super::UnitMode;
 use crate::{
-    RunContext, Runnable,
+    Format, RunContext, Runnable,
     util::{SizeFormat, fmt_size},
 };
 use anyhow::{Context, Result};
@@ -11,6 +11,7 @@ use btrfs_uapi::{
     space::{BlockGroupFlags, SpaceInfo, space_info},
 };
 use clap::Parser;
+use cols::Cols;
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
@@ -85,7 +86,7 @@ fn has_multiple_profiles(spaces: &[SpaceInfo]) -> bool {
 }
 
 impl Runnable for FilesystemUsageCommand {
-    fn run(&self, _ctx: &RunContext) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         let mut mode = self.units.resolve();
         if self.human_si {
             mode = SizeFormat::HumanSi;
@@ -94,7 +95,12 @@ impl Runnable for FilesystemUsageCommand {
             if i > 0 {
                 println!();
             }
-            print_usage(path, self.tabular, &mode)?;
+            match ctx.format {
+                Format::Modern => print_usage_modern(path, &mode)?,
+                Format::Text | Format::Json => {
+                    print_usage(path, self.tabular, &mode)?;
+                }
+            }
         }
         Ok(())
     }
@@ -102,39 +108,33 @@ impl Runnable for FilesystemUsageCommand {
 
 const MIN_UNALLOCATED_THRESH: u64 = 16 * 1024 * 1024;
 
+/// Computed overall stats for a filesystem.
+struct OverallStats {
+    r_total_size: u64,
+    r_total_chunks: u64,
+    r_total_unused: u64,
+    r_total_missing: u64,
+    r_total_used: u64,
+    data_ratio: f64,
+    meta_ratio: f64,
+    free_estimated: u64,
+    free_min: u64,
+    free_statfs: u64,
+    l_global_reserve: u64,
+    l_global_reserve_used: u64,
+    multiple: bool,
+}
+
 #[allow(
-    clippy::too_many_lines,
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-fn print_usage(
+fn compute_overall(
     path: &std::path::Path,
-    _tabular: bool,
-    mode: &SizeFormat,
-) -> Result<()> {
-    let file = File::open(path)
-        .with_context(|| format!("failed to open '{}'", path.display()))?;
-    let fd = file.as_fd();
-
-    let fs = filesystem_info(fd).with_context(|| {
-        format!("failed to get filesystem info for '{}'", path.display())
-    })?;
-    let devices = device_info_all(fd, &fs).with_context(|| {
-        format!("failed to get device info for '{}'", path.display())
-    })?;
-    let spaces = space_info(fd).with_context(|| {
-        format!("failed to get space info for '{}'", path.display())
-    })?;
-
-    // Per-device chunk allocations from the chunk tree.  This requires
-    // CAP_SYS_ADMIN; if it fails we degrade gracefully and note it below.
-    let chunk_allocs = device_chunk_allocations(fd).ok();
-
-    // Map devid -> path for display.
-    let devid_to_path: HashMap<u64, &str> =
-        devices.iter().map(|d| (d.devid, d.path.as_str())).collect();
-
+    devices: &[btrfs_uapi::device::DeviceInfo],
+    spaces: &[SpaceInfo],
+) -> OverallStats {
     let mut r_data_chunks: u64 = 0;
     let mut r_data_used: u64 = 0;
     let mut l_data_chunks: u64 = 0;
@@ -147,7 +147,7 @@ fn print_usage(
     let mut l_global_reserve_used: u64 = 0;
     let mut max_ncopies: u64 = 1;
 
-    for s in &spaces {
+    for s in spaces {
         if s.flags.contains(BlockGroupFlags::GLOBAL_RSV) {
             l_global_reserve = s.total_bytes;
             l_global_reserve_used = s.used_bytes;
@@ -184,36 +184,23 @@ fn print_usage(
         .map(|d| d.total_bytes)
         .sum();
 
-    #[allow(clippy::cast_precision_loss)]
     let data_ratio = if l_data_chunks > 0 {
         r_data_chunks as f64 / l_data_chunks as f64
     } else {
         1.0
     };
-    #[allow(clippy::cast_precision_loss)]
     let meta_ratio = if l_meta_chunks > 0 {
         r_meta_chunks as f64 / l_meta_chunks as f64
     } else {
         1.0
     };
-    #[allow(clippy::cast_precision_loss)]
     let max_data_ratio = max_ncopies as f64;
 
-    #[allow(
-        clippy::cast_precision_loss,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss
-    )]
     let free_base = if data_ratio > 0.0 {
         ((r_data_chunks.saturating_sub(r_data_used)) as f64 / data_ratio) as u64
     } else {
         0
     };
-    #[allow(
-        clippy::cast_precision_loss,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss
-    )]
     let (free_estimated, free_min) = if r_total_unused >= MIN_UNALLOCATED_THRESH
     {
         (
@@ -224,48 +211,102 @@ fn print_usage(
         (free_base, free_base)
     };
 
-    #[allow(clippy::cast_sign_loss)]
     let free_statfs = nix::sys::statfs::statfs(path)
         .map(|st| st.blocks_available() * st.block_size() as u64)
         .unwrap_or(0);
 
-    let multiple = has_multiple_profiles(&spaces);
+    let multiple = has_multiple_profiles(spaces);
+
+    OverallStats {
+        r_total_size,
+        r_total_chunks,
+        r_total_unused,
+        r_total_missing,
+        r_total_used,
+        data_ratio,
+        meta_ratio,
+        free_estimated,
+        free_min,
+        free_statfs,
+        l_global_reserve,
+        l_global_reserve_used,
+        multiple,
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn print_usage(
+    path: &std::path::Path,
+    _tabular: bool,
+    mode: &SizeFormat,
+) -> Result<()> {
+    let file = File::open(path)
+        .with_context(|| format!("failed to open '{}'", path.display()))?;
+    let fd = file.as_fd();
+
+    let fs = filesystem_info(fd).with_context(|| {
+        format!("failed to get filesystem info for '{}'", path.display())
+    })?;
+    let devices = device_info_all(fd, &fs).with_context(|| {
+        format!("failed to get device info for '{}'", path.display())
+    })?;
+    let spaces = space_info(fd).with_context(|| {
+        format!("failed to get space info for '{}'", path.display())
+    })?;
+
+    // Per-device chunk allocations from the chunk tree.  This requires
+    // CAP_SYS_ADMIN; if it fails we degrade gracefully and note it below.
+    let chunk_allocs = device_chunk_allocations(fd).ok();
+
+    // Map devid -> path for display.
+    let devid_to_path: HashMap<u64, &str> =
+        devices.iter().map(|d| (d.devid, d.path.as_str())).collect();
+
+    let stats = compute_overall(path, &devices, &spaces);
 
     println!("Overall:");
-    println!("    Device size:\t\t{:>10}", fmt_size(r_total_size, mode));
+    println!(
+        "    Device size:\t\t{:>10}",
+        fmt_size(stats.r_total_size, mode)
+    );
     println!(
         "    Device allocated:\t\t{:>10}",
-        fmt_size(r_total_chunks, mode)
+        fmt_size(stats.r_total_chunks, mode)
     );
     println!(
         "    Device unallocated:\t\t{:>10}",
-        fmt_size(r_total_unused, mode)
+        fmt_size(stats.r_total_unused, mode)
     );
     println!(
         "    Device missing:\t\t{:>10}",
-        fmt_size(r_total_missing, mode)
+        fmt_size(stats.r_total_missing, mode)
     );
     println!("    Device slack:\t\t{:>10}", fmt_size(0, mode));
-    println!("    Used:\t\t\t{:>10}", fmt_size(r_total_used, mode));
+    println!("    Used:\t\t\t{:>10}", fmt_size(stats.r_total_used, mode));
     println!(
         "    Free (estimated):\t\t{:>10}\t(min: {})",
-        fmt_size(free_estimated, mode),
-        fmt_size(free_min, mode)
+        fmt_size(stats.free_estimated, mode),
+        fmt_size(stats.free_min, mode)
     );
     println!(
         "    Free (statfs, df):\t\t{:>10}",
-        fmt_size(free_statfs, mode)
+        fmt_size(stats.free_statfs, mode)
     );
-    println!("    Data ratio:\t\t\t{data_ratio:>10.2}");
-    println!("    Metadata ratio:\t\t{meta_ratio:>10.2}");
+    println!("    Data ratio:\t\t\t{:>10.2}", stats.data_ratio);
+    println!("    Metadata ratio:\t\t{:>10.2}", stats.meta_ratio);
     println!(
         "    Global reserve:\t\t{:>10}\t(used: {})",
-        fmt_size(l_global_reserve, mode),
-        fmt_size(l_global_reserve_used, mode)
+        fmt_size(stats.l_global_reserve, mode),
+        fmt_size(stats.l_global_reserve_used, mode)
     );
     println!(
         "    Multiple profiles:\t\t{:>10}",
-        if multiple { "yes" } else { "no" }
+        if stats.multiple { "yes" } else { "no" }
     );
 
     if chunk_allocs.is_none() {
@@ -315,6 +356,209 @@ fn print_usage(
     for dev in &devices {
         let unallocated = dev.total_bytes.saturating_sub(dev.bytes_used);
         println!("   {}\t{:>10}", dev.path, fmt_size(unallocated, mode));
+    }
+
+    Ok(())
+}
+
+// -- Modern output -----------------------------------------------------------
+
+#[derive(Cols)]
+struct OverallRow {
+    #[column(header = "PROPERTY")]
+    label: String,
+    #[column(header = "VALUE", right)]
+    value: String,
+}
+
+#[derive(Cols)]
+struct ProfileRow {
+    #[column(header = "TYPE")]
+    bg_type: String,
+    #[column(header = "PROFILE")]
+    profile: String,
+    #[column(header = "TOTAL", right)]
+    total: String,
+    #[column(header = "USED", right)]
+    used: String,
+    #[column(header = "USED%", right)]
+    pct: String,
+}
+
+#[allow(
+    clippy::too_many_lines,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn print_usage_modern(path: &std::path::Path, mode: &SizeFormat) -> Result<()> {
+    let file = File::open(path)
+        .with_context(|| format!("failed to open '{}'", path.display()))?;
+    let fd = file.as_fd();
+
+    let fs = filesystem_info(fd).with_context(|| {
+        format!("failed to get filesystem info for '{}'", path.display())
+    })?;
+    let devices = device_info_all(fd, &fs).with_context(|| {
+        format!("failed to get device info for '{}'", path.display())
+    })?;
+    let spaces = space_info(fd).with_context(|| {
+        format!("failed to get space info for '{}'", path.display())
+    })?;
+    let chunk_allocs = device_chunk_allocations(fd).ok();
+
+    let stats = compute_overall(path, &devices, &spaces);
+
+    // Section 1: Overall key-value table
+    println!("Overall:");
+    let mut overall_rows = vec![
+        OverallRow {
+            label: "Device size".to_string(),
+            value: fmt_size(stats.r_total_size, mode),
+        },
+        OverallRow {
+            label: "Device allocated".to_string(),
+            value: fmt_size(stats.r_total_chunks, mode),
+        },
+        OverallRow {
+            label: "Device unallocated".to_string(),
+            value: fmt_size(stats.r_total_unused, mode),
+        },
+        OverallRow {
+            label: "Device missing".to_string(),
+            value: fmt_size(stats.r_total_missing, mode),
+        },
+        OverallRow {
+            label: "Device slack".to_string(),
+            value: fmt_size(0, mode),
+        },
+        OverallRow {
+            label: "Used".to_string(),
+            value: fmt_size(stats.r_total_used, mode),
+        },
+        OverallRow {
+            label: "Free (estimated)".to_string(),
+            value: format!(
+                "{}  (min: {})",
+                fmt_size(stats.free_estimated, mode),
+                fmt_size(stats.free_min, mode)
+            ),
+        },
+        OverallRow {
+            label: "Free (statfs, df)".to_string(),
+            value: fmt_size(stats.free_statfs, mode),
+        },
+        OverallRow {
+            label: "Data ratio".to_string(),
+            value: format!("{:.2}", stats.data_ratio),
+        },
+        OverallRow {
+            label: "Metadata ratio".to_string(),
+            value: format!("{:.2}", stats.meta_ratio),
+        },
+    ];
+
+    overall_rows.push(OverallRow {
+        label: "Global reserve".to_string(),
+        value: format!(
+            "{}  (used: {})",
+            fmt_size(stats.l_global_reserve, mode),
+            fmt_size(stats.l_global_reserve_used, mode)
+        ),
+    });
+    overall_rows.push(OverallRow {
+        label: "Multiple profiles".to_string(),
+        value: if stats.multiple { "yes" } else { "no" }.to_string(),
+    });
+
+    let mut out = std::io::stdout().lock();
+    let _ = OverallRow::print_table(&overall_rows, &mut out);
+
+    if chunk_allocs.is_none() {
+        eprintln!(
+            "NOTE: per-device usage breakdown unavailable \
+             (chunk tree requires CAP_SYS_ADMIN)"
+        );
+    }
+
+    // Section 2: Profile summary table
+    let profile_rows: Vec<ProfileRow> = spaces
+        .iter()
+        .filter(|s| !s.flags.contains(BlockGroupFlags::GLOBAL_RSV))
+        .map(|s| {
+            let pct = if s.total_bytes > 0 {
+                100.0 * s.used_bytes as f64 / s.total_bytes as f64
+            } else {
+                0.0
+            };
+            ProfileRow {
+                bg_type: s.flags.type_name().to_string(),
+                profile: s.flags.profile_name().to_string(),
+                total: fmt_size(s.total_bytes, mode),
+                used: fmt_size(s.used_bytes, mode),
+                pct: format!("{pct:.2}%"),
+            }
+        })
+        .collect();
+
+    if !profile_rows.is_empty() {
+        println!();
+        let _ = ProfileRow::print_table(&profile_rows, &mut out);
+    }
+
+    // Section 3: Per-device allocation table (dynamic columns)
+    if let Some(allocs) = &chunk_allocs {
+        // Collect unique profiles in display order.
+        let mut profile_flags: Vec<BlockGroupFlags> = Vec::new();
+        for s in &spaces {
+            if s.flags.contains(BlockGroupFlags::GLOBAL_RSV) {
+                continue;
+            }
+            if !profile_flags.contains(&s.flags) {
+                profile_flags.push(s.flags);
+            }
+        }
+
+        let mut table = cols::Table::new();
+        table.add_column(cols::Column::new("PATH"));
+        for flags in &profile_flags {
+            table.add_column(
+                cols::Column::new(&format!(
+                    "{},{}",
+                    flags.type_name(),
+                    flags.profile_name()
+                ))
+                .right(true),
+            );
+        }
+        table.add_column(cols::Column::new("UNALLOC").right(true));
+
+        for dev in &devices {
+            let line = table.new_line(None);
+            let row = table.line_mut(line);
+            row.data_set(0, &dev.path);
+
+            let mut allocated: u64 = 0;
+            for (ci, flags) in profile_flags.iter().enumerate() {
+                let bytes: u64 = allocs
+                    .iter()
+                    .filter(|a| a.devid == dev.devid && a.flags == *flags)
+                    .map(|a| a.bytes)
+                    .sum();
+                allocated += bytes;
+                if bytes > 0 {
+                    row.data_set(ci + 1, &fmt_size(bytes, mode));
+                } else {
+                    row.data_set(ci + 1, "-");
+                }
+            }
+
+            let unallocated = dev.total_bytes.saturating_sub(allocated);
+            row.data_set(profile_flags.len() + 1, &fmt_size(unallocated, mode));
+        }
+
+        println!();
+        let _ = cols::print_table(&table, &mut out);
     }
 
     Ok(())

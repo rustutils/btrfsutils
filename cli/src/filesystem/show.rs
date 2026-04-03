@@ -1,5 +1,8 @@
 use super::UnitMode;
-use crate::{RunContext, Runnable, util::fmt_size};
+use crate::{
+    Format, RunContext, Runnable,
+    util::{SizeFormat, fmt_size},
+};
 use anyhow::{Context, Result};
 use btrfs_uapi::{
     device::device_info_all,
@@ -7,6 +10,7 @@ use btrfs_uapi::{
     space::space_info,
 };
 use clap::Parser;
+use cols::Cols;
 use std::{collections::HashSet, fs::File, os::unix::io::AsFd};
 
 /// Show information about one or more mounted or unmounted filesystems
@@ -27,23 +31,64 @@ pub struct FilesystemShowCommand {
     pub filter: Option<String>,
 }
 
+struct FsEntry {
+    label: String,
+    uuid: String,
+    num_devices: u64,
+    used_bytes: u64,
+    devices: Vec<DevEntry>,
+}
+
+struct DevEntry {
+    devid: u64,
+    total_bytes: u64,
+    bytes_used: u64,
+    path: String,
+}
+
+#[derive(Cols)]
+struct DevRow {
+    #[column(header = "DEVID", right)]
+    devid: u64,
+    #[column(header = "SIZE", right)]
+    size: String,
+    #[column(header = "USED", right)]
+    used: String,
+    #[column(header = "PATH")]
+    path: String,
+}
+
 impl Runnable for FilesystemShowCommand {
-    fn run(&self, _ctx: &RunContext) -> Result<()> {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
         if self.all_devices {
             anyhow::bail!("--all-devices is not yet implemented");
         }
 
         let mode = self.units.resolve();
-        let mounts =
-            parse_btrfs_mounts().context("failed to read /proc/self/mounts")?;
+        let entries = self.collect_entries()?;
 
-        if mounts.is_empty() {
+        if entries.is_empty() {
             println!("No btrfs filesystem found.");
             return Ok(());
         }
 
+        match ctx.format {
+            Format::Modern => print_modern(&entries, &mode),
+            Format::Text | Format::Json => print_text(&entries, &mode),
+        }
+
+        Ok(())
+    }
+}
+
+impl FilesystemShowCommand {
+    fn collect_entries(&self) -> Result<Vec<FsEntry>> {
+        let mounts =
+            parse_btrfs_mounts().context("failed to read /proc/self/mounts")?;
+
+        let mut entries = Vec::new();
         let mut seen_uuids = HashSet::new();
-        let mut first = true;
+
         for mount in &mounts {
             let Ok(file) = File::open(mount) else {
                 continue;
@@ -84,35 +129,93 @@ impl Runnable for FilesystemShowCommand {
                 })
                 .unwrap_or(0);
 
-            if !first {
-                println!();
-            }
-            first = false;
-
-            if label.is_empty() {
-                print!("Label: none ");
-            } else {
-                print!("Label: '{label}' ");
-            }
-            println!(" uuid: {}", info.uuid.as_hyphenated());
-            println!(
-                "\tTotal devices {} FS bytes used {}",
-                info.num_devices,
-                fmt_size(used_bytes, &mode)
-            );
-
-            for dev in &devices {
-                println!(
-                    "\tdevid {:4} size {} used {} path {}",
-                    dev.devid,
-                    fmt_size(dev.total_bytes, &mode),
-                    fmt_size(dev.bytes_used, &mode),
-                    dev.path,
-                );
-            }
+            entries.push(FsEntry {
+                label,
+                uuid: info.uuid.as_hyphenated().to_string(),
+                num_devices: info.num_devices,
+                used_bytes,
+                devices: devices
+                    .iter()
+                    .map(|d| DevEntry {
+                        devid: d.devid,
+                        total_bytes: d.total_bytes,
+                        bytes_used: d.bytes_used,
+                        path: d.path.clone(),
+                    })
+                    .collect(),
+            });
         }
 
-        Ok(())
+        Ok(entries)
+    }
+}
+
+fn print_text(entries: &[FsEntry], mode: &SizeFormat) {
+    for (i, entry) in entries.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+
+        if entry.label.is_empty() {
+            print!("Label: none ");
+        } else {
+            print!("Label: '{}' ", entry.label);
+        }
+        println!(" uuid: {}", entry.uuid);
+        println!(
+            "\tTotal devices {} FS bytes used {}",
+            entry.num_devices,
+            fmt_size(entry.used_bytes, mode)
+        );
+
+        for dev in &entry.devices {
+            println!(
+                "\tdevid {:4} size {} used {} path {}",
+                dev.devid,
+                fmt_size(dev.total_bytes, mode),
+                fmt_size(dev.bytes_used, mode),
+                dev.path,
+            );
+        }
+    }
+}
+
+fn print_modern(entries: &[FsEntry], mode: &SizeFormat) {
+    for (i, entry) in entries.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+
+        if entry.label.is_empty() {
+            println!("Label: none");
+        } else {
+            println!("Label: {}", entry.label);
+        }
+        println!("UUID:  {}", entry.uuid);
+        println!(
+            "Total: {} {}, {} used",
+            entry.num_devices,
+            if entry.num_devices == 1 {
+                "device"
+            } else {
+                "devices"
+            },
+            fmt_size(entry.used_bytes, mode)
+        );
+        println!();
+
+        let rows: Vec<DevRow> = entry
+            .devices
+            .iter()
+            .map(|d| DevRow {
+                devid: d.devid,
+                size: fmt_size(d.total_bytes, mode),
+                used: fmt_size(d.bytes_used, mode),
+                path: d.path.clone(),
+            })
+            .collect();
+        let mut out = std::io::stdout().lock();
+        let _ = DevRow::print_table(&rows, &mut out);
     }
 }
 
