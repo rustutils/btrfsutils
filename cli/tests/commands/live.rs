@@ -96,6 +96,35 @@ fn filesystem_resize_grow_shrink() {
 
 #[test]
 #[ignore = "requires elevated privileges"]
+fn filesystem_du_shared() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path().to_str().unwrap();
+
+    // Create a directory structure with reflinked and exclusive files.
+    let dir = format!("{mp}/testdir");
+    fs::create_dir(&dir).unwrap();
+    write_test_data(Path::new(&dir), "original.bin", 256 * 1024);
+    // Reflink copy: shares extents with the original.
+    Command::new("cp")
+        .args([
+            "--reflink=always",
+            &format!("{dir}/original.bin"),
+            &format!("{dir}/clone.bin"),
+        ])
+        .status()
+        .expect("cp --reflink failed");
+    // A non-reflinked file: all bytes are exclusive.
+    write_test_data(Path::new(&dir), "unique.bin", 128 * 1024);
+    btrfs_ok(&["filesystem", "sync", mp]);
+
+    snap!(
+        "btrfs filesystem du <MOUNT>/testdir",
+        redact(&btrfs_ok(&["filesystem", "du", &dir]), &mnt)
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
 fn filesystem_defrag() {
     let (_td, mnt) = single_mount();
     let mp = mnt.path().to_str().unwrap();

@@ -4,4 +4,4 @@ description: btrfs filesystem du -s <MOUNT>/subvol1
 expression: "redact_paths(&btrfs_ok(&[\"filesystem\", \"du\", \"-s\", &subvol]), &mnt)"
 ---
      Total   Exclusive  Set shared  Filename
-        0B          0B          0B  <MOUNT>/subvol1
+     0.00B       0.00B       0.00B  <MOUNT>/subvol1

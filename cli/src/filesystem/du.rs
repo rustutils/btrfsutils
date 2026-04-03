@@ -79,14 +79,14 @@ fn process_top_level(
 
     let root_dev = meta.dev();
 
-    let total = if meta.is_file() {
+    let (total, file_shared) = if meta.is_file() {
         let file = File::open(path)
             .with_context(|| format!("cannot open '{}'", path.display()))?;
         let info = file_extents(file.as_fd()).map_err(|e| {
             anyhow::anyhow!("fiemap failed on '{}': {e}", path.display())
         })?;
         shared_ranges.extend_from_slice(&info.shared_extents);
-        info.total_bytes
+        (info.total_bytes, info.shared_bytes)
     } else if meta.is_dir() {
         walk_dir(
             path,
@@ -97,11 +97,11 @@ fn process_top_level(
             mode,
         )?
     } else {
-        0
+        (0, 0)
     };
 
     let set_shared = compute_set_shared(&mut shared_ranges);
-    let exclusive = total.saturating_sub(set_shared);
+    let exclusive = total.saturating_sub(file_shared);
 
     println!(
         "{:>10}  {:>10}  {:>10}  {}",
@@ -115,7 +115,7 @@ fn process_top_level(
 }
 
 /// Walk `dir` recursively, printing one line per entry (unless `summarize`),
-/// and return the total bytes for the whole subtree.
+/// and return `(total_bytes, shared_bytes)` for the whole subtree.
 ///
 /// `root_dev` is the device number of the top-level path.  Subdirectories on
 /// a different device (i.e. other mounted filesystems) are silently skipped so
@@ -128,8 +128,9 @@ fn walk_dir(
     shared_ranges: &mut Vec<(u64, u64)>,
     summarize: bool,
     mode: &SizeFormat,
-) -> Result<u64> {
+) -> Result<(u64, u64)> {
     let mut dir_total: u64 = 0;
+    let mut dir_shared: u64 = 0;
 
     let entries = fs::read_dir(dir).with_context(|| {
         format!("cannot read directory '{}'", dir.display())
@@ -202,8 +203,9 @@ fn walk_dir(
 
             shared_ranges.extend_from_slice(&info.shared_extents);
             dir_total += info.total_bytes;
+            dir_shared += info.shared_bytes;
         } else {
-            let sub_total = walk_dir(
+            let (sub_total, sub_shared) = walk_dir(
                 &entry_path,
                 root_dev,
                 seen,
@@ -213,22 +215,22 @@ fn walk_dir(
             )?;
 
             if !summarize {
-                // For non-top-level directories, set shared is shown as "-".
-                // The set-shared total is only computed at the top level.
+                let excl = sub_total.saturating_sub(sub_shared);
                 println!(
                     "{:>10}  {:>10}  {:>10}  {}",
                     fmt_size(sub_total, mode),
-                    "-",
+                    fmt_size(excl, mode),
                     "-",
                     entry_path.display()
                 );
             }
 
             dir_total += sub_total;
+            dir_shared += sub_shared;
         }
     }
 
-    Ok(dir_total)
+    Ok((dir_total, dir_shared))
 }
 
 /// Merge `ranges` in place and return the total bytes covered by the union.

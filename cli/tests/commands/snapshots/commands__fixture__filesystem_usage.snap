@@ -7,14 +7,14 @@ Overall:
     Device size:		 109.00MiB
     Device allocated:		  88.00MiB
     Device unallocated:		  21.00MiB
-    Device missing:		        0B
-    Device slack:		        0B
+    Device missing:		     0.00B
+    Device slack:		     0.00B
     Used:			   2.01MiB
     Free (estimated):		  28.02MiB	(min: 17.52MiB)
     Free (statfs, df):		  27.02MiB
     Data ratio:			      1.00
     Metadata ratio:		      2.00
-    Global reserve:		   5.75MiB	(used: 0B)
+    Global reserve:		   5.75MiB	(used: 0.00B)
     Multiple profiles:		        no
 
 Data,single: Size:8.00MiB, Used:1000.00KiB (12.21%)

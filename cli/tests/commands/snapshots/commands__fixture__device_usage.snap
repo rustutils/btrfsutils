@@ -5,7 +5,7 @@ expression: "redact_paths(&btrfs_ok(&[\"device\", \"usage\", mp]), &mnt)"
 ---
 <DEV>, ID: 1
    Device size:          109.00MiB
-   Device slack:                0B
+   Device slack:             0.00B
    Data,single:           64.00KiB
    Metadata,DUP:         128.00KiB
    System,DUP:           128.00KiB

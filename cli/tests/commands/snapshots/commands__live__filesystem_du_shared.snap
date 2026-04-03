@@ -1,0 +1,10 @@
+---
+source: cli/tests/commands/live.rs
+description: btrfs filesystem du <MOUNT>/testdir
+expression: "redact(&btrfs_ok(&[\"filesystem\", \"du\", &dir]), &mnt)"
+---
+     Total   Exclusive  Set shared  Filename
+ 256.00KiB       0.00B           -  <MOUNT>/testdir/original.bin
+ 256.00KiB       0.00B           -  <MOUNT>/testdir/clone.bin
+ 128.00KiB   128.00KiB           -  <MOUNT>/testdir/unique.bin
+ 640.00KiB   128.00KiB   256.00KiB  <MOUNT>/testdir

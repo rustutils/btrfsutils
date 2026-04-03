@@ -58,11 +58,7 @@ pub fn human_bytes(bytes: u64) -> String {
         value /= 1024.0;
         unit += 1;
     }
-    if unit == 0 {
-        format!("{bytes}B")
-    } else {
-        format!("{value:.2}{}", UNITS[unit])
-    }
+    format!("{value:.2}{}", UNITS[unit])
 }
 
 /// Format a byte count as a human-readable string using SI (base-1000) prefixes.
@@ -75,11 +71,7 @@ pub fn human_bytes_si(bytes: u64) -> String {
         value /= 1000.0;
         unit += 1;
     }
-    if unit == 0 {
-        format!("{bytes}B")
-    } else {
-        format!("{value:.2}{}", UNITS[unit])
-    }
+    format!("{value:.2}{}", UNITS[unit])
 }
 
 /// Format a [`SystemTime`] as a local-time datetime string in the same style
@@ -275,13 +267,13 @@ mod tests {
 
     #[test]
     fn human_bytes_zero() {
-        assert_eq!(human_bytes(0), "0B");
+        assert_eq!(human_bytes(0), "0.00B");
     }
 
     #[test]
     fn human_bytes_small() {
-        assert_eq!(human_bytes(1), "1B");
-        assert_eq!(human_bytes(1023), "1023B");
+        assert_eq!(human_bytes(1), "1.00B");
+        assert_eq!(human_bytes(1023), "1023.00B");
     }
 
     #[test]

@@ -6,4 +6,4 @@ expression: "redact_paths(&btrfs_ok(&[\"filesystem\", \"df\", mp]), &mnt)"
 Data, single: total=8.00MiB, used=1000.00KiB
 System, DUP: total=8.00MiB, used=16.00KiB
 Metadata, DUP: total=32.00MiB, used=512.00KiB
-GlobalReserve, single: total=5.75MiB, used=0B
+GlobalReserve, single: total=5.75MiB, used=0.00B
