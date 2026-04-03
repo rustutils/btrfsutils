@@ -172,6 +172,10 @@
 
           cargo-test = craneLib.cargoTest (commonArgs // {
             inherit cargoArtifacts;
+            # mkfs integration tests run `btrfs check` on generated images.
+            nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
+              pkgs.btrfs-progs
+            ];
           });
 
           cargo-clippy = craneLib.cargoClippy (commonArgs // {
