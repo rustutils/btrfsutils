@@ -22,7 +22,7 @@ use crate::{
         btrfs_ioctl_get_subvol_info_args, btrfs_ioctl_ino_lookup_args,
         btrfs_ioctl_subvol_wait, btrfs_ioctl_vol_args_v2, btrfs_qgroup_inherit,
     },
-    tree_search::{SearchKey, tree_search},
+    tree_search::{SearchFilter, tree_search},
 };
 use bitflags::bitflags;
 use nix::libc::c_char;
@@ -423,7 +423,7 @@ pub fn subvolume_default_get(fd: BorrowedFd) -> nix::Result<u64> {
 
     tree_search(
         fd,
-        SearchKey::for_objectid_range(
+        SearchFilter::for_objectid_range(
             u64::from(BTRFS_ROOT_TREE_OBJECTID),
             BTRFS_DIR_ITEM_KEY,
             u64::from(BTRFS_ROOT_TREE_DIR_OBJECTID),
@@ -496,7 +496,7 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
 
     tree_search(
         fd,
-        SearchKey::for_objectid_range(
+        SearchFilter::for_objectid_range(
             u64::from(BTRFS_ROOT_TREE_OBJECTID),
             BTRFS_ROOT_ITEM_KEY,
             u64::from(BTRFS_FIRST_FREE_OBJECTID),
@@ -515,7 +515,7 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
 
     tree_search(
         fd,
-        SearchKey::for_objectid_range(
+        SearchFilter::for_objectid_range(
             u64::from(BTRFS_ROOT_TREE_OBJECTID),
             BTRFS_ROOT_BACKREF_KEY,
             u64::from(BTRFS_FIRST_FREE_OBJECTID),

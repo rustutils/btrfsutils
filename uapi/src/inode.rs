@@ -12,7 +12,7 @@ use crate::{
         btrfs_ioc_logical_ino_v2, btrfs_ioctl_ino_lookup_user_args,
         btrfs_root_ref,
     },
-    tree_search::{SearchKey, tree_search},
+    tree_search::{SearchFilter, tree_search},
 };
 use std::os::fd::{AsRawFd, BorrowedFd};
 
@@ -274,7 +274,7 @@ fn subvolid_resolve_sub(
 
     tree_search(
         fd,
-        SearchKey::for_objectid_range(
+        SearchFilter::for_objectid_range(
             u64::from(crate::raw::BTRFS_ROOT_TREE_OBJECTID),
             crate::raw::BTRFS_ROOT_BACKREF_KEY,
             subvol_id,

@@ -17,7 +17,7 @@ use crate::{
         btrfs_ioctl_clone_range_args, btrfs_ioctl_encoded_io_args,
         btrfs_ioctl_received_subvol_args, btrfs_ioctl_send_args,
     },
-    tree_search::{SearchKey, tree_search},
+    tree_search::{SearchFilter, tree_search},
 };
 use bitflags::bitflags;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
@@ -318,7 +318,7 @@ fn search_uuid_tree(
     let objectid = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
     let offset = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
 
-    let mut key = SearchKey::for_type(
+    let mut key = SearchFilter::for_type(
         u64::from(raw::BTRFS_UUID_TREE_OBJECTID),
         item_type,
     );

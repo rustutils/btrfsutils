@@ -33,7 +33,7 @@ use crate::{
         btrfs_ioctl_quota_ctl_args, btrfs_ioctl_quota_rescan_args,
         btrfs_qgroup_limit,
     },
-    tree_search::{Key, SearchFilter, SearchKey, tree_search},
+    tree_search::{Key, SearchFilter, tree_search},
 };
 use bitflags::bitflags;
 use nix::errno::Errno;
@@ -512,7 +512,7 @@ fn collect_subvol_ids(fd: BorrowedFd) -> nix::Result<HashSet<u64>> {
     // BTRFS_LAST_FREE_OBJECTID binds as i32 = -256; cast to u64 gives
     // 0xFFFFFFFF_FFFFFF00 as expected.
     #[allow(clippy::cast_sign_loss)]
-    let key = SearchKey::for_objectid_range(
+    let key = SearchFilter::for_objectid_range(
         u64::from(BTRFS_ROOT_TREE_OBJECTID),
         BTRFS_ROOT_ITEM_KEY,
         u64::from(BTRFS_FIRST_FREE_OBJECTID),

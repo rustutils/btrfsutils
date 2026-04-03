@@ -7,7 +7,7 @@ use btrfs_uapi::{
         BTRFS_CHUNK_TREE_OBJECTID, BTRFS_EXTENT_DATA_KEY,
         BTRFS_FIRST_CHUNK_TREE_OBJECTID,
     },
-    tree_search::{Key, SearchFilter, SearchKey, tree_search},
+    tree_search::{Key, SearchFilter, tree_search},
 };
 use clap::Parser;
 use std::{
@@ -120,7 +120,7 @@ fn read_chunk_tree(fd: std::os::unix::io::BorrowedFd) -> Result<Vec<Chunk>> {
 
     tree_search(
         fd,
-        SearchKey::for_objectid_range(
+        SearchFilter::for_objectid_range(
             u64::from(BTRFS_CHUNK_TREE_OBJECTID),
             BTRFS_CHUNK_ITEM_KEY,
             u64::from(BTRFS_FIRST_CHUNK_TREE_OBJECTID),

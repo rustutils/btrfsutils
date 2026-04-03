@@ -29,9 +29,26 @@ All notable changes to this project will be documented in this file.
   qgroup entry parsing)
 - `--format modern` output mode (`BTRFS_OUTPUT_FORMAT=modern` env):
   opt-in improved formatting with adaptive column widths via `cols`
+- `btrfs subvolume list --format modern`: tree-view output with
+  unicode connectors showing the subvolume parent-child hierarchy
 - `RunContext` struct for passing runtime options through commands
 - `Runnable::supported_formats()`: commands declare which formats
   they support; unsupported formats produce a clear error
+
+### Changed
+
+- `SearchKey` renamed to `SearchFilter` with compound `Key` struct:
+  the `(objectid, item_type, offset)` triple is now a single `Key`
+  type, and `SearchFilter` uses `start`/`end` keys instead of six
+  flat min/max fields, making the compound key semantics explicit
+
+### Fixed
+
+- `btrfs subvolume list`: snapshots and subvolumes with non-zero
+  ROOT_ITEM key offsets now show the correct parent ID and name.
+  The tree search callback was not filtering on `hdr.item_type`,
+  causing ROOT_BACKREF and ROOT_REF items to be misinterpreted as
+  ROOT_ITEM data
 
 ## 0.8.0
 

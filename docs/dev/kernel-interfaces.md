@@ -61,27 +61,33 @@ The tree search ioctl is the primary way to read data from btrfs B-trees from
 userspace. It is wrapped in `uapi/src/tree_search.rs` as a callback-based cursor:
 
 ```rust
-tree_search(fd, SearchKey::for_type(tree_id, item_type), |hdr, data| {
+tree_search(fd, SearchFilter::for_type(tree_id, item_type), |hdr, data| {
     // hdr: SearchHeader — objectid, offset, item_type, len (host byte order)
     // data: &[u8] — raw on-disk item payload (little-endian)
     Ok(())
 })?;
 ```
 
-Common `SearchKey` constructors:
+Common `SearchFilter` constructors:
 
 ```rust
 // All items of a specific type across all objectids:
-SearchKey::for_type(raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
-                    raw::BTRFS_CHUNK_ITEM_KEY as u32)
+SearchFilter::for_type(raw::BTRFS_CHUNK_TREE_OBJECTID as u64,
+                       raw::BTRFS_CHUNK_ITEM_KEY as u32)
 
 // Items of a specific type within an objectid range:
-SearchKey::for_objectid_range(tree_id, item_type, min_oid, max_oid)
+SearchFilter::for_objectid_range(tree_id, item_type, min_oid, max_oid)
 ```
 
 For searches spanning multiple item types (e.g. the quota tree walk that reads
-STATUS, INFO, LIMIT, and RELATION keys in one pass), construct `SearchKey`
-directly and set `min_type`/`max_type`.
+STATUS, INFO, LIMIT, and RELATION keys in one pass), construct `SearchFilter`
+directly with `start` and `end` `Key` values spanning the desired type range.
+
+**Important:** The `start` and `end` keys form compound bounds on the B-tree
+key order `(objectid, item_type, offset)`. They are not independent per-field
+filters. Items with unexpected types can appear if their compound key falls
+between `start` and `end`. Callbacks should filter on `hdr.item_type` when
+they need a single type.
 
 ### Bindgen type note
 

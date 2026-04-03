@@ -6,7 +6,7 @@ use btrfs_uapi::{
     inode::ino_paths,
     raw::BTRFS_EXTENT_DATA_KEY,
     subvolume::subvolume_info,
-    tree_search::{SearchKey, tree_search},
+    tree_search::{SearchFilter, tree_search},
 };
 use clap::Parser;
 use std::{os::unix::io::AsFd, path::PathBuf};
@@ -45,7 +45,7 @@ impl Runnable for SubvolumeFindNewCommand {
         // Search tree 0 (the subvolume's own tree, relative to the fd) for
         // EXTENT_DATA_KEY items.  The min_transid filter restricts results to
         // items whose metadata block was written at or after last_gen.
-        let mut key = SearchKey::for_type(0, BTRFS_EXTENT_DATA_KEY);
+        let mut key = SearchFilter::for_type(0, BTRFS_EXTENT_DATA_KEY);
         key.min_transid = self.last_gen;
 
         let mut cache_ino: u64 = 0;

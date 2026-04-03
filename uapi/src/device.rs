@@ -25,7 +25,7 @@ use crate::{
         btrfs_ioctl_get_dev_stats, btrfs_ioctl_vol_args,
         btrfs_ioctl_vol_args_v2,
     },
-    tree_search::{SearchKey, tree_search},
+    tree_search::{SearchFilter, tree_search},
 };
 use nix::{errno::Errno, libc::c_char};
 use std::{
@@ -428,7 +428,7 @@ pub fn device_min_size(fd: BorrowedFd, devid: u64) -> nix::Result<u64> {
 
     tree_search(
         fd,
-        SearchKey::for_objectid_range(
+        SearchFilter::for_objectid_range(
             u64::from(BTRFS_DEV_TREE_OBJECTID),
             BTRFS_DEV_EXTENT_KEY,
             devid,

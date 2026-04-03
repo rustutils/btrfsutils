@@ -68,10 +68,18 @@ impl Key {
 
 /// Filter specifying which items to return from a tree search.
 ///
-/// The kernel searches the compound key space `(objectid, item_type, offset)`.
-/// All items whose compound key falls in the inclusive range `[start, end]`
-/// are returned.  The three components of `start` and `end` are NOT
-/// independent filters — they form compound bounds on the B-tree key order.
+/// Filtering works in three stages:
+///
+/// 1. Select a tree by `tree_id` (e.g. root tree, chunk tree, quota tree).
+/// 2. Return only items whose compound key `(objectid, item_type, offset)`
+///    falls within the inclusive range `[start, end]`.  Because the key is a
+///    compound tuple, the three components of `start` and `end` are not
+///    independent filters — they form a single ordered bound on the B-tree.
+///    This means items with unexpected types can appear if their compound key
+///    is between `start` and `end`; callbacks should filter on
+///    `hdr.item_type` when they need a single type.
+/// 3. Trim results to only include items stored in metadata blocks whose
+///    transaction ID falls within `[min_transid, max_transid]`.
 ///
 /// Build a filter for common cases with [`SearchFilter::for_type`] or
 /// [`SearchFilter::for_objectid_range`].
@@ -81,14 +89,13 @@ impl Key {
 /// call site.
 #[derive(Debug, Clone)]
 pub struct SearchFilter {
-    /// Tree to search: use a `BTRFS_*_TREE_OBJECTID` constant from `crate::raw`.
+    /// Tree to search: a `BTRFS_*_TREE_OBJECTID` constant from `crate::raw`.
     pub tree_id: u64,
     /// Lower bound of the key range (inclusive).
     pub start: Key,
     /// Upper bound of the key range (inclusive).
     pub end: Key,
-    /// Lower bound on the transaction ID of the metadata block holding the
-    /// item (not the transaction that created the item itself).
+    /// Lower bound on the metadata block transaction ID (inclusive).
     pub min_transid: u64,
     /// Upper bound on the metadata block transaction ID (inclusive).
     pub max_transid: u64,
@@ -142,10 +149,6 @@ impl SearchFilter {
         }
     }
 }
-
-// Backward-compatible alias.
-#[doc(hidden)]
-pub type SearchKey = SearchFilter;
 
 /// Metadata returned for each item found by [`tree_search`].
 ///
@@ -202,15 +205,15 @@ const SEARCH_HEADER_SIZE: usize = mem::size_of::<btrfs_ioctl_search_header>();
 /// Most trees require `CAP_SYS_ADMIN`.  The subvolume tree of the inode
 /// belonging to `fd` can be searched without elevated privileges by setting
 /// `key.tree_id = 0`.
-#[allow(clippy::needless_pass_by_value)] // SearchKey is small but not Copy by design
+#[allow(clippy::needless_pass_by_value)] // SearchFilter is small but not Copy by design
 pub fn tree_search(
     fd: BorrowedFd,
-    key: SearchKey,
+    filter: SearchFilter,
     mut f: impl FnMut(&SearchHeader, &[u8]) -> nix::Result<()>,
 ) -> nix::Result<()> {
     let mut args: btrfs_ioctl_search_args = unsafe { mem::zeroed() };
 
-    fill_search_key(&mut args.key, &key);
+    fill_search_key(&mut args.key, &filter);
 
     loop {
         args.key.nr_items = ITEMS_PER_BATCH;
@@ -304,11 +307,11 @@ const DEFAULT_V2_BUF_SIZE: usize = 64 * 1024;
 /// # Errors
 ///
 /// Returns `Err` if the ioctl fails or the callback returns an error.
-#[allow(clippy::needless_pass_by_value)] // SearchKey is small but not Copy by design
+#[allow(clippy::needless_pass_by_value)] // SearchFilter is small but not Copy by design
 #[allow(clippy::too_many_lines)]
 pub fn tree_search_v2(
     fd: BorrowedFd,
-    key: SearchKey,
+    filter: SearchFilter,
     buf_size: Option<usize>,
     mut f: impl FnMut(&SearchHeader, &[u8]) -> nix::Result<()>,
 ) -> nix::Result<()> {
@@ -323,7 +326,7 @@ pub fn tree_search_v2(
     // SAFETY: buf is correctly sized and aligned for btrfs_ioctl_search_args_v2.
     let args_ptr = buf.as_mut_ptr().cast::<btrfs_ioctl_search_args_v2>();
     unsafe {
-        fill_search_key(&mut (*args_ptr).key, &key);
+        fill_search_key(&mut (*args_ptr).key, &filter);
     }
 
     loop {

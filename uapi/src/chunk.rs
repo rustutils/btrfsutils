@@ -16,7 +16,7 @@ use crate::{
         BTRFS_FIRST_CHUNK_TREE_OBJECTID,
     },
     space::BlockGroupFlags,
-    tree_search::{Key, SearchFilter, SearchKey, tree_search},
+    tree_search::{Key, SearchFilter, tree_search},
 };
 use btrfs_disk::items::ChunkItem;
 use std::os::unix::io::BorrowedFd;
@@ -85,7 +85,7 @@ pub fn device_chunk_allocations(
 
     tree_search(
         fd,
-        SearchKey::for_type(
+        SearchFilter::for_type(
             u64::from(BTRFS_CHUNK_TREE_OBJECTID),
             BTRFS_CHUNK_ITEM_KEY,
         ),
@@ -120,7 +120,7 @@ pub fn chunk_list(fd: BorrowedFd) -> nix::Result<Vec<ChunkEntry>> {
 
     tree_search(
         fd,
-        SearchKey::for_objectid_range(
+        SearchFilter::for_objectid_range(
             u64::from(BTRFS_CHUNK_TREE_OBJECTID),
             BTRFS_CHUNK_ITEM_KEY,
             u64::from(BTRFS_FIRST_CHUNK_TREE_OBJECTID),
