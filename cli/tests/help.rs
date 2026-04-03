@@ -10,6 +10,9 @@ use clap::CommandFactory;
 
 /// Render the long help text for a subcommand path (e.g. &["subvolume", "list"]).
 fn help(path: &[&str]) -> String {
+    // Prevent BTRFS_OUTPUT_FORMAT from the outer environment from appearing
+    // in rendered help text (clap shows `[env: VAR=value]` when set).
+    unsafe { std::env::remove_var("BTRFS_OUTPUT_FORMAT") };
     let mut cmd = Arguments::command();
     for &name in path {
         cmd = cmd

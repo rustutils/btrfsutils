@@ -8,10 +8,14 @@ use btrfs_cli::Arguments;
 use clap::Parser;
 
 fn parse(args: &[&str]) -> Arguments {
+    // Prevent BTRFS_OUTPUT_FORMAT from the outer environment from affecting
+    // parsed snapshots (clap reads env vars even with try_parse_from).
+    unsafe { std::env::remove_var("BTRFS_OUTPUT_FORMAT") };
     Arguments::try_parse_from(args).unwrap()
 }
 
 fn parse_err(args: &[&str]) -> String {
+    unsafe { std::env::remove_var("BTRFS_OUTPUT_FORMAT") };
     let err = Arguments::try_parse_from(args).unwrap_err();
     let rendered = err.render().to_string();
     // Only keep the error lines, not the full usage.

@@ -23,6 +23,7 @@ fn btrfs(args: &[&str]) -> (String, String, i32) {
     let output = Command::new(btrfs_bin())
         .args(args)
         .env("TZ", SNAPSHOT_TZ)
+        .env_remove("BTRFS_OUTPUT_FORMAT")
         .output()
         .expect("failed to run btrfs binary");
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
