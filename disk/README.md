@@ -19,22 +19,30 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ### Parsing (read path)
 
-- **Superblock**: full parsing including device items, backup roots, checksum type, feature flags, label
+- **Superblock**: full parsing including device items, backup roots, checksum
+  type, feature flags, label
 - **Tree nodes**: leaf and internal node parsing with key/item extraction
-- **Item payloads**: typed structs for 30+ item types (InodeItem, DirItem, RootItem, FileExtentItem, ExtentItem, ChunkItem, DevItem, DevExtent, BlockGroupItem, QgroupStatus/Info/Limit, and more)
-- **Chunk tree**: logical-to-physical address resolution via ChunkTreeCache, sys_chunk_array bootstrap parsing
-- **Block reader**: read tree blocks by logical address, full filesystem bootstrap (superblock -> chunk tree -> root tree)
+- **Item payloads**: typed structs for 30+ item types (InodeItem, DirItem,
+  RootItem, FileExtentItem, ExtentItem, ChunkItem, DevItem, DevExtent,
+  BlockGroupItem, QgroupStatus/Info/Limit, and more)
+- **Chunk tree**: logical-to-physical address resolution via ChunkTreeCache,
+  sys_chunk_array bootstrap parsing
+- **Block reader**: read tree blocks by logical address, full filesystem
+  bootstrap (superblock -> chunk tree -> root tree)
 - **Tree traversal**: BFS/DFS walk with visitor callbacks
-- **Key types**: KeyType and ObjectId enums with Display formatting, format_key for human-readable output
+- **Key types**: KeyType and ObjectId enums with Display formatting, format_key
+  for human-readable output
 
 ### Serialization (write path)
 
-- **Raw constants**: all `BTRFS_*` constants from kernel headers via bindgen (struct sizes, field offsets, magic numbers, item type codes, feature flags)
-- **Write helpers**: little-endian writers (`write_le_u64`, `write_le_u32`, `write_le_u16`, `write_uuid`) for constructing on-disk structures in byte buffers
+- **Raw constants**: all `BTRFS_*` constants from kernel headers via bindgen
+  (struct sizes, field offsets, magic numbers, item type codes, feature flags)
+- **Write helpers**: random-access little-endian writers (`write_le_u64`,
+  `write_le_u32`, `write_le_u16`, `write_uuid`) for patching on-disk
+  structures in byte buffers. Sequential writes use `bytes::BufMut` directly.
 
 ### Shared
 
-- **Little-endian readers**: `read_le_u64`, `read_le_u32`, `read_le_u16`, `read_uuid`
 - **CRC32C**: used for extent data ref hash computation
 
 ## What's not yet implemented
@@ -44,7 +52,7 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 ## Testing
 
 Unit tests cover superblock parsing, tree node parsing, chunk cache operations,
-key type round-trips, and LE reader/writer helpers.
+key type round-trips, and write helpers.
 
 ```sh
 cargo test -p btrfs-disk

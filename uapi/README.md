@@ -19,9 +19,12 @@ All non-superseded btrfs ioctls are wrapped, plus several standard VFS ioctls:
 - **Device**: add, remove, scan, forget, ready, info, stats
 - **Replace**: start, status, cancel
 - **Scrub**: start, cancel, progress
-- **Subvolume**: create, delete, snapshot, info, flags get/set, default get/set, list
-- **Send / Receive**: send stream, received subvol set, clone range, encoded read/write, UUID tree search
-- **Filesystem**: fs info, space info, sync, start/wait sync, label get/set, resize
+- **Subvolume**: create, delete, snapshot, info, flags get/set, default
+  get/set, list
+- **Send / Receive**: send stream, received subvol set, clone range, encoded
+  read/write, UUID tree search
+- **Filesystem**: fs info, space info, sync, start/wait sync, label get/set,
+  resize
 - **Quota**: enable, disable, rescan, rescan status/wait
 - **Qgroup**: create, destroy, assign, remove, limit, list, clear stale
 - **Tree search**: generic v1 and v2 with callback-based cursor
@@ -31,7 +34,8 @@ All non-superseded btrfs ioctls are wrapped, plus several standard VFS ioctls:
 - **Fiemap**: file extent mapping (FS_IOC_FIEMAP)
 - **Verity**: fs-verity enablement (FS_IOC_ENABLE_VERITY)
 - **Block device**: device size, discard range/whole
-- **Sysfs**: filesystem info, commit stats, quota status, scrub speed limits, send stream version
+- **Sysfs**: filesystem info, commit stats, quota status, scrub speed limits,
+  send stream version
 - **Chunk/device tree**: chunk allocation walks, min device size calculation
 
 ## What's not wrapped
@@ -42,8 +46,12 @@ v2 is already wrapped.
 
 ## Testing
 
-- **Unit tests**: inline `#[cfg(test)]` modules across most wrapper modules. Cover struct parsing, search key construction, cursor advancement, builder patterns, Display implementations, and helper functions. No privileges needed.
-- **Integration tests**: exercise ioctl wrappers against real btrfs filesystems on loopback devices. Cover balance, device, scrub, subvolume, quota, qgroup, send/receive, and more. Require root.
+- **Unit tests**: inline `#[cfg(test)]` modules across most wrapper modules.
+  Cover struct parsing, search key construction, cursor advancement, builder
+  patterns, Display implementations, and helper functions. No privileges needed.
+- **Integration tests**: exercise ioctl wrappers against real btrfs filesystems
+  on loopback devices. Cover balance, device, scrub, subvolume, quota, qgroup,
+  send/receive, and more. Require root.
 
 ```sh
 # Run unit tests (no privileges needed)

@@ -18,36 +18,43 @@ or have a simpler implementation.
 
 ## Goals
 
-**Drop-in compatibility.** The default output of every command matches
-btrfs-progs exactly. Scripts, monitoring tools, and muscle memory all
-work unchanged.
-
-**Modern output, when you want it.** Pass `--modern` or set
-`BTRFS_MODERN=1` to get improved formatting: adaptive column widths,
-cleaner tables, and (eventually) colors. This is opt-in and never
-changes the default behavior.
-
-**Reusable libraries.** The low-level crates (`btrfs-uapi`, `btrfs-disk`,
-`btrfs-stream`) are MIT/Apache-2.0 licensed and designed to be useful
-independently of the CLI tools.
+- **Drop-in compatibility.** The goal is for the output of every command to
+  match btrfs-progs exactly. Scripts, monitoring tools, and muscle memory all
+  work unchanged.
+- **Opt-in added features**. Pass `--format modern` or set `BTRFS_OUTPUT_FORMAT=modern`
+  to opt in to cleaner-looking output, progress bars, adaptive column widths.
+- **Reusable libraries.** Bring btrfs to Rust through the low-level crates
+  (`btrfs-uapi`, `btrfs-disk`, `btrfs-stream`) that you can use in your own
+  code. Permissively licensed under MIT/Apache-2.0, and written from scratch
+  to be ergonomic.
 
 ## Status
 
 This project is under active development. Most commands are fully implemented
 and produce output matching the C original.
 
-Currently, `btrfs check` and `btrfs rescue` are not implemented, and exist
-only as stubs.
+`btrfs check` is fully implemented with 7-phase read-only filesystem
+verification. `btrfs rescue` is partially implemented: `super-recover`,
+`zero-log`, and `create-control-device` work, with 6 remaining subcommands
+as stubs pending transaction infrastructure.
 
 ## Installation
 
-Install the individual tools as separate binaries:
+Currently, we provide three executables: `btrfs` (the main btrfs CLI, use it to
+configure and monitor btrfs filesystems), `btrfs-tune` (use it to modify feature flags, UUIDs, and seeding on unmounted filesystems),
+and `btrfs-mkfs` (use it to format drives as btrfs filesystems, or bootrap
+filesystem images from folder content).
+
+You can install the individual tools as separate binaries:
 
 ```sh
 cargo install btrfs-cli btrfs-mkfs btrfs-tune
 ```
 
-Or install a single `btrfs` binary with mkfs, tune, and multicall support:
+You can also install just the `btrfs` CLI tool, but embed the other binaries as
+subcommands, using the `mkfs` and `tune` features. The `multicall` feature
+means that you can use them busybox-style: symlink the binary to `mkfs.btrfs`,
+and it will run that tool by default.
 
 ```sh
 cargo install btrfs-cli --features mkfs,tune,multicall
@@ -56,8 +63,12 @@ cargo install btrfs-cli --features mkfs,tune,multicall
 With the `mkfs` and `tune` features, `btrfs mkfs` and `btrfs tune` are
 available as subcommands. With the `multicall` feature, the binary also
 dispatches by program name: symlink or hardlink it to `mkfs.btrfs`,
-`btrfs-mkfs`, `btrfstune`, or `btrfs-tune` and it will behave as that
-tool directly.
+`btrfs-mkfs`, `btrfstune`, or `btrfs-tune` and it will behave as that tool
+directly.
+
+This installation mode is useful in combination with building statically for
+`x86_64-unknown-linux-musl`, if you want a single portable binary to deploy to
+systems.
 
 ## Building
 
