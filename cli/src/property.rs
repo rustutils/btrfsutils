@@ -1,4 +1,4 @@
-use crate::{RunContext, Runnable};
+use crate::{CommandGroup, Runnable};
 use anyhow::Result;
 use clap::Parser;
 use std::{
@@ -39,12 +39,12 @@ pub struct PropertyCommand {
     pub subcommand: PropertySubcommand,
 }
 
-impl Runnable for PropertyCommand {
-    fn run(&self, ctx: &RunContext) -> Result<()> {
+impl CommandGroup for PropertyCommand {
+    fn leaf(&self) -> &dyn Runnable {
         match &self.subcommand {
-            PropertySubcommand::Get(cmd) => cmd.run(ctx),
-            PropertySubcommand::Set(cmd) => cmd.run(ctx),
-            PropertySubcommand::List(cmd) => cmd.run(ctx),
+            PropertySubcommand::Get(cmd) => cmd,
+            PropertySubcommand::Set(cmd) => cmd,
+            PropertySubcommand::List(cmd) => cmd,
         }
     }
 }

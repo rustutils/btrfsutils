@@ -1,8 +1,7 @@
 use crate::{
-    RunContext, Runnable,
+    CommandGroup, Runnable,
     util::{SizeFormat, fmt_size},
 };
-use anyhow::Result;
 use btrfs_uapi::scrub::ScrubProgress;
 use clap::Parser;
 
@@ -27,14 +26,14 @@ pub struct ScrubCommand {
     pub subcommand: ScrubSubcommand,
 }
 
-impl Runnable for ScrubCommand {
-    fn run(&self, ctx: &RunContext) -> Result<()> {
+impl CommandGroup for ScrubCommand {
+    fn leaf(&self) -> &dyn Runnable {
         match &self.subcommand {
-            ScrubSubcommand::Start(cmd) => cmd.run(ctx),
-            ScrubSubcommand::Cancel(cmd) => cmd.run(ctx),
-            ScrubSubcommand::Resume(cmd) => cmd.run(ctx),
-            ScrubSubcommand::Status(cmd) => cmd.run(ctx),
-            ScrubSubcommand::Limit(cmd) => cmd.run(ctx),
+            ScrubSubcommand::Start(cmd) => cmd,
+            ScrubSubcommand::Cancel(cmd) => cmd,
+            ScrubSubcommand::Resume(cmd) => cmd,
+            ScrubSubcommand::Status(cmd) => cmd,
+            ScrubSubcommand::Limit(cmd) => cmd,
         }
     }
 }

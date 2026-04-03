@@ -1,5 +1,4 @@
-use crate::{Format, RunContext, Runnable};
-use anyhow::Result;
+use crate::{CommandGroup, Runnable};
 use clap::Parser;
 
 mod assign;
@@ -28,23 +27,16 @@ pub struct QgroupCommand {
     pub subcommand: QgroupSubcommand,
 }
 
-impl Runnable for QgroupCommand {
-    fn supported_formats(&self) -> &[Format] {
+impl CommandGroup for QgroupCommand {
+    fn leaf(&self) -> &dyn Runnable {
         match &self.subcommand {
-            QgroupSubcommand::Show(cmd) => cmd.supported_formats(),
-            _ => &[Format::Text, Format::Modern],
-        }
-    }
-
-    fn run(&self, ctx: &RunContext) -> Result<()> {
-        match &self.subcommand {
-            QgroupSubcommand::Assign(cmd) => cmd.run(ctx),
-            QgroupSubcommand::Remove(cmd) => cmd.run(ctx),
-            QgroupSubcommand::Create(cmd) => cmd.run(ctx),
-            QgroupSubcommand::Destroy(cmd) => cmd.run(ctx),
-            QgroupSubcommand::Show(cmd) => cmd.run(ctx),
-            QgroupSubcommand::Limit(cmd) => cmd.run(ctx),
-            QgroupSubcommand::ClearStale(cmd) => cmd.run(ctx),
+            QgroupSubcommand::Assign(cmd) => cmd,
+            QgroupSubcommand::Remove(cmd) => cmd,
+            QgroupSubcommand::Create(cmd) => cmd,
+            QgroupSubcommand::Destroy(cmd) => cmd,
+            QgroupSubcommand::Show(cmd) => cmd,
+            QgroupSubcommand::Limit(cmd) => cmd,
+            QgroupSubcommand::ClearStale(cmd) => cmd,
         }
     }
 }

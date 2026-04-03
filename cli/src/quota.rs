@@ -1,5 +1,4 @@
-use crate::{RunContext, Runnable};
-use anyhow::Result;
+use crate::{CommandGroup, Runnable};
 use clap::Parser;
 
 mod disable;
@@ -21,13 +20,13 @@ pub struct QuotaCommand {
     pub subcommand: QuotaSubcommand,
 }
 
-impl Runnable for QuotaCommand {
-    fn run(&self, ctx: &RunContext) -> Result<()> {
+impl CommandGroup for QuotaCommand {
+    fn leaf(&self) -> &dyn Runnable {
         match &self.subcommand {
-            QuotaSubcommand::Enable(cmd) => cmd.run(ctx),
-            QuotaSubcommand::Disable(cmd) => cmd.run(ctx),
-            QuotaSubcommand::Rescan(cmd) => cmd.run(ctx),
-            QuotaSubcommand::Status(cmd) => cmd.run(ctx),
+            QuotaSubcommand::Enable(cmd) => cmd,
+            QuotaSubcommand::Disable(cmd) => cmd,
+            QuotaSubcommand::Rescan(cmd) => cmd,
+            QuotaSubcommand::Status(cmd) => cmd,
         }
     }
 }

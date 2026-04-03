@@ -142,6 +142,29 @@ pub trait Runnable {
     }
 }
 
+/// A command group that delegates to a leaf subcommand.
+///
+/// Implement this for parent commands (e.g. `BalanceCommand`,
+/// `DeviceCommand`) that simply dispatch to their subcommand.
+/// A blanket `Runnable` impl forwards all methods through `leaf()`.
+pub trait CommandGroup {
+    fn leaf(&self) -> &dyn Runnable;
+}
+
+impl<T: CommandGroup> Runnable for T {
+    fn run(&self, ctx: &RunContext) -> Result<()> {
+        self.leaf().run(ctx)
+    }
+
+    fn supported_formats(&self) -> &[Format] {
+        self.leaf().supported_formats()
+    }
+
+    fn supports_dry_run(&self) -> bool {
+        self.leaf().supports_dry_run()
+    }
+}
+
 #[derive(Parser, Debug)]
 pub enum Command {
     Balance(BalanceCommand),
@@ -166,7 +189,21 @@ pub enum Command {
     Tune(btrfs_tune::args::Arguments),
 }
 
-impl Command {
+#[cfg(feature = "mkfs")]
+impl Runnable for btrfs_mkfs::args::Arguments {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
+        btrfs_mkfs::run::run(self)
+    }
+}
+
+#[cfg(feature = "tune")]
+impl Runnable for btrfs_tune::args::Arguments {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
+        btrfs_tune::run::run(self)
+    }
+}
+
+impl CommandGroup for Command {
     fn leaf(&self) -> &dyn Runnable {
         match self {
             Command::Balance(cmd) => cmd,
@@ -174,6 +211,8 @@ impl Command {
             Command::Device(cmd) => cmd,
             Command::Filesystem(cmd) => cmd,
             Command::Inspect(cmd) => cmd,
+            #[cfg(feature = "mkfs")]
+            Command::Mkfs(cmd) => cmd,
             Command::Property(cmd) => cmd,
             Command::Qgroup(cmd) => cmd,
             Command::Quota(cmd) => cmd,
@@ -184,57 +223,8 @@ impl Command {
             Command::Scrub(cmd) => cmd,
             Command::Send(cmd) => cmd,
             Command::Subvolume(cmd) => cmd,
-            // mkfs and tune have their own entry points, not Runnable
-            #[cfg(feature = "mkfs")]
-            Command::Mkfs(_) => unreachable!(),
             #[cfg(feature = "tune")]
-            Command::Tune(_) => unreachable!(),
-        }
-    }
-}
-
-impl Runnable for Command {
-    fn supported_formats(&self) -> &[Format] {
-        match self {
-            #[cfg(feature = "mkfs")]
-            Command::Mkfs(_) => &[Format::Text],
-            #[cfg(feature = "tune")]
-            Command::Tune(_) => &[Format::Text],
-            _ => self.leaf().supported_formats(),
-        }
-    }
-
-    fn supports_dry_run(&self) -> bool {
-        match self {
-            #[cfg(feature = "mkfs")]
-            Command::Mkfs(_) => false,
-            #[cfg(feature = "tune")]
-            Command::Tune(_) => false,
-            _ => self.leaf().supports_dry_run(),
-        }
-    }
-
-    fn run(&self, ctx: &RunContext) -> Result<()> {
-        match self {
-            Command::Balance(cmd) => cmd.run(ctx),
-            Command::Check(cmd) => cmd.run(ctx),
-            Command::Device(cmd) => cmd.run(ctx),
-            Command::Filesystem(cmd) => cmd.run(ctx),
-            Command::Inspect(cmd) => cmd.run(ctx),
-            #[cfg(feature = "mkfs")]
-            Command::Mkfs(args) => btrfs_mkfs::run::run(args),
-            Command::Property(cmd) => cmd.run(ctx),
-            Command::Qgroup(cmd) => cmd.run(ctx),
-            Command::Quota(cmd) => cmd.run(ctx),
-            Command::Receive(cmd) => cmd.run(ctx),
-            Command::Replace(cmd) => cmd.run(ctx),
-            Command::Rescue(cmd) => cmd.run(ctx),
-            Command::Restore(cmd) => cmd.run(ctx),
-            Command::Scrub(cmd) => cmd.run(ctx),
-            Command::Send(cmd) => cmd.run(ctx),
-            Command::Subvolume(cmd) => cmd.run(ctx),
-            #[cfg(feature = "tune")]
-            Command::Tune(args) => btrfs_tune::run::run(args),
+            Command::Tune(cmd) => cmd,
         }
     }
 }

@@ -1,5 +1,4 @@
-use crate::{RunContext, Runnable};
-use anyhow::Result;
+use crate::{CommandGroup, Runnable};
 use clap::Parser;
 
 mod cancel;
@@ -20,12 +19,12 @@ pub struct ReplaceCommand {
     pub subcommand: ReplaceSubcommand,
 }
 
-impl Runnable for ReplaceCommand {
-    fn run(&self, ctx: &RunContext) -> Result<()> {
+impl CommandGroup for ReplaceCommand {
+    fn leaf(&self) -> &dyn Runnable {
         match &self.subcommand {
-            ReplaceSubcommand::Start(cmd) => cmd.run(ctx),
-            ReplaceSubcommand::Status(cmd) => cmd.run(ctx),
-            ReplaceSubcommand::Cancel(cmd) => cmd.run(ctx),
+            ReplaceSubcommand::Start(cmd) => cmd,
+            ReplaceSubcommand::Status(cmd) => cmd,
+            ReplaceSubcommand::Cancel(cmd) => cmd,
         }
     }
 }

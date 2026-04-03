@@ -1,5 +1,4 @@
-use crate::{Format, RunContext, Runnable};
-use anyhow::Result;
+use crate::{CommandGroup, Runnable};
 use clap::Parser;
 
 mod create;
@@ -31,33 +30,20 @@ pub struct SubvolumeCommand {
     pub subcommand: SubvolumeSubcommand,
 }
 
-impl Runnable for SubvolumeCommand {
-    fn supported_formats(&self) -> &[Format] {
+impl CommandGroup for SubvolumeCommand {
+    fn leaf(&self) -> &dyn Runnable {
         match &self.subcommand {
-            SubvolumeSubcommand::Show(cmd) => cmd.supported_formats(),
-            SubvolumeSubcommand::List(cmd) => cmd.supported_formats(),
-            SubvolumeSubcommand::GetDefault(cmd) => cmd.supported_formats(),
-            _ => &[Format::Text, Format::Modern],
-        }
-    }
-
-    fn supports_dry_run(&self) -> bool {
-        matches!(self.subcommand, SubvolumeSubcommand::Delete(_))
-    }
-
-    fn run(&self, ctx: &RunContext) -> Result<()> {
-        match &self.subcommand {
-            SubvolumeSubcommand::Create(cmd) => cmd.run(ctx),
-            SubvolumeSubcommand::Delete(cmd) => cmd.run(ctx),
-            SubvolumeSubcommand::Snapshot(cmd) => cmd.run(ctx),
-            SubvolumeSubcommand::Show(cmd) => cmd.run(ctx),
-            SubvolumeSubcommand::List(cmd) => cmd.run(ctx),
-            SubvolumeSubcommand::GetDefault(cmd) => cmd.run(ctx),
-            SubvolumeSubcommand::SetDefault(cmd) => cmd.run(ctx),
-            SubvolumeSubcommand::GetFlags(cmd) => cmd.run(ctx),
-            SubvolumeSubcommand::SetFlags(cmd) => cmd.run(ctx),
-            SubvolumeSubcommand::FindNew(cmd) => cmd.run(ctx),
-            SubvolumeSubcommand::Sync(cmd) => cmd.run(ctx),
+            SubvolumeSubcommand::Create(cmd) => cmd,
+            SubvolumeSubcommand::Delete(cmd) => cmd,
+            SubvolumeSubcommand::Snapshot(cmd) => cmd,
+            SubvolumeSubcommand::Show(cmd) => cmd,
+            SubvolumeSubcommand::List(cmd) => cmd,
+            SubvolumeSubcommand::GetDefault(cmd) => cmd,
+            SubvolumeSubcommand::SetDefault(cmd) => cmd,
+            SubvolumeSubcommand::GetFlags(cmd) => cmd,
+            SubvolumeSubcommand::SetFlags(cmd) => cmd,
+            SubvolumeSubcommand::FindNew(cmd) => cmd,
+            SubvolumeSubcommand::Sync(cmd) => cmd,
         }
     }
 }

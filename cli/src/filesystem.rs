@@ -1,5 +1,4 @@
-use crate::{Format, RunContext, Runnable, util::SizeFormat};
-use anyhow::Result;
+use crate::{CommandGroup, Runnable, util::SizeFormat};
 use clap::{Args, Parser};
 
 mod commit_stats;
@@ -30,7 +29,7 @@ pub struct FilesystemCommand {
     pub subcommand: FilesystemSubcommand,
 }
 
-impl FilesystemCommand {
+impl CommandGroup for FilesystemCommand {
     fn leaf(&self) -> &dyn Runnable {
         match &self.subcommand {
             FilesystemSubcommand::Df(cmd) => cmd,
@@ -44,16 +43,6 @@ impl FilesystemCommand {
             FilesystemSubcommand::Mkswapfile(cmd) => cmd,
             FilesystemSubcommand::CommitStats(cmd) => cmd,
         }
-    }
-}
-
-impl Runnable for FilesystemCommand {
-    fn supported_formats(&self) -> &[Format] {
-        self.leaf().supported_formats()
-    }
-
-    fn run(&self, ctx: &RunContext) -> Result<()> {
-        self.leaf().run(ctx)
     }
 }
 

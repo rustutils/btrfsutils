@@ -1,6 +1,5 @@
 pub(crate) use crate::util::open_path;
-use crate::{RunContext, Runnable};
-use anyhow::Result;
+use crate::{CommandGroup, Runnable};
 use clap::Parser;
 
 mod cancel;
@@ -25,14 +24,14 @@ pub struct BalanceCommand {
     pub subcommand: BalanceSubcommand,
 }
 
-impl Runnable for BalanceCommand {
-    fn run(&self, ctx: &RunContext) -> Result<()> {
+impl CommandGroup for BalanceCommand {
+    fn leaf(&self) -> &dyn Runnable {
         match &self.subcommand {
-            BalanceSubcommand::Start(cmd) => cmd.run(ctx),
-            BalanceSubcommand::Pause(cmd) => cmd.run(ctx),
-            BalanceSubcommand::Cancel(cmd) => cmd.run(ctx),
-            BalanceSubcommand::Resume(cmd) => cmd.run(ctx),
-            BalanceSubcommand::Status(cmd) => cmd.run(ctx),
+            BalanceSubcommand::Start(cmd) => cmd,
+            BalanceSubcommand::Pause(cmd) => cmd,
+            BalanceSubcommand::Cancel(cmd) => cmd,
+            BalanceSubcommand::Resume(cmd) => cmd,
+            BalanceSubcommand::Status(cmd) => cmd,
         }
     }
 }
