@@ -421,10 +421,7 @@ struct Extent {
 ///
 /// Returns `Err` if the tree search ioctl fails.
 pub fn device_min_size(fd: BorrowedFd, devid: u64) -> nix::Result<u64> {
-    let mut min_size: u64 = SZ_1M;
-    let mut extents: Vec<Extent> = Vec::new();
-    let mut holes: Vec<Extent> = Vec::new();
-    let mut last_pos: Option<u64> = None;
+    let mut dev_extents: Vec<(u64, u64)> = Vec::new();
 
     tree_search(
         fd,
@@ -438,38 +435,55 @@ pub fn device_min_size(fd: BorrowedFd, devid: u64) -> nix::Result<u64> {
             let Some(de) = btrfs_disk::items::DeviceExtent::parse(data) else {
                 return Ok(());
             };
-            let phys_start = hdr.offset;
-            let len = de.length;
-
-            min_size += len;
-
-            // Extents are prepended (descending end offset) so that the
-            // adjustment pass processes the highest-addressed extent first.
-            extents.push(Extent {
-                start: phys_start,
-                end: phys_start + len - 1,
-            });
-
-            if let Some(prev_end) = last_pos
-                && prev_end != phys_start
-            {
-                holes.push(Extent {
-                    start: prev_end,
-                    end: phys_start - 1,
-                });
-            }
-
-            last_pos = Some(phys_start + len);
+            dev_extents.push((hdr.offset, de.length));
             Ok(())
         },
     )?;
+
+    Ok(compute_min_size(&dev_extents))
+}
+
+/// Compute the minimum device size from a list of device extents.
+///
+/// Each entry is `(physical_start, length)`. The list must be sorted by
+/// ascending `physical_start` (as returned by the device tree).
+///
+/// The algorithm sums all extent lengths (plus 1 MiB base), then tries to
+/// relocate tail extents into holes to reduce the total. Matches the
+/// btrfs-progs `min-dev-size` logic.
+#[must_use]
+pub fn compute_min_size(dev_extents: &[(u64, u64)]) -> u64 {
+    let mut min_size: u64 = SZ_1M;
+    let mut extents: Vec<Extent> = Vec::new();
+    let mut holes: Vec<Extent> = Vec::new();
+    let mut last_pos: Option<u64> = None;
+
+    for &(phys_start, len) in dev_extents {
+        min_size += len;
+
+        extents.push(Extent {
+            start: phys_start,
+            end: phys_start + len - 1,
+        });
+
+        if let Some(prev_end) = last_pos
+            && prev_end != phys_start
+        {
+            holes.push(Extent {
+                start: prev_end,
+                end: phys_start - 1,
+            });
+        }
+
+        last_pos = Some(phys_start + len);
+    }
 
     // Sort extents by descending end offset for the adjustment pass.
     extents.sort_by(|a, b| b.end.cmp(&a.end));
 
     adjust_min_size(&mut extents, &mut holes, &mut min_size);
 
-    Ok(min_size)
+    min_size
 }
 
 /// Check whether a byte range `[start, end]` contains a superblock mirror.

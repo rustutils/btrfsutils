@@ -392,6 +392,16 @@ fn inspect_min_dev_size() {
 }
 
 #[test]
+fn inspect_min_dev_size_offline() {
+    let img = cached_fixture_image();
+    let img_str = img.to_str().unwrap();
+    snap!(
+        "btrfs inspect-internal min-dev-size --offline <IMG>",
+        btrfs_ok(&["inspect-internal", "min-dev-size", "--offline", img_str])
+    );
+}
+
+#[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_dump_super() {
     let (_td, mnt) = fixture_mount();

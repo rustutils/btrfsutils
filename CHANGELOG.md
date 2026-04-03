@@ -31,6 +31,14 @@ All notable changes to this project will be documented in this file.
   opt-in improved formatting with adaptive column widths via `cols`
 - `btrfs subvolume list --format modern`: tree-view output with
   unicode connectors showing the subvolume parent-child hierarchy
+- `btrfs inspect list-chunks --format modern`: cols-based adaptive
+  table with right-aligned numeric columns
+- `btrfs inspect list-chunks --offline`: read chunks directly from
+  an unmounted device or image file by walking the on-disk chunk and
+  block group trees. Does not require CAP_SYS_ADMIN
+- `btrfs inspect min-dev-size --offline`: compute minimum device
+  size from an unmounted device or image file by walking the device
+  tree directly. Does not require CAP_SYS_ADMIN
 - `RunContext` struct for passing runtime options through commands
 - `Runnable::supported_formats()`: commands declare which formats
   they support; unsupported formats produce a clear error

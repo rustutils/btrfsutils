@@ -15,6 +15,7 @@ Arguments {
             subcommand: MinDevSize(
                 MinDevSizeCommand {
                     devid: 1,
+                    offline: false,
                     path: "/mnt",
                 },
             ),

@@ -5,19 +5,25 @@ expression: text
 Print the minimum size a device can be shrunk to.
 
 Returns the minimum size in bytes that the specified device can be resized to
-without losing data. The device id 1 is used by default. Requires CAP_SYS_ADMIN.
+without losing data. The device id 1 is used by default. Requires CAP_SYS_ADMIN
+(unless --offline is used).
 
 Usage: min-dev-size [OPTIONS] <PATH>
 
 Arguments:
   <PATH>
-          Path to a file or directory on the btrfs filesystem
+          Path to a file or directory on the btrfs filesystem, or a block device
+          / image file when --offline is used
 
 Options:
       --id <DEVID>
           Specify the device id to query
           
           [default: 1]
+
+      --offline
+          Read directly from an unmounted device or image file instead of a
+          mounted filesystem. Does not require CAP_SYS_ADMIN
 
   -h, --help
           Print help (see a summary with '-h')

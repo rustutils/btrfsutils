@@ -1,0 +1,6 @@
+---
+source: cli/tests/commands/fixture.rs
+description: btrfs inspect-internal min-dev-size --offline <IMG>
+expression: "btrfs_ok(&[\"inspect-internal\", \"min-dev-size\", \"--offline\", img_str])"
+---
+105906176 bytes (101.00MiB)
