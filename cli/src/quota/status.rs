@@ -93,7 +93,12 @@ impl Runnable for QuotaStatusCommand {
 
         match ctx.format {
             Format::Modern => {
-                print_status_modern(&self.path, &fs.uuid, &status, rescan.as_ref());
+                print_status_modern(
+                    &self.path,
+                    &fs.uuid,
+                    &status,
+                    rescan.as_ref(),
+                );
             }
             Format::Text => {
                 print_status_text(&self.path, &status);

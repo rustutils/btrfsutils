@@ -121,6 +121,8 @@ pub struct RunContext {
     pub format: Format,
     /// Whether the user requested a dry run.
     pub dry_run: bool,
+    /// Whether the user requested quiet mode (suppress non-error output).
+    pub quiet: bool,
 }
 
 /// A CLI subcommand that can be executed.
@@ -291,6 +293,7 @@ impl Arguments {
         let ctx = RunContext {
             format,
             dry_run: self.global.dry_run,
+            quiet: self.global.quiet,
         };
         self.command.run(&ctx)
     }

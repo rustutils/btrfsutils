@@ -399,8 +399,7 @@ fn attach_qgroup_children(
     let mut row = rows.remove(&id)?;
     if let Some(q) = qgroups.iter().find(|q| q.qgroupid == id) {
         for &child_id in &q.children {
-            if let Some(child) =
-                attach_qgroup_children(child_id, rows, qgroups)
+            if let Some(child) = attach_qgroup_children(child_id, rows, qgroups)
             {
                 row.children.push(child);
             }

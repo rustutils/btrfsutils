@@ -23,7 +23,7 @@ Options:
   -r, --readonly
           Read-only mode: check for errors but do not attempt repairs
 
-  -R
+  -R, --raw
           Print full raw data instead of summary
 
   -f, --force

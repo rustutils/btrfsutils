@@ -53,6 +53,12 @@ All notable changes to this project will be documented in this file.
 - `btrfs qgroup show --format modern`: tree-view output showing the
   qgroup hierarchy with all columns (rfer, excl, max_rfer, max_excl)
   always visible
+- `btrfs scrub start --format modern`: live progress on stderr with
+  terminal-aware updates (200ms terminal, 1s non-terminal), summary
+  tree table with per-device data/metadata/error stats, and raw mode
+  tree with all kernel counters per device
+- `btrfs scrub status --format modern`: cols table with per-device
+  scrubbed/allocated bytes and error summary
 - `RunContext` struct for passing runtime options through commands
 - `Runnable::supported_formats()`: commands declare which formats
   they support; unsupported formats produce a clear error
