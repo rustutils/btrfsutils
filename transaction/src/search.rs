@@ -1,0 +1,424 @@
+//! # B-tree search operations
+//!
+//! Implements `search_slot` which descends a btrfs B-tree from root to leaf,
+//! recording the path at each level. Also provides binary search within a
+//! single tree block, and leaf advancement (`next_leaf`, `prev_leaf`).
+
+use crate::{
+    cow::cow_block,
+    extent_buffer::{ExtentBuffer, key_cmp},
+    fs_info::FsInfo,
+    path::BtrfsPath,
+    transaction::TransHandle,
+};
+use btrfs_disk::tree::DiskKey;
+use std::{
+    cmp::Ordering,
+    io::{self, Read, Seek, Write},
+};
+
+/// Result of a binary search within a tree block.
+#[derive(Debug, Clone, Copy)]
+pub struct BinSearchResult {
+    /// Whether the exact key was found.
+    pub found: bool,
+    /// The slot index. If found, this is the matching slot. If not found,
+    /// this is the insertion point (first key greater than the target).
+    pub slot: usize,
+}
+
+/// Binary search within a leaf for a key.
+///
+/// Returns `(found, slot)` where `slot` is the matching slot if found, or
+/// the insertion point if not found.
+#[must_use]
+pub fn leaf_bin_search(eb: &ExtentBuffer, key: &DiskKey) -> BinSearchResult {
+    let nritems = eb.nritems() as usize;
+    if nritems == 0 {
+        return BinSearchResult {
+            found: false,
+            slot: 0,
+        };
+    }
+
+    let mut low: usize = 0;
+    let mut high: usize = nritems;
+
+    while low < high {
+        let mid = low + (high - low) / 2;
+        let mid_key = eb.item_key(mid);
+        match key_cmp(&mid_key, key) {
+            Ordering::Less => low = mid + 1,
+            Ordering::Greater => high = mid,
+            Ordering::Equal => {
+                return BinSearchResult {
+                    found: true,
+                    slot: mid,
+                };
+            }
+        }
+    }
+
+    BinSearchResult {
+        found: false,
+        slot: low,
+    }
+}
+
+/// Binary search within an internal node for a key.
+///
+/// Returns the slot of the child subtree that could contain the target key.
+/// This is the largest slot where `ptrs[slot].key <= target`. If the target
+/// is less than all keys, returns slot 0.
+#[must_use]
+pub fn node_bin_search(eb: &ExtentBuffer, key: &DiskKey) -> usize {
+    let nritems = eb.nritems() as usize;
+    if nritems == 0 {
+        return 0;
+    }
+
+    let mut low: usize = 0;
+    let mut high: usize = nritems;
+
+    while low < high {
+        let mid = low + (high - low) / 2;
+        let mid_key = eb.key_ptr_key(mid);
+        match key_cmp(&mid_key, key) {
+            Ordering::Less => low = mid + 1,
+            Ordering::Greater => high = mid,
+            Ordering::Equal => return mid,
+        }
+    }
+
+    // `low` is the first slot with key > target. We want the slot before it,
+    // which is the largest slot with key <= target.
+    if low > 0 { low - 1 } else { 0 }
+}
+
+/// Search for a key in a tree, recording the path from root to leaf.
+///
+/// - `trans`: transaction handle (needed if `cow` is true to COW blocks)
+/// - `tree_id`: which tree to search
+/// - `key`: the key to search for
+/// - `path`: receives the search path (must be empty/released)
+/// - `ins_len`: if > 0, this is an insert operation and the leaf must have
+///   enough free space for an item of this total size (ITEM_SIZE + data_size).
+///   If 0, read-only search.
+/// - `cow`: if true, COW each block along the path
+///
+/// Returns `Ok(true)` if the exact key was found, `Ok(false)` if not (in
+/// which case `path.slots[0]` is the insertion point).
+///
+/// # Errors
+///
+/// Returns an error if any block read or COW operation fails.
+pub fn search_slot<R: Read + Write + Seek>(
+    mut trans: Option<&mut TransHandle<R>>,
+    fs_info: &mut FsInfo<R>,
+    tree_id: u64,
+    key: &DiskKey,
+    path: &mut BtrfsPath,
+    _ins_len: u32,
+    cow: bool,
+) -> io::Result<bool> {
+    let root_bytenr = fs_info.root_bytenr(tree_id).ok_or_else(|| {
+        io::Error::other(format!("unknown tree ID {tree_id}"))
+    })?;
+
+    let mut eb = fs_info.read_block(root_bytenr)?;
+
+    // COW the root if needed
+    if cow
+        && let Some(trans) = trans.as_deref_mut()
+        && eb.generation() != fs_info.generation
+    {
+        eb = cow_block(trans, fs_info, &eb, tree_id, None)?;
+        fs_info.set_root_bytenr(tree_id, eb.logical());
+    }
+
+    let mut level = eb.level();
+
+    loop {
+        if level == 0 {
+            // Leaf: binary search for the key
+            let result = leaf_bin_search(&eb, key);
+            path.nodes[0] = Some(eb);
+            path.slots[0] = result.slot;
+            return Ok(result.found);
+        }
+
+        // Internal node: find the child slot
+        let slot = node_bin_search(&eb, key);
+        path.nodes[level as usize] = Some(eb.clone());
+        path.slots[level as usize] = slot;
+
+        // Read the child block
+        let child_bytenr = eb.key_ptr_blockptr(slot);
+        let mut child = fs_info.read_block(child_bytenr)?;
+
+        // COW the child if needed
+        if cow
+            && let Some(trans) = trans.as_deref_mut()
+            && child.generation() != fs_info.generation
+        {
+            child = cow_block(
+                trans,
+                fs_info,
+                &child,
+                tree_id,
+                Some((eb.logical(), slot)),
+            )?;
+            // Update parent's pointer to the new child
+            if let Some(parent) = &mut path.nodes[level as usize] {
+                parent.set_key_ptr_blockptr(slot, child.logical());
+                parent.set_key_ptr_generation(slot, fs_info.generation);
+                fs_info.mark_dirty(parent);
+            }
+        }
+
+        eb = child;
+        level -= 1;
+    }
+}
+
+/// Advance the path to the next leaf.
+///
+/// Walks up the path until finding a level where we can move to the next
+/// slot, then walks back down to the leftmost leaf.
+///
+/// Returns `Ok(true)` if successfully advanced, `Ok(false)` if already at
+/// the last leaf (no more items).
+///
+/// # Errors
+///
+/// Returns an error if any block read fails.
+pub fn next_leaf<R: Read + Write + Seek>(
+    fs_info: &mut FsInfo<R>,
+    path: &mut BtrfsPath,
+) -> io::Result<bool> {
+    // Walk up to find a level where we can advance
+    let mut level = 1u8;
+    loop {
+        if level as usize >= path.nodes.len() {
+            return Ok(false); // No more leaves
+        }
+        let node = match &path.nodes[level as usize] {
+            Some(n) => n,
+            None => return Ok(false),
+        };
+        let slot = path.slots[level as usize];
+        if slot + 1 < node.nritems() as usize {
+            // Can advance at this level
+            path.slots[level as usize] = slot + 1;
+            break;
+        }
+        level += 1;
+    }
+
+    // Walk back down to the leaf, always taking slot 0
+    while level > 0 {
+        let parent = path.nodes[level as usize].as_ref().unwrap();
+        let slot = path.slots[level as usize];
+        let child_bytenr = parent.key_ptr_blockptr(slot);
+        let child = fs_info.read_block(child_bytenr)?;
+        level -= 1;
+        path.nodes[level as usize] = Some(child);
+        path.slots[level as usize] = 0;
+    }
+
+    Ok(true)
+}
+
+/// Move the path to the previous leaf.
+///
+/// Returns `Ok(true)` if successfully moved, `Ok(false)` if already at
+/// the first leaf.
+///
+/// # Errors
+///
+/// Returns an error if any block read fails.
+pub fn prev_leaf<R: Read + Write + Seek>(
+    fs_info: &mut FsInfo<R>,
+    path: &mut BtrfsPath,
+) -> io::Result<bool> {
+    let mut level = 1u8;
+    loop {
+        if level as usize >= path.nodes.len() {
+            return Ok(false);
+        }
+        if path.nodes[level as usize].is_none() {
+            return Ok(false);
+        }
+        let slot = path.slots[level as usize];
+        if slot > 0 {
+            path.slots[level as usize] = slot - 1;
+            break;
+        }
+        level += 1;
+    }
+
+    // Walk back down, taking the last slot at each level
+    while level > 0 {
+        let parent = path.nodes[level as usize].as_ref().unwrap();
+        let slot = path.slots[level as usize];
+        let child_bytenr = parent.key_ptr_blockptr(slot);
+        let child = fs_info.read_block(child_bytenr)?;
+        level -= 1;
+        let last_slot = if child.nritems() > 0 {
+            child.nritems() as usize - 1
+        } else {
+            0
+        };
+        path.nodes[level as usize] = Some(child);
+        path.slots[level as usize] = last_slot;
+    }
+
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::extent_buffer::HEADER_SIZE;
+    use btrfs_disk::tree::KeyType;
+
+    fn make_test_leaf(nodesize: u32, keys: &[(u64, u8, u64)]) -> ExtentBuffer {
+        let mut eb = ExtentBuffer::new_zeroed(nodesize, 65536);
+        eb.set_level(0);
+        eb.set_nritems(keys.len() as u32);
+
+        let mut data_end = nodesize;
+        for (i, &(oid, typ, off)) in keys.iter().enumerate() {
+            let key = DiskKey {
+                objectid: oid,
+                key_type: KeyType::from_raw(typ),
+                offset: off,
+            };
+            let data_size = 16u32; // Arbitrary small payload
+            data_end -= data_size;
+            eb.set_item_key(i, &key);
+            eb.set_item_offset(i, data_end - HEADER_SIZE as u32);
+            eb.set_item_size(i, data_size);
+        }
+        eb
+    }
+
+    #[test]
+    fn leaf_search_found() {
+        let eb = make_test_leaf(
+            4096,
+            &[(1, 1, 0), (2, 1, 0), (3, 1, 0), (5, 1, 0), (10, 1, 0)],
+        );
+        let key = DiskKey {
+            objectid: 3,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        let r = leaf_bin_search(&eb, &key);
+        assert!(r.found);
+        assert_eq!(r.slot, 2);
+    }
+
+    #[test]
+    fn leaf_search_not_found() {
+        let eb = make_test_leaf(4096, &[(1, 1, 0), (3, 1, 0), (5, 1, 0)]);
+        let key = DiskKey {
+            objectid: 2,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        let r = leaf_bin_search(&eb, &key);
+        assert!(!r.found);
+        assert_eq!(r.slot, 1); // insertion point
+    }
+
+    #[test]
+    fn leaf_search_before_all() {
+        let eb = make_test_leaf(4096, &[(5, 1, 0), (10, 1, 0)]);
+        let key = DiskKey {
+            objectid: 1,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        let r = leaf_bin_search(&eb, &key);
+        assert!(!r.found);
+        assert_eq!(r.slot, 0);
+    }
+
+    #[test]
+    fn leaf_search_after_all() {
+        let eb = make_test_leaf(4096, &[(1, 1, 0), (2, 1, 0)]);
+        let key = DiskKey {
+            objectid: 99,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        let r = leaf_bin_search(&eb, &key);
+        assert!(!r.found);
+        assert_eq!(r.slot, 2);
+    }
+
+    #[test]
+    fn leaf_search_empty() {
+        let eb = make_test_leaf(4096, &[]);
+        let key = DiskKey {
+            objectid: 1,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        let r = leaf_bin_search(&eb, &key);
+        assert!(!r.found);
+        assert_eq!(r.slot, 0);
+    }
+
+    #[test]
+    fn node_search() {
+        let mut eb = ExtentBuffer::new_zeroed(4096, 131072);
+        eb.set_level(1);
+        eb.set_nritems(3);
+
+        // keys: 10, 20, 30
+        for (i, oid) in [10u64, 20, 30].iter().enumerate() {
+            let key = DiskKey {
+                objectid: *oid,
+                key_type: KeyType::from_raw(1),
+                offset: 0,
+            };
+            eb.set_key_ptr_key(i, &key);
+            eb.set_key_ptr_blockptr(i, (i as u64 + 1) * 65536);
+            eb.set_key_ptr_generation(i, 1);
+        }
+
+        // Search for key < first: should return slot 0
+        let key = DiskKey {
+            objectid: 5,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        assert_eq!(node_bin_search(&eb, &key), 0);
+
+        // Search for key == 20: should return slot 1
+        let key = DiskKey {
+            objectid: 20,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        assert_eq!(node_bin_search(&eb, &key), 1);
+
+        // Search for key between 20 and 30: should return slot 1
+        let key = DiskKey {
+            objectid: 25,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        assert_eq!(node_bin_search(&eb, &key), 1);
+
+        // Search for key > all: should return slot 2
+        let key = DiskKey {
+            objectid: 99,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        assert_eq!(node_bin_search(&eb, &key), 2);
+    }
+}

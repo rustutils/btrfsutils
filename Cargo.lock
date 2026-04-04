@@ -226,6 +226,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "btrfs-transaction"
+version = "0.9.0"
+dependencies = [
+ "btrfs-disk",
+ "bytes",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "btrfs-tune"
 version = "0.9.0"
 dependencies = [
