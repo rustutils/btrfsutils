@@ -197,9 +197,7 @@ fn find_metadata_alloc_region<R: Read + Write + Seek>(
     )?;
 
     let (bg_start, bg_length, bg_used) = best_bg.ok_or_else(|| {
-        io::Error::other(
-            "no metadata block group with free space",
-        )
+        io::Error::other("no metadata block group with free space")
     })?;
 
     // Set cursor after the used portion. This is a rough heuristic; in reality
