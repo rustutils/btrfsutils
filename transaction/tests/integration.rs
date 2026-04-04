@@ -227,14 +227,28 @@ fn create_test_image() -> (tempfile::TempDir, PathBuf) {
     (dir, img_path)
 }
 
-/// Run `btrfs check` on an image and return whether it passes.
-fn btrfs_check(path: &Path) -> bool {
-    Command::new("btrfs")
+/// Run `btrfs check` on an image, asserting it passes.
+///
+/// Captures stdout/stderr and only prints them if the check fails,
+/// keeping test output clean on success.
+///
+/// # Panics
+///
+/// Panics if `btrfs check` is not found or reports errors.
+fn assert_btrfs_check(path: &Path) {
+    let output = Command::new("btrfs")
         .args(["check", "--readonly"])
         .arg(path)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .output()
+        .expect("btrfs check not found — install btrfs-progs");
+    if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        panic!(
+            "btrfs check failed on {}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}",
+            path.display()
+        );
+    }
 }
 
 #[test]
@@ -242,7 +256,7 @@ fn write_insert_item_and_verify() {
     let (dir, img_path) = create_test_image();
 
     // Verify the pristine image passes btrfs check
-    assert!(btrfs_check(&img_path), "pristine image failed btrfs check");
+    assert_btrfs_check(&img_path);
 
     let generation_before;
     let test_objectid = 100_000u64;
@@ -327,10 +341,7 @@ fn write_insert_item_and_verify() {
     }
 
     // Phase 3: Run btrfs check — must pass clean
-    assert!(
-        btrfs_check(&img_path),
-        "btrfs check failed on modified image"
-    );
+    assert_btrfs_check(&img_path);
 
     drop(dir);
 }
@@ -412,7 +423,7 @@ fn write_delete_item_and_verify() {
     }
 
     // Phase 3: btrfs check must pass
-    assert!(btrfs_check(&img_path), "btrfs check failed after delete");
+    assert_btrfs_check(&img_path);
 
     drop(dir);
 }
