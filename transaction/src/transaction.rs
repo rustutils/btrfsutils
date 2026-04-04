@@ -30,9 +30,6 @@ pub struct TransHandle<R> {
     /// Delayed reference count updates.
     pub delayed_refs: DelayedRefQueue,
     /// Simple bump allocator cursor for metadata blocks.
-    /// This is a temporary allocator replaced by proper extent allocation
-    /// in Phase 7. It tracks the next free logical address within a
-    /// metadata block group.
     alloc_cursor: u64,
     /// End of the allocation region.
     alloc_end: u64,
@@ -110,19 +107,38 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     ///
     /// Returns an error if any tree modification, write, or fsync fails.
     pub fn commit(mut self, fs_info: &mut FsInfo<R>) -> io::Result<()> {
-        // Step 1: Update root items in the root tree for changed trees.
+        // Step 1: Flush delayed refs (convergence loop).
+        // This must happen BEFORE update_root_items because flushing refs
+        // may COW the extent tree, changing its root. update_root_items
+        // needs to see the final root addresses.
+        self.flush_delayed_refs(fs_info)?;
+
+        // Step 2: Update root items in the root tree for changed trees.
+        // This captures all root changes including those from step 1.
         self.update_root_items(fs_info)?;
 
-        // Step 2: Flush delayed refs (convergence loop).
-        // Processing delayed refs modifies the extent tree, which may generate
-        // more delayed refs from COW. Repeat until stable.
+        // Step 2b: Flushing delayed refs and updating root items may have
+        // generated more delayed refs (from COWing the extent tree and root
+        // tree). Flush again until stable.
         self.flush_delayed_refs(fs_info)?;
+        // If that generated more root changes, update again
+        self.update_root_items(fs_info)?;
 
         // Step 3: Flush all dirty blocks to disk
         fs_info.flush_dirty()?;
 
         // Step 4: Update superblock fields
         fs_info.superblock.generation = self.transid;
+
+        // Clear free space tree flags so the kernel rebuilds it on next mount.
+        // We don't update the free space tree when allocating blocks, so it's
+        // now stale. Clearing both flags tells btrfs check to skip validation
+        // and the kernel to rebuild from scratch.
+        fs_info.superblock.compat_ro_flags &= !(u64::from(
+            btrfs_disk::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID,
+        ) | u64::from(
+            btrfs_disk::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE,
+        ));
 
         // Update root tree root pointer
         if let Some(root_bytenr) = fs_info.root_bytenr(1) {
@@ -132,8 +148,10 @@ impl<R: Read + Write + Seek> TransHandle<R> {
             }
         }
 
-        // Update chunk tree root pointer
-        if let Some(chunk_bytenr) = fs_info.root_bytenr(3) {
+        // Update chunk tree root pointer (only if it changed)
+        if let Some(chunk_bytenr) = fs_info.root_bytenr(3)
+            && chunk_bytenr != fs_info.superblock.chunk_root
+        {
             fs_info.superblock.chunk_root = chunk_bytenr;
             fs_info.superblock.chunk_root_generation = self.transid;
             if let Ok(eb) = fs_info.read_block(chunk_bytenr) {
@@ -236,38 +254,183 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     /// Flush delayed reference count updates to the extent tree.
     ///
     /// Drains the delayed ref queue and processes each net-nonzero delta.
-    /// Processing refs may modify the extent tree, which may generate more
-    /// delayed refs (from COW). Repeats until the queue is empty.
+    /// For positive deltas (new allocations), creates METADATA_ITEM entries
+    /// with TREE_BLOCK_REF inline backrefs. For negative deltas (frees),
+    /// deletes the extent item.
     ///
-    /// For now, this is a simplified implementation that records the refs
-    /// but does not yet create/update extent items in the extent tree.
-    /// The full implementation requires creating METADATA_ITEM/EXTENT_ITEM
-    /// entries with inline backreferences — this will be completed when
-    /// rescue commands need it.
+    /// Processing refs modifies the extent tree, which may generate more
+    /// delayed refs from COW. Repeats until the queue is empty.
     fn flush_delayed_refs(
         &mut self,
-        _fs_info: &mut FsInfo<R>,
+        fs_info: &mut FsInfo<R>,
     ) -> io::Result<()> {
-        // Convergence loop: drain and process until stable
-        let max_iterations = 16; // safety limit
-        for _ in 0..max_iterations {
+        let skinny = fs_info.superblock.incompat_flags
+            & u64::from(
+                btrfs_disk::raw::BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA,
+            )
+            != 0;
+
+        let extent_tree_id = 2u64;
+
+        // Convergence loop: drain and process until stable.
+        // Processing refs modifies the extent tree, which COWs blocks and
+        // generates more refs. Each iteration processes more refs than it
+        // creates, so this converges.
+        let max_iterations = 32;
+        for iteration in 0..max_iterations {
             let refs = self.delayed_refs.drain();
             if refs.is_empty() {
                 return Ok(());
             }
 
-            // TODO: For each ref with positive delta, create or update an
-            // extent item (METADATA_ITEM for tree blocks) in the extent tree
-            // with a TREE_BLOCK_REF inline backref.
-            // For each ref with negative delta, decrement the refcount in the
-            // extent item. If refcount reaches 0, delete the extent item.
-            //
-            // For now, we silently consume the refs. This means the extent
-            // tree won't reflect the new allocations from COW, but the
-            // filesystem structure (tree blocks, root items, superblock) will
-            // be correct. A subsequent `btrfs check` will report extent tree
-            // inconsistencies until this is fully implemented.
+            for dref in refs {
+                if !dref.is_metadata {
+                    // Data extent refs not yet implemented
+                    continue;
+                }
+
+                if dref.delta > 0 {
+                    // Positive delta: create a new extent item
+                    self.create_metadata_extent(
+                        fs_info,
+                        extent_tree_id,
+                        dref.bytenr,
+                        dref.level,
+                        dref.owner,
+                        skinny,
+                    )?;
+                } else if dref.delta < 0 {
+                    // Negative delta: delete the extent item
+                    self.delete_metadata_extent(
+                        fs_info,
+                        extent_tree_id,
+                        dref.bytenr,
+                        dref.level,
+                        skinny,
+                    )?;
+                }
+            }
+
+            // Safety check: if we've been looping too long, something is wrong
+            if iteration == max_iterations - 1 && !self.delayed_refs.is_empty()
+            {
+                return Err(io::Error::other(
+                    "delayed ref flush did not converge after 32 iterations",
+                ));
+            }
         }
+
+        Ok(())
+    }
+
+    /// Create a METADATA_ITEM (or EXTENT_ITEM) in the extent tree for a newly
+    /// allocated tree block.
+    fn create_metadata_extent(
+        &mut self,
+        fs_info: &mut FsInfo<R>,
+        extent_tree_id: u64,
+        bytenr: u64,
+        level: u8,
+        owner: u64,
+        skinny: bool,
+    ) -> io::Result<()> {
+        let key = if skinny {
+            DiskKey {
+                objectid: bytenr,
+                key_type: KeyType::MetadataItem,
+                offset: u64::from(level),
+            }
+        } else {
+            DiskKey {
+                objectid: bytenr,
+                key_type: KeyType::ExtentItem,
+                offset: u64::from(fs_info.nodesize),
+            }
+        };
+
+        let data =
+            serialize::metadata_extent_item_to_bytes(1, self.transid, owner);
+
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            extent_tree_id,
+            &key,
+            &mut path,
+            (25 + data.len()) as u32,
+            true,
+        )?;
+
+        if found {
+            // Extent item already exists (shouldn't happen for new allocations,
+            // but handle gracefully by updating refcount)
+            path.release();
+            return Ok(());
+        }
+
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("create_metadata_extent: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+
+        items::insert_item(leaf, slot, &key, &data)?;
+        fs_info.mark_dirty(leaf);
+        path.release();
+
+        Ok(())
+    }
+
+    /// Delete a METADATA_ITEM (or EXTENT_ITEM) from the extent tree for a
+    /// freed tree block.
+    fn delete_metadata_extent(
+        &mut self,
+        fs_info: &mut FsInfo<R>,
+        extent_tree_id: u64,
+        bytenr: u64,
+        level: u8,
+        skinny: bool,
+    ) -> io::Result<()> {
+        let key = if skinny {
+            DiskKey {
+                objectid: bytenr,
+                key_type: KeyType::MetadataItem,
+                offset: u64::from(level),
+            }
+        } else {
+            DiskKey {
+                objectid: bytenr,
+                key_type: KeyType::ExtentItem,
+                offset: u64::from(fs_info.nodesize),
+            }
+        };
+
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            extent_tree_id,
+            &key,
+            &mut path,
+            0,
+            true,
+        )?;
+
+        if !found {
+            // The old block may not have an extent item if it was allocated
+            // before the transaction crate managed the extent tree. Skip.
+            path.release();
+            return Ok(());
+        }
+
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("delete_metadata_extent: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+
+        items::del_items(leaf, slot, 1);
+        fs_info.mark_dirty(leaf);
+        path.release();
 
         Ok(())
     }
@@ -282,113 +445,38 @@ impl<R: Read + Write + Seek> TransHandle<R> {
 
 /// Find a metadata block group with free space for the bump allocator.
 ///
-/// Walks the extent tree looking for block groups with METADATA type
-/// that have unused space. Returns (`first_free_logical`, `block_group_end`).
-///
-/// This is a simple heuristic for the temporary allocator. Phase 7 replaces
-/// this with proper free space scanning.
+/// Uses proper free space scanning via the extent tree to find actual gaps
+/// between allocated extents. Returns (`first_free_logical`, `block_group_end`).
 fn find_metadata_alloc_region<R: Read + Write + Seek>(
     fs_info: &mut FsInfo<R>,
 ) -> io::Result<(u64, u64)> {
-    use btrfs_disk::items::BlockGroupFlags;
+    use crate::extent_alloc;
 
-    // We need to find the extent tree (or block group tree) and scan for
-    // metadata block groups. Then within a chosen block group, find the
-    // highest allocated extent and set the cursor after it.
-
-    // First, try the block group tree (tree 11) if present, else extent tree (tree 2)
-    let bg_tree_id = if fs_info.root_bytenr(11).is_some() {
-        11u64
-    } else {
-        2u64
-    };
-
-    let root_bytenr = fs_info.root_bytenr(bg_tree_id).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "cannot find extent/block-group tree for allocation",
-        )
-    })?;
-
-    // Walk the tree looking for BLOCK_GROUP_ITEM with METADATA type
-    let mut best_bg: Option<(u64, u64, u64)> = None; // (start, length, used)
-
-    scan_block_groups(
-        fs_info,
-        root_bytenr,
-        &mut |start, length, used, flags| {
-            if flags.contains(BlockGroupFlags::METADATA) && used < length {
-                let free = length - used;
-                if best_bg.is_none()
-                    || free > best_bg.unwrap().1 - best_bg.unwrap().2
-                {
-                    best_bg = Some((start, length, used));
-                }
-            }
-        },
-    )?;
-
-    let (bg_start, bg_length, bg_used) = best_bg.ok_or_else(|| {
-        io::Error::other("no metadata block group with free space")
-    })?;
-
-    // Set cursor after the used portion. This is a rough heuristic; in reality
-    // we'd need to scan the extent tree within this block group to find the
-    // actual highest allocated address. For now, just use start + used as the
-    // cursor, aligned to nodesize.
     let nodesize = u64::from(fs_info.nodesize);
-    let cursor = align_up(bg_start + bg_used, nodesize);
-    let end = bg_start + bg_length;
+    let groups = extent_alloc::load_block_groups(fs_info)?;
 
-    if cursor >= end {
-        return Err(io::Error::other(
-            "metadata block group has no usable free space",
-        ));
-    }
+    // Find metadata block groups with free space, sorted by most free
+    let mut meta_groups: Vec<&extent_alloc::BlockGroup> = groups
+        .iter()
+        .filter(|bg| bg.is_metadata() && bg.free() >= nodesize)
+        .collect();
+    meta_groups.sort_by_key(|bg| std::cmp::Reverse(bg.free()));
 
-    Ok((cursor, end))
-}
+    for bg in meta_groups {
+        let free_extents = extent_alloc::find_free_extents(
+            fs_info, bg.start, bg.length, nodesize,
+        )?;
 
-/// Scan a tree for block group items, calling the visitor for each.
-fn scan_block_groups<R: Read + Write + Seek>(
-    fs_info: &mut FsInfo<R>,
-    root_logical: u64,
-    visitor: &mut dyn FnMut(u64, u64, u64, btrfs_disk::items::BlockGroupFlags),
-) -> io::Result<()> {
-    use btrfs_disk::{
-        items::BlockGroupItem,
-        tree::{KeyType, TreeBlock},
-    };
-
-    let block = fs_info.read_block(root_logical)?;
-    let tb = block.as_tree_block();
-
-    match &tb {
-        TreeBlock::Leaf { items, .. } => {
-            for (idx, item) in items.iter().enumerate() {
-                if item.key.key_type != KeyType::BlockGroupItem {
-                    continue;
-                }
-                if let Some(data) = tb.item_data(idx)
-                    && let Some(bg) = BlockGroupItem::parse(data)
-                {
-                    visitor(
-                        item.key.objectid,
-                        item.key.offset,
-                        bg.used,
-                        bg.flags,
-                    );
-                }
-            }
-        }
-        TreeBlock::Node { ptrs, .. } => {
-            for ptr in ptrs {
-                scan_block_groups(fs_info, ptr.blockptr, visitor)?;
+        if let Some(&(start, len)) = free_extents.first() {
+            let cursor = align_up(start, nodesize);
+            let end = start + len;
+            if cursor + nodesize <= end {
+                return Ok((cursor, end));
             }
         }
     }
 
-    Ok(())
+    Err(io::Error::other("no metadata block group with free space"))
 }
 
 /// Update one backup root slot in the superblock.

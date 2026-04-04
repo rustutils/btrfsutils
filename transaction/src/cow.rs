@@ -29,7 +29,7 @@ pub fn cow_block<R: Read + Write + Seek>(
     trans: &mut TransHandle<R>,
     fs_info: &mut FsInfo<R>,
     eb: &ExtentBuffer,
-    _tree_id: u64,
+    tree_id: u64,
     _parent_info: Option<(u64, usize)>,
 ) -> io::Result<ExtentBuffer> {
     // Already COWed in this transaction?
@@ -44,8 +44,14 @@ pub fn cow_block<R: Read + Write + Seek>(
     new_eb.set_bytenr(new_logical);
     new_eb.set_generation(fs_info.generation);
 
-    // Queue old block for freeing (will be processed at commit time)
-    trans.queue_free_block(eb.logical());
+    // Queue delayed refs: +1 for new block, -1 for old block
+    let level = eb.level();
+    trans
+        .delayed_refs
+        .add_ref(new_logical, true, tree_id, level);
+    trans
+        .delayed_refs
+        .drop_ref(eb.logical(), true, tree_id, level);
 
     // Mark the new block dirty
     fs_info.mark_dirty(&new_eb);
