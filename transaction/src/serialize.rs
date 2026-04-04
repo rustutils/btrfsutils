@@ -146,6 +146,95 @@ fn write_timespec(buf: &mut Vec<u8>, ts: &Timespec) {
     buf.put_u32_le(ts.nsec);
 }
 
+/// Parameters for creating an inode item.
+pub struct InodeItemArgs {
+    /// Generation and transid.
+    pub generation: u64,
+    /// Logical file size.
+    pub size: u64,
+    /// On-disk bytes used.
+    pub nbytes: u64,
+    /// Hard link count.
+    pub nlink: u32,
+    /// Owner user ID.
+    pub uid: u32,
+    /// Owner group ID.
+    pub gid: u32,
+    /// POSIX file mode (type + permissions).
+    pub mode: u32,
+    /// Timestamp for atime/ctime/mtime/otime.
+    pub time: Timespec,
+}
+
+/// Serialize a `btrfs_inode_item` (160 bytes).
+#[must_use]
+pub fn inode_item_to_bytes(args: &InodeItemArgs) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(INODE_ITEM_SIZE);
+    buf.put_u64_le(args.generation);
+    buf.put_u64_le(args.generation); // transid = generation
+    buf.put_u64_le(args.size);
+    buf.put_u64_le(args.nbytes);
+    buf.put_u64_le(0); // block_group
+    buf.put_u32_le(args.nlink);
+    buf.put_u32_le(args.uid);
+    buf.put_u32_le(args.gid);
+    buf.put_u32_le(args.mode);
+    buf.put_u64_le(0); // rdev
+    buf.put_u64_le(0); // flags
+    buf.put_u64_le(0); // sequence
+    buf.extend_from_slice(&[0u8; 32]); // reserved
+    for _ in 0..4 {
+        write_timespec(&mut buf, &args.time);
+    }
+    debug_assert_eq!(buf.len(), INODE_ITEM_SIZE);
+    buf
+}
+
+/// Serialize a `btrfs_dir_item` (directory entry).
+///
+/// On-disk layout: location key (17) + transid (8) + data_len (2) +
+/// name_len (2) + type (1) + name + data = 30 + name.len() + data.len().
+#[must_use]
+pub fn dir_item_to_bytes(
+    location: &DiskKey,
+    transid: u64,
+    file_type: u8,
+    name: &[u8],
+) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(30 + name.len());
+    // location key
+    let key_off = buf.len();
+    buf.extend_from_slice(&[0u8; 17]);
+    write_disk_key(&mut buf[key_off..], 0, location);
+    buf.put_u64_le(transid);
+    buf.put_u16_le(0); // data_len (no xattr data for regular entries)
+    buf.put_u16_le(name.len() as u16);
+    buf.put_u8(file_type);
+    buf.extend_from_slice(name);
+    buf
+}
+
+/// Serialize a `btrfs_inode_ref`.
+///
+/// On-disk layout: index (8) + name_len (2) + name.
+#[must_use]
+pub fn inode_ref_to_bytes(index: u64, name: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(10 + name.len());
+    buf.put_u64_le(index);
+    buf.put_u16_le(name.len() as u16);
+    buf.extend_from_slice(name);
+    buf
+}
+
+/// Compute the btrfs name hash for DIR_ITEM key offsets.
+///
+/// Uses standard CRC32C (ISO 3309) of the filename bytes, matching
+/// the kernel's `btrfs_name_hash`.
+#[must_use]
+pub fn name_hash(name: &[u8]) -> u32 {
+    btrfs_disk::util::btrfs_csum_data(name)
+}
+
 /// Create a minimal `RootItem` suitable for internal trees (not subvolumes).
 ///
 /// Sets generation, bytenr, level, and refs=1. All other fields are zeroed/nil.
@@ -243,5 +332,88 @@ mod tests {
         let bytes = root_item_to_bytes(&item);
         // Should be 496 bytes (160 inode + 336 root item fields + reserved)
         assert_eq!(bytes.len(), 496);
+    }
+
+    #[test]
+    fn inode_item_round_trip() {
+        use btrfs_disk::items::InodeItem;
+
+        let bytes = inode_item_to_bytes(&InodeItemArgs {
+            generation: 7,
+            size: 42,
+            nbytes: 4096,
+            nlink: 1,
+            uid: 1000,
+            gid: 1000,
+            mode: 0o100644,
+            time: Timespec {
+                sec: 1000,
+                nsec: 500,
+            },
+        });
+        assert_eq!(bytes.len(), INODE_ITEM_SIZE);
+
+        let parsed = InodeItem::parse(&bytes).unwrap();
+        assert_eq!(parsed.generation, 7);
+        assert_eq!(parsed.transid, 7);
+        assert_eq!(parsed.size, 42);
+        assert_eq!(parsed.nbytes, 4096);
+        assert_eq!(parsed.nlink, 1);
+        assert_eq!(parsed.uid, 1000);
+        assert_eq!(parsed.gid, 1000);
+        assert_eq!(parsed.mode, 0o100644);
+    }
+
+    #[test]
+    fn dir_item_round_trip() {
+        use btrfs_disk::items::DirItem;
+
+        let location = DiskKey {
+            objectid: 257,
+            key_type: btrfs_disk::tree::KeyType::InodeItem,
+            offset: 0,
+        };
+        let bytes = dir_item_to_bytes(
+            &location,
+            7,
+            btrfs_disk::raw::BTRFS_FT_REG_FILE as u8,
+            b"hello.txt",
+        );
+
+        let items = DirItem::parse_all(&bytes);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].location.objectid, 257);
+        assert_eq!(items[0].transid, 7);
+        assert_eq!(items[0].name, b"hello.txt");
+    }
+
+    #[test]
+    fn inode_ref_round_trip() {
+        use btrfs_disk::items::InodeRef;
+
+        let bytes = inode_ref_to_bytes(2, b"hello.txt");
+        let refs = InodeRef::parse_all(&bytes);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].index, 2);
+        assert_eq!(refs[0].name, b"hello.txt");
+    }
+
+    #[test]
+    fn name_hash_deterministic() {
+        let h1 = name_hash(b"hello.txt");
+        let h2 = name_hash(b"hello.txt");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, 0);
+        // Different names produce different hashes (very likely)
+        assert_ne!(name_hash(b"hello.txt"), name_hash(b"world.txt"));
+    }
+
+    #[test]
+    fn name_hash_consistent() {
+        let h = name_hash(b"hello.txt");
+        assert_ne!(h, 0);
+        assert_eq!(h, name_hash(b"hello.txt"));
+        // Standard CRC32C of "hello.txt" should match Python result
+        assert_eq!(h, 0x4a9e_c2ee, "standard CRC32C mismatch");
     }
 }
