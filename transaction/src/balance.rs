@@ -8,9 +8,11 @@
 //! merging with a sibling to prevent excessive tree bloat.
 
 use crate::{
+    cow::cow_block,
     extent_buffer::{HEADER_SIZE, ITEM_SIZE},
     fs_info::FsInfo,
     path::BtrfsPath,
+    transaction::TransHandle,
 };
 use std::io::{self, Read, Seek, Write};
 
@@ -24,8 +26,10 @@ use std::io::{self, Read, Seek, Write};
 ///
 /// Returns an error if block I/O fails.
 pub fn push_leaf_left<R: Read + Write + Seek>(
+    trans: &mut TransHandle<R>,
     fs_info: &mut FsInfo<R>,
     path: &mut BtrfsPath,
+    tree_id: u64,
 ) -> io::Result<usize> {
     // Find the parent level
     let parent_level = match find_parent_level(path) {
@@ -48,50 +52,66 @@ pub fn push_leaf_left<R: Read + Write + Seek>(
     }
 
     let left_free = left.leaf_free_space();
-    let leaf = path.nodes[0].as_ref().unwrap();
-    let nritems = leaf.nritems() as usize;
 
-    if nritems == 0 {
-        return Ok(0);
-    }
-
-    // Calculate how many items we can push
-    let mut push_count = 0;
-    let mut push_data_size = 0u32;
-    for i in 0..nritems {
-        let item_total = ITEM_SIZE as u32 + leaf.item_size(i);
-        if push_data_size + item_total > left_free {
-            break;
+    // Collect item data from the current leaf before we need mutable access
+    // to the path for COW and parent pointer updates.
+    let push_items = {
+        let leaf = path.nodes[0].as_ref().unwrap();
+        let nritems = leaf.nritems() as usize;
+        if nritems == 0 {
+            return Ok(0);
         }
-        push_data_size += item_total;
-        push_count += 1;
-    }
+
+        let mut items = Vec::new();
+        let mut total_size = 0u32;
+        for i in 0..nritems {
+            let item_total = ITEM_SIZE as u32 + leaf.item_size(i);
+            if total_size + item_total > left_free {
+                break;
+            }
+            total_size += item_total;
+            items.push((
+                leaf.item_key(i),
+                leaf.item_size(i),
+                leaf.item_data(i).to_vec(),
+            ));
+        }
+        items
+    };
+    let push_count = push_items.len();
 
     if push_count == 0 {
         return Ok(0);
     }
 
-    // Copy items to the left sibling
-    let mut left = left;
+    // COW the sibling before modifying it. If the sibling belongs to a
+    // previous generation, modifying it in place would overwrite the
+    // committed state and break crash consistency.
+    let mut left = cow_block(trans, fs_info, &left, tree_id, None)?;
+    if left.logical() != left_bytenr {
+        // COW allocated a new block — update the parent's pointer
+        let parent = path.nodes[parent_level].as_mut().unwrap();
+        parent.set_key_ptr_blockptr(parent_slot - 1, left.logical());
+        parent.set_key_ptr_generation(parent_slot - 1, fs_info.generation);
+        fs_info.mark_dirty(parent);
+    }
     let left_nritems = left.nritems() as usize;
     let mut data_end = left.leaf_data_end();
 
-    for i in 0..push_count {
-        let src_key = leaf.item_key(i);
-        let src_size = leaf.item_size(i);
-        let src_data = leaf.item_data(i).to_vec();
+    for (i, (src_key, src_size, src_data)) in push_items.iter().enumerate() {
+        let src_size = *src_size;
 
         data_end -= src_size;
         let new_offset = data_end - HEADER_SIZE as u32;
         let dest_slot = left_nritems + i;
 
-        left.set_item_key(dest_slot, &src_key);
+        left.set_item_key(dest_slot, src_key);
         left.set_item_offset(dest_slot, new_offset);
         left.set_item_size(dest_slot, src_size);
 
         let abs_off = data_end as usize;
         left.as_bytes_mut()[abs_off..abs_off + src_size as usize]
-            .copy_from_slice(&src_data);
+            .copy_from_slice(src_data);
     }
     left.set_nritems((left_nritems + push_count) as u32);
     fs_info.mark_dirty(&left);
@@ -130,8 +150,10 @@ pub fn push_leaf_left<R: Read + Write + Seek>(
 ///
 /// Returns an error if block I/O fails.
 pub fn push_leaf_right<R: Read + Write + Seek>(
+    trans: &mut TransHandle<R>,
     fs_info: &mut FsInfo<R>,
     path: &mut BtrfsPath,
+    tree_id: u64,
 ) -> io::Result<usize> {
     let parent_level = match find_parent_level(path) {
         Some(l) => l,
@@ -154,32 +176,51 @@ pub fn push_leaf_right<R: Read + Write + Seek>(
     }
 
     let right_free = right.leaf_free_space();
-    let leaf = path.nodes[0].as_ref().unwrap();
-    let nritems = leaf.nritems() as usize;
 
-    if nritems == 0 {
-        return Ok(0);
-    }
-
-    // Calculate how many items we can push from the end of the leaf
-    let mut push_count = 0;
-    let mut push_data_size = 0u32;
-    for i in (0..nritems).rev() {
-        let item_total = ITEM_SIZE as u32 + leaf.item_size(i);
-        if push_data_size + item_total > right_free {
-            break;
+    // Collect item data from the current leaf before we need mutable access
+    // to the path for COW and parent pointer updates.
+    let (push_items, nritems) = {
+        let leaf = path.nodes[0].as_ref().unwrap();
+        let nritems = leaf.nritems() as usize;
+        if nritems == 0 {
+            return Ok(0);
         }
-        push_data_size += item_total;
-        push_count += 1;
-    }
+
+        let mut items = Vec::new();
+        let mut total_size = 0u32;
+        for i in (0..nritems).rev() {
+            let item_total = ITEM_SIZE as u32 + leaf.item_size(i);
+            if total_size + item_total > right_free {
+                break;
+            }
+            total_size += item_total;
+            items.push((
+                leaf.item_key(i),
+                leaf.item_size(i),
+                leaf.item_data(i).to_vec(),
+            ));
+        }
+        // Reverse so items are in ascending key order (we collected them in reverse)
+        items.reverse();
+        (items, nritems)
+    };
+    let push_count = push_items.len();
 
     if push_count == 0 {
         return Ok(0);
     }
 
-    // We need to shift existing right-sibling items to make room, then
-    // copy our items into the front of the right sibling.
-    let mut right = right;
+    // COW the sibling before modifying it. If the sibling belongs to a
+    // previous generation, modifying it in place would overwrite the
+    // committed state and break crash consistency.
+    let mut right = cow_block(trans, fs_info, &right, tree_id, None)?;
+    if right.logical() != right_bytenr {
+        // COW allocated a new block — update the parent's pointer
+        let parent = path.nodes[parent_level].as_mut().unwrap();
+        parent.set_key_ptr_blockptr(parent_slot + 1, right.logical());
+        parent.set_key_ptr_generation(parent_slot + 1, fs_info.generation);
+        fs_info.mark_dirty(parent);
+    }
     let right_nritems = right.nritems() as usize;
     let first_push = nritems - push_count;
 
@@ -191,24 +232,21 @@ pub fn push_leaf_right<R: Read + Write + Seek>(
         right.copy_within(src..src + len, dest);
     }
 
-    // Copy items from end of our leaf to beginning of right sibling
+    // Copy items to the beginning of the right sibling
     let mut data_end = right.leaf_data_end();
-    for i in 0..push_count {
-        let src_slot = first_push + i;
-        let src_key = leaf.item_key(src_slot);
-        let src_size = leaf.item_size(src_slot);
-        let src_data = leaf.item_data(src_slot).to_vec();
+    for (i, (src_key, src_size, src_data)) in push_items.iter().enumerate() {
+        let src_size = *src_size;
 
         data_end -= src_size;
         let new_offset = data_end - HEADER_SIZE as u32;
 
-        right.set_item_key(i, &src_key);
+        right.set_item_key(i, src_key);
         right.set_item_offset(i, new_offset);
         right.set_item_size(i, src_size);
 
         let abs_off = data_end as usize;
         right.as_bytes_mut()[abs_off..abs_off + src_size as usize]
-            .copy_from_slice(&src_data);
+            .copy_from_slice(src_data);
     }
     right.set_nritems((right_nritems + push_count) as u32);
     fs_info.mark_dirty(&right);
