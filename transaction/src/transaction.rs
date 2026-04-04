@@ -570,10 +570,65 @@ fn find_metadata_alloc_region<R: Read + Write + Seek>(
 ///
 /// This is currently a placeholder. The full implementation needs to populate
 /// the backup root fields from the current tree root state.
-fn update_backup_root<R>(_fs_info: &FsInfo<R>, _slot: usize) {
-    // TODO: properly update backup roots when BackupRoot has setters or
-    // when we add a BackupRoot builder. For now, the superblock's existing
-    // backup roots are preserved as-is during to_bytes() serialization.
+/// Populate one backup root slot from the current filesystem state.
+///
+/// The superblock has 4 rotating backup root entries. On each commit, one
+/// slot is overwritten (cycling 0 -> 1 -> 2 -> 3 -> 0). Each entry
+/// captures the root pointers, generations, and levels of the 6 core trees
+/// plus filesystem size counters.
+fn update_backup_root<R: Read + Write + Seek>(
+    fs_info: &mut FsInfo<R>,
+    slot: usize,
+) {
+    use btrfs_disk::superblock::BackupRoot;
+
+    /// Read the generation and level of a tree's root block, returning
+    /// (bytenr, generation, level). Falls back to (0, 0, 0) if unavailable.
+    fn root_info<R: Read + Write + Seek>(
+        fs_info: &mut FsInfo<R>,
+        tree_id: u64,
+    ) -> (u64, u64, u8) {
+        let bytenr = fs_info.root_bytenr(tree_id).unwrap_or(0);
+        if bytenr == 0 {
+            return (0, 0, 0);
+        }
+        match fs_info.read_block(bytenr) {
+            Ok(eb) => (bytenr, eb.generation(), eb.level()),
+            Err(_) => (bytenr, 0, 0),
+        }
+    }
+
+    let (tree_root, tree_root_gen, tree_root_level) = root_info(fs_info, 1);
+    let (chunk_root, chunk_root_gen, chunk_root_level) = root_info(fs_info, 3);
+    let (extent_root, extent_root_gen, extent_root_level) =
+        root_info(fs_info, 2);
+    let (fs_root, fs_root_gen, fs_root_level) = root_info(fs_info, 5);
+    let (dev_root, dev_root_gen, dev_root_level) = root_info(fs_info, 4);
+    let (csum_root, csum_root_gen, csum_root_level) = root_info(fs_info, 7);
+
+    fs_info.superblock.backup_roots[slot] = BackupRoot {
+        tree_root,
+        tree_root_gen,
+        chunk_root,
+        chunk_root_gen,
+        extent_root,
+        extent_root_gen,
+        fs_root,
+        fs_root_gen,
+        dev_root,
+        dev_root_gen,
+        csum_root,
+        csum_root_gen,
+        total_bytes: fs_info.superblock.total_bytes,
+        bytes_used: fs_info.superblock.bytes_used,
+        num_devices: fs_info.superblock.num_devices,
+        tree_root_level,
+        chunk_root_level,
+        extent_root_level,
+        fs_root_level,
+        dev_root_level,
+        csum_root_level,
+    };
 }
 
 /// Align a value up to the given alignment.
