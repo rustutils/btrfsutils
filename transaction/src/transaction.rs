@@ -73,21 +73,37 @@ impl<R: Read + Write + Seek> TransHandle<R> {
 
     /// Allocate a new metadata block (nodesize bytes).
     ///
-    /// Uses the temporary bump allocator. Returns the logical address
-    /// of the newly allocated block.
+    /// Uses a bump allocator within a free extent. If the current region is
+    /// exhausted, scans the extent tree for another free extent and continues
+    /// allocating from there.
     ///
     /// # Errors
     ///
-    /// Returns an error if the allocation region is exhausted.
-    pub fn alloc_block(&mut self, fs_info: &FsInfo<R>) -> io::Result<u64> {
-        let logical = self.alloc_cursor;
-        let next = logical + u64::from(fs_info.nodesize);
+    /// Returns an error if no free metadata space is available.
+    pub fn alloc_block(&mut self, fs_info: &mut FsInfo<R>) -> io::Result<u64> {
+        let nodesize = u64::from(fs_info.nodesize);
+        let next = self.alloc_cursor + nodesize;
+
         if next > self.alloc_end {
-            return Err(io::Error::other(
-                "temporary allocator: out of space in metadata block group",
-            ));
+            // Current region exhausted — find another free extent.
+            // Pass the current cursor so we don't re-discover space we
+            // already allocated from (those blocks don't have extent items
+            // yet so they'd appear "free" in the scan).
+            let (cursor, end) =
+                find_metadata_alloc_region_after(fs_info, self.alloc_cursor)?;
+            self.alloc_cursor = cursor;
+            self.alloc_end = end;
+
+            let next = self.alloc_cursor + nodesize;
+            if next > self.alloc_end {
+                return Err(io::Error::other(
+                    "no metadata block group with enough free space",
+                ));
+            }
         }
-        self.alloc_cursor = next;
+
+        let logical = self.alloc_cursor;
+        self.alloc_cursor += nodesize;
         self.allocated_blocks.push(logical);
         Ok(logical)
     }
@@ -134,11 +150,13 @@ impl<R: Read + Write + Seek> TransHandle<R> {
         // Step 4: Update superblock fields
         fs_info.superblock.generation = self.transid;
 
-        // NOTE: We do NOT clear FREE_SPACE_TREE_VALID here even though the
-        // free space tree is stale. The kernel requires both FREE_SPACE_TREE
-        // and FREE_SPACE_TREE_VALID when BLOCK_GROUP_TREE is set. The stale
-        // free space tree will be rebuilt by the kernel on next read-write
-        // mount. btrfs check may report cache warnings which we tolerate.
+        // The free space tree is now stale (blocks were allocated without
+        // updating it). Clear VALID so the kernel rebuilds it on next
+        // read-write mount. We keep FREE_SPACE_TREE set (required by
+        // BLOCK_GROUP_TREE for mount).
+        fs_info.superblock.compat_ro_flags &= !u64::from(
+            btrfs_disk::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID,
+        );
 
         // Update root tree root pointer
         if let Some(root_bytenr) = fs_info.root_bytenr(1) {
@@ -522,15 +540,160 @@ impl<R: Read + Write + Seek> TransHandle<R> {
         Ok(())
     }
 
+    /// Rebuild free space tree entries by scanning the extent tree.
+    ///
+    /// For each block group, computes free ranges from the extent tree and
+    /// rewrites the FREE_SPACE_EXTENT and FREE_SPACE_INFO items. This is
+    /// simpler and more robust than incremental updates because it doesn't
+    /// have convergence issues.
+    #[allow(dead_code)]
+    fn rebuild_free_space_tree(
+        &mut self,
+        fs_info: &mut FsInfo<R>,
+    ) -> io::Result<()> {
+        use crate::extent_alloc;
+        use btrfs_disk::items::FreeSpaceInfo;
+
+        let fst_id = 10u64;
+        if fs_info.root_bytenr(fst_id).is_none() {
+            return Ok(());
+        }
+        let groups = extent_alloc::load_block_groups(fs_info)?;
+
+        for bg in &groups {
+            // Find free ranges within this block group
+            let free_ranges = extent_alloc::find_free_extents(
+                fs_info, bg.start, bg.length, 1,
+            )?;
+
+            // Delete existing FREE_SPACE_EXTENT items for this block group
+            self.delete_free_space_extents(
+                fs_info, fst_id, bg.start, bg.length,
+            )?;
+
+            // Insert new FREE_SPACE_EXTENT items
+            for &(start, len) in &free_ranges {
+                let key = DiskKey {
+                    objectid: start,
+                    key_type: KeyType::FreeSpaceExtent,
+                    offset: len,
+                };
+                let mut path = BtrfsPath::new();
+                let found = search::search_slot(
+                    Some(&mut *self),
+                    fs_info,
+                    fst_id,
+                    &key,
+                    &mut path,
+                    25,
+                    true,
+                )?;
+                if !found {
+                    let leaf = path.nodes[0].as_mut().unwrap();
+                    items::insert_item(leaf, path.slots[0], &key, &[])?;
+                    fs_info.mark_dirty(leaf);
+                }
+                path.release();
+            }
+
+            // Update FREE_SPACE_INFO for this block group
+            let info_key = DiskKey {
+                objectid: bg.start,
+                key_type: KeyType::FreeSpaceInfo,
+                offset: bg.length,
+            };
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                Some(&mut *self),
+                fs_info,
+                fst_id,
+                &info_key,
+                &mut path,
+                0,
+                true,
+            )?;
+            if found {
+                let leaf = path.nodes[0].as_mut().unwrap();
+                let slot = path.slots[0];
+                let data = leaf.item_data(slot).to_vec();
+                if let Some(info) = FreeSpaceInfo::parse(&data) {
+                    // Update extent_count, preserve flags
+                    let mut new_data = Vec::with_capacity(8);
+                    new_data.extend_from_slice(
+                        &(free_ranges.len() as u32).to_le_bytes(),
+                    );
+                    new_data
+                        .extend_from_slice(&info.flags.bits().to_le_bytes());
+                    items::update_item(leaf, slot, &new_data)?;
+                    fs_info.mark_dirty(leaf);
+                }
+            }
+            path.release();
+        }
+
+        Ok(())
+    }
+
+    /// Delete all FREE_SPACE_EXTENT items within a block group's range.
+    #[allow(dead_code)]
+    fn delete_free_space_extents(
+        &mut self,
+        fs_info: &mut FsInfo<R>,
+        fst_id: u64,
+        bg_start: u64,
+        bg_length: u64,
+    ) -> io::Result<()> {
+        let bg_end = bg_start + bg_length;
+
+        // Search for the first key >= bg_start with type FREE_SPACE_EXTENT
+        let search_key = DiskKey {
+            objectid: bg_start,
+            key_type: KeyType::FreeSpaceExtent,
+            offset: 0,
+        };
+
+        loop {
+            let mut path = BtrfsPath::new();
+            let _found = search::search_slot(
+                Some(&mut *self),
+                fs_info,
+                fst_id,
+                &search_key,
+                &mut path,
+                0,
+                true,
+            )?;
+
+            let leaf = match path.nodes[0].as_mut() {
+                Some(l) => l,
+                None => break,
+            };
+            let slot = path.slots[0];
+            if slot >= leaf.nritems() as usize {
+                path.release();
+                break;
+            }
+
+            let key = leaf.item_key(slot);
+            if key.key_type != KeyType::FreeSpaceExtent
+                || key.objectid >= bg_end
+            {
+                path.release();
+                break;
+            }
+
+            items::del_items(leaf, slot, 1);
+            fs_info.mark_dirty(leaf);
+            path.release();
+            // Loop to find and delete the next one
+        }
+
+        Ok(())
+    }
+
     /// Update the free space tree to account for specific allocated blocks.
     /// For each block, find the containing `FREE_SPACE_EXTENT` and shrink
     /// or split it.
-    ///
-    /// Not currently called in the commit path because updating the free
-    /// space tree requires allocating blocks (for COW), which can exhaust
-    /// the allocator. Instead, we clear the `VALID` flag and let the kernel
-    /// rebuild. This method is retained for future use when the allocator
-    /// is more robust.
     #[allow(dead_code)]
     fn update_free_space_tree_for(
         &mut self,
@@ -673,9 +836,17 @@ impl<R: Read + Write + Seek> TransHandle<R> {
 /// Find a metadata block group with free space for the bump allocator.
 ///
 /// Uses proper free space scanning via the extent tree to find actual gaps
-/// between allocated extents. Returns (`first_free_logical`, `block_group_end`).
+/// between allocated extents. Returns (`first_free_logical`, `region_end`).
 fn find_metadata_alloc_region<R: Read + Write + Seek>(
     fs_info: &mut FsInfo<R>,
+) -> io::Result<(u64, u64)> {
+    find_metadata_alloc_region_after(fs_info, 0)
+}
+
+/// Find a free metadata region starting at or after `min_addr`.
+fn find_metadata_alloc_region_after<R: Read + Write + Seek>(
+    fs_info: &mut FsInfo<R>,
+    min_addr: u64,
 ) -> io::Result<(u64, u64)> {
     use crate::extent_alloc;
 
@@ -694,8 +865,8 @@ fn find_metadata_alloc_region<R: Read + Write + Seek>(
             fs_info, bg.start, bg.length, nodesize,
         )?;
 
-        if let Some(&(start, len)) = free_extents.first() {
-            let cursor = align_up(start, nodesize);
+        for &(start, len) in &free_extents {
+            let cursor = align_up(start.max(min_addr), nodesize);
             let end = start + len;
             if cursor + nodesize <= end {
                 return Ok((cursor, end));

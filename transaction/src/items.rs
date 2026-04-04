@@ -120,14 +120,15 @@ pub fn insert_item(
         data_end - data_size
     };
 
-    // Verify the new offset preserves descending order
+    // Verify the new offset preserves non-ascending order.
+    // Zero-size items (like FREE_SPACE_EXTENT) may share the same offset.
     debug_assert!(
         slot == 0 || {
             let prev_off = eb.item_offset(slot - 1);
-            new_data_offset < prev_off
+            new_data_offset <= prev_off
         },
-        "insert_item: new offset {new_data_offset} not below slot {}'s offset {}",
-        slot - 1,
+        "insert_item: new offset {new_data_offset} above slot {}'s offset {}",
+        slot.saturating_sub(1),
         if slot > 0 {
             eb.item_offset(slot - 1)
         } else {
