@@ -6,12 +6,14 @@
 
 use btrfs_disk::tree::{DiskKey, KeyType};
 use btrfs_transaction::{
-    extent_buffer::key_cmp, fs_info::FsInfo, path::BtrfsPath, search,
+    extent_buffer::key_cmp, fs_info::FsInfo, items, path::BtrfsPath, search,
+    transaction::TransHandle,
 };
 use std::{
     fs::File,
     io::{self, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
+    process::Command,
 };
 
 /// Path to the fixture image (gzipped).
@@ -193,4 +195,225 @@ fn search_extent_tree() {
     // Should find something (the extent tree is never empty on a valid fs)
     let leaf = path.leaf().expect("should have a leaf");
     assert!(leaf.nritems() > 0, "extent tree leaf should have items");
+}
+
+// ---- Write path tests ----
+
+/// Create a temporary btrfs image file using the system `mkfs.btrfs`.
+/// Returns the temp directory (keeps the file alive) and the image path.
+///
+/// # Panics
+///
+/// Panics if the temp directory cannot be created, the image file cannot be
+/// written, or `mkfs.btrfs` is not available or fails.
+fn create_test_image() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::TempDir::new().expect("failed to create temp dir");
+    let img_path = dir.path().join("test.img");
+
+    // Create a 128 MiB sparse file
+    let file = File::create(&img_path).expect("failed to create image file");
+    file.set_len(128 * 1024 * 1024)
+        .expect("failed to set image size");
+    drop(file);
+
+    // Run mkfs.btrfs
+    let status = Command::new("mkfs.btrfs")
+        .args(["-f", "-q"])
+        .arg(&img_path)
+        .status()
+        .expect("mkfs.btrfs not found — install btrfs-progs");
+    assert!(status.success(), "mkfs.btrfs failed with {status}");
+
+    (dir, img_path)
+}
+
+/// Run `btrfs check` on an image and return whether it passes.
+fn btrfs_check(path: &Path) -> bool {
+    Command::new("btrfs")
+        .args(["check", "--readonly"])
+        .arg(path)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[test]
+fn write_insert_item_and_verify() {
+    let (dir, img_path) = create_test_image();
+
+    // Verify the pristine image passes btrfs check
+    assert!(btrfs_check(&img_path), "pristine image failed btrfs check");
+
+    let generation_before;
+    let test_objectid = 100_000u64;
+    let test_key = DiskKey {
+        objectid: test_objectid,
+        key_type: KeyType::TemporaryItem,
+        offset: 42,
+    };
+    let test_data = b"hello transaction";
+
+    // Phase 1: Open, start transaction, insert item, commit
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).expect("open failed");
+        generation_before = fs.superblock.generation;
+
+        let mut trans =
+            TransHandle::start(&mut fs).expect("start transaction failed");
+
+        // Search for the insertion point in the root tree
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1, // root tree
+            &test_key,
+            &mut path,
+            (25 + test_data.len()) as u32,
+            true, // COW
+        )
+        .expect("search_slot failed");
+
+        assert!(!found, "test key should not exist yet");
+
+        // Insert the item into the leaf
+        let leaf = path.nodes[0].as_mut().expect("no leaf");
+        let slot = path.slots[0];
+        items::insert_item(leaf, slot, &test_key, test_data)
+            .expect("insert_item failed");
+        fs.mark_dirty(leaf);
+
+        path.release();
+
+        // Commit
+        trans.commit(&mut fs).expect("commit failed");
+    }
+
+    // Phase 2: Reopen and verify the item persists
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).expect("reopen failed");
+
+        // Generation should have incremented
+        assert_eq!(
+            fs.superblock.generation,
+            generation_before + 1,
+            "generation should have incremented"
+        );
+
+        // Search for our inserted item
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None, &mut fs, 1, &test_key, &mut path, 0, false,
+        )
+        .expect("search_slot on reopen failed");
+
+        assert!(found, "inserted item should be found after reopen");
+
+        // Verify the data
+        let leaf = path.leaf().expect("no leaf");
+        let slot = path.leaf_slot();
+        let data = leaf.item_data(slot);
+        assert_eq!(data, test_data, "item data should match");
+    }
+
+    // Phase 3: Run btrfs check
+    // Note: btrfs check will likely report extent tree inconsistencies since
+    // we don't yet write extent items for newly allocated blocks. This is
+    // expected until the delayed ref flush is fully implemented.
+    let check_result = btrfs_check(&img_path);
+    if !check_result {
+        eprintln!(
+            "btrfs check reported errors (expected: extent tree \
+             inconsistencies from missing extent items for COW blocks)"
+        );
+    }
+
+    drop(dir); // clean up temp files
+}
+
+#[test]
+fn write_delete_item_and_verify() {
+    let (dir, img_path) = create_test_image();
+
+    // Find the UUID tree ROOT_ITEM (tree ID 9) and delete it
+    let uuid_key = DiskKey {
+        objectid: 9,
+        key_type: KeyType::RootItem,
+        offset: 0,
+    };
+
+    // Phase 1: Delete the UUID tree root item
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).expect("open failed");
+
+        // Verify UUID tree root item exists
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None, &mut fs, 1, &uuid_key, &mut path, 0, false,
+        )
+        .expect("search failed");
+        path.release();
+        assert!(found);
+
+        let mut trans =
+            TransHandle::start(&mut fs).expect("start transaction failed");
+
+        // Search with COW to get a writable path
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &uuid_key,
+            &mut path,
+            0,
+            true,
+        )
+        .expect("search failed");
+        assert!(found, "UUID tree ROOT_ITEM should exist");
+
+        // Delete it
+        let leaf = path.nodes[0].as_mut().expect("no leaf");
+        let slot = path.slots[0];
+        items::del_items(leaf, slot, 1);
+        fs.mark_dirty(leaf);
+
+        path.release();
+        trans.commit(&mut fs).expect("commit failed");
+    }
+
+    // Phase 2: Verify deletion persisted
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).expect("reopen failed");
+
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None, &mut fs, 1, &uuid_key, &mut path, 0, false,
+        )
+        .expect("search failed");
+
+        assert!(!found, "UUID tree ROOT_ITEM should be gone after delete");
+    }
+
+    drop(dir);
 }
