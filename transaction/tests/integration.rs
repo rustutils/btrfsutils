@@ -427,3 +427,122 @@ fn write_delete_item_and_verify() {
 
     drop(dir);
 }
+
+#[test]
+fn backup_roots_updated_on_commit() {
+    let (dir, img_path) = create_test_image();
+
+    let generation_before;
+    let root_bytenr_before;
+
+    // Read pre-commit state
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let fs = FsInfo::open(file).expect("open failed");
+        generation_before = fs.superblock.generation;
+        root_bytenr_before = fs.superblock.root;
+    }
+
+    // Modify the filesystem (insert an item to trigger COW)
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).expect("open failed");
+        let mut trans = TransHandle::start(&mut fs).expect("start failed");
+
+        let key = DiskKey {
+            objectid: 100_001,
+            key_type: KeyType::TemporaryItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &key,
+            &mut path,
+            25 + 4,
+            true,
+        )
+        .expect("search failed");
+
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        items::insert_item(leaf, slot, &key, &[0xBB; 4]).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).expect("commit failed");
+    }
+
+    // Verify backup roots
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let fs = FsInfo::open(file).expect("reopen failed");
+        let new_gen = fs.superblock.generation;
+        assert_eq!(new_gen, generation_before + 1);
+
+        // The backup root slot is transid % 4
+        let slot = (new_gen % 4) as usize;
+        let backup = &fs.superblock.backup_roots[slot];
+
+        // Backup root should reflect the new state
+        assert_eq!(
+            backup.tree_root, fs.superblock.root,
+            "backup tree_root should match superblock root"
+        );
+        assert_eq!(
+            backup.tree_root_gen, new_gen,
+            "backup tree_root_gen should match new generation"
+        );
+        assert_ne!(
+            backup.tree_root, root_bytenr_before,
+            "root tree should have moved due to COW"
+        );
+
+        // Extent tree should be present
+        assert_ne!(backup.extent_root, 0, "backup extent_root should be set");
+        assert_ne!(
+            backup.extent_root_gen, 0,
+            "backup extent_root_gen should be set"
+        );
+
+        // FS tree, dev tree, csum tree should be present
+        assert_ne!(backup.fs_root, 0, "backup fs_root should be set");
+        assert_ne!(backup.dev_root, 0, "backup dev_root should be set");
+        assert_ne!(backup.csum_root, 0, "backup csum_root should be set");
+
+        // Size counters should be populated
+        assert_ne!(backup.total_bytes, 0, "backup total_bytes should be set");
+        assert_ne!(backup.bytes_used, 0, "backup bytes_used should be set");
+        assert_eq!(
+            backup.bytes_used, fs.superblock.bytes_used,
+            "backup bytes_used should match superblock"
+        );
+        assert_eq!(
+            backup.num_devices, fs.superblock.num_devices,
+            "backup num_devices should match superblock"
+        );
+
+        // Chunk tree should match superblock
+        assert_eq!(
+            backup.chunk_root, fs.superblock.chunk_root,
+            "backup chunk_root should match superblock"
+        );
+    }
+
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
