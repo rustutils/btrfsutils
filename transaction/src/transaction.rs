@@ -271,6 +271,10 @@ impl<R: Read + Write + Seek> TransHandle<R> {
             != 0;
 
         let extent_tree_id = 2u64;
+        let nodesize = i64::from(fs_info.nodesize);
+
+        // Track net bytes_used change for block group and superblock updates
+        let mut bytes_used_delta: i64 = 0;
 
         // Convergence loop: drain and process until stable.
         // Processing refs modifies the extent tree, which COWs blocks and
@@ -280,17 +284,15 @@ impl<R: Read + Write + Seek> TransHandle<R> {
         for iteration in 0..max_iterations {
             let refs = self.delayed_refs.drain();
             if refs.is_empty() {
-                return Ok(());
+                break;
             }
 
             for dref in refs {
                 if !dref.is_metadata {
-                    // Data extent refs not yet implemented
                     continue;
                 }
 
                 if dref.delta > 0 {
-                    // Positive delta: create a new extent item
                     self.create_metadata_extent(
                         fs_info,
                         extent_tree_id,
@@ -299,8 +301,8 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                         dref.owner,
                         skinny,
                     )?;
+                    bytes_used_delta += nodesize;
                 } else if dref.delta < 0 {
-                    // Negative delta: delete the extent item
                     self.delete_metadata_extent(
                         fs_info,
                         extent_tree_id,
@@ -308,10 +310,10 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                         dref.level,
                         skinny,
                     )?;
+                    bytes_used_delta -= nodesize;
                 }
             }
 
-            // Safety check: if we've been looping too long, something is wrong
             if iteration == max_iterations - 1 && !self.delayed_refs.is_empty()
             {
                 return Err(io::Error::other(
@@ -320,6 +322,91 @@ impl<R: Read + Write + Seek> TransHandle<R> {
             }
         }
 
+        // Update superblock bytes_used and block group used field
+        if bytes_used_delta != 0 {
+            let current = fs_info.superblock.bytes_used as i64;
+            fs_info.superblock.bytes_used = (current + bytes_used_delta) as u64;
+
+            self.update_block_group_used(fs_info, bytes_used_delta)?;
+        }
+
+        Ok(())
+    }
+
+    /// Update the metadata block group item's `used` field to reflect
+    /// allocation changes during this transaction.
+    fn update_block_group_used(
+        &mut self,
+        fs_info: &mut FsInfo<R>,
+        bytes_delta: i64,
+    ) -> io::Result<()> {
+        use btrfs_disk::items::BlockGroupItem;
+
+        // Find the block group that contains our allocation region
+        let alloc_addr = self.alloc_cursor;
+
+        // Block group items live in tree 11 (block group tree) or tree 2
+        let bg_tree_id = if fs_info.root_bytenr(11).is_some() {
+            11u64
+        } else {
+            2u64
+        };
+
+        // Search for the block group containing alloc_addr.
+        // Block group keys: (logical_offset, BLOCK_GROUP_ITEM, length)
+        let search_key = DiskKey {
+            objectid: alloc_addr,
+            key_type: KeyType::BlockGroupItem,
+            offset: 0,
+        };
+
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            bg_tree_id,
+            &search_key,
+            &mut path,
+            0,
+            true,
+        )?;
+
+        // If not exact match, back up to find the containing block group
+        if !found && path.slots[0] > 0 {
+            path.slots[0] -= 1;
+        }
+
+        let leaf = match path.nodes[0].as_mut() {
+            Some(l) => l,
+            None => return Ok(()),
+        };
+        let slot = path.slots[0];
+        if slot >= leaf.nritems() as usize {
+            path.release();
+            return Ok(());
+        }
+
+        let item_key = leaf.item_key(slot);
+        if item_key.key_type != KeyType::BlockGroupItem {
+            path.release();
+            return Ok(());
+        }
+
+        // Read, update, and write back the block group item
+        let data = leaf.item_data(slot).to_vec();
+        if let Some(bg) = BlockGroupItem::parse(&data) {
+            let new_used = (bg.used as i64 + bytes_delta).max(0) as u64;
+            let new_data =
+                serialize::block_group_item_to_bytes(&BlockGroupItem {
+                    used: new_used,
+                    chunk_objectid: bg.chunk_objectid,
+                    flags: bg.flags,
+                });
+            items::update_item(leaf, slot, &new_data)?;
+            fs_info.mark_dirty(leaf);
+        }
+
+        path.release();
         Ok(())
     }
 
