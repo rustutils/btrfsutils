@@ -226,15 +226,6 @@ pub fn inode_ref_to_bytes(index: u64, name: &[u8]) -> Vec<u8> {
     buf
 }
 
-/// Compute the btrfs name hash for DIR_ITEM key offsets.
-///
-/// Uses standard CRC32C (ISO 3309) of the filename bytes, matching
-/// the kernel's `btrfs_name_hash`.
-#[must_use]
-pub fn name_hash(name: &[u8]) -> u32 {
-    btrfs_disk::util::btrfs_csum_data(name)
-}
-
 /// Create a minimal `RootItem` suitable for internal trees (not subvolumes).
 ///
 /// Sets generation, bytenr, level, and refs=1. All other fields are zeroed/nil.
@@ -398,22 +389,4 @@ mod tests {
         assert_eq!(refs[0].name, b"hello.txt");
     }
 
-    #[test]
-    fn name_hash_deterministic() {
-        let h1 = name_hash(b"hello.txt");
-        let h2 = name_hash(b"hello.txt");
-        assert_eq!(h1, h2);
-        assert_ne!(h1, 0);
-        // Different names produce different hashes (very likely)
-        assert_ne!(name_hash(b"hello.txt"), name_hash(b"world.txt"));
-    }
-
-    #[test]
-    fn name_hash_consistent() {
-        let h = name_hash(b"hello.txt");
-        assert_ne!(h, 0);
-        assert_eq!(h, name_hash(b"hello.txt"));
-        // Standard CRC32C of "hello.txt" should match Python result
-        assert_eq!(h, 0x4a9e_c2ee, "standard CRC32C mismatch");
-    }
 }

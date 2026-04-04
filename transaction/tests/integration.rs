@@ -963,7 +963,7 @@ fn mount_verify_file_created() {
         let dir_item_key = DiskKey {
             objectid: root_dir_inode,
             key_type: KeyType::DirItem,
-            offset: u64::from(serialize::name_hash(file_name)),
+            offset: u64::from(btrfs_disk::util::btrfs_name_hash(file_name)),
         };
         let mut path = BtrfsPath::new();
         search::search_slot(
