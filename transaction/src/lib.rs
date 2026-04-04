@@ -6,10 +6,11 @@
 //! item insertion/deletion, node splitting, transaction commit, and extent
 //! allocation.
 //!
-//! The primary entry point is [`FsInfo::open`], which opens a device or image
-//! file for modification. From there, start a transaction with
-//! [`TransHandle::start`], modify trees through [`search_slot`] and the item
-//! operation functions, and commit with [`TransHandle::commit`].
+//! The primary entry point is [`fs_info::FsInfo::open`], which opens a device
+//! or image file for modification. From there, start a transaction with
+//! [`transaction::TransHandle::start`], modify trees through
+//! [`search::search_slot`] and the item operation functions, and commit with
+//! [`transaction::TransHandle::commit`].
 //!
 //! This is a clean-room implementation based on the on-disk format
 //! specification and UAPI headers. It is licensed MIT/Apache-2.0.

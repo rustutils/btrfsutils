@@ -31,9 +31,9 @@ pub fn split_leaf<R: Read + Write + Seek>(
     key: &DiskKey,
     _data_size: u32,
 ) -> io::Result<()> {
-    let leaf = path.nodes[0].as_ref().ok_or_else(|| {
-        io::Error::other("split_leaf: no leaf in path")
-    })?;
+    let leaf = path.nodes[0]
+        .as_ref()
+        .ok_or_else(|| io::Error::other("split_leaf: no leaf in path"))?;
     let nritems = leaf.nritems() as usize;
     let nodesize = leaf.nodesize();
 
@@ -115,9 +115,9 @@ pub fn split_node<R: Read + Write + Seek>(
     tree_id: u64,
     level: u8,
 ) -> io::Result<()> {
-    let node = path.nodes[level as usize].as_ref().ok_or_else(|| {
-        io::Error::other("split_node: no node at level")
-    })?;
+    let node = path.nodes[level as usize]
+        .as_ref()
+        .ok_or_else(|| io::Error::other("split_node: no node at level"))?;
     let nritems = node.nritems() as usize;
     let nodesize = node.nodesize();
     let split = nritems / 2;
@@ -201,9 +201,9 @@ fn insert_ptr_in_parent<R: Read + Write + Seek>(
 
     // Check if parent has room
     {
-        let parent = path.nodes[parent_level].as_ref().ok_or_else(|| {
-            io::Error::other("insert_ptr: parent missing")
-        })?;
+        let parent = path.nodes[parent_level]
+            .as_ref()
+            .ok_or_else(|| io::Error::other("insert_ptr: parent missing"))?;
         let parent_nritems = parent.nritems() as usize;
         let max_ptrs = parent.max_key_ptrs() as usize;
         if parent_nritems >= max_ptrs {
