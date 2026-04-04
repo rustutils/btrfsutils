@@ -104,6 +104,42 @@ pub fn block_group_item_to_bytes(item: &BlockGroupItem) -> Vec<u8> {
     buf
 }
 
+/// Size of a skinny metadata extent item with one `TREE_BLOCK_REF` inline backref.
+///
+/// Layout: extent item header (24) + inline ref type (1) + offset (8) = 33 bytes.
+pub const METADATA_EXTENT_ITEM_SIZE: usize = 33;
+
+/// Serialize a metadata extent item (METADATA_ITEM) with a single
+/// `TREE_BLOCK_REF` inline backref.
+///
+/// This is the on-disk format for a tree block extent when the
+/// `SKINNY_METADATA` incompat flag is set (modern default). The key is
+/// `(bytenr, METADATA_ITEM=169, level)`.
+///
+/// Data layout (33 bytes):
+/// - Extent item header (24 bytes): refs (u64) + generation (u64) + flags (u64)
+/// - Inline backref (9 bytes): type (u8, `TREE_BLOCK_REF`=176) + offset (u64, root_id)
+#[must_use]
+pub fn metadata_extent_item_to_bytes(
+    refs: u64,
+    generation: u64,
+    root_id: u64,
+) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(METADATA_EXTENT_ITEM_SIZE);
+
+    // Extent item header
+    buf.put_u64_le(refs);
+    buf.put_u64_le(generation);
+    buf.put_u64_le(btrfs_disk::items::ExtentFlags::TREE_BLOCK.bits());
+
+    // Inline TREE_BLOCK_REF: type byte + root_id as offset
+    buf.put_u8(btrfs_disk::tree::KeyType::TreeBlockRef.to_raw());
+    buf.put_u64_le(root_id);
+
+    debug_assert_eq!(buf.len(), METADATA_EXTENT_ITEM_SIZE);
+    buf
+}
+
 /// Serialize a `Timespec` to 12 bytes (8-byte sec + 4-byte nsec).
 fn write_timespec(buf: &mut Vec<u8>, ts: &Timespec) {
     buf.put_u64_le(ts.sec);

@@ -326,19 +326,13 @@ fn write_insert_item_and_verify() {
         assert_eq!(data, test_data, "item data should match");
     }
 
-    // Phase 3: Run btrfs check
-    // Note: btrfs check will likely report extent tree inconsistencies since
-    // we don't yet write extent items for newly allocated blocks. This is
-    // expected until the delayed ref flush is fully implemented.
-    let check_result = btrfs_check(&img_path);
-    if !check_result {
-        eprintln!(
-            "btrfs check reported errors (expected: extent tree \
-             inconsistencies from missing extent items for COW blocks)"
-        );
-    }
+    // Phase 3: Run btrfs check — must pass clean
+    assert!(
+        btrfs_check(&img_path),
+        "btrfs check failed on modified image"
+    );
 
-    drop(dir); // clean up temp files
+    drop(dir);
 }
 
 #[test]
