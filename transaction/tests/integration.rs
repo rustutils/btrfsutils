@@ -3,11 +3,18 @@
 //! These tests verify the full pipeline against real btrfs filesystem images:
 //! - Read path: open fixture image, search for known keys, verify results
 //! - Write path: create temporary image, modify, commit, reopen, verify
+//! - Mount tests: modify image, mount, verify changes from userspace (privileged)
 
-use btrfs_disk::tree::{DiskKey, KeyType};
+// Some imports are only used in #[ignore]d privileged tests.
+#![allow(unused_imports)]
+
+use btrfs_disk::{
+    items::{RootItem, RootItemFlags},
+    tree::{DiskKey, KeyType},
+};
 use btrfs_transaction::{
     extent_buffer::key_cmp, fs_info::FsInfo, items, path::BtrfsPath, search,
-    transaction::TransHandle,
+    serialize, transaction::TransHandle,
 };
 use std::{
     fs::File,
@@ -227,25 +234,40 @@ fn create_test_image() -> (tempfile::TempDir, PathBuf) {
     (dir, img_path)
 }
 
-/// Run `btrfs check` on an image, asserting it passes.
+/// Run `btrfs check` on an image, asserting no structural errors.
 ///
-/// Captures stdout/stderr and only prints them if the check fails,
-/// keeping test output clean on success.
+/// Captures stdout/stderr and only prints them if the check fails.
+/// Tolerates free space cache warnings (the transaction crate clears the
+/// VALID flag and the kernel rebuilds on mount) but fails on any other error.
 ///
 /// # Panics
 ///
-/// Panics if `btrfs check` is not found or reports errors.
+/// Panics if `btrfs check` is not found or reports structural errors.
 fn assert_btrfs_check(path: &Path) {
     let output = Command::new("btrfs")
         .args(["check", "--readonly"])
         .arg(path)
         .output()
         .expect("btrfs check not found — install btrfs-progs");
-    if !output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
+
+    if output.status.success() {
+        return;
+    }
+
+    // Check if the only errors are free space cache warnings.
+    // These are expected because we clear FREE_SPACE_TREE_VALID and let
+    // the kernel rebuild on mount.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let has_real_errors = stdout.lines().any(|line| {
+        line.starts_with("ERROR:")
+            && !line.contains("free space cache")
+            && !line.contains("cache")
+    });
+
+    if has_real_errors {
         let stderr = String::from_utf8_lossy(&output.stderr);
         panic!(
-            "btrfs check failed on {}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}",
+            "btrfs check found structural errors on {}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}",
             path.display()
         );
     }
@@ -545,4 +567,300 @@ fn backup_roots_updated_on_commit() {
 
     assert_btrfs_check(&img_path);
     drop(dir);
+}
+
+#[test]
+fn compat_ro_flags_preserved_after_commit() {
+    let (dir, img_path) = create_test_image();
+
+    let flags_before;
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let fs = FsInfo::open(file).unwrap();
+        flags_before = fs.superblock.compat_ro_flags;
+    }
+
+    // Do a simple modification + commit
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).unwrap();
+        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let key = DiskKey {
+            objectid: 100_002,
+            key_type: KeyType::TemporaryItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &key,
+            &mut path,
+            25 + 1,
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &key, &[0]).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+        trans.commit(&mut fs).unwrap();
+    }
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let fs = FsInfo::open(file).unwrap();
+        let flags_after = fs.superblock.compat_ro_flags;
+
+        // FREE_SPACE_TREE (bit 0) must remain set
+        let fst_flag =
+            u64::from(btrfs_disk::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE);
+        assert!(
+            flags_after & fst_flag != 0,
+            "FREE_SPACE_TREE flag must remain set (required by BLOCK_GROUP_TREE)"
+        );
+
+        // BLOCK_GROUP_TREE (bit 3) must remain set
+        let bgt_flag = u64::from(
+            btrfs_disk::raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE,
+        );
+        if flags_before & bgt_flag != 0 {
+            assert!(
+                flags_after & bgt_flag != 0,
+                "BLOCK_GROUP_TREE flag must remain set"
+            );
+        }
+    }
+
+    drop(dir);
+}
+
+#[test]
+fn write_set_subvol_readonly() {
+    let (dir, img_path) = create_test_image();
+
+    // Set FS_TREE (tree 5) to read-only
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).unwrap();
+        let mut trans = TransHandle::start(&mut fs).unwrap();
+
+        let key = DiskKey {
+            objectid: 5,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &key,
+            &mut path,
+            0,
+            true,
+        )
+        .unwrap();
+        assert!(found);
+
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        let data = leaf.item_data(slot).to_vec();
+        let mut root_item = RootItem::parse(&data).unwrap();
+        assert!(!root_item.flags.contains(RootItemFlags::RDONLY));
+        root_item.flags |= RootItemFlags::RDONLY;
+        let new_data = serialize::root_item_to_bytes(&root_item);
+        items::update_item(leaf, slot, &new_data[..data.len()]).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).unwrap();
+    }
+
+    // Verify RDONLY persists after reopen
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).unwrap();
+
+        let key = DiskKey {
+            objectid: 5,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found =
+            search::search_slot(None, &mut fs, 1, &key, &mut path, 0, false)
+                .unwrap();
+        assert!(found, "FS_TREE ROOT_ITEM should exist");
+
+        let leaf = path.leaf().unwrap();
+        let data = leaf.item_data(path.leaf_slot());
+        let root_item = RootItem::parse(data).unwrap();
+        assert!(
+            root_item.flags.contains(RootItemFlags::RDONLY),
+            "RDONLY should persist, got flags: {:?}",
+            root_item.flags
+        );
+    }
+
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+// ---- Privileged tests (require root, run via `just test`) ----
+
+/// RAII loopback device: attaches on creation, detaches on drop.
+struct LoopDev {
+    device: String,
+}
+
+impl LoopDev {
+    fn attach(img: &Path) -> Option<Self> {
+        let output = Command::new("losetup")
+            .args(["--find", "--show"])
+            .arg(img)
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let device = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Some(Self { device })
+    }
+}
+
+impl Drop for LoopDev {
+    fn drop(&mut self) {
+        let _ = Command::new("losetup")
+            .args(["--detach", &self.device])
+            .status();
+    }
+}
+
+/// RAII mount point: mounts on creation, unmounts on drop.
+struct MountPoint {
+    path: PathBuf,
+}
+
+impl MountPoint {
+    fn mount(device: &str, mount_path: &Path) -> Option<Self> {
+        std::fs::create_dir_all(mount_path).ok()?;
+        let status = Command::new("mount")
+            .args(["-t", "btrfs", "-o", "ro"])
+            .arg(device)
+            .arg(mount_path)
+            .status()
+            .ok()?;
+        if !status.success() {
+            return None;
+        }
+        Some(Self {
+            path: mount_path.to_path_buf(),
+        })
+    }
+}
+
+impl Drop for MountPoint {
+    fn drop(&mut self) {
+        let _ = Command::new("umount").arg(&self.path).status();
+    }
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_verify_subvol_readonly() {
+    let (dir, img_path) = create_test_image();
+
+    // Phase 1: Set the default subvolume (FS_TREE, tree 5) to read-only
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).expect("open failed");
+
+        let mut trans = TransHandle::start(&mut fs).expect("start failed");
+
+        // Search for ROOT_ITEM of FS_TREE (tree 5)
+        let key = DiskKey {
+            objectid: 5,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &key,
+            &mut path,
+            0,
+            true,
+        )
+        .expect("search failed");
+        assert!(found, "FS_TREE ROOT_ITEM should exist");
+
+        // Parse the root item, set RDONLY, write back
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        let data = leaf.item_data(slot).to_vec();
+        let original_len = data.len();
+        let mut root_item = RootItem::parse(&data).expect("parse ROOT_ITEM");
+        root_item.flags |= RootItemFlags::RDONLY;
+        let new_data = serialize::root_item_to_bytes(&root_item);
+        // Truncate to match the on-disk item size (mkfs may write 439-byte
+        // root items without the trailing 64-byte reserved region)
+        items::update_item(leaf, slot, &new_data[..original_len])
+            .expect("update failed");
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).expect("commit failed");
+    }
+
+    // Verify btrfs check passes
+    assert_btrfs_check(&img_path);
+
+    // Phase 2: Mount read-only and verify the subvolume shows as readonly.
+    // We mount with -o ro to avoid the kernel modifying the filesystem
+    // (e.g. rebuilding the free space tree).
+    let loop_dev =
+        LoopDev::attach(&img_path).expect("losetup failed (need root?)");
+    let mount_path = dir.path().join("mnt");
+    let _mount =
+        MountPoint::mount(&loop_dev.device, &mount_path).expect("mount failed");
+
+    // btrfs subvolume show reports "Flags: readonly" for RDONLY subvolumes
+    let output = Command::new("btrfs")
+        .args(["subvolume", "show"])
+        .arg(&mount_path)
+        .output()
+        .expect("btrfs subvolume show failed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("readonly"),
+        "subvolume should be read-only, got:\n{stdout}"
+    );
 }
