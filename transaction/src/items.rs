@@ -48,26 +48,92 @@ pub fn insert_item(
 
     let nritems = eb.nritems() as usize;
 
-    // Data grows backward from the end. `data_end` is the lowest data offset
-    // (relative to HEADER_SIZE) among current items. For an empty leaf it's
-    // nodesize - HEADER_SIZE.
+    // Data grows backward from the end of the block. Offsets are relative to
+    // HEADER_SIZE and must be in descending order by slot index: item 0 has the
+    // highest offset, item N-1 has the lowest.
+    //
+    // `data_end` is the lowest data offset among current items.
     let data_end = if nritems == 0 {
         eb.nodesize() - HEADER_SIZE as u32
     } else {
         eb.item_offset(nritems - 1)
     };
 
-    // The new item's data is placed at the current bottom of the data area.
-    let new_data_offset = data_end - data_size;
-
     if nritems > 0 && slot < nritems {
-        // Shift item descriptors at [slot..nritems) right by one ITEM_SIZE
-        // to make room for the new descriptor.
+        // Inserting before existing items. Items at [slot..nritems) have data
+        // at offsets LOWER than items at [0..slot). We must shift their data
+        // DOWN by data_size to make room, preserving the descending offset
+        // invariant.
+
+        // 1. Shift data bytes for items [slot..nritems-1] down by data_size.
+        //    Their data spans from data_end to the top of slot's data.
+        let abs_data_bottom = HEADER_SIZE + data_end as usize;
+        let abs_data_top = HEADER_SIZE
+            + eb.item_offset(slot) as usize
+            + eb.item_size(slot) as usize;
+        if abs_data_bottom < abs_data_top {
+            eb.copy_within(
+                abs_data_bottom..abs_data_top,
+                abs_data_bottom - data_size as usize,
+            );
+        }
+
+        // 2. Update offsets for items [slot..nritems) (subtract data_size).
+        for i in slot..nritems {
+            let old_off = eb.item_offset(i);
+            eb.set_item_offset(i, old_off - data_size);
+        }
+
+        // 3. Shift item descriptors at [slot..nritems) right by one ITEM_SIZE.
         let items_src = HEADER_SIZE + slot * ITEM_SIZE;
         let items_len = (nritems - slot) * ITEM_SIZE;
         let items_dest = items_src + ITEM_SIZE;
         eb.copy_within(items_src..items_src + items_len, items_dest);
     }
+
+    // The new item's data offset: data_end - data_size is the new lowest
+    // offset (now occupied by the shifted items). Our item goes at data_end,
+    // which is above the shifted data and below items [0..slot-1].
+    // Wait — after shifting, the old data_end is now occupied. The new gap
+    // is at (data_end - data_size + shifted_data_size)... Actually, the shift
+    // moved everything from [data_end..top) down to [data_end-data_size..top-data_size).
+    // So the gap is [top-data_size..top). The new item's data goes at
+    // the offset that was occupied by the old slot item's data top minus data_size.
+    //
+    // Simpler: the new item's offset should be: if slot == 0, one below item[1]'s
+    // offset (which is the old item[0] offset - data_size). If slot > 0,
+    // one below item[slot-1]'s offset.
+    //
+    // Actually the simplest correct formula: after shifting, the new lowest
+    // offset is data_end - data_size (at new item index nritems, which was
+    // the old nritems-1 shifted). The new item at slot `slot` should have
+    // offset = item[slot+1].offset + item[slot+1].size (right above item
+    // slot+1's data). But we can also just compute: the data for the new
+    // item should go right above the shifted item at slot+1.
+    let new_data_offset = if slot < nritems {
+        // Item at slot+1 (which was the old item at slot, now shifted and
+        // with updated offset) ends at offset + size. Our data goes right
+        // above that.
+        eb.item_offset(slot + 1) + eb.item_size(slot + 1)
+    } else {
+        // Appending at the end: data goes at data_end - data_size
+        data_end - data_size
+    };
+
+    // Verify the new offset preserves descending order
+    debug_assert!(
+        slot == 0 || {
+            let prev_off = eb.item_offset(slot - 1);
+            new_data_offset < prev_off
+        },
+        "insert_item: new offset {new_data_offset} not below slot {}'s offset {}",
+        slot - 1,
+        if slot > 0 {
+            eb.item_offset(slot - 1)
+        } else {
+            0
+        }
+    );
 
     // Write the new item descriptor at the insert slot
     eb.set_item_key(slot, key);
