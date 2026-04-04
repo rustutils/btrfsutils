@@ -237,8 +237,8 @@ fn create_test_image() -> (tempfile::TempDir, PathBuf) {
 /// Run `btrfs check` on an image, asserting no structural errors.
 ///
 /// Captures stdout/stderr and only prints them if the check fails.
-/// Tolerates free space cache warnings (the transaction crate clears the
-/// VALID flag and the kernel rebuilds on mount) but fails on any other error.
+/// Tolerates free space tree cache warnings (we clear `VALID` and the
+/// kernel rebuilds on mount) but fails on any other error.
 ///
 /// # Panics
 ///
@@ -254,18 +254,17 @@ fn assert_btrfs_check(path: &Path) {
         return;
     }
 
-    // Check if the only errors are free space cache warnings.
-    // These are expected because we clear FREE_SPACE_TREE_VALID and let
-    // the kernel rebuild on mount.
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let has_real_errors = stdout.lines().any(|line| {
-        line.starts_with("ERROR:")
-            && !line.contains("free space cache")
+    // The free space tree may be stale (we clear VALID and the kernel
+    // rebuilds on mount). Only fail on non-cache errors.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let has_structural_errors = stderr.lines().any(|line| {
+        line.contains("ERROR:")
+            && !line.contains("free space")
             && !line.contains("cache")
     });
 
-    if has_real_errors {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if has_structural_errors {
+        let stdout = String::from_utf8_lossy(&output.stdout);
         panic!(
             "btrfs check found structural errors on {}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}",
             path.display()
