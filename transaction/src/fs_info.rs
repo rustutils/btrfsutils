@@ -31,6 +31,9 @@ pub struct FsInfo<R> {
     pub superblock: Superblock,
     /// Map of tree ID to root block logical address.
     roots: HashMap<u64, u64>,
+    /// Snapshot of root bytenrs at transaction start. Used to detect which
+    /// trees had their root block change during the transaction.
+    original_roots: HashMap<u64, u64>,
     /// Logical addresses of blocks modified in the current transaction.
     dirty: HashSet<u64>,
     /// Current transaction generation (superblock.generation + 1 during a
@@ -67,15 +70,23 @@ impl<R: Read + Write + Seek> FsInfo<R> {
         let sectorsize = superblock.sectorsize;
 
         // Convert BTreeMap<u64, (u64, u64)> to HashMap<u64, u64> (tree_id -> root bytenr)
-        let roots: HashMap<u64, u64> = tree_roots
+        let mut roots: HashMap<u64, u64> = tree_roots
             .into_iter()
             .map(|(id, (bytenr, _offset))| (id, bytenr))
             .collect();
+
+        // The root tree and chunk tree roots live in the superblock, not in
+        // ROOT_ITEM entries. Add them explicitly.
+        roots.insert(1, superblock.root);
+        roots.insert(3, superblock.chunk_root);
+
+        let original_roots = roots.clone();
 
         Ok(Self {
             reader,
             superblock,
             roots,
+            original_roots,
             dirty: HashSet::new(),
             generation,
             nodesize,
@@ -100,15 +111,21 @@ impl<R: Read + Write + Seek> FsInfo<R> {
         let nodesize = superblock.nodesize;
         let sectorsize = superblock.sectorsize;
 
-        let roots: HashMap<u64, u64> = tree_roots
+        let mut roots: HashMap<u64, u64> = tree_roots
             .into_iter()
             .map(|(id, (bytenr, _offset))| (id, bytenr))
             .collect();
+
+        roots.insert(1, superblock.root);
+        roots.insert(3, superblock.chunk_root);
+
+        let original_roots = roots.clone();
 
         Ok(Self {
             reader,
             superblock,
             roots,
+            original_roots,
             dirty: HashSet::new(),
             generation,
             nodesize,
@@ -252,6 +269,39 @@ impl<R: Read + Write + Seek> FsInfo<R> {
     pub fn evict_block(&mut self, logical: u64) {
         self.block_cache.remove(&logical);
         self.dirty.remove(&logical);
+    }
+
+    /// Snapshot the current roots so we can detect changes at commit time.
+    ///
+    /// Called at transaction start to record the baseline state.
+    pub fn snapshot_roots(&mut self) {
+        self.original_roots = self.roots.clone();
+    }
+
+    /// Return tree IDs whose root block changed since the last snapshot.
+    ///
+    /// Compares current roots against the snapshot taken at transaction start.
+    /// Excludes tree IDs 1 (root tree) and 3 (chunk tree) since their root
+    /// pointers live in the superblock, not in root items.
+    #[must_use]
+    pub fn changed_roots(&self) -> Vec<(u64, u64, u8)> {
+        let mut changed = Vec::new();
+        for (&tree_id, &current_bytenr) in &self.roots {
+            // Root tree and chunk tree are updated via superblock, not root items
+            if tree_id == 1 || tree_id == 3 {
+                continue;
+            }
+            let original = self.original_roots.get(&tree_id).copied();
+            if original != Some(current_bytenr) {
+                // Look up the level from the cached block if available
+                let level = self
+                    .block_cache
+                    .get(&current_bytenr)
+                    .map_or(0, |eb| eb.level());
+                changed.push((tree_id, current_bytenr, level));
+            }
+        }
+        changed
     }
 }
 

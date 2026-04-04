@@ -231,6 +231,7 @@ version = "0.9.0"
 dependencies = [
  "btrfs-disk",
  "bytes",
+ "flate2",
  "tempfile",
  "uuid",
 ]
