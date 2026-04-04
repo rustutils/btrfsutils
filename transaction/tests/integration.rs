@@ -9,7 +9,7 @@
 #![allow(unused_imports)]
 
 use btrfs_disk::{
-    items::{RootItem, RootItemFlags},
+    items::{RootItem, RootItemFlags, Timespec},
     tree::{DiskKey, KeyType},
 };
 use btrfs_transaction::{
@@ -862,4 +862,210 @@ fn mount_verify_subvol_readonly() {
         stdout.contains("readonly"),
         "subvolume should be read-only, got:\n{stdout}"
     );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_verify_file_created() {
+    let (dir, img_path) = create_test_image();
+
+    let file_name = b"hello.txt";
+    let file_inode = 257u64;
+    let dir_index = 100u64; // high index to avoid conflicts with mkfs entries
+    let root_dir_inode = 256u64;
+
+    // Phase 1: Create a file in the FS tree (tree 5)
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).expect("open failed");
+        let transid = fs.superblock.generation + 1;
+        let mut trans = TransHandle::start(&mut fs).expect("start failed");
+
+        let ts = Timespec {
+            sec: 1_700_000_000,
+            nsec: 0,
+        };
+
+        // 1. Create INODE_ITEM for the new file
+        // mode 0100644 = regular file, rw-r--r--
+        let inode_data =
+            serialize::inode_item_to_bytes(&serialize::InodeItemArgs {
+                generation: transid,
+                size: 0,
+                nbytes: 0,
+                nlink: 1,
+                uid: 0,
+                gid: 0,
+                mode: 0o100644,
+                time: ts,
+            });
+        let inode_key = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &inode_key,
+            &mut path,
+            (25 + inode_data.len()) as u32,
+            true,
+        )
+        .expect("search inode slot failed");
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &inode_key, &inode_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // 2. Create INODE_REF (file -> parent dir)
+        let iref_data = serialize::inode_ref_to_bytes(dir_index, file_name);
+        let iref_key = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeRef,
+            offset: root_dir_inode,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &iref_key,
+            &mut path,
+            (25 + iref_data.len()) as u32,
+            true,
+        )
+        .expect("search iref slot failed");
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &iref_key, &iref_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // 3. Create DIR_ITEM (parent dir -> file, keyed by name hash)
+        let location = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let dir_data = serialize::dir_item_to_bytes(
+            &location,
+            transid,
+            btrfs_disk::raw::BTRFS_FT_REG_FILE as u8,
+            file_name,
+        );
+        let dir_item_key = DiskKey {
+            objectid: root_dir_inode,
+            key_type: KeyType::DirItem,
+            offset: u64::from(serialize::name_hash(file_name)),
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_item_key,
+            &mut path,
+            (25 + dir_data.len()) as u32,
+            true,
+        )
+        .expect("search dir_item slot failed");
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &dir_item_key, &dir_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // 4. Create DIR_INDEX (parent dir -> file, keyed by index)
+        let dir_index_key = DiskKey {
+            objectid: root_dir_inode,
+            key_type: KeyType::DirIndex,
+            offset: dir_index,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_index_key,
+            &mut path,
+            (25 + dir_data.len()) as u32,
+            true,
+        )
+        .expect("search dir_index slot failed");
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &dir_index_key, &dir_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // 5. Update the root directory's INODE_ITEM (increment size for
+        //    the new dir entry: name_len + sizeof(btrfs_dir_item) = 9 + 30)
+        let dir_inode_key = DiskKey {
+            objectid: root_dir_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_inode_key,
+            &mut path,
+            0,
+            true,
+        )
+        .expect("search dir inode failed");
+        assert!(found, "root dir INODE_ITEM should exist");
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        let old_data = leaf.item_data(slot).to_vec();
+        if let Some(mut inode) = btrfs_disk::items::InodeItem::parse(&old_data)
+        {
+            // dir isize += name_len + btrfs_dir_item header (30 bytes)
+            inode.size += file_name.len() as u64 + 30;
+            inode.transid = transid;
+            let new_data =
+                serialize::inode_item_to_bytes(&serialize::InodeItemArgs {
+                    generation: inode.generation,
+                    size: inode.size,
+                    nbytes: inode.nbytes,
+                    nlink: inode.nlink,
+                    uid: inode.uid,
+                    gid: inode.gid,
+                    mode: inode.mode,
+                    time: ts,
+                });
+            items::update_item(leaf, slot, &new_data).unwrap();
+            fs.mark_dirty(leaf);
+        }
+        path.release();
+
+        trans.commit(&mut fs).expect("commit failed");
+    }
+
+    // Phase 2: Verify btrfs check passes (structural integrity)
+    assert_btrfs_check(&img_path);
+
+    // Phase 3: Mount and verify the file is visible
+    let loop_dev =
+        LoopDev::attach(&img_path).expect("losetup failed (need root?)");
+    let mount_path = dir.path().join("mnt");
+    let _mount =
+        MountPoint::mount(&loop_dev.device, &mount_path).expect("mount failed");
+
+    let file_path = mount_path.join("hello.txt");
+    assert!(file_path.exists(), "hello.txt should exist after mount");
+
+    // Verify it's a regular file with the right permissions
+    let metadata = std::fs::metadata(&file_path).expect("stat failed");
+    assert!(metadata.is_file(), "hello.txt should be a regular file");
+    assert_eq!(metadata.len(), 0, "hello.txt should be empty");
 }
