@@ -53,6 +53,15 @@ pub fn raw_crc32c(seed: u32, data: &[u8]) -> u32 {
     !crc32c::crc32c_append(!seed, data)
 }
 
+/// Btrfs name hash for `DIR_ITEM` and `DIR_INDEX` key offsets.
+///
+/// Raw CRC32C with seed `0xFFFFFFFE` (`~1`) and no finalization XOR.
+/// This matches the kernel's `btrfs_name_hash()`.
+#[must_use]
+pub fn btrfs_name_hash(name: &[u8]) -> u32 {
+    raw_crc32c(!1u32, name)
+}
+
 /// Standard CRC32C matching the kernel's `hash_crc32c()` / btrfs on-disk
 /// checksum format.
 ///
@@ -124,6 +133,14 @@ mod tests {
             u64::from_le_bytes(buf[4..12].try_into().unwrap()),
             0xDEADBEEF_CAFEBABE
         );
+    }
+
+    #[test]
+    fn test_btrfs_name_hash() {
+        // Verified against dump-tree output from a real btrfs filesystem
+        assert_eq!(btrfs_name_hash(b"hello.txt"), 0x415f_eb59);
+        // Different names produce different hashes
+        assert_ne!(btrfs_name_hash(b"hello.txt"), btrfs_name_hash(b"world.txt"));
     }
 
     #[test]
