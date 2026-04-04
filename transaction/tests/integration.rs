@@ -346,7 +346,7 @@ fn write_delete_item_and_verify() {
         offset: 0,
     };
 
-    // Phase 1: Delete the UUID tree root item
+    // Phase 1: Delete the UUID tree root item and free its root block
     {
         let file = File::options()
             .read(true)
@@ -355,14 +355,9 @@ fn write_delete_item_and_verify() {
             .unwrap();
         let mut fs = FsInfo::open(file).expect("open failed");
 
-        // Verify UUID tree root item exists
-        let mut path = BtrfsPath::new();
-        let found = search::search_slot(
-            None, &mut fs, 1, &uuid_key, &mut path, 0, false,
-        )
-        .expect("search failed");
-        path.release();
-        assert!(found);
+        // Read the UUID tree's root block address before deleting
+        let uuid_tree_bytenr =
+            fs.root_bytenr(9).expect("UUID tree root missing");
 
         let mut trans =
             TransHandle::start(&mut fs).expect("start transaction failed");
@@ -381,13 +376,20 @@ fn write_delete_item_and_verify() {
         .expect("search failed");
         assert!(found, "UUID tree ROOT_ITEM should exist");
 
-        // Delete it
+        // Delete the ROOT_ITEM
         let leaf = path.nodes[0].as_mut().expect("no leaf");
         let slot = path.slots[0];
         items::del_items(leaf, slot, 1);
         fs.mark_dirty(leaf);
-
         path.release();
+
+        // Queue a delayed ref to free the UUID tree's root block.
+        // When removing a tree, its blocks' extent items must be cleaned up.
+        trans.delayed_refs.drop_ref(uuid_tree_bytenr, true, 9, 0);
+
+        // Remove from roots map so commit doesn't try to update it
+        fs.remove_root(9);
+
         trans.commit(&mut fs).expect("commit failed");
     }
 
@@ -408,6 +410,9 @@ fn write_delete_item_and_verify() {
 
         assert!(!found, "UUID tree ROOT_ITEM should be gone after delete");
     }
+
+    // Phase 3: btrfs check must pass
+    assert!(btrfs_check(&img_path), "btrfs check failed after delete");
 
     drop(dir);
 }
