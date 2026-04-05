@@ -9,6 +9,7 @@ use crate::{
     extent_buffer::{ExtentBuffer, key_cmp},
     fs_info::FsInfo,
     path::BtrfsPath,
+    split,
     transaction::TransHandle,
 };
 use btrfs_disk::tree::DiskKey;
@@ -95,15 +96,28 @@ pub fn node_bin_search(eb: &ExtentBuffer, key: &DiskKey) -> usize {
     if low > 0 { low - 1 } else { 0 }
 }
 
+/// Describes why a search is being performed, so `search_slot` can
+/// prepare the tree accordingly during descent.
+#[derive(Debug, Clone, Copy)]
+pub enum SearchIntent {
+    /// Read-only lookup. No tree modifications are expected.
+    ReadOnly,
+    /// Insertion: the leaf must have at least this many free bytes
+    /// (ITEM_SIZE + data payload size). Full nodes are split preemptively
+    /// during descent.
+    Insert(u32),
+    /// Deletion: sparse nodes are rebalanced during descent to prevent
+    /// tree bloat from deletion-heavy operations.
+    Delete,
+}
+
 /// Search for a key in a tree, recording the path from root to leaf.
 ///
 /// - `trans`: transaction handle (needed if `cow` is true to COW blocks)
 /// - `tree_id`: which tree to search
 /// - `key`: the key to search for
 /// - `path`: receives the search path (must be empty/released)
-/// - `ins_len`: if > 0, this is an insert operation and the leaf must have
-///   enough free space for an item of this total size (ITEM_SIZE + data_size).
-///   If 0, read-only search.
+/// - `intent`: controls preemptive splitting and rebalancing during descent
 /// - `cow`: if true, COW each block along the path
 ///
 /// Returns `Ok(true)` if the exact key was found, `Ok(false)` if not (in
@@ -111,14 +125,14 @@ pub fn node_bin_search(eb: &ExtentBuffer, key: &DiskKey) -> usize {
 ///
 /// # Errors
 ///
-/// Returns an error if any block read or COW operation fails.
+/// Returns an error if any block read, COW, or split operation fails.
 pub fn search_slot<R: Read + Write + Seek>(
     mut trans: Option<&mut TransHandle<R>>,
     fs_info: &mut FsInfo<R>,
     tree_id: u64,
     key: &DiskKey,
     path: &mut BtrfsPath,
-    _ins_len: u32,
+    intent: SearchIntent,
     cow: bool,
 ) -> io::Result<bool> {
     let root_bytenr = fs_info.root_bytenr(tree_id).ok_or_else(|| {
@@ -144,10 +158,53 @@ pub fn search_slot<R: Read + Write + Seek>(
             let result = leaf_bin_search(&eb, key);
             path.nodes[0] = Some(eb);
             path.slots[0] = result.slot;
+
+            // If inserting, ensure the leaf has enough free space.
+            // Split the leaf if it doesn't, then re-search to find the
+            // correct slot in whichever leaf the key belongs to.
+            if let SearchIntent::Insert(needed) = intent {
+                let leaf = path.nodes[0].as_ref().unwrap();
+                if leaf.leaf_free_space() < needed {
+                    if let Some(trans) = trans.as_deref_mut() {
+                        split::split_leaf(
+                            trans, fs_info, path, tree_id, key, needed,
+                        )?;
+                    } else {
+                        return Err(io::Error::other(
+                            "leaf full and no transaction for split",
+                        ));
+                    }
+                }
+            }
+
             return Ok(result.found);
         }
 
-        // Internal node: find the child slot
+        // Internal node: preemptive split if inserting and the node is full.
+        // This prevents the case where a leaf split needs to insert a key
+        // pointer into a full parent, which would require walking back up.
+        if matches!(intent, SearchIntent::Insert(_)) {
+            let nritems = eb.nritems() as usize;
+            let max_ptrs = eb.max_key_ptrs() as usize;
+            if nritems >= max_ptrs {
+                // Store the node in the path before splitting it
+                path.nodes[level as usize] = Some(eb.clone());
+                path.slots[level as usize] = node_bin_search(&eb, key);
+
+                if let Some(trans) = trans.as_deref_mut() {
+                    split::split_node(trans, fs_info, path, tree_id, level)?;
+                    // After split, re-read the node from the path (it may
+                    // have been updated) and re-search for the correct slot
+                    eb = path.nodes[level as usize].as_ref().unwrap().clone();
+                } else {
+                    return Err(io::Error::other(
+                        "node full and no transaction for split",
+                    ));
+                }
+            }
+        }
+
+        // Find the child slot
         let slot = node_bin_search(&eb, key);
         path.nodes[level as usize] = Some(eb.clone());
         path.slots[level as usize] = slot;
