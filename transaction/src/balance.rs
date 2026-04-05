@@ -12,7 +12,7 @@ use crate::{
     extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
     filesystem::Filesystem,
     path::BtrfsPath,
-    transaction::TransHandle,
+    transaction::Transaction,
 };
 use std::io::{self, Read, Seek, Write};
 
@@ -26,7 +26,7 @@ use std::io::{self, Read, Seek, Write};
 ///
 /// Returns an error if block I/O fails.
 pub fn push_leaf_left<R: Read + Write + Seek>(
-    trans: &mut TransHandle<R>,
+    trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
     path: &mut BtrfsPath,
     tree_id: u64,
@@ -150,7 +150,7 @@ pub fn push_leaf_left<R: Read + Write + Seek>(
 ///
 /// Returns an error if block I/O fails.
 pub fn push_leaf_right<R: Read + Write + Seek>(
-    trans: &mut TransHandle<R>,
+    trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
     path: &mut BtrfsPath,
     tree_id: u64,
@@ -310,7 +310,7 @@ pub fn push_leaf_right<R: Read + Write + Seek>(
 ///
 /// Returns an error if block I/O or COW fails.
 pub fn balance_node<R: Read + Write + Seek>(
-    trans: &mut TransHandle<R>,
+    trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
     parent: &mut ExtentBuffer,
     parent_slot: usize,

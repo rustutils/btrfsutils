@@ -12,7 +12,7 @@ use crate::{
     },
     filesystem::Filesystem,
     path::BtrfsPath,
-    transaction::TransHandle,
+    transaction::Transaction,
 };
 use btrfs_disk::tree::DiskKey;
 use std::io::{self, Read, Seek, Write};
@@ -27,7 +27,7 @@ use std::io::{self, Read, Seek, Write};
 ///
 /// Returns an error if block allocation or I/O fails.
 pub fn split_leaf<R: Read + Write + Seek>(
-    trans: &mut TransHandle<R>,
+    trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
     path: &mut BtrfsPath,
     tree_id: u64,
@@ -173,7 +173,7 @@ pub fn split_leaf<R: Read + Write + Seek>(
 ///
 /// Returns an error if block allocation or I/O fails.
 pub fn split_node<R: Read + Write + Seek>(
-    trans: &mut TransHandle<R>,
+    trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
     path: &mut BtrfsPath,
     tree_id: u64,
@@ -234,7 +234,7 @@ pub fn split_node<R: Read + Write + Seek>(
 /// If the parent is full, splits it recursively. If the root splits,
 /// creates a new root.
 fn insert_ptr_in_parent<R: Read + Write + Seek>(
-    trans: &mut TransHandle<R>,
+    trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
     path: &mut BtrfsPath,
     tree_id: u64,
@@ -313,7 +313,7 @@ fn find_parent_level(path: &BtrfsPath) -> Option<usize> {
 
 /// Create a new root node when the old root splits.
 fn create_new_root<R: Read + Write + Seek>(
-    trans: &mut TransHandle<R>,
+    trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
     path: &mut BtrfsPath,
     tree_id: u64,

@@ -19,7 +19,7 @@ use btrfs_transaction::{
     path::BtrfsPath,
     search::{self, SearchIntent},
     serialize,
-    transaction::TransHandle,
+    transaction::Transaction,
 };
 use std::{
     fs::File,
@@ -335,7 +335,7 @@ fn write_insert_item_and_verify() {
         generation_before = fs.superblock.generation;
 
         let mut trans =
-            TransHandle::start(&mut fs).expect("start transaction failed");
+            Transaction::start(&mut fs).expect("start transaction failed");
 
         // Search for the insertion point in the root tree
         let mut path = BtrfsPath::new();
@@ -434,7 +434,7 @@ fn write_delete_item_and_verify() {
             fs.root_bytenr(9).expect("UUID tree root missing");
 
         let mut trans =
-            TransHandle::start(&mut fs).expect("start transaction failed");
+            Transaction::start(&mut fs).expect("start transaction failed");
 
         // Search with COW to get a writable path
         let mut path = BtrfsPath::new();
@@ -524,7 +524,7 @@ fn backup_roots_updated_on_commit() {
             .open(&img_path)
             .unwrap();
         let mut fs = Filesystem::open(file).expect("open failed");
-        let mut trans = TransHandle::start(&mut fs).expect("start failed");
+        let mut trans = Transaction::start(&mut fs).expect("start failed");
 
         let key = DiskKey {
             objectid: 100_001,
@@ -639,7 +639,7 @@ fn compat_ro_flags_preserved_after_commit() {
             .open(&img_path)
             .unwrap();
         let mut fs = Filesystem::open(file).unwrap();
-        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let mut trans = Transaction::start(&mut fs).unwrap();
         let key = DiskKey {
             objectid: 100_002,
             key_type: KeyType::TemporaryItem,
@@ -716,7 +716,7 @@ fn write_many_items_triggers_split() {
             .unwrap();
         let mut fs = Filesystem::open(file).expect("open failed");
         let mut trans =
-            TransHandle::start(&mut fs).expect("start transaction failed");
+            Transaction::start(&mut fs).expect("start transaction failed");
 
         for i in 0..item_count {
             let key = DiskKey {
@@ -805,7 +805,7 @@ fn write_set_subvol_readonly() {
             .open(&img_path)
             .unwrap();
         let mut fs = Filesystem::open(file).unwrap();
-        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let mut trans = Transaction::start(&mut fs).unwrap();
 
         let key = DiskKey {
             objectid: 5,
@@ -953,7 +953,7 @@ fn mount_verify_subvol_readonly() {
             .unwrap();
         let mut fs = Filesystem::open(file).expect("open failed");
 
-        let mut trans = TransHandle::start(&mut fs).expect("start failed");
+        let mut trans = Transaction::start(&mut fs).expect("start failed");
 
         // Search for ROOT_ITEM of FS_TREE (tree 5)
         let key = DiskKey {
@@ -1036,7 +1036,7 @@ fn mount_verify_file_created() {
             .unwrap();
         let mut fs = Filesystem::open(file).expect("open failed");
         let transid = fs.superblock.generation + 1;
-        let mut trans = TransHandle::start(&mut fs).expect("start failed");
+        let mut trans = Transaction::start(&mut fs).expect("start failed");
 
         let ts = Timespec {
             sec: 1_700_000_000,

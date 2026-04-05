@@ -12,7 +12,7 @@ use btrfs_transaction::{
     items,
     path::BtrfsPath,
     search::{self, SearchIntent},
-    transaction::TransHandle,
+    transaction::Transaction,
 };
 use std::{
     fs::File,
@@ -119,7 +119,7 @@ fn validate_leaf(eb: &btrfs_transaction::extent_buffer::ExtentBuffer) {
 fn split_leaf_compacts_data() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
 
     let data = [0xAB; 32];
     // Insert enough items to trigger exactly one split
@@ -161,7 +161,7 @@ fn split_leaf_compacts_data() {
 fn push_leaf_right_preserves_offset_ordering() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
 
     // Insert 500 items to trigger multiple splits and redistributions
     let data = [0xCD; 32];
@@ -202,7 +202,7 @@ fn push_leaf_right_preserves_offset_ordering() {
 fn dup_writes_both_copies() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
 
     // Insert enough items to allocate new blocks in the DUP metadata group
     let data = [0xEF; 32];
@@ -239,7 +239,7 @@ fn dup_writes_both_copies() {
 fn cow_block_clears_flags() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
 
     // Read the root tree root and COW it
     let root_bytenr = fs.root_bytenr(1).unwrap();
@@ -268,7 +268,7 @@ fn cow_block_clears_flags() {
 fn alloc_tree_block_creates_extent_ref() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
 
     let logical = trans.alloc_tree_block(&mut fs, 1, 0).unwrap();
 
@@ -287,7 +287,7 @@ fn alloc_tree_block_creates_extent_ref() {
 fn cow_block_pins_old_address() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
 
     let root_bytenr = fs.root_bytenr(1).unwrap();
     let eb = fs.read_block(root_bytenr).unwrap();
@@ -311,7 +311,7 @@ fn cow_block_pins_old_address() {
 fn block_group_used_correct_after_commit() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
 
     // Insert items to trigger COW (which creates extent refs)
     let data = [0x99; 16];
@@ -349,7 +349,7 @@ fn block_group_used_correct_after_commit() {
 fn commit_convergence_with_many_trees() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
 
     // Modify items in the root tree to trigger root item updates and
     // extent tree COW during commit
@@ -390,7 +390,7 @@ fn all_items_searchable_after_split() {
 
     {
         let mut fs = open_rw(&img_path);
-        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let mut trans = Transaction::start(&mut fs).unwrap();
 
         for i in 0..item_count {
             let key = make_key(800_000 + i);
@@ -450,7 +450,7 @@ fn balance_cows_sibling_from_previous_generation() {
     // Transaction 1: insert items to build a multi-leaf tree
     {
         let mut fs = open_rw(&img_path);
-        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let mut trans = Transaction::start(&mut fs).unwrap();
         let data = [0xAA; 32];
         for i in 0..300 {
             let key = make_key(900_000 + i);
@@ -479,7 +479,7 @@ fn balance_cows_sibling_from_previous_generation() {
     // and right.logical() != right_bytenr branches).
     {
         let mut fs = open_rw(&img_path);
-        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let mut trans = Transaction::start(&mut fs).unwrap();
         let data = [0xBB; 32];
         for i in 0..300 {
             let key = make_key(900_300 + i);
@@ -538,7 +538,7 @@ fn delete_many_items_triggers_node_rebalance() {
     // Transaction 1: insert enough items to build a multi-level tree
     {
         let mut fs = open_rw(&img_path);
-        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let mut trans = Transaction::start(&mut fs).unwrap();
         let data = [0xEE; 32];
         for i in 0..1000 {
             let key = make_key(1_100_000 + i);
@@ -566,7 +566,7 @@ fn delete_many_items_triggers_node_rebalance() {
     // Transaction 2: delete most items using SearchIntent::Delete
     {
         let mut fs = open_rw(&img_path);
-        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let mut trans = Transaction::start(&mut fs).unwrap();
         for i in 0..900 {
             let key = make_key(1_100_000 + i);
             let mut path = BtrfsPath::new();
@@ -668,7 +668,7 @@ fn make_node(
 fn balance_node_merge_right() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
     let nodesize = fs.nodesize;
     let generation = fs.generation;
     let old_gen = generation - 1; // Previous generation forces COW
@@ -772,7 +772,7 @@ fn balance_node_merge_right() {
 fn balance_node_merge_left() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
     let nodesize = fs.nodesize;
     let generation = fs.generation;
     let old_gen = generation - 1;
@@ -864,7 +864,7 @@ fn balance_node_merge_left() {
 fn balance_node_not_sparse_skips() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
     let nodesize = fs.nodesize;
     let generation = fs.generation;
     let max_ptrs =
@@ -919,7 +919,7 @@ fn balance_node_not_sparse_skips() {
 fn balance_node_too_full_to_merge() {
     let (dir, img_path) = create_test_image();
     let mut fs = open_rw(&img_path);
-    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let mut trans = Transaction::start(&mut fs).unwrap();
     let nodesize = fs.nodesize;
     let generation = fs.generation;
     let max_ptrs =
@@ -1007,7 +1007,7 @@ fn large_tree_insert_and_delete() {
     // Transaction 1: build the 3-level tree
     {
         let mut fs = open_rw(&img_path);
-        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let mut trans = Transaction::start(&mut fs).unwrap();
 
         for i in 0..item_count {
             let key = make_key(2_000_000 + i);
@@ -1047,7 +1047,7 @@ fn large_tree_insert_and_delete() {
     let delete_count = 9000;
     {
         let mut fs = open_rw(&img_path);
-        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let mut trans = Transaction::start(&mut fs).unwrap();
 
         for i in 0..delete_count {
             let key = make_key(2_000_000 + i);

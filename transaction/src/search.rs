@@ -11,7 +11,7 @@ use crate::{
     filesystem::Filesystem,
     path::BtrfsPath,
     split,
-    transaction::TransHandle,
+    transaction::Transaction,
 };
 use btrfs_disk::tree::DiskKey;
 use std::{
@@ -128,7 +128,7 @@ pub enum SearchIntent {
 ///
 /// Returns an error if any block read, COW, or split operation fails.
 pub fn search_slot<R: Read + Write + Seek>(
-    mut trans: Option<&mut TransHandle<R>>,
+    mut trans: Option<&mut Transaction<R>>,
     fs_info: &mut Filesystem<R>,
     tree_id: u64,
     key: &DiskKey,

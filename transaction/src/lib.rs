@@ -8,8 +8,8 @@
 //!
 //! The primary entry point is [`Filesystem::open`], which opens a device or
 //! image file for modification. From there, start a transaction with
-//! [`TransHandle::start`], modify trees through [`search::search_slot`] and
-//! the item operation functions, and commit with [`TransHandle::commit`].
+//! [`Transaction::start`], modify trees through [`search::search_slot`] and
+//! the item operation functions, and commit with [`Transaction::commit`].
 //!
 //! This is a clean-room implementation based on the on-disk format
 //! specification and UAPI headers. It is licensed MIT/Apache-2.0.
@@ -32,7 +32,7 @@ pub mod serialize;
 pub mod split;
 pub mod transaction;
 
-pub use crate::{transaction::TransHandle, filesystem::Filesystem};
+pub use crate::{filesystem::Filesystem, transaction::Transaction};
 
 #[cfg(test)]
 mod test_helpers;

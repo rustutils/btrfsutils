@@ -1,6 +1,6 @@
 //! # Transaction lifecycle: start, commit, abort
 //!
-//! A `TransHandle` groups multiple tree modifications into a single atomic
+//! A `Transaction` groups multiple tree modifications into a single atomic
 //! commit. The commit point is the superblock write: all new tree blocks are
 //! written first (at new locations via COW), then the superblock is updated
 //! to point to the new root.
@@ -27,11 +27,11 @@ use std::{
 
 /// Handle for an in-progress transaction.
 ///
-/// Created by [`TransHandle::start`], which increments the generation.
+/// Created by [`Transaction::start`], which increments the generation.
 /// Tracks dirty blocks and pending reference count changes. Finalized by
-/// either [`commit`](TransHandle::commit) (write to disk) or
-/// [`abort`](TransHandle::abort) (discard).
-pub struct TransHandle<R> {
+/// either [`commit`](Transaction::commit) (write to disk) or
+/// [`abort`](Transaction::abort) (discard).
+pub struct Transaction<R> {
     /// The transaction generation (superblock.generation + 1).
     pub transid: u64,
     /// Blocks freed during this transaction (old COW sources).
@@ -53,7 +53,7 @@ pub struct TransHandle<R> {
     _phantom: std::marker::PhantomData<R>,
 }
 
-impl<R: Read + Write + Seek> TransHandle<R> {
+impl<R: Read + Write + Seek> Transaction<R> {
     /// Start a new transaction.
     ///
     /// Increments the filesystem generation by 1 and initializes the

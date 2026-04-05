@@ -12,7 +12,7 @@ use crate::{
     items,
     path::BtrfsPath,
     search::{self, SearchIntent},
-    transaction::TransHandle,
+    transaction::Transaction,
 };
 use btrfs_disk::tree::{DiskKey, KeyType};
 use std::{fs::File, io, path::PathBuf, process::Command};
@@ -94,7 +94,7 @@ impl TestFixture {
 ///
 /// Returns the number of items actually inserted.
 pub fn insert_test_items<R: io::Read + io::Write + io::Seek>(
-    trans: &mut TransHandle<R>,
+    trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
     tree_id: u64,
     start_oid: u64,
