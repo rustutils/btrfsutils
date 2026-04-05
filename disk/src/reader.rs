@@ -111,14 +111,20 @@ impl<R: Read + Write + Seek> BlockReader<R> {
     ///
     /// Returns an error if the logical address is unmapped or the underlying write fails.
     pub fn write_block(&mut self, logical: u64, buf: &[u8]) -> io::Result<()> {
-        let physical = self.chunk_cache.resolve(logical).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("logical address {logical} not mapped in chunk cache"),
-            )
-        })?;
-        self.reader.seek(SeekFrom::Start(physical))?;
-        self.reader.write_all(buf)?;
+        let physicals =
+            self.chunk_cache.resolve_all(logical).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "logical address {logical} not mapped in chunk cache"
+                    ),
+                )
+            })?;
+        // Write to all stripe copies (DUP, RAID1, etc.)
+        for physical in physicals {
+            self.reader.seek(SeekFrom::Start(physical))?;
+            self.reader.write_all(buf)?;
+        }
         Ok(())
     }
 }

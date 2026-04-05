@@ -224,16 +224,45 @@ pub fn push_leaf_right<R: Read + Write + Seek>(
     let right_nritems = right.nritems() as usize;
     let first_push = nritems - push_count;
 
-    // Shift existing right items' descriptors right by push_count
+    // Calculate total data size of items being pushed
+    let push_data_total: u32 = push_items.iter().map(|(_, s, _)| *s).sum();
+
+    // Shift existing right items' data DOWN by push_data_total to make
+    // room at the top of the data area for the new items. Data in btrfs
+    // grows downward from the end of the block, and item 0 must have the
+    // highest offset.
     if right_nritems > 0 {
+        let old_data_end = right.leaf_data_end();
+        let old_data_start =
+            HEADER_SIZE as u32 + right.item_offset(0) + right.item_size(0);
+        let data_len = old_data_start as usize - old_data_end as usize;
+        if data_len > 0 {
+            let src_start = old_data_end as usize;
+            let dest_start = src_start - push_data_total as usize;
+            right.copy_within(src_start..src_start + data_len, dest_start);
+        }
+
+        // Shift existing items' descriptors right by push_count and
+        // update their offsets to account for the data shift.
+        let src = HEADER_SIZE;
+        let len = right_nritems * ITEM_SIZE;
+        let dest = HEADER_SIZE + push_count * ITEM_SIZE;
+        right.copy_within(src..src + len, dest);
+
+        for i in push_count..push_count + right_nritems {
+            let old_off = right.item_offset(i);
+            right.set_item_offset(i, old_off - push_data_total);
+        }
+    } else {
+        // No existing items — just shift descriptors area
         let src = HEADER_SIZE;
         let len = right_nritems * ITEM_SIZE;
         let dest = HEADER_SIZE + push_count * ITEM_SIZE;
         right.copy_within(src..src + len, dest);
     }
 
-    // Copy items to the beginning of the right sibling
-    let mut data_end = right.leaf_data_end();
+    // Pack new items at the top of the data area (highest offsets).
+    let mut data_end = right.nodesize();
     for (i, (src_key, src_size, src_data)) in push_items.iter().enumerate() {
         let src_size = *src_size;
 

@@ -704,7 +704,7 @@ fn write_many_items_triggers_split() {
     let (dir, img_path) = create_test_image();
     assert_btrfs_check(&img_path);
 
-    let item_count = 300;
+    let item_count = 1000;
     let data_payload = [0xABu8; 32];
 
     // Phase 1: Insert many items, forcing leaf splits

@@ -110,9 +110,38 @@ pub fn split_leaf<R: Read + Write + Seek>(
     }
     new_leaf.set_nritems(move_count as u32);
 
-    // Truncate the original leaf
+    // Truncate the original leaf and compact the remaining items' data
+    // toward the end of the block. Items [0..split) stay, but the data
+    // from moved items [split..nritems) left a gap. btrfs requires the
+    // first item's data to end at nodesize - HEADER_SIZE (no gap at the
+    // top of the data area).
     let old_leaf = path.nodes[0].as_mut().unwrap();
+    debug_assert_eq!(
+        old_leaf.generation(),
+        fs_info.generation,
+        "split_leaf: old leaf at {} has stale generation {} (expected {})",
+        old_leaf.logical(),
+        old_leaf.generation(),
+        fs_info.generation
+    );
     old_leaf.set_nritems(split as u32);
+
+    // Repack data: copy each remaining item's data to a contiguous region
+    // at the end of the block, updating offsets as we go.
+    if split > 0 {
+        let mut data_end = nodesize;
+        for i in 0..split {
+            let size = old_leaf.item_size(i);
+            let old_data = old_leaf.item_data(i).to_vec();
+            data_end -= size;
+            let new_offset = data_end - HEADER_SIZE as u32;
+            old_leaf.set_item_offset(i, new_offset);
+            let abs_off = data_end as usize;
+            old_leaf.as_bytes_mut()[abs_off..abs_off + size as usize]
+                .copy_from_slice(&old_data);
+        }
+    }
+
     fs_info.mark_dirty(old_leaf);
     fs_info.mark_dirty(&new_leaf);
 
@@ -324,6 +353,14 @@ fn create_new_root<R: Read + Write + Seek>(
     new_root.set_nritems(2);
 
     // Pointer 0: old root (left child)
+    debug_assert_eq!(
+        old_root.generation(),
+        fs_info.generation,
+        "create_new_root: old root at {} has generation {}, expected {}",
+        old_root_logical,
+        old_root.generation(),
+        fs_info.generation
+    );
     new_root.set_key_ptr(
         0,
         &old_root_key,

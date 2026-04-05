@@ -86,6 +86,24 @@ impl ChunkTreeCache {
         Some(mapping.stripes[0].offset + offset_within_chunk)
     }
 
+    /// Resolve a logical address to physical byte offsets on ALL stripes.
+    ///
+    /// For DUP and RAID1 profiles, a single logical address maps to multiple
+    /// physical copies. Write operations must update all copies to maintain
+    /// consistency.
+    #[must_use]
+    pub fn resolve_all(&self, logical: u64) -> Option<Vec<u64>> {
+        let mapping = self.lookup(logical)?;
+        let offset_within_chunk = logical - mapping.logical;
+        Some(
+            mapping
+                .stripes
+                .iter()
+                .map(|s| s.offset + offset_within_chunk)
+                .collect(),
+        )
+    }
+
     /// Return the number of cached chunk mappings.
     #[must_use]
     pub fn len(&self) -> usize {
