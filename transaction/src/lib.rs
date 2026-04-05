@@ -6,11 +6,10 @@
 //! item insertion/deletion, node splitting, transaction commit, and extent
 //! allocation.
 //!
-//! The primary entry point is [`filesystem::Filesystem::open`], which opens a device
-//! or image file for modification. From there, start a transaction with
-//! [`transaction::TransHandle::start`], modify trees through
-//! [`search::search_slot`] and the item operation functions, and commit with
-//! [`transaction::TransHandle::commit`].
+//! The primary entry point is [`Filesystem::open`], which opens a device or
+//! image file for modification. From there, start a transaction with
+//! [`TransHandle::start`], modify trees through [`search::search_slot`] and
+//! the item operation functions, and commit with [`TransHandle::commit`].
 //!
 //! This is a clean-room implementation based on the on-disk format
 //! specification and UAPI headers. It is licensed MIT/Apache-2.0.
@@ -32,6 +31,8 @@ pub mod search;
 pub mod serialize;
 pub mod split;
 pub mod transaction;
+
+pub use crate::{transaction::TransHandle, filesystem::Filesystem};
 
 #[cfg(test)]
 mod test_helpers;

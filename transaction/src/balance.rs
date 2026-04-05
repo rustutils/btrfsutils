@@ -1,4 +1,4 @@
-//! # Node balancing (push left/right, merge)
+//! # Node balancing
 //!
 //! Before splitting a full leaf or node, try redistributing items to a
 //! neighboring sibling. This reduces tree height growth and keeps the tree
