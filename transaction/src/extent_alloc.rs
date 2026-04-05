@@ -243,49 +243,6 @@ fn collect_extents_in_range<R: Read + Write + Seek>(
     Ok(())
 }
 
-/// Allocate a metadata block from the best available metadata block group.
-///
-/// Scans block groups for metadata space, finds free extents, and returns the
-/// logical address of a free `nodesize`-aligned region.
-///
-/// # Errors
-///
-/// Returns an error if no free metadata space is available.
-pub fn alloc_metadata_block<R: Read + Write + Seek>(
-    fs_info: &mut FsInfo<R>,
-) -> io::Result<u64> {
-    let nodesize = u64::from(fs_info.nodesize);
-    let groups = load_block_groups(fs_info)?;
-
-    // Try metadata block groups first, sorted by most free space
-    let mut meta_groups: Vec<&BlockGroup> = groups
-        .iter()
-        .filter(|bg| bg.is_metadata() && bg.free() >= nodesize)
-        .collect();
-    meta_groups.sort_by_key(|bg| std::cmp::Reverse(bg.free()));
-
-    for bg in meta_groups {
-        let free_extents =
-            find_free_extents(fs_info, bg.start, bg.length, nodesize)?;
-        for &(start, _len) in &free_extents {
-            // Align to nodesize
-            let aligned = align_up(start, nodesize);
-            if aligned + nodesize <= bg.start + bg.length {
-                return Ok(aligned);
-            }
-        }
-    }
-
-    Err(io::Error::other(
-        "no free metadata space available in any block group",
-    ))
-}
-
-/// Align a value up to the given alignment.
-const fn align_up(value: u64, align: u64) -> u64 {
-    (value + align - 1) & !(align - 1)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,11 +273,4 @@ mod tests {
         assert!(bg.is_data());
     }
 
-    #[test]
-    fn align_up_cases() {
-        assert_eq!(align_up(0, 16384), 0);
-        assert_eq!(align_up(1, 16384), 16384);
-        assert_eq!(align_up(16384, 16384), 16384);
-        assert_eq!(align_up(16385, 16384), 32768);
-    }
 }
