@@ -9,7 +9,7 @@
 
 use crate::{
     cow::cow_block,
-    extent_buffer::{HEADER_SIZE, ITEM_SIZE},
+    extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
     fs_info::FsInfo,
     path::BtrfsPath,
     transaction::TransHandle,
@@ -263,6 +263,139 @@ pub fn push_leaf_right<R: Read + Write + Seek>(
     fs_info.mark_dirty(parent);
 
     Ok(push_count)
+}
+
+/// Try to rebalance a sparse internal node during deletion descent.
+///
+/// If the node at `level` in the path has fewer key pointers than
+/// `threshold`, attempt to merge with a sibling or redistribute key
+/// pointers. This prevents tree bloat from deletion-heavy operations.
+///
+/// Called from `search_slot` when `SearchIntent::Delete` and the child
+/// node to descend into is sparse.
+///
+/// Returns `true` if the node was merged into its sibling (and the path
+/// updated), `false` if no action was taken or only redistribution occurred.
+///
+/// # Errors
+///
+/// Returns an error if block I/O or COW fails.
+pub fn balance_node<R: Read + Write + Seek>(
+    trans: &mut TransHandle<R>,
+    fs_info: &mut FsInfo<R>,
+    parent: &mut ExtentBuffer,
+    parent_slot: usize,
+    tree_id: u64,
+) -> io::Result<bool> {
+    let child_bytenr = parent.key_ptr_blockptr(parent_slot);
+    let child = fs_info.read_block(child_bytenr)?;
+    let child_nritems = child.nritems() as usize;
+    let max_ptrs = child.max_key_ptrs() as usize;
+
+    // Only rebalance if below 25% occupancy
+    if child_nritems >= max_ptrs / 4 {
+        return Ok(false);
+    }
+
+    let parent_nritems = parent.nritems() as usize;
+
+    // Try merging with the right sibling first
+    if parent_slot + 1 < parent_nritems {
+        let right_bytenr = parent.key_ptr_blockptr(parent_slot + 1);
+        let right = fs_info.read_block(right_bytenr)?;
+        let right_nritems = right.nritems() as usize;
+
+        if child_nritems + right_nritems <= max_ptrs {
+            // Merge: move all of right's key pointers into child, then
+            // remove right's pointer from the parent.
+            let mut child = cow_block(trans, fs_info, &child, tree_id, None)?;
+            if child.logical() != child_bytenr {
+                parent.set_key_ptr_blockptr(parent_slot, child.logical());
+                parent.set_key_ptr_generation(parent_slot, fs_info.generation);
+            }
+
+            // Copy right's key pointers to end of child
+            for i in 0..right_nritems {
+                let key = right.key_ptr_key(i);
+                let blockptr = right.key_ptr_blockptr(i);
+                let kp_gen = right.key_ptr_generation(i);
+                child.set_key_ptr(child_nritems + i, &key, blockptr, kp_gen);
+            }
+            child.set_nritems((child_nritems + right_nritems) as u32);
+            fs_info.mark_dirty(&child);
+
+            // Remove the right sibling's pointer from the parent
+            let remove_slot = parent_slot + 1;
+            if remove_slot + 1 < parent_nritems {
+                let src = HEADER_SIZE + (remove_slot + 1) * KEY_PTR_SIZE;
+                let len = (parent_nritems - remove_slot - 1) * KEY_PTR_SIZE;
+                parent.copy_within(src..src + len, src - KEY_PTR_SIZE);
+            }
+            parent.set_nritems((parent_nritems - 1) as u32);
+            fs_info.mark_dirty(parent);
+
+            // Queue delayed ref drop for the absorbed right sibling
+            trans.delayed_refs.drop_ref(
+                right_bytenr,
+                true,
+                tree_id,
+                right.level(),
+            );
+            trans.pin_block(right_bytenr);
+
+            return Ok(true);
+        }
+    }
+
+    // Try merging with the left sibling
+    if parent_slot > 0 {
+        let left_bytenr = parent.key_ptr_blockptr(parent_slot - 1);
+        let left = fs_info.read_block(left_bytenr)?;
+        let left_nritems = left.nritems() as usize;
+
+        if left_nritems + child_nritems <= max_ptrs {
+            // Merge child into left: append child's key pointers to left
+            let mut left = cow_block(trans, fs_info, &left, tree_id, None)?;
+            if left.logical() != left_bytenr {
+                parent.set_key_ptr_blockptr(parent_slot - 1, left.logical());
+                parent.set_key_ptr_generation(
+                    parent_slot - 1,
+                    fs_info.generation,
+                );
+            }
+
+            for i in 0..child_nritems {
+                let key = child.key_ptr_key(i);
+                let blockptr = child.key_ptr_blockptr(i);
+                let kp_gen = child.key_ptr_generation(i);
+                left.set_key_ptr(left_nritems + i, &key, blockptr, kp_gen);
+            }
+            left.set_nritems((left_nritems + child_nritems) as u32);
+            fs_info.mark_dirty(&left);
+
+            // Remove child's pointer from the parent
+            if parent_slot + 1 < parent_nritems {
+                let src = HEADER_SIZE + (parent_slot + 1) * KEY_PTR_SIZE;
+                let len = (parent_nritems - parent_slot - 1) * KEY_PTR_SIZE;
+                parent.copy_within(src..src + len, src - KEY_PTR_SIZE);
+            }
+            parent.set_nritems((parent_nritems - 1) as u32);
+            fs_info.mark_dirty(parent);
+
+            // Queue delayed ref drop for the absorbed child
+            trans.delayed_refs.drop_ref(
+                child_bytenr,
+                true,
+                tree_id,
+                child.level(),
+            );
+            trans.pin_block(child_bytenr);
+
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 /// Find the parent level in the path.

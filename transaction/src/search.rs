@@ -5,6 +5,7 @@
 //! single tree block, and leaf advancement (`next_leaf`, `prev_leaf`).
 
 use crate::{
+    balance,
     cow::cow_block,
     extent_buffer::{ExtentBuffer, key_cmp},
     fs_info::FsInfo,
@@ -201,6 +202,22 @@ pub fn search_slot<R: Read + Write + Seek>(
                         "node full and no transaction for split",
                     ));
                 }
+            }
+        }
+
+        // Deletion rebalancing: if the child we're about to descend into
+        // is sparse (below 25% occupancy), try to merge it with a sibling.
+        // This prevents tree bloat from deletion-heavy operations.
+        if matches!(intent, SearchIntent::Delete) {
+            let slot = node_bin_search(&eb, key);
+            if let Some(trans) = trans.as_deref_mut()
+                && balance::balance_node(
+                    trans, fs_info, &mut eb, slot, tree_id,
+                )?
+            {
+                // Node was merged — the parent's nritems changed.
+                // Re-search to find the correct child slot.
+                fs_info.mark_dirty(&eb);
             }
         }
 
