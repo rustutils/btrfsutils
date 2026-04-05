@@ -388,5 +388,4 @@ mod tests {
         assert_eq!(refs[0].index, 2);
         assert_eq!(refs[0].name, b"hello.txt");
     }
-
 }
