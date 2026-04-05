@@ -21,7 +21,7 @@ use btrfs_disk::{
     tree::{DiskKey, KeyType},
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::{self, Read, Seek, Write},
 };
 
@@ -44,6 +44,11 @@ pub struct TransHandle<R> {
     alloc_cursor: u64,
     /// End of the allocation region.
     alloc_end: u64,
+    /// Logical addresses of blocks freed during this transaction. These
+    /// must not be reallocated before the superblock is committed, because
+    /// the previous superblock still references them. A crash before commit
+    /// would leave both old and new data at the same address.
+    pinned: BTreeSet<u64>,
     /// Phantom to tie the lifetime/type parameter.
     _phantom: std::marker::PhantomData<R>,
 }
@@ -76,6 +81,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
             delayed_refs: DelayedRefQueue::new(),
             alloc_cursor: cursor,
             alloc_end: end,
+            pinned: BTreeSet::new(),
             _phantom: std::marker::PhantomData,
         })
     }
@@ -91,30 +97,43 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     /// Returns an error if no free metadata space is available.
     pub fn alloc_block(&mut self, fs_info: &mut FsInfo<R>) -> io::Result<u64> {
         let nodesize = u64::from(fs_info.nodesize);
-        let next = self.alloc_cursor + nodesize;
 
-        if next > self.alloc_end {
-            // Current region exhausted — find another free extent.
-            // Pass the current cursor so we don't re-discover space we
-            // already allocated from (those blocks don't have extent items
-            // yet so they'd appear "free" in the scan).
-            let (cursor, end) =
-                find_metadata_alloc_region_after(fs_info, self.alloc_cursor)?;
-            self.alloc_cursor = cursor;
-            self.alloc_end = end;
-
+        loop {
             let next = self.alloc_cursor + nodesize;
-            if next > self.alloc_end {
-                return Err(io::Error::other(
-                    "no metadata block group with enough free space",
-                ));
-            }
-        }
 
-        let logical = self.alloc_cursor;
-        self.alloc_cursor += nodesize;
-        self.allocated_blocks.push(logical);
-        Ok(logical)
+            if next > self.alloc_end {
+                // Current region exhausted — find another free extent.
+                // Pass the current cursor so we don't re-discover space we
+                // already allocated from (those blocks don't have extent
+                // items yet so they'd appear "free" in the scan).
+                let (cursor, end) = find_metadata_alloc_region_after(
+                    fs_info,
+                    self.alloc_cursor,
+                )?;
+                self.alloc_cursor = cursor;
+                self.alloc_end = end;
+
+                let next = self.alloc_cursor + nodesize;
+                if next > self.alloc_end {
+                    return Err(io::Error::other(
+                        "no metadata block group with enough free space",
+                    ));
+                }
+            }
+
+            let logical = self.alloc_cursor;
+            self.alloc_cursor += nodesize;
+
+            // Skip pinned blocks: these were freed during this transaction
+            // but the old superblock still references them. Reusing them
+            // before commit would break crash consistency.
+            if self.pinned.contains(&logical) {
+                continue;
+            }
+
+            self.allocated_blocks.push(logical);
+            return Ok(logical);
+        }
     }
 
     /// Allocate a new tree block and queue a delayed ref for it.
@@ -136,6 +155,22 @@ impl<R: Read + Write + Seek> TransHandle<R> {
         let logical = self.alloc_block(fs_info)?;
         self.delayed_refs.add_ref(logical, true, tree_id, level);
         Ok(logical)
+    }
+
+    /// Mark a block as pinned (freed but not yet committed).
+    ///
+    /// Pinned blocks must not be reallocated during this transaction.
+    /// The previous superblock still references them, so reusing the
+    /// address before the new superblock is committed would corrupt the
+    /// old consistent state on crash.
+    pub fn pin_block(&mut self, logical: u64) {
+        self.pinned.insert(logical);
+    }
+
+    /// Check whether a logical address is pinned.
+    #[must_use]
+    pub fn is_pinned(&self, logical: u64) -> bool {
+        self.pinned.contains(&logical)
     }
 
     /// Queue a block to be freed after commit.

@@ -62,10 +62,12 @@ pub fn cow_block<R: Read + Write + Seek>(
     let flags = new_eb.flags() & !(HEADER_FLAG_WRITTEN | HEADER_FLAG_RELOC);
     new_eb.set_flags(flags);
 
-    // Queue -1 delayed ref for the old block being replaced
+    // Queue -1 delayed ref for the old block being replaced, and pin it
+    // so the allocator doesn't reuse the address before commit.
     trans
         .delayed_refs
         .drop_ref(eb.logical(), true, tree_id, level);
+    trans.pin_block(eb.logical());
 
     // Mark the new block dirty
     fs_info.mark_dirty(&new_eb);
