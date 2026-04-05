@@ -193,9 +193,32 @@ pub fn search_slot<R: Read + Write + Seek>(
                 path.slots[level as usize] = node_bin_search(&eb, key);
 
                 if let Some(trans) = trans.as_deref_mut() {
+                    let split_point = nritems / 2;
+                    let old_slot = path.slots[level as usize];
                     split::split_node(trans, fs_info, path, tree_id, level)?;
-                    // After split, re-read the node from the path (it may
-                    // have been updated) and re-search for the correct slot
+
+                    // After split, path.nodes[level] is the truncated left
+                    // half. If our key was in the right half, we need to
+                    // switch to the right half node in the path.
+                    if old_slot >= split_point {
+                        // Find the parent level (above the split level)
+                        let parent_level = (level as usize + 1
+                            ..path.nodes.len())
+                            .find(|&l| path.nodes[l].is_some());
+                        if let Some(pl) = parent_level {
+                            let parent = path.nodes[pl].as_ref().unwrap();
+                            let ps = path.slots[pl];
+                            // The right half was inserted at ps + 1
+                            if ps + 1 < parent.nritems() as usize {
+                                let right_bytenr =
+                                    parent.key_ptr_blockptr(ps + 1);
+                                let right = fs_info.read_block(right_bytenr)?;
+                                path.nodes[level as usize] = Some(right);
+                                path.slots[pl] = ps + 1;
+                            }
+                        }
+                    }
+
                     eb = path.nodes[level as usize].as_ref().unwrap().clone();
                 } else {
                     return Err(io::Error::other(

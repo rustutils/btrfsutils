@@ -1101,3 +1101,88 @@ fn large_tree_insert_and_delete() {
 
     drop(dir);
 }
+
+/// Regression: cascading node splits when a parent node is full and must
+/// be split before inserting a key pointer from a child split. Tests
+/// that path.slots is correctly updated after the parent split.
+/// Previously panicked with an out-of-bounds write in set_key_ptr.
+#[test]
+fn cascading_node_split() {
+    // Use a 512 MiB image for enough metadata space
+    let dir = tempfile::TempDir::new().unwrap();
+    let img_path = dir.path().join("test.img");
+    let file = File::create(&img_path).unwrap();
+    file.set_len(512 * 1024 * 1024).unwrap();
+    drop(file);
+    let status = std::process::Command::new("mkfs.btrfs")
+        .args(["-f", "-q"])
+        .arg(&img_path)
+        .status()
+        .expect("mkfs.btrfs not found");
+    assert!(status.success());
+
+    // Use 3000-byte items: ~5 per leaf, need >493 leaves for level 2
+    // = ~2465 items. Use 2600 for margin.
+    let item_count: u64 = 2600;
+    let data = vec![0xCC; 3000];
+
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+
+        for i in 0..item_count {
+            let key = make_key(3_000_000 + i);
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+                true,
+            )
+            .unwrap_or_else(|e| panic!("search failed at item {i}: {e}"));
+            let leaf = path.nodes[0].as_mut().unwrap();
+            items::insert_item(leaf, path.slots[0], &key, &data)
+                .unwrap_or_else(|e| panic!("insert failed at item {i}: {e}"));
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+
+        // Should have a level-2 tree
+        let root = fs.read_block(fs.root_bytenr(1).unwrap()).unwrap();
+        assert!(
+            root.level() >= 2,
+            "expected level >= 2, got {}",
+            root.level()
+        );
+
+        trans.commit(&mut fs).unwrap();
+    }
+
+    assert_btrfs_check(&img_path);
+
+    // Verify all items survived
+    {
+        let mut fs = open_rw(&img_path);
+        for i in 0..item_count {
+            let key = make_key(3_000_000 + i);
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                None,
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::ReadOnly,
+                false,
+            )
+            .unwrap();
+            assert!(found, "item {i} not found after commit");
+            path.release();
+        }
+    }
+
+    drop(dir);
+}

@@ -152,6 +152,7 @@ pub fn split_leaf<R: Read + Write + Seek>(
         tree_id,
         &new_leaf_first_key,
         new_logical,
+        0, // child is a leaf
     )?;
 
     // Update the path to point to the correct leaf for insertion
@@ -222,6 +223,7 @@ pub fn split_node<R: Read + Write + Seek>(
         tree_id,
         &new_node_first_key,
         new_logical,
+        level, // child is a node at this level
     )?;
 
     Ok(())
@@ -238,15 +240,10 @@ fn insert_ptr_in_parent<R: Read + Write + Seek>(
     tree_id: u64,
     key: &DiskKey,
     child_logical: u64,
+    child_level: u8,
 ) -> io::Result<()> {
-    // Find the parent level
-    let _child_level = path.nodes[0].as_ref().map(|n| n.level()).unwrap_or(0);
-
-    // Walk up to find the level of the parent
-    // Actually, for a leaf split, parent is level 1. For a node split at level L,
-    // parent is level L+1. But the caller should handle this through the path.
-    // We need to find the right parent level.
-    let parent_level = find_parent_level(path);
+    // Find the parent: the first occupied level above the child.
+    let parent_level = find_parent_level_above(path, child_level as usize);
 
     if parent_level.is_none() {
         // We're splitting the root — create a new root
@@ -269,8 +266,32 @@ fn insert_ptr_in_parent<R: Read + Write + Seek>(
         let parent_nritems = parent.nritems() as usize;
         let max_ptrs = parent.max_key_ptrs() as usize;
         if parent_nritems >= max_ptrs {
-            // Need to split the parent first, then retry
+            // Split the parent first. This truncates the left half and
+            // inserts the right half into the grandparent (which may
+            // cascade further). After the split, the path at parent_level
+            // is stale. Instead of trying to fix it, re-search for the
+            // correct insertion point by scanning the grandparent for
+            // the child we're inserting next to.
             split_node(trans, fs_info, path, tree_id, parent_level as u8)?;
+
+            // The grandparent (or new root) now has pointers to both
+            // halves. Find the node that should contain our key by
+            // searching from the grandparent level down.
+            let gp_level = find_parent_level_above(path, parent_level);
+            if let Some(gp) = gp_level {
+                let gp_node = path.nodes[gp].as_ref().unwrap();
+                let gp_slot = crate::search::node_bin_search(gp_node, key);
+                let target_bytenr = gp_node.key_ptr_blockptr(gp_slot);
+                let target_node = fs_info.read_block(target_bytenr)?;
+                path.nodes[parent_level] = Some(target_node);
+                // Find slot in the target node for the child
+                path.slots[parent_level] = crate::search::node_bin_search(
+                    path.nodes[parent_level].as_ref().unwrap(),
+                    key,
+                );
+                path.slots[gp] = gp_slot;
+            }
+
             return insert_ptr_in_parent(
                 trans,
                 fs_info,
@@ -278,6 +299,7 @@ fn insert_ptr_in_parent<R: Read + Write + Seek>(
                 tree_id,
                 key,
                 child_logical,
+                child_level,
             );
         }
     }
@@ -303,10 +325,12 @@ fn insert_ptr_in_parent<R: Read + Write + Seek>(
     Ok(())
 }
 
-/// Find the parent level for inserting a new key pointer.
-/// Returns None if the path's root is at the top (need new root).
-fn find_parent_level(path: &BtrfsPath) -> Option<usize> {
-    (1..path.nodes.len()).find(|&level| path.nodes[level].is_some())
+/// Find the first occupied level above `min_level` in the path.
+fn find_parent_level_above(
+    path: &BtrfsPath,
+    min_level: usize,
+) -> Option<usize> {
+    (min_level + 1..path.nodes.len()).find(|&level| path.nodes[level].is_some())
 }
 
 /// Create a new root node when the old root splits.
@@ -549,7 +573,7 @@ mod tests {
     #[test]
     fn find_parent_level_none() {
         let path = BtrfsPath::new();
-        assert!(find_parent_level(&path).is_none());
+        assert!(find_parent_level_above(&path, 0).is_none());
     }
 
     #[test]
@@ -557,7 +581,7 @@ mod tests {
         let mut path = BtrfsPath::new();
         path.nodes[0] = Some(ExtentBuffer::new_zeroed(4096, 0));
         path.nodes[1] = Some(ExtentBuffer::new_zeroed(4096, 65536));
-        assert_eq!(find_parent_level(&path), Some(1));
+        assert_eq!(find_parent_level_above(&path, 0), Some(1));
     }
 
     #[test]
@@ -565,6 +589,6 @@ mod tests {
         let mut path = BtrfsPath::new();
         path.nodes[0] = Some(ExtentBuffer::new_zeroed(4096, 0));
         path.nodes[2] = Some(ExtentBuffer::new_zeroed(4096, 131072));
-        assert_eq!(find_parent_level(&path), Some(2));
+        assert_eq!(find_parent_level_above(&path, 0), Some(2));
     }
 }
