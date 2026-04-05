@@ -7,7 +7,7 @@
 
 use crate::{
     balance,
-    extent_buffer::{ExtentBuffer, HEADER_SIZE, KEY_PTR_SIZE, key_cmp},
+    extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE, key_cmp},
     fs_info::FsInfo,
     path::BtrfsPath,
     transaction::TransHandle,
@@ -53,8 +53,25 @@ pub fn split_leaf<R: Read + Write + Seek>(
     let nritems = leaf.nritems() as usize;
     let nodesize = leaf.nodesize();
 
-    // Find the split point: aim for roughly half the data in each leaf
-    let split = nritems / 2;
+    // Find a data-aware split point. Items have variable sizes, so splitting
+    // at nritems/2 can produce very unbalanced leaves. Instead, sum the actual
+    // byte usage and find the item where roughly half the total bytes are on
+    // each side. Each item consumes ITEM_SIZE (descriptor) + data_size bytes.
+    let total_bytes: u32 = (0..nritems)
+        .map(|i| ITEM_SIZE as u32 + leaf.item_size(i))
+        .sum();
+    let half = total_bytes / 2;
+    let mut running = 0u32;
+    let mut split = nritems / 2; // fallback
+    for i in 0..nritems {
+        running += ITEM_SIZE as u32 + leaf.item_size(i);
+        if running >= half {
+            // Split after item i: items [0..=i] stay, [i+1..] move.
+            // Ensure at least one item on each side.
+            split = (i + 1).clamp(1, nritems - 1);
+            break;
+        }
+    }
 
     // Allocate a new leaf
     let new_logical = trans.alloc_block(fs_info)?;
