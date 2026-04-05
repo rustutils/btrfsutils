@@ -6,8 +6,8 @@
 
 use btrfs_disk::tree::{DiskKey, KeyType};
 use btrfs_transaction::{
-    cow,
-    extent_buffer::{HEADER_SIZE, ITEM_SIZE},
+    balance, cow,
+    extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
     fs_info::FsInfo,
     items,
     path::BtrfsPath,
@@ -630,5 +630,280 @@ fn delete_many_items_triggers_node_rebalance() {
         }
     }
 
+    drop(dir);
+}
+
+/// Helper: create a level-1 node ExtentBuffer with `n` key pointers.
+/// Keys are (start_oid + i*100, RootItem, 0), blockptrs are fake addresses.
+fn make_node(
+    nodesize: u32,
+    logical: u64,
+    generation: u64,
+    n: usize,
+    start_oid: u64,
+) -> ExtentBuffer {
+    let mut eb = ExtentBuffer::new_zeroed(nodesize, logical);
+    eb.set_level(1);
+    eb.set_nritems(n as u32);
+    eb.set_generation(generation);
+    eb.set_owner(1);
+    for i in 0..n {
+        let key = DiskKey {
+            objectid: start_oid + i as u64 * 100,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        eb.set_key_ptr(i, &key, 0x1000_0000 + i as u64 * 0x4000, generation);
+    }
+    eb
+}
+
+/// Coverage: balance_node merge-right path. A sparse child merges with
+/// its right sibling, absorbing all key pointers and removing the right
+/// sibling's entry from the parent.
+#[test]
+fn balance_node_merge_right() {
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let nodesize = fs.nodesize;
+    let generation = fs.generation;
+
+    // Create a sparse child (2 key pointers) and a right sibling (3 key pointers).
+    // Together they fit in one node (5 << max_ptrs).
+    let child = make_node(nodesize, 0x2000_0000, generation, 2, 100);
+    let right = make_node(nodesize, 0x2000_4000, generation, 3, 300);
+
+    // Put them in the cache so read_block can find them
+    fs.mark_dirty(&child);
+    fs.mark_dirty(&right);
+
+    // Build parent with 2 children: child at slot 0, right at slot 1
+    let mut parent = ExtentBuffer::new_zeroed(nodesize, 0x3000_0000);
+    parent.set_level(2);
+    parent.set_nritems(2);
+    parent.set_generation(generation);
+    parent.set_owner(1);
+    let child_key = DiskKey {
+        objectid: 100,
+        key_type: KeyType::RootItem,
+        offset: 0,
+    };
+    let right_key = DiskKey {
+        objectid: 300,
+        key_type: KeyType::RootItem,
+        offset: 0,
+    };
+    parent.set_key_ptr(0, &child_key, child.logical(), generation);
+    parent.set_key_ptr(1, &right_key, right.logical(), generation);
+
+    // Call balance_node on slot 0 (the sparse child)
+    let merged =
+        balance::balance_node(&mut trans, &mut fs, &mut parent, 0, 1).unwrap();
+    assert!(merged, "should have merged");
+
+    // Parent should now have 1 child (the right sibling was absorbed)
+    assert_eq!(parent.nritems(), 1);
+
+    // The merged child should have 5 key pointers (2 + 3)
+    let merged_bytenr = parent.key_ptr_blockptr(0);
+    let merged_eb = fs.read_block(merged_bytenr).unwrap();
+    assert_eq!(merged_eb.nritems(), 5);
+    assert_eq!(merged_eb.level(), 1);
+
+    // Verify key pointer ordering in merged node
+    for i in 0..4 {
+        let k1 = merged_eb.key_ptr_key(i);
+        let k2 = merged_eb.key_ptr_key(i + 1);
+        assert!(
+            k1.objectid < k2.objectid,
+            "key[{i}].oid={} not < key[{}].oid={}",
+            k1.objectid,
+            i + 1,
+            k2.objectid,
+        );
+    }
+
+    // Right sibling should be pinned
+    assert!(trans.is_pinned(right.logical()));
+
+    trans.abort(&mut fs);
+    drop(dir);
+}
+
+/// Coverage: balance_node merge-left path. When there's no right sibling
+/// (child is at the last slot), the child merges into the left sibling.
+#[test]
+fn balance_node_merge_left() {
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let nodesize = fs.nodesize;
+    let generation = fs.generation;
+
+    // Left sibling (3 key pointers), sparse child at slot 1 (2 key pointers)
+    let left = make_node(nodesize, 0x4000_0000, generation, 3, 100);
+    let child = make_node(nodesize, 0x4000_4000, generation, 2, 400);
+
+    fs.mark_dirty(&left);
+    fs.mark_dirty(&child);
+
+    let mut parent = ExtentBuffer::new_zeroed(nodesize, 0x5000_0000);
+    parent.set_level(2);
+    parent.set_nritems(2);
+    parent.set_generation(generation);
+    parent.set_owner(1);
+    let left_key = DiskKey {
+        objectid: 100,
+        key_type: KeyType::RootItem,
+        offset: 0,
+    };
+    let child_key = DiskKey {
+        objectid: 400,
+        key_type: KeyType::RootItem,
+        offset: 0,
+    };
+    parent.set_key_ptr(0, &left_key, left.logical(), generation);
+    parent.set_key_ptr(1, &child_key, child.logical(), generation);
+
+    // Call balance_node on slot 1 (the sparse child, last slot = no right sibling)
+    let merged =
+        balance::balance_node(&mut trans, &mut fs, &mut parent, 1, 1).unwrap();
+    assert!(merged, "should have merged into left");
+
+    // Parent should have 1 child
+    assert_eq!(parent.nritems(), 1);
+
+    // The left sibling should now have 5 key pointers (3 + 2)
+    let merged_bytenr = parent.key_ptr_blockptr(0);
+    let merged_eb = fs.read_block(merged_bytenr).unwrap();
+    assert_eq!(merged_eb.nritems(), 5);
+
+    // Child should be pinned (it was absorbed)
+    assert!(trans.is_pinned(child.logical()));
+
+    trans.abort(&mut fs);
+    drop(dir);
+}
+
+/// Coverage: balance_node when child is not sparse (>= 25% full).
+/// Should return false without merging.
+#[test]
+fn balance_node_not_sparse_skips() {
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let nodesize = fs.nodesize;
+    let generation = fs.generation;
+    let max_ptrs =
+        ((nodesize - HEADER_SIZE as u32) / KEY_PTR_SIZE as u32) as usize;
+
+    // Create child with 25% occupancy (at the threshold)
+    let threshold = max_ptrs / 4;
+    let child = make_node(nodesize, 0x6000_0000, generation, threshold, 100);
+    let right = make_node(nodesize, 0x6000_4000, generation, 3, 50000);
+
+    fs.mark_dirty(&child);
+    fs.mark_dirty(&right);
+
+    let mut parent = ExtentBuffer::new_zeroed(nodesize, 0x7000_0000);
+    parent.set_level(2);
+    parent.set_nritems(2);
+    parent.set_generation(generation);
+    parent.set_owner(1);
+    parent.set_key_ptr(
+        0,
+        &DiskKey {
+            objectid: 100,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        },
+        child.logical(),
+        generation,
+    );
+    parent.set_key_ptr(
+        1,
+        &DiskKey {
+            objectid: 50000,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        },
+        right.logical(),
+        generation,
+    );
+
+    let merged =
+        balance::balance_node(&mut trans, &mut fs, &mut parent, 0, 1).unwrap();
+    assert!(!merged, "should not merge (child is at threshold)");
+    assert_eq!(parent.nritems(), 2, "parent unchanged");
+
+    trans.abort(&mut fs);
+    drop(dir);
+}
+
+/// Coverage: balance_node when combined items exceed max_ptrs.
+/// Both siblings exist but neither can absorb the child.
+#[test]
+fn balance_node_too_full_to_merge() {
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+    let mut trans = TransHandle::start(&mut fs).unwrap();
+    let nodesize = fs.nodesize;
+    let generation = fs.generation;
+    let max_ptrs =
+        ((nodesize - HEADER_SIZE as u32) / KEY_PTR_SIZE as u32) as usize;
+
+    // Sparse child (2 ptrs) but left and right siblings are nearly full
+    let left = make_node(nodesize, 0x8000_0000, generation, max_ptrs - 1, 100);
+    let child = make_node(nodesize, 0x8000_4000, generation, 2, 50000);
+    let right =
+        make_node(nodesize, 0x8000_8000, generation, max_ptrs - 1, 80000);
+
+    fs.mark_dirty(&left);
+    fs.mark_dirty(&child);
+    fs.mark_dirty(&right);
+
+    let mut parent = ExtentBuffer::new_zeroed(nodesize, 0x9000_0000);
+    parent.set_level(2);
+    parent.set_nritems(3);
+    parent.set_generation(generation);
+    parent.set_owner(1);
+    parent.set_key_ptr(
+        0,
+        &DiskKey {
+            objectid: 100,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        },
+        left.logical(),
+        generation,
+    );
+    parent.set_key_ptr(
+        1,
+        &DiskKey {
+            objectid: 50000,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        },
+        child.logical(),
+        generation,
+    );
+    parent.set_key_ptr(
+        2,
+        &DiskKey {
+            objectid: 80000,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        },
+        right.logical(),
+        generation,
+    );
+
+    let merged =
+        balance::balance_node(&mut trans, &mut fs, &mut parent, 1, 1).unwrap();
+    assert!(!merged, "should not merge (siblings too full)");
+    assert_eq!(parent.nritems(), 3, "parent unchanged");
+
+    trans.abort(&mut fs);
     drop(dir);
 }
