@@ -695,6 +695,104 @@ fn compat_ro_flags_preserved_after_commit() {
     drop(dir);
 }
 
+/// Insert enough items to force leaf splits, then verify all items survive
+/// the commit and pass `btrfs check`. This exercises the preemptive splitting
+/// logic in `search_slot` with `SearchIntent::Insert`, the `alloc_tree_block`
+/// unified allocation, and the commit convergence loop.
+#[test]
+fn write_many_items_triggers_split() {
+    let (dir, img_path) = create_test_image();
+    assert_btrfs_check(&img_path);
+
+    let item_count = 300;
+    let data_payload = [0xABu8; 32];
+
+    // Phase 1: Insert many items, forcing leaf splits
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).expect("open failed");
+        let mut trans =
+            TransHandle::start(&mut fs).expect("start transaction failed");
+
+        for i in 0..item_count {
+            let key = DiskKey {
+                objectid: 200_000 + i as u64,
+                key_type: KeyType::TemporaryItem,
+                offset: 0,
+            };
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Insert((25 + data_payload.len()) as u32),
+                true,
+            )
+            .unwrap_or_else(|e| panic!("search_slot failed on item {i}: {e}"));
+            assert!(!found, "item {i} should not exist yet");
+
+            let leaf = path.nodes[0].as_mut().expect("no leaf");
+            items::insert_item(leaf, path.slots[0], &key, &data_payload)
+                .unwrap_or_else(|e| {
+                    panic!("insert_item failed on item {i}: {e}")
+                });
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+
+        trans.commit(&mut fs).expect("commit failed");
+    }
+
+    // Phase 2: Verify filesystem integrity
+    assert_btrfs_check(&img_path);
+
+    // Phase 3: Reopen and verify all items are searchable
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = FsInfo::open(file).expect("reopen failed");
+
+        for i in 0..item_count {
+            let key = DiskKey {
+                objectid: 200_000 + i as u64,
+                key_type: KeyType::TemporaryItem,
+                offset: 0,
+            };
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                None,
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::ReadOnly,
+                false,
+            )
+            .unwrap_or_else(|e| panic!("search failed for item {i}: {e}"));
+            assert!(found, "item {i} not found after commit");
+
+            let leaf = path.nodes[0].as_ref().unwrap();
+            let data = leaf.item_data(path.slots[0]);
+            assert_eq!(
+                data, &data_payload,
+                "item {i} data mismatch after commit"
+            );
+            path.release();
+        }
+    }
+
+    drop(dir);
+}
+
 #[test]
 fn write_set_subvol_readonly() {
     let (dir, img_path) = create_test_image();
