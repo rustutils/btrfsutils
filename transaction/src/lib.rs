@@ -32,3 +32,6 @@ pub mod search;
 pub mod serialize;
 pub mod split;
 pub mod transaction;
+
+#[cfg(test)]
+mod test_helpers;

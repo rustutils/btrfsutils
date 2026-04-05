@@ -119,7 +119,10 @@ mod tests {
         let current_gen = 42u64;
         let is_written = true;
         let skip_cow = eb.generation() == current_gen && !is_written;
-        assert!(!skip_cow, "should require COW even with matching generation");
+        assert!(
+            !skip_cow,
+            "should require COW even with matching generation"
+        );
     }
 
     #[test]
