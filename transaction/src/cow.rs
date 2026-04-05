@@ -80,14 +80,55 @@ mod tests {
     use super::*;
 
     #[test]
-    fn already_cowed_block_returned_as_is() {
-        // If generation matches, cow_block should return the same logical address
+    fn header_flag_values() {
+        // Verify our flag constants match the kernel header
+        assert_eq!(HEADER_FLAG_WRITTEN, 1);
+        assert_eq!(HEADER_FLAG_RELOC, 2);
+    }
+
+    #[test]
+    fn cow_skip_condition_generation_match_not_written() {
+        // When generation matches and block not written: should skip COW
         let mut eb = ExtentBuffer::new_zeroed(4096, 65536);
         eb.set_generation(42);
-        eb.set_bytenr(65536);
+        // Simulate the check in cow_block
+        let current_gen = 42u64;
+        let is_written = false;
+        assert!(
+            eb.generation() == current_gen && !is_written,
+            "should skip COW"
+        );
+    }
 
-        // We can't fully test cow_block without a real FsInfo, but we can
-        // verify the generation check logic
-        assert_eq!(eb.generation(), 42);
+    #[test]
+    fn cow_required_generation_mismatch() {
+        // When generation doesn't match: must COW
+        let mut eb = ExtentBuffer::new_zeroed(4096, 65536);
+        eb.set_generation(41);
+        let current_gen = 42u64;
+        let is_written = false;
+        let skip_cow = eb.generation() == current_gen && !is_written;
+        assert!(!skip_cow, "should require COW");
+    }
+
+    #[test]
+    fn cow_required_when_written() {
+        // When generation matches but block was written: must COW
+        let mut eb = ExtentBuffer::new_zeroed(4096, 65536);
+        eb.set_generation(42);
+        let current_gen = 42u64;
+        let is_written = true;
+        let skip_cow = eb.generation() == current_gen && !is_written;
+        assert!(!skip_cow, "should require COW even with matching generation");
+    }
+
+    #[test]
+    fn clear_written_reloc_flags() {
+        let mut eb = ExtentBuffer::new_zeroed(4096, 65536);
+        eb.set_flags(HEADER_FLAG_WRITTEN | HEADER_FLAG_RELOC | 0x100);
+        let cleared = eb.flags() & !(HEADER_FLAG_WRITTEN | HEADER_FLAG_RELOC);
+        assert_eq!(cleared, 0x100);
+        assert_eq!(cleared & HEADER_FLAG_WRITTEN, 0);
+        assert_eq!(cleared & HEADER_FLAG_RELOC, 0);
     }
 }

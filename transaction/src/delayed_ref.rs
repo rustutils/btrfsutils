@@ -141,4 +141,43 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].bytenr, 131072);
     }
+
+    #[test]
+    fn drain_empties_queue() {
+        let mut q = DelayedRefQueue::new();
+        q.add_ref(65536, true, 5, 0);
+        assert!(!q.is_empty());
+        assert_eq!(q.len(), 1);
+        let _ = q.drain();
+        assert!(q.is_empty());
+        assert_eq!(q.len(), 0);
+    }
+
+    #[test]
+    fn double_add_ref() {
+        let mut q = DelayedRefQueue::new();
+        q.add_ref(65536, true, 5, 0);
+        q.add_ref(65536, true, 5, 0);
+        let refs = q.drain();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].delta, 2);
+    }
+
+    #[test]
+    fn preserves_metadata_fields() {
+        let mut q = DelayedRefQueue::new();
+        q.add_ref(65536, true, 7, 2);
+        let refs = q.drain();
+        assert_eq!(refs[0].bytenr, 65536);
+        assert!(refs[0].is_metadata);
+        assert_eq!(refs[0].owner, 7);
+        assert_eq!(refs[0].level, 2);
+    }
+
+    #[test]
+    fn empty_queue_drain() {
+        let mut q = DelayedRefQueue::new();
+        let refs = q.drain();
+        assert!(refs.is_empty());
+    }
 }

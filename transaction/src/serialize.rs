@@ -434,4 +434,56 @@ mod tests {
         assert_eq!(refs[0].index, 2);
         assert_eq!(refs[0].name, b"hello.txt");
     }
+
+    #[test]
+    fn non_skinny_metadata_extent_size() {
+        let key = DiskKey {
+            objectid: 256,
+            key_type: btrfs_disk::tree::KeyType::InodeItem,
+            offset: 0,
+        };
+        let bytes = non_skinny_metadata_extent_item_to_bytes(1, 42, 5, &key, 0);
+        assert_eq!(bytes.len(), NON_SKINNY_METADATA_EXTENT_ITEM_SIZE);
+        assert_eq!(bytes.len(), 51);
+    }
+
+    #[test]
+    fn skinny_vs_non_skinny_header_match() {
+        // Both formats share the same 24-byte extent item header
+        let skinny = metadata_extent_item_to_bytes(1, 42, 5);
+        let key = DiskKey {
+            objectid: 0,
+            key_type: btrfs_disk::tree::KeyType::from_raw(0),
+            offset: 0,
+        };
+        let non_skinny =
+            non_skinny_metadata_extent_item_to_bytes(1, 42, 5, &key, 0);
+        // First 24 bytes (refs + generation + flags) should be identical
+        assert_eq!(&skinny[..24], &non_skinny[..24]);
+    }
+
+    #[test]
+    fn metadata_extent_flags() {
+        let bytes = metadata_extent_item_to_bytes(1, 42, 5);
+        // Flags at offset 16..24 should be TREE_BLOCK
+        let flags = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
+        assert_eq!(flags, btrfs_disk::items::ExtentFlags::TREE_BLOCK.bits());
+    }
+
+    #[test]
+    fn insert_empty_item_via_insert() {
+        // Zero-length items (like FREE_SPACE_EXTENT) should work
+        let mut eb = crate::extent_buffer::ExtentBuffer::new_zeroed(4096, 0);
+        eb.set_level(0);
+        eb.set_nritems(0);
+        let key = DiskKey {
+            objectid: 100,
+            key_type: btrfs_disk::tree::KeyType::FreeSpaceExtent,
+            offset: 4096,
+        };
+        crate::items::insert_item(&mut eb, 0, &key, &[]).unwrap();
+        assert_eq!(eb.nritems(), 1);
+        assert_eq!(eb.item_size(0), 0);
+        assert_eq!(eb.item_data(0).len(), 0);
+    }
 }

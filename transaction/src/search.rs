@@ -495,4 +495,99 @@ mod tests {
         };
         assert_eq!(node_bin_search(&eb, &key), 2);
     }
+
+    #[test]
+    fn node_search_single_item() {
+        let mut eb = ExtentBuffer::new_zeroed(4096, 131072);
+        eb.set_level(1);
+        eb.set_nritems(1);
+
+        let key = DiskKey {
+            objectid: 10,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        eb.set_key_ptr_key(0, &key);
+        eb.set_key_ptr_blockptr(0, 65536);
+        eb.set_key_ptr_generation(0, 1);
+
+        // Any key should return slot 0
+        let key = DiskKey {
+            objectid: 5,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        assert_eq!(node_bin_search(&eb, &key), 0);
+
+        let key = DiskKey {
+            objectid: 99,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        assert_eq!(node_bin_search(&eb, &key), 0);
+    }
+
+    #[test]
+    fn node_search_empty() {
+        let mut eb = ExtentBuffer::new_zeroed(4096, 131072);
+        eb.set_level(1);
+        eb.set_nritems(0);
+
+        let key = DiskKey {
+            objectid: 1,
+            key_type: KeyType::from_raw(1),
+            offset: 0,
+        };
+        assert_eq!(node_bin_search(&eb, &key), 0);
+    }
+
+    #[test]
+    fn leaf_search_key_type_ordering() {
+        // Keys are compared by (objectid, type, offset). Two keys with
+        // the same objectid but different types should be ordered by type.
+        let eb = make_test_leaf(
+            4096,
+            &[
+                (256, 1, 0),  // InodeItem
+                (256, 12, 0), // DirItem
+                (256, 84, 0), // DirIndex
+            ],
+        );
+
+        // Search for type 12 (DirItem)
+        let key = DiskKey {
+            objectid: 256,
+            key_type: KeyType::from_raw(12),
+            offset: 0,
+        };
+        let r = leaf_bin_search(&eb, &key);
+        assert!(r.found);
+        assert_eq!(r.slot, 1);
+    }
+
+    #[test]
+    fn leaf_search_offset_ordering() {
+        let eb =
+            make_test_leaf(4096, &[(256, 1, 0), (256, 1, 100), (256, 1, 200)]);
+
+        let key = DiskKey {
+            objectid: 256,
+            key_type: KeyType::from_raw(1),
+            offset: 100,
+        };
+        let r = leaf_bin_search(&eb, &key);
+        assert!(r.found);
+        assert_eq!(r.slot, 1);
+    }
+
+    #[test]
+    fn search_intent_debug_format() {
+        // Verify SearchIntent implements Debug
+        let intent = SearchIntent::Insert(100);
+        let _ = format!("{intent:?}");
+        let intent = SearchIntent::ReadOnly;
+        let _ = format!("{intent:?}");
+        let intent = SearchIntent::Delete;
+        let _ = format!("{intent:?}");
+    }
 }

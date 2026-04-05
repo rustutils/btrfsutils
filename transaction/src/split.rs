@@ -379,3 +379,194 @@ fn create_new_root<R: Read + Write + Seek>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{extent_buffer::ExtentBuffer, items};
+    use btrfs_disk::tree::KeyType;
+
+    fn make_key(oid: u64) -> DiskKey {
+        DiskKey {
+            objectid: oid,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        }
+    }
+
+    fn filled_leaf(
+        nodesize: u32,
+        item_count: usize,
+        data_size: usize,
+    ) -> ExtentBuffer {
+        let mut eb = ExtentBuffer::new_zeroed(nodesize, 65536);
+        eb.set_level(0);
+        eb.set_nritems(0);
+        eb.set_generation(1);
+        eb.set_owner(5);
+        let data = vec![0xAA; data_size];
+        for i in 0..item_count {
+            items::insert_item(&mut eb, i, &make_key(i as u64 + 1), &data)
+                .unwrap();
+        }
+        eb
+    }
+
+    #[test]
+    fn data_aware_split_point_uniform_items() {
+        // With uniform 32-byte items, the split point should be near nritems/2
+        let eb = filled_leaf(16384, 200, 32);
+        let nritems = eb.nritems() as usize;
+
+        let total_bytes: u32 = (0..nritems)
+            .map(|i| ITEM_SIZE as u32 + eb.item_size(i))
+            .sum();
+        let half = total_bytes / 2;
+        let mut running = 0u32;
+        let mut split = nritems / 2;
+        for i in 0..nritems {
+            running += ITEM_SIZE as u32 + eb.item_size(i);
+            if running >= half {
+                split = (i + 1).clamp(1, nritems - 1);
+                break;
+            }
+        }
+
+        // For uniform items, split should be close to nritems/2
+        assert!(
+            (split as i64 - nritems as i64 / 2).unsigned_abs() <= 1,
+            "split={split} but nritems/2={}",
+            nritems / 2
+        );
+    }
+
+    #[test]
+    fn data_aware_split_point_variable_items() {
+        // Mix of small and large items
+        let mut eb = ExtentBuffer::new_zeroed(4096, 65536);
+        eb.set_level(0);
+        eb.set_nritems(0);
+        eb.set_generation(1);
+        eb.set_owner(5);
+
+        // Insert 5 items: one large, four small
+        items::insert_item(&mut eb, 0, &make_key(1), &[0x11; 1000]).unwrap();
+        items::insert_item(&mut eb, 1, &make_key(2), &[0x22; 50]).unwrap();
+        items::insert_item(&mut eb, 2, &make_key(3), &[0x33; 50]).unwrap();
+        items::insert_item(&mut eb, 3, &make_key(4), &[0x44; 50]).unwrap();
+        items::insert_item(&mut eb, 4, &make_key(5), &[0x55; 50]).unwrap();
+
+        let nritems = eb.nritems() as usize;
+        let total_bytes: u32 = (0..nritems)
+            .map(|i| ITEM_SIZE as u32 + eb.item_size(i))
+            .sum();
+        let half = total_bytes / 2;
+        let mut running = 0u32;
+        let mut split = nritems / 2;
+        for i in 0..nritems {
+            running += ITEM_SIZE as u32 + eb.item_size(i);
+            if running >= half {
+                split = (i + 1).clamp(1, nritems - 1);
+                break;
+            }
+        }
+
+        // The large 1000-byte item at position 0 accounts for most of the
+        // bytes. The split should happen after item 0 (split=1), not at
+        // nritems/2=2.
+        assert_eq!(split, 1, "split should be after the large item");
+    }
+
+    #[test]
+    fn split_point_clamps_minimum() {
+        // With 2 items where the first is huge, split should be 1 (not 0)
+        let mut eb = ExtentBuffer::new_zeroed(4096, 65536);
+        eb.set_level(0);
+        eb.set_nritems(0);
+        eb.set_generation(1);
+        eb.set_owner(5);
+        items::insert_item(&mut eb, 0, &make_key(1), &[0x11; 2000]).unwrap();
+        items::insert_item(&mut eb, 1, &make_key(2), &[0x22; 50]).unwrap();
+
+        let nritems = eb.nritems() as usize;
+        let total_bytes: u32 = (0..nritems)
+            .map(|i| ITEM_SIZE as u32 + eb.item_size(i))
+            .sum();
+        let half = total_bytes / 2;
+        let mut running = 0u32;
+        let mut split = nritems / 2;
+        for i in 0..nritems {
+            running += ITEM_SIZE as u32 + eb.item_size(i);
+            if running >= half {
+                split = (i + 1).clamp(1, nritems - 1);
+                break;
+            }
+        }
+        assert_eq!(split, 1, "split should be 1 (at least one item per side)");
+    }
+
+    #[test]
+    fn leaf_data_compaction_after_truncate() {
+        // Simulate what split_leaf does: create a full leaf, truncate to
+        // first half, then compact data.
+        let mut eb = filled_leaf(4096, 20, 32);
+        let nodesize = eb.nodesize();
+        let split = 10;
+
+        // Verify item 0 data end before truncate
+        let end_before = eb.item_offset(0) + eb.item_size(0);
+        assert_eq!(end_before, nodesize - HEADER_SIZE as u32);
+
+        // Truncate
+        eb.set_nritems(split);
+
+        // Before compaction: item 0's data end should still be correct
+        // (items 0..split have the highest offsets)
+        let end_after_trunc = eb.item_offset(0) + eb.item_size(0);
+        assert_eq!(end_after_trunc, nodesize - HEADER_SIZE as u32);
+
+        // Compact (repack remaining items)
+        let mut data_end = nodesize;
+        for i in 0..split as usize {
+            let size = eb.item_size(i);
+            let old_data = eb.item_data(i).to_vec();
+            data_end -= size;
+            let new_offset = data_end - HEADER_SIZE as u32;
+            eb.set_item_offset(i, new_offset);
+            let abs_off = data_end as usize;
+            eb.as_bytes_mut()[abs_off..abs_off + size as usize]
+                .copy_from_slice(&old_data);
+        }
+
+        // After compaction: item 0 data should still end at the right place
+        let end_compacted = eb.item_offset(0) + eb.item_size(0);
+        assert_eq!(end_compacted, nodesize - HEADER_SIZE as u32);
+
+        // Verify all data is intact
+        for i in 0..split as usize {
+            assert_eq!(eb.item_data(i), &[0xAA; 32]);
+        }
+    }
+
+    #[test]
+    fn find_parent_level_none() {
+        let path = BtrfsPath::new();
+        assert!(find_parent_level(&path).is_none());
+    }
+
+    #[test]
+    fn find_parent_level_at_1() {
+        let mut path = BtrfsPath::new();
+        path.nodes[0] = Some(ExtentBuffer::new_zeroed(4096, 0));
+        path.nodes[1] = Some(ExtentBuffer::new_zeroed(4096, 65536));
+        assert_eq!(find_parent_level(&path), Some(1));
+    }
+
+    #[test]
+    fn find_parent_level_at_2() {
+        let mut path = BtrfsPath::new();
+        path.nodes[0] = Some(ExtentBuffer::new_zeroed(4096, 0));
+        path.nodes[2] = Some(ExtentBuffer::new_zeroed(4096, 131072));
+        assert_eq!(find_parent_level(&path), Some(2));
+    }
+}

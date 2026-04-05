@@ -433,4 +433,93 @@ mod tests {
         // After deleting, nritems is 0 so leaf_free_space should be back to max
         assert_eq!(eb.leaf_free_space(), initial_free);
     }
+
+    #[test]
+    fn insert_empty_item_zero_size() {
+        let mut eb = empty_leaf(4096);
+        insert_empty_item(&mut eb, 0, &make_key(1), 0).unwrap();
+        assert_eq!(eb.nritems(), 1);
+        assert_eq!(eb.item_size(0), 0);
+    }
+
+    #[test]
+    fn insert_preserves_descending_offsets() {
+        let mut eb = empty_leaf(4096);
+        // Insert items with varying data sizes
+        insert_item(&mut eb, 0, &make_key(1), &[0x11; 200]).unwrap();
+        insert_item(&mut eb, 1, &make_key(2), &[0x22; 50]).unwrap();
+        insert_item(&mut eb, 2, &make_key(3), &[0x33; 100]).unwrap();
+
+        // Offsets must be in descending order (item 0 highest)
+        for i in 0..eb.nritems() as usize - 1 {
+            assert!(
+                eb.item_offset(i) > eb.item_offset(i + 1),
+                "offset[{i}]={} should be > offset[{}]={}",
+                eb.item_offset(i),
+                i + 1,
+                eb.item_offset(i + 1)
+            );
+        }
+    }
+
+    #[test]
+    fn first_item_data_ends_at_block_end() {
+        let mut eb = empty_leaf(4096);
+        insert_item(&mut eb, 0, &make_key(1), &[0x11; 100]).unwrap();
+        insert_item(&mut eb, 1, &make_key(2), &[0x22; 50]).unwrap();
+        insert_item(&mut eb, 2, &make_key(3), &[0x33; 75]).unwrap();
+
+        // Item 0's data must end at nodesize - HEADER_SIZE
+        let end = eb.item_offset(0) + eb.item_size(0);
+        assert_eq!(end, eb.nodesize() - HEADER_SIZE as u32);
+    }
+
+    #[test]
+    fn insert_in_middle() {
+        let mut eb = empty_leaf(4096);
+        insert_item(&mut eb, 0, &make_key(1), &[0x11; 50]).unwrap();
+        insert_item(&mut eb, 1, &make_key(3), &[0x33; 50]).unwrap();
+        // Insert between items 0 and 1
+        insert_item(&mut eb, 1, &make_key(2), &[0x22; 50]).unwrap();
+
+        assert_eq!(eb.nritems(), 3);
+        assert_eq!(eb.item_key(0).objectid, 1);
+        assert_eq!(eb.item_key(1).objectid, 2);
+        assert_eq!(eb.item_key(2).objectid, 3);
+        // Verify all data is correct
+        assert_eq!(eb.item_data(0), &[0x11; 50]);
+        assert_eq!(eb.item_data(1), &[0x22; 50]);
+        assert_eq!(eb.item_data(2), &[0x33; 50]);
+    }
+
+    #[test]
+    fn insert_variable_sizes() {
+        let mut eb = empty_leaf(4096);
+        insert_item(&mut eb, 0, &make_key(1), &[0x11; 10]).unwrap();
+        insert_item(&mut eb, 1, &make_key(2), &[0x22; 500]).unwrap();
+        insert_item(&mut eb, 2, &make_key(3), &[0x33; 1]).unwrap();
+
+        assert_eq!(eb.item_data(0), &[0x11; 10]);
+        assert_eq!(eb.item_data(1), &[0x22; 500]);
+        assert_eq!(eb.item_data(2), &[0x33; 1]);
+
+        // Verify packing: item 0 ends at top
+        let end = eb.item_offset(0) + eb.item_size(0);
+        assert_eq!(end, eb.nodesize() - HEADER_SIZE as u32);
+    }
+
+    #[test]
+    fn delete_middle_preserves_data() {
+        let mut eb = empty_leaf(4096);
+        insert_item(&mut eb, 0, &make_key(1), &[0x11; 50]).unwrap();
+        insert_item(&mut eb, 1, &make_key(2), &[0x22; 50]).unwrap();
+        insert_item(&mut eb, 2, &make_key(3), &[0x33; 50]).unwrap();
+
+        del_items(&mut eb, 1, 1);
+        assert_eq!(eb.nritems(), 2);
+        assert_eq!(eb.item_key(0).objectid, 1);
+        assert_eq!(eb.item_key(1).objectid, 3);
+        assert_eq!(eb.item_data(0), &[0x11; 50]);
+        assert_eq!(eb.item_data(1), &[0x33; 50]);
+    }
 }

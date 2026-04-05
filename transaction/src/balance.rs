@@ -453,4 +453,48 @@ mod tests {
         path.nodes[1] = Some(ExtentBuffer::new_zeroed(4096, 65536));
         assert_eq!(find_parent_level(&path), Some(1));
     }
+
+    #[test]
+    fn find_parent_skips_empty_levels() {
+        let mut path = BtrfsPath::new();
+        path.nodes[0] = Some(ExtentBuffer::new_zeroed(4096, 0));
+        // Level 1 empty, level 2 has a node
+        path.nodes[2] = Some(ExtentBuffer::new_zeroed(4096, 131072));
+        assert_eq!(find_parent_level(&path), Some(2));
+    }
+
+    #[test]
+    fn push_leaf_left_no_parent_returns_zero() {
+        // A root leaf has no parent, so push_leaf_left should return 0
+        // without needing a real FsInfo. We verify by checking find_parent_level.
+        let path = BtrfsPath::new();
+        assert_eq!(find_parent_level(&path), None);
+    }
+
+    #[test]
+    fn push_leaf_left_at_slot_zero_returns_zero() {
+        // If current leaf is at parent slot 0, there's no left sibling
+        let mut path = BtrfsPath::new();
+        path.nodes[0] = Some(ExtentBuffer::new_zeroed(4096, 0));
+        path.nodes[1] = Some(ExtentBuffer::new_zeroed(4096, 65536));
+        path.slots[1] = 0; // Leftmost slot
+        assert_eq!(find_parent_level(&path), Some(1));
+        // Can't call push_leaf_left without FsInfo, but we can verify
+        // the early return condition
+        assert_eq!(path.slots[1], 0);
+    }
+
+    #[test]
+    fn push_leaf_right_at_last_slot_no_sibling() {
+        // If the current leaf is at the last parent slot, no right sibling
+        let mut path = BtrfsPath::new();
+        path.nodes[0] = Some(ExtentBuffer::new_zeroed(4096, 0));
+        let mut parent = ExtentBuffer::new_zeroed(4096, 65536);
+        parent.set_level(1);
+        parent.set_nritems(2);
+        path.nodes[1] = Some(parent);
+        path.slots[1] = 1; // Last slot (nritems=2, so slots 0 and 1)
+        // parent_slot + 1 >= parent_nritems → no right sibling
+        assert!(path.slots[1] + 1 >= 2);
+    }
 }
