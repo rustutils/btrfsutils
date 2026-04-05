@@ -32,8 +32,13 @@ pub fn cow_block<R: Read + Write + Seek>(
     tree_id: u64,
     _parent_info: Option<(u64, usize)>,
 ) -> io::Result<ExtentBuffer> {
-    // Already COWed in this transaction?
-    if eb.generation() == fs_info.generation {
+    // Already COWed in this transaction and not yet flushed to stable
+    // storage? Safe to modify in place. A block that has been written to
+    // disk (flush_dirty or write_block) is part of the on-disk state and
+    // must be COWed again to preserve crash consistency.
+    if eb.generation() == fs_info.generation
+        && !fs_info.is_written(eb.logical())
+    {
         return Ok(eb.clone());
     }
 

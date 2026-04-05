@@ -14,7 +14,7 @@ use btrfs_disk::{
     superblock::Superblock,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet},
     io::{self, Read, Seek, Write},
 };
 
@@ -30,12 +30,13 @@ pub struct FsInfo<R> {
     /// Parsed superblock (updated in-memory during transactions).
     pub superblock: Superblock,
     /// Map of tree ID to root block logical address.
-    roots: HashMap<u64, u64>,
+    roots: BTreeMap<u64, u64>,
     /// Snapshot of root bytenrs at transaction start. Used to detect which
     /// trees had their root block change during the transaction.
-    original_roots: HashMap<u64, u64>,
+    original_roots: BTreeMap<u64, u64>,
     /// Logical addresses of blocks modified in the current transaction.
-    dirty: HashSet<u64>,
+    /// BTreeSet gives sorted iteration in `flush_dirty` for sequential I/O.
+    dirty: BTreeSet<u64>,
     /// Current transaction generation (superblock.generation + 1 during a
     /// transaction, or superblock.generation when idle).
     pub generation: u64,
@@ -46,7 +47,13 @@ pub struct FsInfo<R> {
     /// In-memory cache of extent buffers read or created during the transaction.
     /// Keyed by logical address. This avoids re-reading blocks from disk and
     /// ensures modifications are visible within the same transaction.
-    block_cache: HashMap<u64, ExtentBuffer>,
+    block_cache: BTreeMap<u64, ExtentBuffer>,
+    /// Logical addresses of blocks that have been written to stable storage
+    /// (via `flush_dirty` or `write_block`). A block in this set must be
+    /// COWed before modification even if its generation matches the current
+    /// transaction, because the on-disk copy is now part of the committed
+    /// state and overwriting it would break crash consistency.
+    written: BTreeSet<u64>,
 }
 
 impl<R: Read + Write + Seek> FsInfo<R> {
@@ -69,8 +76,8 @@ impl<R: Read + Write + Seek> FsInfo<R> {
         let nodesize = superblock.nodesize;
         let sectorsize = superblock.sectorsize;
 
-        // Convert BTreeMap<u64, (u64, u64)> to HashMap<u64, u64> (tree_id -> root bytenr)
-        let mut roots: HashMap<u64, u64> = tree_roots
+        // Convert BTreeMap<u64, (u64, u64)> to BTreeMap<u64, u64> (tree_id -> root bytenr)
+        let mut roots: BTreeMap<u64, u64> = tree_roots
             .into_iter()
             .map(|(id, (bytenr, _offset))| (id, bytenr))
             .collect();
@@ -87,11 +94,12 @@ impl<R: Read + Write + Seek> FsInfo<R> {
             superblock,
             roots,
             original_roots,
-            dirty: HashSet::new(),
+            dirty: BTreeSet::new(),
             generation,
             nodesize,
             sectorsize,
-            block_cache: HashMap::new(),
+            block_cache: BTreeMap::new(),
+            written: BTreeSet::new(),
         })
     }
 
@@ -111,7 +119,7 @@ impl<R: Read + Write + Seek> FsInfo<R> {
         let nodesize = superblock.nodesize;
         let sectorsize = superblock.sectorsize;
 
-        let mut roots: HashMap<u64, u64> = tree_roots
+        let mut roots: BTreeMap<u64, u64> = tree_roots
             .into_iter()
             .map(|(id, (bytenr, _offset))| (id, bytenr))
             .collect();
@@ -126,11 +134,12 @@ impl<R: Read + Write + Seek> FsInfo<R> {
             superblock,
             roots,
             original_roots,
-            dirty: HashSet::new(),
+            dirty: BTreeSet::new(),
             generation,
             nodesize,
             sectorsize,
-            block_cache: HashMap::new(),
+            block_cache: BTreeMap::new(),
+            written: BTreeSet::new(),
         })
     }
 
@@ -165,6 +174,7 @@ impl<R: Read + Write + Seek> FsInfo<R> {
         eb.update_checksum();
         self.reader.write_block(eb.logical(), eb.as_bytes())?;
         self.dirty.insert(eb.logical());
+        self.written.insert(eb.logical());
         self.block_cache.insert(eb.logical(), eb.clone());
         Ok(())
     }
@@ -213,9 +223,18 @@ impl<R: Read + Write + Seek> FsInfo<R> {
         self.dirty.len()
     }
 
-    /// Clear the dirty set (used after commit or abort).
+    /// Check whether a block has been written to stable storage during
+    /// this transaction. Such blocks must be COWed before modification
+    /// even if their generation matches the current transaction.
+    #[must_use]
+    pub fn is_written(&self, logical: u64) -> bool {
+        self.written.contains(&logical)
+    }
+
+    /// Clear the dirty and written sets (used after commit or abort).
     pub fn clear_dirty(&mut self) {
         self.dirty.clear();
+        self.written.clear();
     }
 
     /// Clear the block cache (used after commit or abort to free memory).
@@ -244,6 +263,7 @@ impl<R: Read + Write + Seek> FsInfo<R> {
                 let mut eb = eb;
                 eb.update_checksum();
                 self.reader.write_block(eb.logical(), eb.as_bytes())?;
+                self.written.insert(eb.logical());
             }
         }
         Ok(())
@@ -316,7 +336,7 @@ mod tests {
     #[test]
     fn dirty_tracking() {
         // We can test the dirty set logic without a real filesystem
-        let mut dirty = HashSet::new();
+        let mut dirty = BTreeSet::new();
         dirty.insert(65536u64);
         dirty.insert(131072);
         assert_eq!(dirty.len(), 2);
@@ -327,7 +347,7 @@ mod tests {
 
     #[test]
     fn roots_map() {
-        let mut roots = HashMap::new();
+        let mut roots = BTreeMap::new();
         roots.insert(1u64, 65536u64);
         roots.insert(5, 131072);
         assert_eq!(roots.get(&1), Some(&65536));
