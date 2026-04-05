@@ -13,8 +13,13 @@ use btrfs_disk::{
     tree::{DiskKey, KeyType},
 };
 use btrfs_transaction::{
-    extent_buffer::key_cmp, fs_info::FsInfo, items, path::BtrfsPath, search,
-    serialize, transaction::TransHandle,
+    extent_buffer::key_cmp,
+    fs_info::FsInfo,
+    items,
+    path::BtrfsPath,
+    search::{self, SearchIntent},
+    serialize,
+    transaction::TransHandle,
 };
 use std::{
     fs::File,
@@ -88,9 +93,16 @@ fn search_root_tree_for_fs_tree() {
         offset: 0,
     };
     let mut path = BtrfsPath::new();
-    let found =
-        search::search_slot(None, &mut fs, 1, &key, &mut path, 0, false)
-            .expect("search_slot failed");
+    let found = search::search_slot(
+        None,
+        &mut fs,
+        1,
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .expect("search_slot failed");
 
     assert!(found, "ROOT_ITEM for FS_TREE should exist");
     let leaf = path.leaf().expect("path should have a leaf");
@@ -117,9 +129,16 @@ fn search_nonexistent_key() {
         offset: 0,
     };
     let mut path = BtrfsPath::new();
-    let found =
-        search::search_slot(None, &mut fs, 1, &key, &mut path, 0, false)
-            .expect("search_slot failed");
+    let found = search::search_slot(
+        None,
+        &mut fs,
+        1,
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .expect("search_slot failed");
 
     assert!(!found, "key 999999 should not exist in root tree");
 }
@@ -141,12 +160,21 @@ fn next_leaf_traversal() {
         offset: 0,
     };
     let mut path = BtrfsPath::new();
-    search::search_slot(None, &mut fs, 1, &key, &mut path, 0, false)
-        .expect("search_slot failed");
+    search::search_slot(
+        None,
+        &mut fs,
+        1,
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .expect("search_slot failed");
 
     // Walk forward through all items in the root tree
     let mut count = 0;
     let mut prev_key: Option<DiskKey> = None;
+    #[allow(clippy::while_let_loop)]
     loop {
         let leaf = match path.leaf() {
             Some(l) => l,
@@ -196,8 +224,16 @@ fn search_extent_tree() {
         offset: 0,
     };
     let mut path = BtrfsPath::new();
-    search::search_slot(None, &mut fs, 2, &key, &mut path, 0, false)
-        .expect("search_slot in extent tree failed");
+    search::search_slot(
+        None,
+        &mut fs,
+        2,
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .expect("search_slot in extent tree failed");
 
     // Should find something (the extent tree is never empty on a valid fs)
     let leaf = path.leaf().expect("should have a leaf");
@@ -309,7 +345,7 @@ fn write_insert_item_and_verify() {
             1, // root tree
             &test_key,
             &mut path,
-            (25 + test_data.len()) as u32,
+            SearchIntent::Insert((25 + test_data.len()) as u32),
             true, // COW
         )
         .expect("search_slot failed");
@@ -348,7 +384,13 @@ fn write_insert_item_and_verify() {
         // Search for our inserted item
         let mut path = BtrfsPath::new();
         let found = search::search_slot(
-            None, &mut fs, 1, &test_key, &mut path, 0, false,
+            None,
+            &mut fs,
+            1,
+            &test_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
         )
         .expect("search_slot on reopen failed");
 
@@ -402,7 +444,7 @@ fn write_delete_item_and_verify() {
             1,
             &uuid_key,
             &mut path,
-            0,
+            SearchIntent::Delete,
             true,
         )
         .expect("search failed");
@@ -436,7 +478,13 @@ fn write_delete_item_and_verify() {
 
         let mut path = BtrfsPath::new();
         let found = search::search_slot(
-            None, &mut fs, 1, &uuid_key, &mut path, 0, false,
+            None,
+            &mut fs,
+            1,
+            &uuid_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
         )
         .expect("search failed");
 
@@ -490,7 +538,7 @@ fn backup_roots_updated_on_commit() {
             1,
             &key,
             &mut path,
-            25 + 4,
+            SearchIntent::Insert(25 + 4),
             true,
         )
         .expect("search failed");
@@ -604,7 +652,7 @@ fn compat_ro_flags_preserved_after_commit() {
             1,
             &key,
             &mut path,
-            25 + 1,
+            SearchIntent::Insert(25 + 1),
             true,
         )
         .unwrap();
@@ -673,7 +721,7 @@ fn write_set_subvol_readonly() {
             1,
             &key,
             &mut path,
-            0,
+            SearchIntent::ReadOnly,
             true,
         )
         .unwrap();
@@ -708,9 +756,16 @@ fn write_set_subvol_readonly() {
             offset: 0,
         };
         let mut path = BtrfsPath::new();
-        let found =
-            search::search_slot(None, &mut fs, 1, &key, &mut path, 0, false)
-                .unwrap();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            1,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .unwrap();
         assert!(found, "FS_TREE ROOT_ITEM should exist");
 
         let leaf = path.leaf().unwrap();
@@ -815,7 +870,7 @@ fn mount_verify_subvol_readonly() {
             1,
             &key,
             &mut path,
-            0,
+            SearchIntent::ReadOnly,
             true,
         )
         .expect("search failed");
@@ -915,7 +970,7 @@ fn mount_verify_file_created() {
             5,
             &inode_key,
             &mut path,
-            (25 + inode_data.len()) as u32,
+            SearchIntent::Insert((25 + inode_data.len()) as u32),
             true,
         )
         .expect("search inode slot failed");
@@ -939,7 +994,7 @@ fn mount_verify_file_created() {
             5,
             &iref_key,
             &mut path,
-            (25 + iref_data.len()) as u32,
+            SearchIntent::Insert((25 + iref_data.len()) as u32),
             true,
         )
         .expect("search iref slot failed");
@@ -972,7 +1027,7 @@ fn mount_verify_file_created() {
             5,
             &dir_item_key,
             &mut path,
-            (25 + dir_data.len()) as u32,
+            SearchIntent::Insert((25 + dir_data.len()) as u32),
             true,
         )
         .expect("search dir_item slot failed");
@@ -995,7 +1050,7 @@ fn mount_verify_file_created() {
             5,
             &dir_index_key,
             &mut path,
-            (25 + dir_data.len()) as u32,
+            SearchIntent::Insert((25 + dir_data.len()) as u32),
             true,
         )
         .expect("search dir_index slot failed");
@@ -1019,7 +1074,7 @@ fn mount_verify_file_created() {
             5,
             &dir_inode_key,
             &mut path,
-            0,
+            SearchIntent::ReadOnly,
             true,
         )
         .expect("search dir inode failed");

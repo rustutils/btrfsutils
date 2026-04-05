@@ -6,8 +6,13 @@
 //! to point to the new root.
 
 use crate::{
-    delayed_ref::DelayedRefQueue, fs_info::FsInfo, items, path::BtrfsPath,
-    search, serialize,
+    delayed_ref::DelayedRefQueue,
+    extent_buffer::ITEM_SIZE,
+    fs_info::FsInfo,
+    items,
+    path::BtrfsPath,
+    search::{self, SearchIntent},
+    serialize,
 };
 use btrfs_disk::{
     items::RootItem,
@@ -226,7 +231,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                 root_tree_id,
                 &key,
                 &mut path,
-                0,
+                SearchIntent::ReadOnly,
                 true, // COW the path so we can modify the leaf
             )?;
 
@@ -385,7 +390,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
             bg_tree_id,
             &search_key,
             &mut path,
-            0,
+            SearchIntent::ReadOnly,
             true,
         )?;
 
@@ -463,7 +468,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
             extent_tree_id,
             &key,
             &mut path,
-            (25 + data.len()) as u32,
+            SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
             true,
         )?;
 
@@ -517,7 +522,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
             extent_tree_id,
             &key,
             &mut path,
-            0,
+            SearchIntent::Delete,
             true,
         )?;
 
@@ -585,7 +590,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                     fst_id,
                     &key,
                     &mut path,
-                    25,
+                    SearchIntent::Insert(ITEM_SIZE as u32),
                     true,
                 )?;
                 if !found {
@@ -609,7 +614,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                 fst_id,
                 &info_key,
                 &mut path,
-                0,
+                SearchIntent::ReadOnly,
                 true,
             )?;
             if found {
@@ -660,7 +665,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                 fst_id,
                 &search_key,
                 &mut path,
-                0,
+                SearchIntent::Delete,
                 true,
             )?;
 
@@ -724,7 +729,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                 fst_id,
                 &search_key,
                 &mut path,
-                0,
+                SearchIntent::Delete,
                 true,
             )?;
 
@@ -782,7 +787,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                     fst_id,
                     &left_key,
                     &mut path,
-                    25,
+                    SearchIntent::Insert(ITEM_SIZE as u32),
                     true,
                 )?;
                 let leaf = path.nodes[0].as_mut().unwrap();
@@ -806,7 +811,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                     fst_id,
                     &right_key,
                     &mut path,
-                    25,
+                    SearchIntent::Insert(ITEM_SIZE as u32),
                     true,
                 )?;
                 let leaf = path.nodes[0].as_mut().unwrap();
