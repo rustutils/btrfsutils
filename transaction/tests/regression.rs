@@ -6,8 +6,9 @@
 
 use btrfs_disk::tree::{DiskKey, KeyType};
 use btrfs_transaction::{
-    balance, cow,
-    extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
+    balance,
+    buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
+    cow,
     filesystem::Filesystem,
     items,
     path::BtrfsPath,
@@ -85,7 +86,7 @@ fn validate_tree_leaves(fs_info: &mut Filesystem<File>, root_bytenr: u64) {
     }
 }
 
-fn validate_leaf(eb: &btrfs_transaction::extent_buffer::ExtentBuffer) {
+fn validate_leaf(eb: &btrfs_transaction::buffer::ExtentBuffer) {
     let nritems = eb.nritems() as usize;
     if nritems == 0 {
         return;

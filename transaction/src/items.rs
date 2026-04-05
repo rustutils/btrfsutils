@@ -8,7 +8,7 @@
 //! payloads grow backward from the end of the block. The free space is the
 //! gap between them.
 
-use crate::extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE};
+use crate::buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE};
 use btrfs_disk::tree::DiskKey;
 use std::io;
 

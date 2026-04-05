@@ -7,9 +7,7 @@
 
 use crate::{
     balance,
-    extent_buffer::{
-        ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE, key_cmp,
-    },
+    buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE, key_cmp},
     filesystem::Filesystem,
     path::BtrfsPath,
     transaction::Transaction,
@@ -383,7 +381,7 @@ fn create_new_root<R: Read + Write + Seek>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{extent_buffer::ExtentBuffer, items};
+    use crate::{buffer::ExtentBuffer, items};
     use btrfs_disk::tree::KeyType;
 
     fn make_key(oid: u64) -> DiskKey {

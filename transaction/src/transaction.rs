@@ -7,8 +7,8 @@
 
 use crate::{
     allocation,
+    buffer::ITEM_SIZE,
     delayed_ref::DelayedRefQueue,
-    extent_buffer::ITEM_SIZE,
     filesystem::Filesystem,
     items,
     path::BtrfsPath,

@@ -5,7 +5,7 @@
 //! used by `search_slot` to record the descent path and by item operations
 //! to know which blocks to modify.
 
-use crate::extent_buffer::{BTRFS_MAX_LEVEL, ExtentBuffer};
+use crate::buffer::{BTRFS_MAX_LEVEL, ExtentBuffer};
 
 /// A search path through a btrfs B-tree.
 ///

@@ -8,8 +8,8 @@
 //! merging with a sibling to prevent excessive tree bloat.
 
 use crate::{
+    buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
     cow::cow_block,
-    extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
     filesystem::Filesystem,
     path::BtrfsPath,
     transaction::Transaction,
@@ -443,7 +443,7 @@ fn find_parent_level(path: &BtrfsPath) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extent_buffer::ExtentBuffer;
+    use crate::buffer::ExtentBuffer;
 
     // Balance tests require multi-level trees with siblings, which need
     // real filesystem images. Unit tests here verify the helper logic.

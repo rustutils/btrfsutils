@@ -8,8 +8,7 @@
 //! been copy-on-written and can be modified in place.
 
 use crate::{
-    extent_buffer::ExtentBuffer, filesystem::Filesystem,
-    transaction::Transaction,
+    buffer::ExtentBuffer, filesystem::Filesystem, transaction::Transaction,
 };
 use std::io::{self, Read, Seek, Write};
 

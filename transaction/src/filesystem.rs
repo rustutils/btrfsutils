@@ -8,7 +8,7 @@
 //! Open a device or image with [`Filesystem::open`], then use the read/write
 //! methods to access tree blocks through `ExtentBuffer`.
 
-use crate::extent_buffer::ExtentBuffer;
+use crate::buffer::ExtentBuffer;
 use btrfs_disk::{
     reader::{self, BlockReader, OpenFilesystem},
     superblock::Superblock,

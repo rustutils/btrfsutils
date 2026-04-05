@@ -6,8 +6,8 @@
 
 use crate::{
     balance,
+    buffer::{ExtentBuffer, key_cmp},
     cow::cow_block,
-    extent_buffer::{ExtentBuffer, key_cmp},
     filesystem::Filesystem,
     path::BtrfsPath,
     split,
@@ -353,7 +353,7 @@ pub fn prev_leaf<R: Read + Write + Seek>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extent_buffer::HEADER_SIZE;
+    use crate::buffer::HEADER_SIZE;
     use btrfs_disk::tree::KeyType;
 
     fn make_test_leaf(nodesize: u32, keys: &[(u64, u8, u64)]) -> ExtentBuffer {

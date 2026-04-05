@@ -21,9 +21,9 @@
 
 pub mod allocation;
 pub mod balance;
+pub mod buffer;
 pub mod cow;
 pub mod delayed_ref;
-pub mod extent_buffer;
 pub mod filesystem;
 pub mod items;
 pub mod path;

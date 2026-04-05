@@ -14,7 +14,7 @@ use btrfs_disk::{
     tree::{DiskKey, KeyType},
 };
 use btrfs_transaction::{
-    extent_buffer::key_cmp,
+    buffer::key_cmp,
     filesystem::Filesystem,
     items,
     path::BtrfsPath,

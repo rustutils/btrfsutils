@@ -7,7 +7,7 @@
 //! structures, without requiring elevated privileges.
 
 use crate::{
-    extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE},
+    buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE},
     filesystem::Filesystem,
     items,
     path::BtrfsPath,
@@ -181,7 +181,7 @@ fn validate_single_leaf(eb: &ExtentBuffer) -> io::Result<()> {
     for i in 0..nritems - 1 {
         let k1 = eb.item_key(i);
         let k2 = eb.item_key(i + 1);
-        if crate::extent_buffer::key_cmp(&k1, &k2) != std::cmp::Ordering::Less {
+        if crate::buffer::key_cmp(&k1, &k2) != std::cmp::Ordering::Less {
             return Err(io::Error::other(format!(
                 "leaf at {}: key[{i}]={:?} not < key[{}]={:?}",
                 eb.logical(),
