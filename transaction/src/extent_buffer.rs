@@ -10,7 +10,7 @@
 //! the write path needs for COW and item manipulation.
 
 use btrfs_disk::{
-    tree::{DiskKey, Header, KeyType, TreeBlock},
+    tree::{DiskKey, KeyType, TreeBlock},
     util::csum_tree_block,
 };
 use bytes::{Buf, BufMut};
@@ -96,12 +96,6 @@ impl ExtentBuffer {
     #[must_use]
     pub fn as_tree_block(&self) -> TreeBlock {
         TreeBlock::parse(&self.data)
-    }
-
-    /// Parse and return the header.
-    #[must_use]
-    pub fn header(&self) -> Header {
-        Header::parse(&self.data)
     }
 
     // --- Header field readers ---
@@ -385,18 +379,6 @@ impl ExtentBuffer {
         self.data.copy_within(src, dest);
     }
 
-    /// Copy bytes from another extent buffer into this one.
-    pub fn copy_from_eb(
-        &mut self,
-        dest: usize,
-        src: &ExtentBuffer,
-        src_off: usize,
-        len: usize,
-    ) {
-        self.data[dest..dest + len]
-            .copy_from_slice(&src.data[src_off..src_off + len]);
-    }
-
     /// Fill a range with zeros.
     pub fn zero_range(&mut self, offset: usize, len: usize) {
         self.data[offset..offset + len].fill(0);
@@ -412,12 +394,6 @@ impl ExtentBuffer {
     #[must_use]
     pub fn is_node(&self) -> bool {
         self.level() > 0
-    }
-
-    /// Maximum number of items that can fit in this leaf (zero-size items).
-    #[must_use]
-    pub fn max_items(&self) -> u32 {
-        (self.nodesize() - HEADER_SIZE as u32) / ITEM_SIZE as u32
     }
 
     /// Maximum number of key pointers that can fit in this node.
