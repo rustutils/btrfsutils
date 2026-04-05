@@ -140,7 +140,10 @@ mod tests {
         // Verified against dump-tree output from a real btrfs filesystem
         assert_eq!(btrfs_name_hash(b"hello.txt"), 0x415f_eb59);
         // Different names produce different hashes
-        assert_ne!(btrfs_name_hash(b"hello.txt"), btrfs_name_hash(b"world.txt"));
+        assert_ne!(
+            btrfs_name_hash(b"hello.txt"),
+            btrfs_name_hash(b"world.txt")
+        );
     }
 
     #[test]
