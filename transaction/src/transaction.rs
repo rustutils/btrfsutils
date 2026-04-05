@@ -281,16 +281,38 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                 root_item.level = new_level;
 
                 let new_data = serialize::root_item_to_bytes(&root_item);
-                // The serialized size must match the existing item size
                 if new_data.len() == item_data.len() {
                     items::update_item(leaf, slot, &new_data)?;
+                    fs_info.mark_dirty(leaf);
                 } else {
-                    // Size mismatch (v1 vs v2 root item). Write as much as fits.
-                    let write_len = new_data.len().min(item_data.len());
-                    leaf.item_data_mut(slot)[..write_len]
-                        .copy_from_slice(&new_data[..write_len]);
+                    // Size mismatch (v1 vs v2 root item). Delete and
+                    // reinsert with the correct size to avoid corruption.
+                    items::del_items(leaf, slot, 1);
+                    fs_info.mark_dirty(leaf);
+                    path.release();
+
+                    let mut path = BtrfsPath::new();
+                    search::search_slot(
+                        Some(&mut *self),
+                        fs_info,
+                        root_tree_id,
+                        &key,
+                        &mut path,
+                        SearchIntent::Insert(
+                            (ITEM_SIZE + new_data.len()) as u32,
+                        ),
+                        true,
+                    )?;
+                    let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+                        io::Error::other(
+                            "update_root_items: no leaf after reinsert search",
+                        )
+                    })?;
+                    items::insert_item(leaf, path.slots[0], &key, &new_data)?;
+                    fs_info.mark_dirty(leaf);
+                    path.release();
+                    continue;
                 }
-                fs_info.mark_dirty(leaf);
             }
 
             path.release();
