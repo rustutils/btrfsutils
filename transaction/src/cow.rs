@@ -47,8 +47,9 @@ pub fn cow_block<R: Read + Write + Seek>(
         return Ok(eb.clone());
     }
 
-    // Allocate a new block
-    let new_logical = trans.alloc_block(fs_info)?;
+    // Allocate a new block and queue a +1 delayed ref for it
+    let level = eb.level();
+    let new_logical = trans.alloc_tree_block(fs_info, tree_id, level)?;
     let mut new_eb = eb.clone();
     new_eb.set_logical(new_logical);
     new_eb.set_bytenr(new_logical);
@@ -61,11 +62,7 @@ pub fn cow_block<R: Read + Write + Seek>(
     let flags = new_eb.flags() & !(HEADER_FLAG_WRITTEN | HEADER_FLAG_RELOC);
     new_eb.set_flags(flags);
 
-    // Queue delayed refs: +1 for new block, -1 for old block
-    let level = eb.level();
-    trans
-        .delayed_refs
-        .add_ref(new_logical, true, tree_id, level);
+    // Queue -1 delayed ref for the old block being replaced
     trans
         .delayed_refs
         .drop_ref(eb.logical(), true, tree_id, level);

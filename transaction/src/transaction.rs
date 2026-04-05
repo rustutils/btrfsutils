@@ -117,6 +117,27 @@ impl<R: Read + Write + Seek> TransHandle<R> {
         Ok(logical)
     }
 
+    /// Allocate a new tree block and queue a delayed ref for it.
+    ///
+    /// This is the standard allocation entry point for tree blocks. It
+    /// combines physical allocation with extent reference creation as a
+    /// single atomic operation, ensuring every allocated block gets a
+    /// corresponding extent item at commit time.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no free metadata space is available.
+    pub fn alloc_tree_block(
+        &mut self,
+        fs_info: &mut FsInfo<R>,
+        tree_id: u64,
+        level: u8,
+    ) -> io::Result<u64> {
+        let logical = self.alloc_block(fs_info)?;
+        self.delayed_refs.add_ref(logical, true, tree_id, level);
+        Ok(logical)
+    }
+
     /// Queue a block to be freed after commit.
     pub fn queue_free_block(&mut self, logical: u64) {
         self.freed_blocks.push(logical);

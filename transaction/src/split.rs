@@ -7,7 +7,9 @@
 
 use crate::{
     balance,
-    extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE, key_cmp},
+    extent_buffer::{
+        ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE, key_cmp,
+    },
     fs_info::FsInfo,
     path::BtrfsPath,
     transaction::TransHandle,
@@ -73,8 +75,8 @@ pub fn split_leaf<R: Read + Write + Seek>(
         }
     }
 
-    // Allocate a new leaf
-    let new_logical = trans.alloc_block(fs_info)?;
+    // Allocate a new leaf and queue an extent ref for it
+    let new_logical = trans.alloc_tree_block(fs_info, tree_id, 0)?;
     let mut new_leaf = ExtentBuffer::new_zeroed(nodesize, new_logical);
     new_leaf.set_bytenr(new_logical);
     new_leaf.set_level(0);
@@ -155,8 +157,8 @@ pub fn split_node<R: Read + Write + Seek>(
     let nodesize = node.nodesize();
     let split = nritems / 2;
 
-    // Allocate new node
-    let new_logical = trans.alloc_block(fs_info)?;
+    // Allocate new node and queue an extent ref for it
+    let new_logical = trans.alloc_tree_block(fs_info, tree_id, level)?;
     let mut new_node = ExtentBuffer::new_zeroed(nodesize, new_logical);
     new_node.set_bytenr(new_logical);
     new_node.set_level(level);
@@ -307,9 +309,9 @@ fn create_new_root<R: Read + Write + Seek>(
         old_root.key_ptr_key(0)
     };
 
-    // Allocate new root
-    let new_logical = trans.alloc_block(fs_info)?;
+    // Allocate new root and queue an extent ref for it
     let new_level = old_root.level() + 1;
+    let new_logical = trans.alloc_tree_block(fs_info, tree_id, new_level)?;
     let mut new_root =
         ExtentBuffer::new_zeroed(old_root.nodesize(), new_logical);
     new_root.set_bytenr(new_logical);
