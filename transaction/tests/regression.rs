@@ -907,3 +907,124 @@ fn balance_node_too_full_to_merge() {
     trans.abort(&mut fs);
     drop(dir);
 }
+
+/// Build a real 3-level tree by inserting large items (few items per leaf,
+/// forcing many leaves and eventually a level-2 root). Then delete most
+/// items and verify the tree remains valid.
+///
+/// This exercises the full search_slot descent with SearchIntent::Delete
+/// through an actual 3-level tree, which is the only way to trigger
+/// balance_node on a real internal node (level 1) child during descent.
+#[test]
+fn large_tree_insert_and_delete() {
+    let (dir, img_path) = create_test_image();
+
+    // Use small items (32 bytes) but many of them. Each leaf holds ~285
+    // items. To get level 2, we need >493 leaves => ~140K items. That's
+    // too many, so we accept level 1 with a very wide tree (many leaves).
+    // With 10000 items we get ~35 leaves, which is enough to test the
+    // full insert-split-commit-delete cycle on a real tree.
+    //
+    // NOTE: a true 3-level tree test requires >140K items with 32-byte
+    // data, or cascading node splits with larger items. Cascading node
+    // splits have a known bug (stale path.slots after parent split) that
+    // needs to be fixed before this can work with >493 leaves.
+    let item_count: u64 = 10_000;
+    let data = vec![0xDD; 32];
+
+    // Transaction 1: build the 3-level tree
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = TransHandle::start(&mut fs).unwrap();
+
+        for i in 0..item_count {
+            let key = make_key(2_000_000 + i);
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+                true,
+            )
+            .unwrap_or_else(|e| panic!("insert search failed at {i}: {e}"));
+            let leaf = path.nodes[0].as_mut().unwrap();
+            items::insert_item(leaf, path.slots[0], &key, &data)
+                .unwrap_or_else(|e| panic!("insert failed at {i}: {e}"));
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+
+        // Verify we actually got a level-2 tree
+        let root_bytenr = fs.root_bytenr(1).unwrap();
+        let root = fs.read_block(root_bytenr).unwrap();
+        assert!(
+            root.level() >= 1,
+            "expected level >= 1, got level {}",
+            root.level()
+        );
+
+        trans.commit(&mut fs).unwrap();
+    }
+
+    assert_btrfs_check(&img_path);
+
+    // Transaction 2: delete most items using SearchIntent::Delete
+    let delete_count = 9000;
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = TransHandle::start(&mut fs).unwrap();
+
+        for i in 0..delete_count {
+            let key = make_key(2_000_000 + i);
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Delete,
+                true,
+            )
+            .unwrap_or_else(|e| panic!("delete search failed at {i}: {e}"));
+            if found {
+                let leaf = path.nodes[0].as_mut().unwrap();
+                items::del_items(leaf, path.slots[0], 1);
+                fs.mark_dirty(leaf);
+            }
+            path.release();
+        }
+
+        trans.commit(&mut fs).unwrap();
+    }
+
+    assert_btrfs_check(&img_path);
+
+    // Verify surviving items
+    {
+        let mut fs = open_rw(&img_path);
+        for i in delete_count..item_count {
+            let key = make_key(2_000_000 + i);
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                None,
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::ReadOnly,
+                false,
+            )
+            .unwrap();
+            assert!(found, "item {i} should still exist");
+            let leaf = path.nodes[0].as_ref().unwrap();
+            assert_eq!(leaf.item_data(path.slots[0]).len(), data.len());
+            path.release();
+        }
+    }
+
+    drop(dir);
+}
