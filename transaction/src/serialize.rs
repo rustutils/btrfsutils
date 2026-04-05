@@ -226,6 +226,52 @@ pub fn inode_ref_to_bytes(index: u64, name: &[u8]) -> Vec<u8> {
     buf
 }
 
+/// Size of a non-skinny metadata extent item with `tree_block_info` and
+/// one `TREE_BLOCK_REF` inline backref.
+///
+/// Layout: extent_item (24) + tree_block_info (18) + inline ref (9) = 51 bytes.
+pub const NON_SKINNY_METADATA_EXTENT_ITEM_SIZE: usize = 51;
+
+/// Serialize a non-skinny metadata extent item (EXTENT_ITEM) with a
+/// `tree_block_info` structure and a `TREE_BLOCK_REF` inline backref.
+///
+/// This is the on-disk format for old filesystems without the
+/// `SKINNY_METADATA` incompat flag. The key is
+/// `(bytenr, EXTENT_ITEM=168, nodesize)`.
+///
+/// Data layout (51 bytes):
+/// - Extent item header (24 bytes): refs (u64) + generation (u64) + flags (u64)
+/// - tree_block_info (18 bytes): first key (17 bytes) + level (u8)
+/// - Inline backref (9 bytes): type (u8, TREE_BLOCK_REF=176) + offset (u64, root_id)
+#[must_use]
+pub fn non_skinny_metadata_extent_item_to_bytes(
+    refs: u64,
+    generation: u64,
+    root_id: u64,
+    first_key: &DiskKey,
+    level: u8,
+) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(NON_SKINNY_METADATA_EXTENT_ITEM_SIZE);
+
+    // Extent item header
+    buf.put_u64_le(refs);
+    buf.put_u64_le(generation);
+    buf.put_u64_le(btrfs_disk::items::ExtentFlags::TREE_BLOCK.bits());
+
+    // tree_block_info: first key + level
+    let key_off = buf.len();
+    buf.extend_from_slice(&[0u8; 17]);
+    write_disk_key(&mut buf[key_off..], 0, first_key);
+    buf.put_u8(level);
+
+    // Inline TREE_BLOCK_REF: type byte + root_id as offset
+    buf.put_u8(btrfs_disk::tree::KeyType::TreeBlockRef.to_raw());
+    buf.put_u64_le(root_id);
+
+    debug_assert_eq!(buf.len(), NON_SKINNY_METADATA_EXTENT_ITEM_SIZE);
+    buf
+}
+
 /// Create a minimal `RootItem` suitable for internal trees (not subvolumes).
 ///
 /// Sets generation, bytenr, level, and refs=1. All other fields are zeroed/nil.

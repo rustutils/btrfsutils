@@ -525,8 +525,38 @@ impl<R: Read + Write + Seek> TransHandle<R> {
             }
         };
 
-        let data =
-            serialize::metadata_extent_item_to_bytes(1, self.transid, owner);
+        let data = if skinny {
+            serialize::metadata_extent_item_to_bytes(1, self.transid, owner)
+        } else {
+            // Non-skinny format requires tree_block_info with the first
+            // key and level of the referenced tree block.
+            let first_key = if let Ok(eb) = fs_info.read_block(bytenr) {
+                if eb.level() == 0 && eb.nritems() > 0 {
+                    eb.item_key(0)
+                } else if eb.level() > 0 && eb.nritems() > 0 {
+                    eb.key_ptr_key(0)
+                } else {
+                    DiskKey {
+                        objectid: 0,
+                        key_type: KeyType::Unknown(0),
+                        offset: 0,
+                    }
+                }
+            } else {
+                DiskKey {
+                    objectid: 0,
+                    key_type: KeyType::Unknown(0),
+                    offset: 0,
+                }
+            };
+            serialize::non_skinny_metadata_extent_item_to_bytes(
+                1,
+                self.transid,
+                owner,
+                &first_key,
+                level,
+            )
+        };
 
         let mut path = BtrfsPath::new();
         let found = search::search_slot(
