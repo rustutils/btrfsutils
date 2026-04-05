@@ -15,8 +15,8 @@ use crate::{
     search::{self, SearchIntent},
 };
 use btrfs_disk::{
-    items::RootItem,
-    serialize, superblock,
+    items::{ExtentItem, RootItem},
+    superblock,
     tree::{DiskKey, KeyType},
 };
 use std::{
@@ -576,7 +576,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         };
 
         let data = if skinny {
-            serialize::metadata_extent_item_to_bytes(1, self.transid, owner)
+            ExtentItem::to_bytes_skinny(1, self.transid, owner)
         } else {
             // Non-skinny format requires tree_block_info with the first
             // key and level of the referenced tree block.
@@ -599,7 +599,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
                     offset: 0,
                 }
             };
-            serialize::non_skinny_metadata_extent_item_to_bytes(
+            ExtentItem::to_bytes_non_skinny(
                 1,
                 self.transid,
                 owner,

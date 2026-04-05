@@ -1324,6 +1324,60 @@ impl ExtentItem {
             inline_refs,
         })
     }
+
+    /// Size of a skinny metadata extent item with one `TREE_BLOCK_REF`.
+    ///
+    /// Layout: extent header (24) + inline ref type (1) + offset (8) = 33.
+    pub const SKINNY_SIZE: usize = 33;
+
+    /// Size of a non-skinny metadata extent item with `tree_block_info`
+    /// and one `TREE_BLOCK_REF`.
+    ///
+    /// Layout: extent header (24) + `tree_block_info` (18) + inline ref (9) = 51.
+    pub const NON_SKINNY_SIZE: usize = 51;
+
+    /// Serialize a skinny metadata extent item (`METADATA_ITEM`) with a
+    /// single `TREE_BLOCK_REF` inline backref (33 bytes).
+    #[must_use]
+    pub fn to_bytes_skinny(
+        refs: u64,
+        generation: u64,
+        root_id: u64,
+    ) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(Self::SKINNY_SIZE);
+        buf.put_u64_le(refs);
+        buf.put_u64_le(generation);
+        buf.put_u64_le(ExtentFlags::TREE_BLOCK.bits());
+        buf.put_u8(KeyType::TreeBlockRef.to_raw());
+        buf.put_u64_le(root_id);
+        debug_assert_eq!(buf.len(), Self::SKINNY_SIZE);
+        buf
+    }
+
+    /// Serialize a non-skinny metadata extent item (`EXTENT_ITEM`) with
+    /// `tree_block_info` and a `TREE_BLOCK_REF` inline backref (51 bytes).
+    #[must_use]
+    pub fn to_bytes_non_skinny(
+        refs: u64,
+        generation: u64,
+        root_id: u64,
+        first_key: &DiskKey,
+        level: u8,
+    ) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(Self::NON_SKINNY_SIZE);
+        buf.put_u64_le(refs);
+        buf.put_u64_le(generation);
+        buf.put_u64_le(ExtentFlags::TREE_BLOCK.bits());
+        // tree_block_info: first key + level
+        let key_off = buf.len();
+        buf.extend_from_slice(&[0u8; 17]);
+        write_disk_key(&mut buf[key_off..], 0, first_key);
+        buf.put_u8(level);
+        buf.put_u8(KeyType::TreeBlockRef.to_raw());
+        buf.put_u64_le(root_id);
+        debug_assert_eq!(buf.len(), Self::NON_SKINNY_SIZE);
+        buf
+    }
 }
 
 /// Standalone data extent backreference (non-inline).
@@ -2774,5 +2828,120 @@ mod tests {
             (BlockGroupFlags::DATA | BlockGroupFlags::RAID1C4).profile_name(),
             "RAID1C4"
         );
+    }
+
+    #[test]
+    fn extent_item_skinny_size() {
+        let bytes = ExtentItem::to_bytes_skinny(1, 42, 5);
+        assert_eq!(bytes.len(), ExtentItem::SKINNY_SIZE);
+        assert_eq!(bytes.len(), 33);
+    }
+
+    #[test]
+    fn extent_item_non_skinny_size() {
+        let key = DiskKey {
+            objectid: 256,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let bytes = ExtentItem::to_bytes_non_skinny(1, 42, 5, &key, 0);
+        assert_eq!(bytes.len(), ExtentItem::NON_SKINNY_SIZE);
+        assert_eq!(bytes.len(), 51);
+    }
+
+    #[test]
+    fn extent_item_skinny_non_skinny_header_match() {
+        let skinny = ExtentItem::to_bytes_skinny(1, 42, 5);
+        let key = DiskKey {
+            objectid: 0,
+            key_type: KeyType::from_raw(0),
+            offset: 0,
+        };
+        let non_skinny = ExtentItem::to_bytes_non_skinny(1, 42, 5, &key, 0);
+        // First 24 bytes (refs + generation + flags) identical
+        assert_eq!(&skinny[..24], &non_skinny[..24]);
+    }
+
+    #[test]
+    fn extent_item_flags_are_tree_block() {
+        let bytes = ExtentItem::to_bytes_skinny(1, 42, 5);
+        let flags = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
+        assert_eq!(flags, ExtentFlags::TREE_BLOCK.bits());
+    }
+
+    #[test]
+    fn root_item_to_bytes_round_trip() {
+        let original = RootItem::new_internal(42, 65536, 0);
+        let bytes = original.to_bytes();
+        assert_eq!(bytes.len(), 496);
+        let parsed = RootItem::parse(&bytes).expect("parse failed");
+        assert_eq!(parsed.generation, 42);
+        assert_eq!(parsed.bytenr, 65536);
+        assert_eq!(parsed.level, 0);
+        assert_eq!(parsed.refs, 1);
+    }
+
+    #[test]
+    fn block_group_item_to_bytes_round_trip() {
+        let bg = BlockGroupItem {
+            used: 1024 * 1024,
+            chunk_objectid: 256,
+            flags: BlockGroupFlags::METADATA | BlockGroupFlags::DUP,
+        };
+        let bytes = bg.to_bytes();
+        assert_eq!(bytes.len(), 24);
+        let parsed = BlockGroupItem::parse(&bytes).unwrap();
+        assert_eq!(parsed.used, bg.used);
+        assert_eq!(parsed.chunk_objectid, bg.chunk_objectid);
+        assert_eq!(parsed.flags, bg.flags);
+    }
+
+    #[test]
+    fn inode_item_args_to_bytes_size() {
+        let args = InodeItemArgs {
+            generation: 7,
+            size: 42,
+            nbytes: 4096,
+            nlink: 1,
+            uid: 1000,
+            gid: 1000,
+            mode: 0o100644,
+            time: Timespec { sec: 100, nsec: 0 },
+        };
+        let bytes = args.to_bytes();
+        assert_eq!(bytes.len(), 160);
+        let parsed = InodeItem::parse(&bytes).unwrap();
+        assert_eq!(parsed.generation, 7);
+        assert_eq!(parsed.size, 42);
+        assert_eq!(parsed.nlink, 1);
+    }
+
+    #[test]
+    fn dir_item_serialize_round_trip() {
+        let location = DiskKey {
+            objectid: 257,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let bytes = DirItem::serialize(
+            &location,
+            7,
+            raw::BTRFS_FT_REG_FILE as u8,
+            b"hello.txt",
+        );
+        let items = DirItem::parse_all(&bytes);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].location.objectid, 257);
+        assert_eq!(items[0].transid, 7);
+        assert_eq!(items[0].name, b"hello.txt");
+    }
+
+    #[test]
+    fn inode_ref_serialize_round_trip() {
+        let bytes = InodeRef::serialize(2, b"hello.txt");
+        let refs = InodeRef::parse_all(&bytes);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].index, 2);
+        assert_eq!(refs[0].name, b"hello.txt");
     }
 }
