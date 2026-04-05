@@ -157,24 +157,34 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     ///
     /// Returns an error if any tree modification, write, or fsync fails.
     pub fn commit(mut self, fs_info: &mut FsInfo<R>) -> io::Result<()> {
-        // Step 1: Flush delayed refs (convergence loop).
-        // This must happen BEFORE update_root_items because flushing refs
-        // may COW the extent tree, changing its root. update_root_items
-        // needs to see the final root addresses.
-        self.flush_delayed_refs(fs_info)?;
+        // Step 1: Convergence loop. Flushing delayed refs modifies the
+        // extent tree (COW), which generates new delayed refs. Updating
+        // root items modifies the root tree (COW), generating more.
+        // Alternate until both are stable.
+        let max_passes = 16;
+        for pass in 0..max_passes {
+            self.flush_delayed_refs(fs_info)?;
+            self.update_root_items(fs_info)?;
+            // Re-snapshot roots so changed_roots() only detects new
+            // changes from subsequent COW operations, not the ones we
+            // just processed.
+            fs_info.snapshot_roots();
 
-        // Step 2: Update root items in the root tree for changed trees.
-        // This captures all root changes including those from step 1.
-        self.update_root_items(fs_info)?;
+            // Stable when no pending refs and no changed roots remain
+            if self.delayed_refs.is_empty()
+                && fs_info.changed_roots().is_empty()
+            {
+                break;
+            }
 
-        // Step 2b: Flushing delayed refs and updating root items may have
-        // generated more delayed refs (from COWing the extent tree and root
-        // tree). Flush again until stable.
-        self.flush_delayed_refs(fs_info)?;
-        // If that generated more root changes, update again
-        self.update_root_items(fs_info)?;
+            if pass == max_passes - 1 {
+                return Err(io::Error::other(
+                    "commit convergence loop did not stabilize",
+                ));
+            }
+        }
 
-        // Step 3: Flush all dirty blocks to disk
+        // Step 2: Flush all dirty blocks to disk
         fs_info.flush_dirty()?;
 
         // Step 4: Update superblock fields
