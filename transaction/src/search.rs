@@ -104,7 +104,7 @@ pub enum SearchIntent {
     /// Read-only lookup. No tree modifications are expected.
     ReadOnly,
     /// Insertion: the leaf must have at least this many free bytes
-    /// (ITEM_SIZE + data payload size). Full nodes are split preemptively
+    /// (`ITEM_SIZE` + data payload size). Full nodes are split preemptively
     /// during descent.
     Insert(u32),
     /// Deletion: sparse nodes are rebalanced during descent to prevent
@@ -127,6 +127,7 @@ pub enum SearchIntent {
 /// # Errors
 ///
 /// Returns an error if any block read, COW, or split operation fails.
+#[allow(clippy::too_many_lines)]
 pub fn search_slot<R: Read + Write + Seek>(
     mut trans: Option<&mut Transaction<R>>,
     fs_info: &mut Filesystem<R>,
@@ -299,9 +300,8 @@ pub fn next_leaf<R: Read + Write + Seek>(
         if level as usize >= path.nodes.len() {
             return Ok(false); // No more leaves
         }
-        let node = match &path.nodes[level as usize] {
-            Some(n) => n,
-            None => return Ok(false),
+        let Some(node) = &path.nodes[level as usize] else {
+            return Ok(false);
         };
         let slot = path.slots[level as usize];
         if slot + 1 < node.nritems() as usize {

@@ -36,7 +36,7 @@ pub struct Filesystem<R> {
     /// trees had their root block change during the transaction.
     original_roots: BTreeMap<u64, u64>,
     /// Logical addresses of blocks modified in the current transaction.
-    /// BTreeSet gives sorted iteration in `flush_dirty` for sequential I/O.
+    /// `BTreeSet` gives sorted iteration in `flush_dirty` for sequential I/O.
     dirty: BTreeSet<u64>,
     /// Current transaction generation (superblock.generation + 1 during a
     /// transaction, or superblock.generation when idle).
@@ -51,7 +51,7 @@ pub struct Filesystem<R> {
     block_cache: BTreeMap<u64, ExtentBuffer>,
     /// Logical addresses of blocks that have been written to stable storage
     /// (via `flush_dirty` or `write_block`). A block in this set must be
-    /// COWed before modification even if its generation matches the current
+    /// COW'd before modification even if its generation matches the current
     /// transaction, because the on-disk copy is now part of the committed
     /// state and overwriting it would break crash consistency.
     written: BTreeSet<u64>,
@@ -146,7 +146,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
 
     /// Read a tree block at the given logical address, returning an `ExtentBuffer`.
     ///
-    /// If the block is already in the in-memory cache (e.g. it was COWed or
+    /// If the block is already in the in-memory cache (e.g. it was COW'd or
     /// previously read in this transaction), the cached version is returned
     /// without hitting disk.
     ///
@@ -225,7 +225,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
     }
 
     /// Check whether a block has been written to stable storage during
-    /// this transaction. Such blocks must be COWed before modification
+    /// this transaction. Such blocks must be COW'd before modification
     /// even if their generation matches the current transaction.
     #[must_use]
     pub fn is_written(&self, logical: u64) -> bool {
@@ -243,7 +243,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
         self.block_cache.clear();
     }
 
-    /// Return all tree root entries as (tree_id, root_bytenr) pairs.
+    /// Return all tree root entries as `(tree_id, root_bytenr)` pairs.
     pub fn tree_roots(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
         self.roots.iter().map(|(&id, &bytenr)| (id, bytenr))
     }
@@ -332,7 +332,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
                 let level = self
                     .block_cache
                     .get(&current_bytenr)
-                    .map_or(0, |eb| eb.level());
+                    .map_or(0, ExtentBuffer::level);
                 changed.push((tree_id, current_bytenr, level));
             }
         }

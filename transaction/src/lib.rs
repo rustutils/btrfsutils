@@ -14,10 +14,13 @@
 //! This is a clean-room implementation based on the on-disk format
 //! specification and UAPI headers. It is licensed MIT/Apache-2.0.
 
-// don't enable clippy::pedantic yet, since this is still a prototype.
-//#![warn(clippy::pedantic)]
-//#![allow(clippy::module_name_repetitions)]
-//#![allow(clippy::cast_possible_truncation)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::cast_possible_truncation)] // nodesize ≤ 64K, offsets always fit u32
+#![allow(clippy::cast_possible_wrap)] // bytes_used u64↔i64 conversions are intentional
+#![allow(clippy::cast_sign_loss)] // bytes_used i64↔u64 conversions are intentional
+#![allow(clippy::missing_errors_doc)] // error conditions obvious from Result<T>
+#![allow(clippy::missing_panics_doc)] // path.nodes[].unwrap() always valid in context
+#![allow(clippy::module_name_repetitions)]
 
 pub mod allocation;
 pub mod balance;

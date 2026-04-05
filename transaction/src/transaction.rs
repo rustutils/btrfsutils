@@ -280,11 +280,11 @@ impl<R: Read + Write + Seek> Transaction<R> {
         Ok(())
     }
 
-    /// Update ROOT_ITEM entries in the root tree for every tree whose root
+    /// Update `ROOT_ITEM` entries in the root tree for every tree whose root
     /// block changed during this transaction.
     ///
     /// For each changed tree, searches the root tree for the existing
-    /// ROOT_ITEM, parses it, updates the bytenr/generation/level fields,
+    /// `ROOT_ITEM`, parses it, updates the bytenr/generation/level fields,
     /// re-serializes it, and writes it back in place.
     fn update_root_items(
         &mut self,
@@ -380,8 +380,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// Flush delayed reference count updates to the extent tree.
     ///
     /// Drains the delayed ref queue and processes each net-nonzero delta.
-    /// For positive deltas (new allocations), creates METADATA_ITEM entries
-    /// with TREE_BLOCK_REF inline backrefs. For negative deltas (frees),
+    /// For positive deltas (new allocations), creates `METADATA_ITEM` entries
+    /// with `TREE_BLOCK_REF` inline backrefs. For negative deltas (frees),
     /// deletes the extent item.
     ///
     /// Processing refs modifies the extent tree, which may generate more
@@ -520,9 +520,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // key uses offset=0, which is less than the actual key. So search_slot
         // lands at the block group item (first key >= our search key). Verify
         // the objectid matches.
-        let leaf = match path.nodes[0].as_mut() {
-            Some(l) => l,
-            None => return Ok(()),
+        let Some(leaf) = path.nodes[0].as_mut() else {
+            return Ok(());
         };
         let slot = path.slots[0];
         if slot >= leaf.nritems() as usize {
@@ -556,7 +555,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         Ok(())
     }
 
-    /// Create a METADATA_ITEM (or EXTENT_ITEM) in the extent tree for a newly
+    /// Create a `METADATA_ITEM` (or `EXTENT_ITEM`) in the extent tree for a newly
     /// allocated tree block.
     fn create_metadata_extent(
         &mut self,
@@ -644,7 +643,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         Ok(())
     }
 
-    /// Delete a METADATA_ITEM (or EXTENT_ITEM) from the extent tree for a
+    /// Delete a `METADATA_ITEM` (or `EXTENT_ITEM`) from the extent tree for a
     /// freed tree block.
     fn delete_metadata_extent(
         &mut self,
@@ -701,7 +700,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// Rebuild free space tree entries by scanning the extent tree.
     ///
     /// For each block group, computes free ranges from the extent tree and
-    /// rewrites the FREE_SPACE_EXTENT and FREE_SPACE_INFO items. This is
+    /// rewrites the `FREE_SPACE_EXTENT` and `FREE_SPACE_INFO` items. This is
     /// simpler and more robust than incremental updates because it doesn't
     /// have convergence issues.
     #[allow(dead_code)]
@@ -791,7 +790,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         Ok(())
     }
 
-    /// Delete all FREE_SPACE_EXTENT items within a block group's range.
+    /// Delete all `FREE_SPACE_EXTENT` items within a block group's range.
     #[allow(dead_code)]
     fn delete_free_space_extents(
         &mut self,
@@ -821,9 +820,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
                 true,
             )?;
 
-            let leaf = match path.nodes[0].as_mut() {
-                Some(l) => l,
-                None => break,
+            let Some(leaf) = path.nodes[0].as_mut() else {
+                break;
             };
             let slot = path.slots[0];
             if slot >= leaf.nritems() as usize {
@@ -890,12 +888,9 @@ impl<R: Read + Write + Seek> Transaction<R> {
                 path.slots[0] -= 1;
             }
 
-            let leaf = match path.nodes[0].as_mut() {
-                Some(l) => l,
-                None => {
-                    path.release();
-                    continue;
-                }
+            let Some(leaf) = path.nodes[0].as_mut() else {
+                path.release();
+                continue;
             };
             let slot = path.slots[0];
             if slot >= leaf.nritems() as usize {

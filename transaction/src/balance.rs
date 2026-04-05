@@ -32,9 +32,8 @@ pub fn push_leaf_left<R: Read + Write + Seek>(
     tree_id: u64,
 ) -> io::Result<usize> {
     // Find the parent level
-    let parent_level = match find_parent_level(path) {
-        Some(l) => l,
-        None => return Ok(0), // Root leaf, no sibling
+    let Some(parent_level) = find_parent_level(path) else {
+        return Ok(0); // Root leaf, no sibling
     };
 
     let parent_slot = path.slots[parent_level];
@@ -155,9 +154,8 @@ pub fn push_leaf_right<R: Read + Write + Seek>(
     path: &mut BtrfsPath,
     tree_id: u64,
 ) -> io::Result<usize> {
-    let parent_level = match find_parent_level(path) {
-        Some(l) => l,
-        None => return Ok(0),
+    let Some(parent_level) = find_parent_level(path) else {
+        return Ok(0);
     };
 
     let parent = path.nodes[parent_level].as_ref().unwrap();
