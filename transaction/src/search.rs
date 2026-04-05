@@ -128,12 +128,12 @@ pub fn search_slot<R: Read + Write + Seek>(
     let mut eb = fs_info.read_block(root_bytenr)?;
 
     // COW the root if needed
-    if cow
-        && let Some(trans) = trans.as_deref_mut()
-        && eb.generation() != fs_info.generation
-    {
+    if cow && let Some(trans) = trans.as_deref_mut() {
+        let old_logical = eb.logical();
         eb = cow_block(trans, fs_info, &eb, tree_id, None)?;
-        fs_info.set_root_bytenr(tree_id, eb.logical());
+        if eb.logical() != old_logical {
+            fs_info.set_root_bytenr(tree_id, eb.logical());
+        }
     }
 
     let mut level = eb.level();
@@ -157,10 +157,8 @@ pub fn search_slot<R: Read + Write + Seek>(
         let mut child = fs_info.read_block(child_bytenr)?;
 
         // COW the child if needed
-        if cow
-            && let Some(trans) = trans.as_deref_mut()
-            && child.generation() != fs_info.generation
-        {
+        if cow && let Some(trans) = trans.as_deref_mut() {
+            let old_logical = child.logical();
             child = cow_block(
                 trans,
                 fs_info,
@@ -168,11 +166,13 @@ pub fn search_slot<R: Read + Write + Seek>(
                 tree_id,
                 Some((eb.logical(), slot)),
             )?;
-            // Update parent's pointer to the new child
-            if let Some(parent) = &mut path.nodes[level as usize] {
-                parent.set_key_ptr_blockptr(slot, child.logical());
-                parent.set_key_ptr_generation(slot, fs_info.generation);
-                fs_info.mark_dirty(parent);
+            if child.logical() != old_logical {
+                // Update parent's pointer to the new child
+                if let Some(parent) = &mut path.nodes[level as usize] {
+                    parent.set_key_ptr_blockptr(slot, child.logical());
+                    parent.set_key_ptr_generation(slot, fs_info.generation);
+                    fs_info.mark_dirty(parent);
+                }
             }
         }
 
