@@ -330,7 +330,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
                 root_item.generation_v2 = self.transid;
                 root_item.level = new_level;
 
-                let new_data = serialize::root_item_to_bytes(&root_item);
+                let new_data = root_item.to_bytes();
                 if new_data.len() == item_data.len() {
                     items::update_item(leaf, slot, &new_data)?;
                     fs_info.mark_dirty(leaf);
@@ -536,12 +536,12 @@ impl<R: Read + Write + Seek> Transaction<R> {
         let data = leaf.item_data(slot).to_vec();
         if let Some(bg) = BlockGroupItem::parse(&data) {
             let new_used = (bg.used as i64 + bytes_delta).max(0) as u64;
-            let new_data =
-                serialize::block_group_item_to_bytes(&BlockGroupItem {
-                    used: new_used,
-                    chunk_objectid: bg.chunk_objectid,
-                    flags: bg.flags,
-                });
+            let new_data = BlockGroupItem {
+                used: new_used,
+                chunk_objectid: bg.chunk_objectid,
+                flags: bg.flags,
+            }
+            .to_bytes();
             items::update_item(leaf, slot, &new_data)?;
             fs_info.mark_dirty(leaf);
         }

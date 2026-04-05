@@ -9,8 +9,9 @@
 #![allow(unused_imports)]
 
 use btrfs_disk::{
-    items::{RootItem, RootItemFlags, Timespec},
-    serialize,
+    items::{
+        DirItem, InodeItemArgs, InodeRef, RootItem, RootItemFlags, Timespec,
+    },
     tree::{DiskKey, KeyType},
 };
 use btrfs_transaction::{
@@ -831,7 +832,7 @@ fn write_set_subvol_readonly() {
         let mut root_item = RootItem::parse(&data).unwrap();
         assert!(!root_item.flags.contains(RootItemFlags::RDONLY));
         root_item.flags |= RootItemFlags::RDONLY;
-        let new_data = serialize::root_item_to_bytes(&root_item);
+        let new_data = root_item.to_bytes();
         items::update_item(leaf, slot, &new_data[..data.len()]).unwrap();
         fs.mark_dirty(leaf);
         path.release();
@@ -981,7 +982,7 @@ fn mount_verify_subvol_readonly() {
         let original_len = data.len();
         let mut root_item = RootItem::parse(&data).expect("parse ROOT_ITEM");
         root_item.flags |= RootItemFlags::RDONLY;
-        let new_data = serialize::root_item_to_bytes(&root_item);
+        let new_data = root_item.to_bytes();
         // Truncate to match the on-disk item size (mkfs may write 439-byte
         // root items without the trailing 64-byte reserved region)
         items::update_item(leaf, slot, &new_data[..original_len])
@@ -1045,17 +1046,17 @@ fn mount_verify_file_created() {
 
         // 1. Create INODE_ITEM for the new file
         // mode 0100644 = regular file, rw-r--r--
-        let inode_data =
-            serialize::inode_item_to_bytes(&serialize::InodeItemArgs {
-                generation: transid,
-                size: 0,
-                nbytes: 0,
-                nlink: 1,
-                uid: 0,
-                gid: 0,
-                mode: 0o100644,
-                time: ts,
-            });
+        let inode_data = InodeItemArgs {
+            generation: transid,
+            size: 0,
+            nbytes: 0,
+            nlink: 1,
+            uid: 0,
+            gid: 0,
+            mode: 0o100644,
+            time: ts,
+        }
+        .to_bytes();
         let inode_key = DiskKey {
             objectid: file_inode,
             key_type: KeyType::InodeItem,
@@ -1079,7 +1080,7 @@ fn mount_verify_file_created() {
         path.release();
 
         // 2. Create INODE_REF (file -> parent dir)
-        let iref_data = serialize::inode_ref_to_bytes(dir_index, file_name);
+        let iref_data = InodeRef::serialize(dir_index, file_name);
         let iref_key = DiskKey {
             objectid: file_inode,
             key_type: KeyType::InodeRef,
@@ -1107,7 +1108,7 @@ fn mount_verify_file_created() {
             key_type: KeyType::InodeItem,
             offset: 0,
         };
-        let dir_data = serialize::dir_item_to_bytes(
+        let dir_data = DirItem::serialize(
             &location,
             transid,
             btrfs_disk::raw::BTRFS_FT_REG_FILE as u8,
@@ -1185,17 +1186,17 @@ fn mount_verify_file_created() {
             // dir isize += name_len + btrfs_dir_item header (30 bytes)
             inode.size += file_name.len() as u64 + 30;
             inode.transid = transid;
-            let new_data =
-                serialize::inode_item_to_bytes(&serialize::InodeItemArgs {
-                    generation: inode.generation,
-                    size: inode.size,
-                    nbytes: inode.nbytes,
-                    nlink: inode.nlink,
-                    uid: inode.uid,
-                    gid: inode.gid,
-                    mode: inode.mode,
-                    time: ts,
-                });
+            let new_data = InodeItemArgs {
+                generation: inode.generation,
+                size: inode.size,
+                nbytes: inode.nbytes,
+                nlink: inode.nlink,
+                uid: inode.uid,
+                gid: inode.gid,
+                mode: inode.mode,
+                time: ts,
+            }
+            .to_bytes();
             items::update_item(leaf, slot, &new_data).unwrap();
             fs.mark_dirty(leaf);
         }

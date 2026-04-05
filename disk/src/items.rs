@@ -9,8 +9,8 @@
 use crate::util::get_uuid;
 use crate::{
     raw,
-    tree::{DiskKey, ObjectId},
-    util::raw_crc32c,
+    tree::{DiskKey, KeyType, ObjectId},
+    util::{raw_crc32c, write_disk_key},
 };
 use bytes::{Buf, BufMut};
 use std::{fmt, mem};
@@ -163,6 +163,12 @@ impl Timespec {
             sec: buf.get_u64_le(),
             nsec: buf.get_u32_le(),
         }
+    }
+
+    /// Serialize to 12 bytes (8-byte sec + 4-byte nsec).
+    fn write_to(&self, buf: &mut Vec<u8>) {
+        buf.put_u64_le(self.sec);
+        buf.put_u32_le(self.nsec);
     }
 }
 
@@ -404,6 +410,52 @@ impl InodeItem {
     }
 }
 
+/// Parameters for creating an inode item.
+pub struct InodeItemArgs {
+    /// Generation and transid.
+    pub generation: u64,
+    /// Logical file size.
+    pub size: u64,
+    /// On-disk bytes used.
+    pub nbytes: u64,
+    /// Hard link count.
+    pub nlink: u32,
+    /// Owner user ID.
+    pub uid: u32,
+    /// Owner group ID.
+    pub gid: u32,
+    /// POSIX file mode (type + permissions).
+    pub mode: u32,
+    /// Timestamp for atime/ctime/mtime/otime.
+    pub time: Timespec,
+}
+
+impl InodeItemArgs {
+    /// Serialize to the 160-byte on-disk `btrfs_inode_item` representation.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(160);
+        buf.put_u64_le(self.generation);
+        buf.put_u64_le(self.generation); // transid = generation
+        buf.put_u64_le(self.size);
+        buf.put_u64_le(self.nbytes);
+        buf.put_u64_le(0); // block_group
+        buf.put_u32_le(self.nlink);
+        buf.put_u32_le(self.uid);
+        buf.put_u32_le(self.gid);
+        buf.put_u32_le(self.mode);
+        buf.put_u64_le(0); // rdev
+        buf.put_u64_le(0); // flags
+        buf.put_u64_le(0); // sequence
+        buf.extend_from_slice(&[0u8; 32]); // reserved
+        for _ in 0..4 {
+            self.time.write_to(&mut buf);
+        }
+        debug_assert_eq!(buf.len(), 160);
+        buf
+    }
+}
+
 /// Hard link reference from an inode to a directory entry.
 ///
 /// Key: `(inode_number, INODE_REF, parent_dir_inode)`. Multiple refs can be
@@ -434,6 +486,19 @@ impl InodeRef {
             result.push(Self { index, name });
         }
         result
+    }
+
+    /// Serialize a single inode ref entry.
+    ///
+    /// On-disk layout: index (8) + `name_len` (2) + name.
+    #[must_use]
+    pub fn serialize(index: u64, name: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(10 + name.len());
+        buf.put_u64_le(index);
+        #[allow(clippy::cast_possible_truncation)]
+        buf.put_u16_le(name.len() as u16);
+        buf.extend_from_slice(name);
+        buf
     }
 }
 
@@ -528,6 +593,30 @@ impl DirItem {
             });
         }
         result
+    }
+
+    /// Serialize a directory entry.
+    ///
+    /// On-disk layout: location key (17) + transid (8) + `data_len` (2) +
+    /// `name_len` (2) + type (1) + name + data = 30 + `name.len()` + `data.len()`.
+    #[must_use]
+    pub fn serialize(
+        location: &DiskKey,
+        transid: u64,
+        file_type: u8,
+        name: &[u8],
+    ) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(30 + name.len());
+        let key_off = buf.len();
+        buf.extend_from_slice(&[0u8; 17]);
+        write_disk_key(&mut buf[key_off..], 0, location);
+        buf.put_u64_le(transid);
+        buf.put_u16_le(0); // data_len (no xattr data for regular entries)
+        #[allow(clippy::cast_possible_truncation)]
+        buf.put_u16_le(name.len() as u16);
+        buf.put_u8(file_type);
+        buf.extend_from_slice(name);
+        buf
     }
 }
 
@@ -752,6 +841,91 @@ impl RootItem {
             stime,
             rtime,
         })
+    }
+
+    /// Create a minimal root item for internal trees (not subvolumes).
+    ///
+    /// Sets generation, bytenr, level, and refs=1. All other fields are
+    /// zeroed/nil.
+    #[must_use]
+    pub fn new_internal(generation: u64, bytenr: u64, level: u8) -> Self {
+        Self {
+            generation,
+            root_dirid: 0,
+            bytenr,
+            byte_limit: 0,
+            bytes_used: 0,
+            last_snapshot: 0,
+            flags: RootItemFlags::empty(),
+            refs: 1,
+            drop_progress: DiskKey {
+                objectid: 0,
+                key_type: KeyType::from_raw(0),
+                offset: 0,
+            },
+            drop_level: 0,
+            level,
+            generation_v2: generation,
+            uuid: Uuid::nil(),
+            parent_uuid: Uuid::nil(),
+            received_uuid: Uuid::nil(),
+            ctransid: 0,
+            otransid: 0,
+            stransid: 0,
+            rtransid: 0,
+            ctime: Timespec { sec: 0, nsec: 0 },
+            otime: Timespec { sec: 0, nsec: 0 },
+            stime: Timespec { sec: 0, nsec: 0 },
+            rtime: Timespec { sec: 0, nsec: 0 },
+        }
+    }
+
+    /// Serialize to the on-disk byte representation (496 bytes).
+    ///
+    /// Starts with a 160-byte zeroed `inode_item`, followed by root item
+    /// fields, padded with zeros to 496 bytes total.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        const INODE_ITEM_SIZE: usize = 160;
+        let mut buf = Vec::with_capacity(496);
+
+        // btrfs_inode_item (160 bytes) — zeroed for internal tree root items
+        buf.extend_from_slice(&[0u8; INODE_ITEM_SIZE]);
+
+        buf.put_u64_le(self.generation);
+        buf.put_u64_le(self.root_dirid);
+        buf.put_u64_le(self.bytenr);
+        buf.put_u64_le(self.byte_limit);
+        buf.put_u64_le(self.bytes_used);
+        buf.put_u64_le(self.last_snapshot);
+        buf.put_u64_le(self.flags.bits());
+        buf.put_u32_le(self.refs);
+
+        let key_off = buf.len();
+        buf.extend_from_slice(&[0u8; 17]);
+        write_disk_key(&mut buf[key_off..], 0, &self.drop_progress);
+
+        buf.put_u8(self.drop_level);
+        buf.put_u8(self.level);
+        buf.put_u64_le(self.generation_v2);
+
+        buf.extend_from_slice(self.uuid.as_bytes());
+        buf.extend_from_slice(self.parent_uuid.as_bytes());
+        buf.extend_from_slice(self.received_uuid.as_bytes());
+
+        buf.put_u64_le(self.ctransid);
+        buf.put_u64_le(self.otransid);
+        buf.put_u64_le(self.stransid);
+        buf.put_u64_le(self.rtransid);
+
+        self.ctime.write_to(&mut buf);
+        self.otime.write_to(&mut buf);
+        self.stime.write_to(&mut buf);
+        self.rtime.write_to(&mut buf);
+
+        // Pad to 496 bytes (160 inode + 336 root fields + reserved)
+        buf.resize(496, 0);
+        buf
     }
 }
 
@@ -1234,6 +1408,16 @@ impl BlockGroupItem {
             chunk_objectid: buf.get_u64_le(),
             flags: BlockGroupFlags::from_bits_truncate(buf.get_u64_le()),
         })
+    }
+
+    /// Serialize to the 24-byte on-disk representation.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(24);
+        buf.put_u64_le(self.used);
+        buf.put_u64_le(self.chunk_objectid);
+        buf.put_u64_le(self.flags.bits());
+        buf
     }
 }
 
