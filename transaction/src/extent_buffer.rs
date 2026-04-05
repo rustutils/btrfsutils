@@ -11,7 +11,7 @@
 
 use btrfs_disk::{
     tree::{DiskKey, KeyType, TreeBlock},
-    util::csum_tree_block,
+    util::{csum_tree_block, write_disk_key},
 };
 use bytes::{Buf, BufMut};
 use uuid::Uuid;
@@ -413,13 +413,6 @@ impl std::fmt::Debug for ExtentBuffer {
             .field("owner", &self.owner())
             .finish()
     }
-}
-
-/// Write a `DiskKey` into a byte buffer at the given offset.
-pub fn write_disk_key(buf: &mut [u8], off: usize, key: &DiskKey) {
-    (&mut buf[off..off + 8]).put_u64_le(key.objectid);
-    buf[off + 8] = key.key_type.to_raw();
-    (&mut buf[off + 9..off + 17]).put_u64_le(key.offset);
 }
 
 /// Compare two `DiskKey` values as a `(objectid, type, offset)` tuple.

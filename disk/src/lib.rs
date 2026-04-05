@@ -73,6 +73,7 @@ pub mod items;
 #[allow(missing_docs)]
 pub mod raw;
 pub mod reader;
+pub mod serialize;
 pub mod superblock;
 pub mod tree;
 pub mod util;

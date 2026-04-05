@@ -13,11 +13,10 @@ use crate::{
     items,
     path::BtrfsPath,
     search::{self, SearchIntent},
-    serialize,
 };
 use btrfs_disk::{
     items::RootItem,
-    superblock,
+    serialize, superblock,
     tree::{DiskKey, KeyType},
 };
 use std::{

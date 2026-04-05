@@ -8,10 +8,10 @@
 //! Each function writes directly into a `Vec<u8>` using `BufMut` for
 //! consistency with the disk crate's `write_bytes` pattern.
 
-use crate::extent_buffer::write_disk_key;
-use btrfs_disk::{
+use crate::{
     items::{BlockGroupItem, RootItem, RootItemFlags, Timespec},
     tree::DiskKey,
+    util::write_disk_key,
 };
 use bytes::BufMut;
 use uuid::Uuid;
@@ -109,7 +109,7 @@ pub fn block_group_item_to_bytes(item: &BlockGroupItem) -> Vec<u8> {
 /// Layout: extent item header (24) + inline ref type (1) + offset (8) = 33 bytes.
 pub const METADATA_EXTENT_ITEM_SIZE: usize = 33;
 
-/// Serialize a metadata extent item (METADATA_ITEM) with a single
+/// Serialize a metadata extent item (`METADATA_ITEM`) with a single
 /// `TREE_BLOCK_REF` inline backref.
 ///
 /// This is the on-disk format for a tree block extent when the
@@ -118,7 +118,7 @@ pub const METADATA_EXTENT_ITEM_SIZE: usize = 33;
 ///
 /// Data layout (33 bytes):
 /// - Extent item header (24 bytes): refs (u64) + generation (u64) + flags (u64)
-/// - Inline backref (9 bytes): type (u8, `TREE_BLOCK_REF`=176) + offset (u64, root_id)
+/// - Inline backref (9 bytes): type (u8, `TREE_BLOCK_REF`=176) + offset (u64, `root_id`)
 #[must_use]
 pub fn metadata_extent_item_to_bytes(
     refs: u64,
@@ -130,10 +130,10 @@ pub fn metadata_extent_item_to_bytes(
     // Extent item header
     buf.put_u64_le(refs);
     buf.put_u64_le(generation);
-    buf.put_u64_le(btrfs_disk::items::ExtentFlags::TREE_BLOCK.bits());
+    buf.put_u64_le(crate::items::ExtentFlags::TREE_BLOCK.bits());
 
     // Inline TREE_BLOCK_REF: type byte + root_id as offset
-    buf.put_u8(btrfs_disk::tree::KeyType::TreeBlockRef.to_raw());
+    buf.put_u8(crate::tree::KeyType::TreeBlockRef.to_raw());
     buf.put_u64_le(root_id);
 
     debug_assert_eq!(buf.len(), METADATA_EXTENT_ITEM_SIZE);
@@ -192,8 +192,8 @@ pub fn inode_item_to_bytes(args: &InodeItemArgs) -> Vec<u8> {
 
 /// Serialize a `btrfs_dir_item` (directory entry).
 ///
-/// On-disk layout: location key (17) + transid (8) + data_len (2) +
-/// name_len (2) + type (1) + name + data = 30 + name.len() + data.len().
+/// On-disk layout: location key (17) + transid (8) + `data_len` (2) +
+/// `name_len` (2) + type (1) + name + data = 30 + `name.len()` + `data.len()`.
 #[must_use]
 pub fn dir_item_to_bytes(
     location: &DiskKey,
@@ -208,6 +208,7 @@ pub fn dir_item_to_bytes(
     write_disk_key(&mut buf[key_off..], 0, location);
     buf.put_u64_le(transid);
     buf.put_u16_le(0); // data_len (no xattr data for regular entries)
+    #[allow(clippy::cast_possible_truncation)] // name_len fits in u16
     buf.put_u16_le(name.len() as u16);
     buf.put_u8(file_type);
     buf.extend_from_slice(name);
@@ -216,11 +217,12 @@ pub fn dir_item_to_bytes(
 
 /// Serialize a `btrfs_inode_ref`.
 ///
-/// On-disk layout: index (8) + name_len (2) + name.
+/// On-disk layout: index (8) + `name_len` (2) + name.
 #[must_use]
 pub fn inode_ref_to_bytes(index: u64, name: &[u8]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(10 + name.len());
     buf.put_u64_le(index);
+    #[allow(clippy::cast_possible_truncation)] // name_len fits in u16
     buf.put_u16_le(name.len() as u16);
     buf.extend_from_slice(name);
     buf
@@ -229,10 +231,10 @@ pub fn inode_ref_to_bytes(index: u64, name: &[u8]) -> Vec<u8> {
 /// Size of a non-skinny metadata extent item with `tree_block_info` and
 /// one `TREE_BLOCK_REF` inline backref.
 ///
-/// Layout: extent_item (24) + tree_block_info (18) + inline ref (9) = 51 bytes.
+/// Layout: `extent_item` (24) + `tree_block_info` (18) + inline ref (9) = 51 bytes.
 pub const NON_SKINNY_METADATA_EXTENT_ITEM_SIZE: usize = 51;
 
-/// Serialize a non-skinny metadata extent item (EXTENT_ITEM) with a
+/// Serialize a non-skinny metadata extent item (`EXTENT_ITEM`) with a
 /// `tree_block_info` structure and a `TREE_BLOCK_REF` inline backref.
 ///
 /// This is the on-disk format for old filesystems without the
@@ -241,8 +243,8 @@ pub const NON_SKINNY_METADATA_EXTENT_ITEM_SIZE: usize = 51;
 ///
 /// Data layout (51 bytes):
 /// - Extent item header (24 bytes): refs (u64) + generation (u64) + flags (u64)
-/// - tree_block_info (18 bytes): first key (17 bytes) + level (u8)
-/// - Inline backref (9 bytes): type (u8, TREE_BLOCK_REF=176) + offset (u64, root_id)
+/// - `tree_block_info` (18 bytes): first key (17 bytes) + level (u8)
+/// - Inline backref (9 bytes): type (u8, `TREE_BLOCK_REF=176`) + offset (u64, `root_id`)
 #[must_use]
 pub fn non_skinny_metadata_extent_item_to_bytes(
     refs: u64,
@@ -256,7 +258,7 @@ pub fn non_skinny_metadata_extent_item_to_bytes(
     // Extent item header
     buf.put_u64_le(refs);
     buf.put_u64_le(generation);
-    buf.put_u64_le(btrfs_disk::items::ExtentFlags::TREE_BLOCK.bits());
+    buf.put_u64_le(crate::items::ExtentFlags::TREE_BLOCK.bits());
 
     // tree_block_info: first key + level
     let key_off = buf.len();
@@ -265,7 +267,7 @@ pub fn non_skinny_metadata_extent_item_to_bytes(
     buf.put_u8(level);
 
     // Inline TREE_BLOCK_REF: type byte + root_id as offset
-    buf.put_u8(btrfs_disk::tree::KeyType::TreeBlockRef.to_raw());
+    buf.put_u8(crate::tree::KeyType::TreeBlockRef.to_raw());
     buf.put_u64_le(root_id);
 
     debug_assert_eq!(buf.len(), NON_SKINNY_METADATA_EXTENT_ITEM_SIZE);
@@ -292,7 +294,7 @@ pub fn make_internal_root_item(
         refs: 1,
         drop_progress: DiskKey {
             objectid: 0,
-            key_type: btrfs_disk::tree::KeyType::from_raw(0),
+            key_type: crate::tree::KeyType::from_raw(0),
             offset: 0,
         },
         drop_level: 0,
@@ -315,7 +317,7 @@ pub fn make_internal_root_item(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use btrfs_disk::items::{BlockGroupFlags, RootItem as DiskRootItem};
+    use crate::items::{BlockGroupFlags, RootItem as DiskRootItem};
 
     #[test]
     fn root_item_round_trip() {
@@ -373,7 +375,7 @@ mod tests {
 
     #[test]
     fn inode_item_round_trip() {
-        use btrfs_disk::items::InodeItem;
+        use crate::items::InodeItem;
 
         let bytes = inode_item_to_bytes(&InodeItemArgs {
             generation: 7,
@@ -403,17 +405,17 @@ mod tests {
 
     #[test]
     fn dir_item_round_trip() {
-        use btrfs_disk::items::DirItem;
+        use crate::items::DirItem;
 
         let location = DiskKey {
             objectid: 257,
-            key_type: btrfs_disk::tree::KeyType::InodeItem,
+            key_type: crate::tree::KeyType::InodeItem,
             offset: 0,
         };
         let bytes = dir_item_to_bytes(
             &location,
             7,
-            btrfs_disk::raw::BTRFS_FT_REG_FILE as u8,
+            crate::raw::BTRFS_FT_REG_FILE as u8,
             b"hello.txt",
         );
 
@@ -426,7 +428,7 @@ mod tests {
 
     #[test]
     fn inode_ref_round_trip() {
-        use btrfs_disk::items::InodeRef;
+        use crate::items::InodeRef;
 
         let bytes = inode_ref_to_bytes(2, b"hello.txt");
         let refs = InodeRef::parse_all(&bytes);
@@ -439,7 +441,7 @@ mod tests {
     fn non_skinny_metadata_extent_size() {
         let key = DiskKey {
             objectid: 256,
-            key_type: btrfs_disk::tree::KeyType::InodeItem,
+            key_type: crate::tree::KeyType::InodeItem,
             offset: 0,
         };
         let bytes = non_skinny_metadata_extent_item_to_bytes(1, 42, 5, &key, 0);
@@ -453,7 +455,7 @@ mod tests {
         let skinny = metadata_extent_item_to_bytes(1, 42, 5);
         let key = DiskKey {
             objectid: 0,
-            key_type: btrfs_disk::tree::KeyType::from_raw(0),
+            key_type: crate::tree::KeyType::from_raw(0),
             offset: 0,
         };
         let non_skinny =
@@ -467,23 +469,6 @@ mod tests {
         let bytes = metadata_extent_item_to_bytes(1, 42, 5);
         // Flags at offset 16..24 should be TREE_BLOCK
         let flags = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
-        assert_eq!(flags, btrfs_disk::items::ExtentFlags::TREE_BLOCK.bits());
-    }
-
-    #[test]
-    fn insert_empty_item_via_insert() {
-        // Zero-length items (like FREE_SPACE_EXTENT) should work
-        let mut eb = crate::extent_buffer::ExtentBuffer::new_zeroed(4096, 0);
-        eb.set_level(0);
-        eb.set_nritems(0);
-        let key = DiskKey {
-            objectid: 100,
-            key_type: btrfs_disk::tree::KeyType::FreeSpaceExtent,
-            offset: 4096,
-        };
-        crate::items::insert_item(&mut eb, 0, &key, &[]).unwrap();
-        assert_eq!(eb.nritems(), 1);
-        assert_eq!(eb.item_size(0), 0);
-        assert_eq!(eb.item_data(0).len(), 0);
+        assert_eq!(flags, crate::items::ExtentFlags::TREE_BLOCK.bits());
     }
 }

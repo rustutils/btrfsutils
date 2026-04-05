@@ -28,7 +28,6 @@ pub mod filesystem;
 pub mod items;
 pub mod path;
 pub mod search;
-pub mod serialize;
 pub mod split;
 pub mod transaction;
 

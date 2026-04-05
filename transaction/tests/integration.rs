@@ -10,6 +10,7 @@
 
 use btrfs_disk::{
     items::{RootItem, RootItemFlags, Timespec},
+    serialize,
     tree::{DiskKey, KeyType},
 };
 use btrfs_transaction::{
@@ -18,7 +19,6 @@ use btrfs_transaction::{
     items,
     path::BtrfsPath,
     search::{self, SearchIntent},
-    serialize,
     transaction::Transaction,
 };
 use std::{
