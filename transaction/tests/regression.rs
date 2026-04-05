@@ -660,7 +660,10 @@ fn make_node(
 
 /// Coverage: balance_node merge-right path. A sparse child merges with
 /// its right sibling, absorbing all key pointers and removing the right
-/// sibling's entry from the parent.
+/// sibling's entry from the parent. Uses an old generation to force COW
+/// (covers child.logical() != child_bytenr branch), and 3 children so
+/// removing the right sibling requires shifting the third entry left
+/// (covers remove_slot + 1 < parent_nritems branch).
 #[test]
 fn balance_node_merge_right() {
     let (dir, img_path) = create_test_image();
@@ -668,48 +671,77 @@ fn balance_node_merge_right() {
     let mut trans = TransHandle::start(&mut fs).unwrap();
     let nodesize = fs.nodesize;
     let generation = fs.generation;
+    let old_gen = generation - 1; // Previous generation forces COW
 
-    // Create a sparse child (2 key pointers) and a right sibling (3 key pointers).
-    // Together they fit in one node (5 << max_ptrs).
-    let child = make_node(nodesize, 0x2000_0000, generation, 2, 100);
-    let right = make_node(nodesize, 0x2000_4000, generation, 3, 300);
+    // Sparse child (2 ptrs) and right sibling (3 ptrs) with old generation.
+    // Third sibling at the end so removing the right sibling requires a shift.
+    let child = make_node(nodesize, 0x2000_0000, old_gen, 2, 100);
+    let right = make_node(nodesize, 0x2000_4000, old_gen, 3, 300);
+    let third = make_node(nodesize, 0x2000_8000, generation, 5, 600);
 
-    // Put them in the cache so read_block can find them
     fs.mark_dirty(&child);
     fs.mark_dirty(&right);
+    fs.mark_dirty(&third);
 
-    // Build parent with 2 children: child at slot 0, right at slot 1
+    // Parent with 3 children
     let mut parent = ExtentBuffer::new_zeroed(nodesize, 0x3000_0000);
     parent.set_level(2);
-    parent.set_nritems(2);
+    parent.set_nritems(3);
     parent.set_generation(generation);
     parent.set_owner(1);
-    let child_key = DiskKey {
-        objectid: 100,
-        key_type: KeyType::RootItem,
-        offset: 0,
-    };
-    let right_key = DiskKey {
-        objectid: 300,
-        key_type: KeyType::RootItem,
-        offset: 0,
-    };
-    parent.set_key_ptr(0, &child_key, child.logical(), generation);
-    parent.set_key_ptr(1, &right_key, right.logical(), generation);
+    parent.set_key_ptr(
+        0,
+        &DiskKey {
+            objectid: 100,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        },
+        child.logical(),
+        old_gen,
+    );
+    parent.set_key_ptr(
+        1,
+        &DiskKey {
+            objectid: 300,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        },
+        right.logical(),
+        old_gen,
+    );
+    parent.set_key_ptr(
+        2,
+        &DiskKey {
+            objectid: 600,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        },
+        third.logical(),
+        generation,
+    );
 
-    // Call balance_node on slot 0 (the sparse child)
     let merged =
         balance::balance_node(&mut trans, &mut fs, &mut parent, 0, 1).unwrap();
     assert!(merged, "should have merged");
 
-    // Parent should now have 1 child (the right sibling was absorbed)
-    assert_eq!(parent.nritems(), 1);
+    // Parent should now have 2 children (right absorbed, third shifted left)
+    assert_eq!(parent.nritems(), 2);
 
     // The merged child should have 5 key pointers (2 + 3)
     let merged_bytenr = parent.key_ptr_blockptr(0);
     let merged_eb = fs.read_block(merged_bytenr).unwrap();
     assert_eq!(merged_eb.nritems(), 5);
     assert_eq!(merged_eb.level(), 1);
+    // COW should have changed the address
+    assert_ne!(
+        merged_bytenr,
+        child.logical(),
+        "COW should allocate new block"
+    );
+
+    // Third child should now be at slot 1
+    assert_eq!(parent.key_ptr_blockptr(1), third.logical());
+    assert_eq!(parent.key_ptr_key(1).objectid, 600);
 
     // Verify key pointer ordering in merged node
     for i in 0..4 {
@@ -731,8 +763,11 @@ fn balance_node_merge_right() {
     drop(dir);
 }
 
-/// Coverage: balance_node merge-left path. When there's no right sibling
-/// (child is at the last slot), the child merges into the left sibling.
+/// Coverage: balance_node merge-left path. Sparse child at slot 1 (middle)
+/// merges into the left sibling. Uses old generation to force COW (covers
+/// left.logical() != left_bytenr branch), and 3 children so removing the
+/// child requires shifting the third entry left (covers parent_slot + 1 <
+/// parent_nritems branch).
 #[test]
 fn balance_node_merge_left() {
     let (dir, img_path) = create_test_image();
@@ -740,44 +775,81 @@ fn balance_node_merge_left() {
     let mut trans = TransHandle::start(&mut fs).unwrap();
     let nodesize = fs.nodesize;
     let generation = fs.generation;
+    let old_gen = generation - 1;
 
-    // Left sibling (3 key pointers), sparse child at slot 1 (2 key pointers)
-    let left = make_node(nodesize, 0x4000_0000, generation, 3, 100);
-    let child = make_node(nodesize, 0x4000_4000, generation, 2, 400);
+    // Left sibling (3 ptrs, old gen), sparse child at slot 1 (2 ptrs, old gen),
+    // right sibling at slot 2 so merge-right is tried first but right has too
+    // many items. Actually, to force the merge-left path, we make the right
+    // sibling too full to merge with the child.
+    let max_ptrs =
+        ((nodesize - HEADER_SIZE as u32) / KEY_PTR_SIZE as u32) as usize;
+    let left = make_node(nodesize, 0x4000_0000, old_gen, 3, 100);
+    let child = make_node(nodesize, 0x4000_4000, old_gen, 2, 400);
+    let right = make_node(nodesize, 0x4000_8000, generation, max_ptrs - 1, 600);
 
     fs.mark_dirty(&left);
     fs.mark_dirty(&child);
+    fs.mark_dirty(&right);
 
     let mut parent = ExtentBuffer::new_zeroed(nodesize, 0x5000_0000);
     parent.set_level(2);
-    parent.set_nritems(2);
+    parent.set_nritems(3);
     parent.set_generation(generation);
     parent.set_owner(1);
-    let left_key = DiskKey {
-        objectid: 100,
-        key_type: KeyType::RootItem,
-        offset: 0,
-    };
-    let child_key = DiskKey {
-        objectid: 400,
-        key_type: KeyType::RootItem,
-        offset: 0,
-    };
-    parent.set_key_ptr(0, &left_key, left.logical(), generation);
-    parent.set_key_ptr(1, &child_key, child.logical(), generation);
+    parent.set_key_ptr(
+        0,
+        &DiskKey {
+            objectid: 100,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        },
+        left.logical(),
+        old_gen,
+    );
+    parent.set_key_ptr(
+        1,
+        &DiskKey {
+            objectid: 400,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        },
+        child.logical(),
+        old_gen,
+    );
+    parent.set_key_ptr(
+        2,
+        &DiskKey {
+            objectid: 600,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        },
+        right.logical(),
+        generation,
+    );
 
-    // Call balance_node on slot 1 (the sparse child, last slot = no right sibling)
+    // Merge-right will be tried first (child + right = 2 + 492 = 494 > 493),
+    // so it falls through to merge-left (child + left = 2 + 3 = 5 <= 493).
     let merged =
         balance::balance_node(&mut trans, &mut fs, &mut parent, 1, 1).unwrap();
     assert!(merged, "should have merged into left");
 
-    // Parent should have 1 child
-    assert_eq!(parent.nritems(), 1);
+    // Parent should have 2 children (child removed, right shifted left)
+    assert_eq!(parent.nritems(), 2);
 
-    // The left sibling should now have 5 key pointers (3 + 2)
+    // Left sibling should now have 5 key pointers (3 + 2)
     let merged_bytenr = parent.key_ptr_blockptr(0);
     let merged_eb = fs.read_block(merged_bytenr).unwrap();
     assert_eq!(merged_eb.nritems(), 5);
+    // COW should have changed the address
+    assert_ne!(
+        merged_bytenr,
+        left.logical(),
+        "COW should allocate new block"
+    );
+
+    // Right sibling should now be at slot 1
+    assert_eq!(parent.key_ptr_blockptr(1), right.logical());
+    assert_eq!(parent.key_ptr_key(1).objectid, 600);
 
     // Child should be pinned (it was absorbed)
     assert!(trans.is_pinned(child.logical()));
