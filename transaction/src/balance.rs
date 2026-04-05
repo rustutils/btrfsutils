@@ -10,7 +10,7 @@
 use crate::{
     cow::cow_block,
     extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
-    fs_info::FsInfo,
+    filesystem::Filesystem,
     path::BtrfsPath,
     transaction::TransHandle,
 };
@@ -27,7 +27,7 @@ use std::io::{self, Read, Seek, Write};
 /// Returns an error if block I/O fails.
 pub fn push_leaf_left<R: Read + Write + Seek>(
     trans: &mut TransHandle<R>,
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     path: &mut BtrfsPath,
     tree_id: u64,
 ) -> io::Result<usize> {
@@ -151,7 +151,7 @@ pub fn push_leaf_left<R: Read + Write + Seek>(
 /// Returns an error if block I/O fails.
 pub fn push_leaf_right<R: Read + Write + Seek>(
     trans: &mut TransHandle<R>,
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     path: &mut BtrfsPath,
     tree_id: u64,
 ) -> io::Result<usize> {
@@ -311,7 +311,7 @@ pub fn push_leaf_right<R: Read + Write + Seek>(
 /// Returns an error if block I/O or COW fails.
 pub fn balance_node<R: Read + Write + Seek>(
     trans: &mut TransHandle<R>,
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     parent: &mut ExtentBuffer,
     parent_slot: usize,
     tree_id: u64,
@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn push_leaf_left_no_parent_returns_zero() {
         // A root leaf has no parent, so push_leaf_left should return 0
-        // without needing a real FsInfo. We verify by checking find_parent_level.
+        // without needing a real Filesystem. We verify by checking find_parent_level.
         let path = BtrfsPath::new();
         assert_eq!(find_parent_level(&path), None);
     }
@@ -487,7 +487,7 @@ mod tests {
         path.nodes[1] = Some(ExtentBuffer::new_zeroed(4096, 65536));
         path.slots[1] = 0; // Leftmost slot
         assert_eq!(find_parent_level(&path), Some(1));
-        // Can't call push_leaf_left without FsInfo, but we can verify
+        // Can't call push_leaf_left without Filesystem, but we can verify
         // the early return condition
         assert_eq!(path.slots[1], 0);
     }

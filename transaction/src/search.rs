@@ -8,7 +8,7 @@ use crate::{
     balance,
     cow::cow_block,
     extent_buffer::{ExtentBuffer, key_cmp},
-    fs_info::FsInfo,
+    filesystem::Filesystem,
     path::BtrfsPath,
     split,
     transaction::TransHandle,
@@ -129,7 +129,7 @@ pub enum SearchIntent {
 /// Returns an error if any block read, COW, or split operation fails.
 pub fn search_slot<R: Read + Write + Seek>(
     mut trans: Option<&mut TransHandle<R>>,
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     tree_id: u64,
     key: &DiskKey,
     path: &mut BtrfsPath,
@@ -267,7 +267,7 @@ pub fn search_slot<R: Read + Write + Seek>(
 ///
 /// Returns an error if any block read fails.
 pub fn next_leaf<R: Read + Write + Seek>(
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     path: &mut BtrfsPath,
 ) -> io::Result<bool> {
     // Walk up to find a level where we can advance
@@ -312,7 +312,7 @@ pub fn next_leaf<R: Read + Write + Seek>(
 ///
 /// Returns an error if any block read fails.
 pub fn prev_leaf<R: Read + Write + Seek>(
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     path: &mut BtrfsPath,
 ) -> io::Result<bool> {
     let mut level = 1u8;

@@ -2,13 +2,13 @@
 //! Shared test helpers for creating in-memory filesystem state.
 //!
 //! These helpers create real btrfs filesystem images via `mkfs.btrfs`,
-//! open them as `FsInfo`, and start transactions. This enables unit tests
+//! open them as `Filesystem`, and start transactions. This enables unit tests
 //! that exercise the full COW/split/balance pipeline with real on-disk
 //! structures, without requiring elevated privileges.
 
 use crate::{
     extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE},
-    fs_info::FsInfo,
+    filesystem::Filesystem,
     items,
     path::BtrfsPath,
     search::{self, SearchIntent},
@@ -53,10 +53,10 @@ impl TestFixture {
         }
     }
 
-    /// Open the image for read-write access as `FsInfo`.
-    pub fn open(&self) -> io::Result<FsInfo<File>> {
+    /// Open the image for read-write access as `Filesystem`.
+    pub fn open(&self) -> io::Result<Filesystem<File>> {
         let file = File::options().read(true).write(true).open(&self.path)?;
-        FsInfo::open(file)
+        Filesystem::open(file)
     }
 
     /// Run `btrfs check --readonly` and panic if structural errors are found.
@@ -95,7 +95,7 @@ impl TestFixture {
 /// Returns the number of items actually inserted.
 pub fn insert_test_items<R: io::Read + io::Write + io::Seek>(
     trans: &mut TransHandle<R>,
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     tree_id: u64,
     start_oid: u64,
     count: usize,
@@ -132,7 +132,7 @@ pub fn insert_test_items<R: io::Read + io::Write + io::Seek>(
 /// offset ordering: item[0] data ends at `nodesize - HEADER_SIZE`, and
 /// offsets are strictly descending.
 pub fn validate_leaf_offsets<R: io::Read + io::Write + io::Seek>(
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     root_bytenr: u64,
 ) -> io::Result<()> {
     let eb = fs_info.read_block(root_bytenr)?;

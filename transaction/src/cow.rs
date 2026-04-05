@@ -8,7 +8,8 @@
 //! been copy-on-written and can be modified in place.
 
 use crate::{
-    extent_buffer::ExtentBuffer, fs_info::FsInfo, transaction::TransHandle,
+    extent_buffer::ExtentBuffer, filesystem::Filesystem,
+    transaction::TransHandle,
 };
 use std::io::{self, Read, Seek, Write};
 
@@ -32,7 +33,7 @@ const HEADER_FLAG_RELOC: u64 = 1 << 1;
 /// Returns an error if block allocation or I/O fails.
 pub fn cow_block<R: Read + Write + Seek>(
     trans: &mut TransHandle<R>,
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     eb: &ExtentBuffer,
     tree_id: u64,
     _parent_info: Option<(u64, usize)>,

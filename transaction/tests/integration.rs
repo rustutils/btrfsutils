@@ -14,7 +14,7 @@ use btrfs_disk::{
 };
 use btrfs_transaction::{
     extent_buffer::key_cmp,
-    fs_info::FsInfo,
+    filesystem::Filesystem,
     items,
     path::BtrfsPath,
     search::{self, SearchIntent},
@@ -63,7 +63,7 @@ fn open_fixture_image() {
         .write(true)
         .open(tmp.path())
         .unwrap();
-    let fs = FsInfo::open(file).expect("failed to open fixture");
+    let fs = Filesystem::open(file).expect("failed to open fixture");
 
     // Verify basic superblock fields
     assert_eq!(fs.superblock.nodesize, 16384);
@@ -84,7 +84,7 @@ fn search_root_tree_for_fs_tree() {
         .write(true)
         .open(tmp.path())
         .unwrap();
-    let mut fs = FsInfo::open(file).expect("failed to open fixture");
+    let mut fs = Filesystem::open(file).expect("failed to open fixture");
 
     // Search for ROOT_ITEM of the FS tree (tree ID 5)
     let key = DiskKey {
@@ -120,7 +120,7 @@ fn search_nonexistent_key() {
         .write(true)
         .open(tmp.path())
         .unwrap();
-    let mut fs = FsInfo::open(file).expect("failed to open fixture");
+    let mut fs = Filesystem::open(file).expect("failed to open fixture");
 
     // Search for a key that shouldn't exist
     let key = DiskKey {
@@ -151,7 +151,7 @@ fn next_leaf_traversal() {
         .write(true)
         .open(tmp.path())
         .unwrap();
-    let mut fs = FsInfo::open(file).expect("failed to open fixture");
+    let mut fs = Filesystem::open(file).expect("failed to open fixture");
 
     // Search for the minimum key in the root tree
     let key = DiskKey {
@@ -215,7 +215,7 @@ fn search_extent_tree() {
         .write(true)
         .open(tmp.path())
         .unwrap();
-    let mut fs = FsInfo::open(file).expect("failed to open fixture");
+    let mut fs = Filesystem::open(file).expect("failed to open fixture");
 
     // Verify we can search the extent tree (tree 2)
     let key = DiskKey {
@@ -331,7 +331,7 @@ fn write_insert_item_and_verify() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).expect("open failed");
+        let mut fs = Filesystem::open(file).expect("open failed");
         generation_before = fs.superblock.generation;
 
         let mut trans =
@@ -372,7 +372,7 @@ fn write_insert_item_and_verify() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).expect("reopen failed");
+        let mut fs = Filesystem::open(file).expect("reopen failed");
 
         // Generation should have incremented
         assert_eq!(
@@ -427,7 +427,7 @@ fn write_delete_item_and_verify() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).expect("open failed");
+        let mut fs = Filesystem::open(file).expect("open failed");
 
         // Read the UUID tree's root block address before deleting
         let uuid_tree_bytenr =
@@ -474,7 +474,7 @@ fn write_delete_item_and_verify() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).expect("reopen failed");
+        let mut fs = Filesystem::open(file).expect("reopen failed");
 
         let mut path = BtrfsPath::new();
         let found = search::search_slot(
@@ -511,7 +511,7 @@ fn backup_roots_updated_on_commit() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let fs = FsInfo::open(file).expect("open failed");
+        let fs = Filesystem::open(file).expect("open failed");
         generation_before = fs.superblock.generation;
         root_bytenr_before = fs.superblock.root;
     }
@@ -523,7 +523,7 @@ fn backup_roots_updated_on_commit() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).expect("open failed");
+        let mut fs = Filesystem::open(file).expect("open failed");
         let mut trans = TransHandle::start(&mut fs).expect("start failed");
 
         let key = DiskKey {
@@ -559,7 +559,7 @@ fn backup_roots_updated_on_commit() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let fs = FsInfo::open(file).expect("reopen failed");
+        let fs = Filesystem::open(file).expect("reopen failed");
         let new_gen = fs.superblock.generation;
         assert_eq!(new_gen, generation_before + 1);
 
@@ -627,7 +627,7 @@ fn compat_ro_flags_preserved_after_commit() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let fs = FsInfo::open(file).unwrap();
+        let fs = Filesystem::open(file).unwrap();
         flags_before = fs.superblock.compat_ro_flags;
     }
 
@@ -638,7 +638,7 @@ fn compat_ro_flags_preserved_after_commit() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).unwrap();
+        let mut fs = Filesystem::open(file).unwrap();
         let mut trans = TransHandle::start(&mut fs).unwrap();
         let key = DiskKey {
             objectid: 100_002,
@@ -669,7 +669,7 @@ fn compat_ro_flags_preserved_after_commit() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let fs = FsInfo::open(file).unwrap();
+        let fs = Filesystem::open(file).unwrap();
         let flags_after = fs.superblock.compat_ro_flags;
 
         // FREE_SPACE_TREE (bit 0) must remain set
@@ -714,7 +714,7 @@ fn write_many_items_triggers_split() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).expect("open failed");
+        let mut fs = Filesystem::open(file).expect("open failed");
         let mut trans =
             TransHandle::start(&mut fs).expect("start transaction failed");
 
@@ -759,7 +759,7 @@ fn write_many_items_triggers_split() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).expect("reopen failed");
+        let mut fs = Filesystem::open(file).expect("reopen failed");
 
         for i in 0..item_count {
             let key = DiskKey {
@@ -804,7 +804,7 @@ fn write_set_subvol_readonly() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).unwrap();
+        let mut fs = Filesystem::open(file).unwrap();
         let mut trans = TransHandle::start(&mut fs).unwrap();
 
         let key = DiskKey {
@@ -846,7 +846,7 @@ fn write_set_subvol_readonly() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).unwrap();
+        let mut fs = Filesystem::open(file).unwrap();
 
         let key = DiskKey {
             objectid: 5,
@@ -951,7 +951,7 @@ fn mount_verify_subvol_readonly() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).expect("open failed");
+        let mut fs = Filesystem::open(file).expect("open failed");
 
         let mut trans = TransHandle::start(&mut fs).expect("start failed");
 
@@ -1034,7 +1034,7 @@ fn mount_verify_file_created() {
             .write(true)
             .open(&img_path)
             .unwrap();
-        let mut fs = FsInfo::open(file).expect("open failed");
+        let mut fs = Filesystem::open(file).expect("open failed");
         let transid = fs.superblock.generation + 1;
         let mut trans = TransHandle::start(&mut fs).expect("start failed");
 

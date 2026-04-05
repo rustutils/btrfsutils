@@ -6,7 +6,7 @@
 //! item insertion/deletion, node splitting, transaction commit, and extent
 //! allocation.
 //!
-//! The primary entry point is [`fs_info::FsInfo::open`], which opens a device
+//! The primary entry point is [`filesystem::Filesystem::open`], which opens a device
 //! or image file for modification. From there, start a transaction with
 //! [`transaction::TransHandle::start`], modify trees through
 //! [`search::search_slot`] and the item operation functions, and commit with
@@ -25,7 +25,7 @@ pub mod cow;
 pub mod delayed_ref;
 pub mod extent_alloc;
 pub mod extent_buffer;
-pub mod fs_info;
+pub mod filesystem;
 pub mod items;
 pub mod path;
 pub mod search;

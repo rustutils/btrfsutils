@@ -1,11 +1,11 @@
 //! # In-memory filesystem state for a transaction session
 //!
-//! `FsInfo` is the central state object for modifying a btrfs filesystem. It
+//! `Filesystem` is the central state object for modifying a btrfs filesystem. It
 //! wraps a `BlockReader` (from `btrfs-disk`), holds the parsed superblock, all
 //! tree root pointers, and tracks which blocks have been modified during the
 //! current transaction.
 //!
-//! Open a device or image with [`FsInfo::open`], then use the read/write
+//! Open a device or image with [`Filesystem::open`], then use the read/write
 //! methods to access tree blocks through `ExtentBuffer`.
 
 use crate::extent_buffer::ExtentBuffer;
@@ -24,7 +24,7 @@ use std::{
 /// (with chunk cache for logical-to-physical resolution), the superblock,
 /// all tree root pointers, the current transaction generation, and the set
 /// of dirty (modified) block addresses.
-pub struct FsInfo<R> {
+pub struct Filesystem<R> {
     /// Block reader with fully populated chunk cache.
     reader: BlockReader<R>,
     /// Parsed superblock (updated in-memory during transactions).
@@ -56,11 +56,11 @@ pub struct FsInfo<R> {
     written: BTreeSet<u64>,
 }
 
-impl<R: Read + Write + Seek> FsInfo<R> {
+impl<R: Read + Write + Seek> Filesystem<R> {
     /// Open a btrfs filesystem from a readable+writable+seekable handle.
     ///
     /// Performs the full bootstrap sequence (superblock, chunk cache, root
-    /// tree), then wraps the result into an `FsInfo` ready for transactions.
+    /// tree), then wraps the result into an `Filesystem` ready for transactions.
     ///
     /// # Errors
     ///
@@ -329,7 +329,7 @@ impl<R: Read + Write + Seek> FsInfo<R> {
 mod tests {
     use super::*;
 
-    // FsInfo requires a real filesystem image to test meaningfully.
+    // Filesystem requires a real filesystem image to test meaningfully.
     // These are basic structural tests; full integration tests will use
     // temporary images created by btrfs-mkfs.
 

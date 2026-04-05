@@ -8,7 +8,7 @@ use btrfs_disk::tree::{DiskKey, KeyType};
 use btrfs_transaction::{
     balance, cow,
     extent_buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
-    fs_info::FsInfo,
+    filesystem::Filesystem,
     items,
     path::BtrfsPath,
     search::{self, SearchIntent},
@@ -59,9 +59,9 @@ fn assert_btrfs_check(path: &Path) {
     }
 }
 
-fn open_rw(path: &Path) -> FsInfo<File> {
+fn open_rw(path: &Path) -> Filesystem<File> {
     let file = File::options().read(true).write(true).open(path).unwrap();
-    FsInfo::open(file).expect("open failed")
+    Filesystem::open(file).expect("open failed")
 }
 
 fn make_key(oid: u64) -> DiskKey {
@@ -74,7 +74,7 @@ fn make_key(oid: u64) -> DiskKey {
 
 /// Validate that every leaf in a tree has correct item offset packing:
 /// item[0] data ends at nodesize - HEADER_SIZE, offsets are descending.
-fn validate_tree_leaves(fs_info: &mut FsInfo<File>, root_bytenr: u64) {
+fn validate_tree_leaves(fs_info: &mut Filesystem<File>, root_bytenr: u64) {
     let eb = fs_info.read_block(root_bytenr).unwrap();
     if eb.level() == 0 {
         validate_leaf(&eb);

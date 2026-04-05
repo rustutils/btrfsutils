@@ -9,7 +9,7 @@ use crate::{
     delayed_ref::DelayedRefQueue,
     extent_alloc,
     extent_buffer::ITEM_SIZE,
-    fs_info::FsInfo,
+    filesystem::Filesystem,
     items,
     path::BtrfsPath,
     search::{self, SearchIntent},
@@ -62,7 +62,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     /// # Errors
     ///
     /// Returns an error if the filesystem state cannot be prepared.
-    pub fn start(fs_info: &mut FsInfo<R>) -> io::Result<Self> {
+    pub fn start(fs_info: &mut Filesystem<R>) -> io::Result<Self> {
         let transid = fs_info.superblock.generation + 1;
         fs_info.generation = transid;
 
@@ -95,7 +95,10 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     /// # Errors
     ///
     /// Returns an error if no free metadata space is available.
-    pub fn alloc_block(&mut self, fs_info: &mut FsInfo<R>) -> io::Result<u64> {
+    pub fn alloc_block(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+    ) -> io::Result<u64> {
         let nodesize = u64::from(fs_info.nodesize);
 
         loop {
@@ -148,7 +151,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     /// Returns an error if no free metadata space is available.
     pub fn alloc_tree_block(
         &mut self,
-        fs_info: &mut FsInfo<R>,
+        fs_info: &mut Filesystem<R>,
         tree_id: u64,
         level: u8,
     ) -> io::Result<u64> {
@@ -191,7 +194,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     /// # Errors
     ///
     /// Returns an error if any tree modification, write, or fsync fails.
-    pub fn commit(mut self, fs_info: &mut FsInfo<R>) -> io::Result<()> {
+    pub fn commit(mut self, fs_info: &mut Filesystem<R>) -> io::Result<()> {
         // Step 1: Convergence loop. Flushing delayed refs modifies the
         // extent tree (COW), which generates new delayed refs. Updating
         // root items modifies the root tree (COW), generating more.
@@ -278,7 +281,10 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     /// For each changed tree, searches the root tree for the existing
     /// ROOT_ITEM, parses it, updates the bytenr/generation/level fields,
     /// re-serializes it, and writes it back in place.
-    fn update_root_items(&mut self, fs_info: &mut FsInfo<R>) -> io::Result<()> {
+    fn update_root_items(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+    ) -> io::Result<()> {
         let changed = fs_info.changed_roots();
         if changed.is_empty() {
             return Ok(());
@@ -377,7 +383,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     /// delayed refs from COW. Repeats until the queue is empty.
     fn flush_delayed_refs(
         &mut self,
-        fs_info: &mut FsInfo<R>,
+        fs_info: &mut Filesystem<R>,
     ) -> io::Result<()> {
         let skinny = fs_info.superblock.incompat_flags
             & u64::from(
@@ -473,7 +479,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     /// objectid). The delta is applied to the current `used` value.
     fn update_block_group_used(
         &mut self,
-        fs_info: &mut FsInfo<R>,
+        fs_info: &mut Filesystem<R>,
         bg_start: u64,
         bytes_delta: i64,
     ) -> io::Result<()> {
@@ -549,7 +555,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     /// allocated tree block.
     fn create_metadata_extent(
         &mut self,
-        fs_info: &mut FsInfo<R>,
+        fs_info: &mut Filesystem<R>,
         extent_tree_id: u64,
         bytenr: u64,
         level: u8,
@@ -637,7 +643,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     /// freed tree block.
     fn delete_metadata_extent(
         &mut self,
-        fs_info: &mut FsInfo<R>,
+        fs_info: &mut Filesystem<R>,
         extent_tree_id: u64,
         bytenr: u64,
         level: u8,
@@ -696,7 +702,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     #[allow(dead_code)]
     fn rebuild_free_space_tree(
         &mut self,
-        fs_info: &mut FsInfo<R>,
+        fs_info: &mut Filesystem<R>,
     ) -> io::Result<()> {
         use crate::extent_alloc;
         use btrfs_disk::items::FreeSpaceInfo;
@@ -785,7 +791,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     #[allow(dead_code)]
     fn delete_free_space_extents(
         &mut self,
-        fs_info: &mut FsInfo<R>,
+        fs_info: &mut Filesystem<R>,
         fst_id: u64,
         bg_start: u64,
         bg_length: u64,
@@ -844,7 +850,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     #[allow(dead_code)]
     fn update_free_space_tree_for(
         &mut self,
-        fs_info: &mut FsInfo<R>,
+        fs_info: &mut Filesystem<R>,
         allocated: &[u64],
     ) -> io::Result<()> {
         let fst_id = 10u64;
@@ -973,7 +979,7 @@ impl<R: Read + Write + Seek> TransHandle<R> {
     }
 
     /// Abort the transaction: discard all dirty blocks without writing.
-    pub fn abort(self, fs_info: &mut FsInfo<R>) {
+    pub fn abort(self, fs_info: &mut Filesystem<R>) {
         fs_info.generation = fs_info.superblock.generation;
         fs_info.clear_dirty();
         fs_info.clear_cache();
@@ -985,14 +991,14 @@ impl<R: Read + Write + Seek> TransHandle<R> {
 /// Uses proper free space scanning via the extent tree to find actual gaps
 /// between allocated extents. Returns (`first_free_logical`, `region_end`).
 fn find_metadata_alloc_region<R: Read + Write + Seek>(
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
 ) -> io::Result<(u64, u64)> {
     find_metadata_alloc_region_after(fs_info, 0)
 }
 
 /// Find a free metadata region starting at or after `min_addr`.
 fn find_metadata_alloc_region_after<R: Read + Write + Seek>(
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     min_addr: u64,
 ) -> io::Result<(u64, u64)> {
     use crate::extent_alloc;
@@ -1035,7 +1041,7 @@ fn find_metadata_alloc_region_after<R: Read + Write + Seek>(
 /// captures the root pointers, generations, and levels of the 6 core trees
 /// plus filesystem size counters.
 fn update_backup_root<R: Read + Write + Seek>(
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     slot: usize,
 ) {
     use btrfs_disk::superblock::BackupRoot;
@@ -1043,7 +1049,7 @@ fn update_backup_root<R: Read + Write + Seek>(
     /// Read the generation and level of a tree's root block, returning
     /// (bytenr, generation, level). Falls back to (0, 0, 0) if unavailable.
     fn root_info<R: Read + Write + Seek>(
-        fs_info: &mut FsInfo<R>,
+        fs_info: &mut Filesystem<R>,
         tree_id: u64,
     ) -> (u64, u64, u8) {
         let bytenr = fs_info.root_bytenr(tree_id).unwrap_or(0);

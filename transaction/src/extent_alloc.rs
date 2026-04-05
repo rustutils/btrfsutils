@@ -13,7 +13,7 @@
 //! delayed reference queue, which batches updates and flushes them at commit
 //! time.
 
-use crate::fs_info::FsInfo;
+use crate::filesystem::Filesystem;
 use btrfs_disk::{
     items::{BlockGroupFlags, BlockGroupItem},
     tree::{KeyType, TreeBlock},
@@ -68,7 +68,7 @@ impl BlockGroup {
 ///
 /// Returns an error if tree reading fails.
 pub fn load_block_groups<R: Read + Write + Seek>(
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
 ) -> io::Result<Vec<BlockGroup>> {
     let bg_tree_id = if fs_info.root_bytenr(11).is_some() {
         11u64
@@ -89,7 +89,7 @@ pub fn load_block_groups<R: Read + Write + Seek>(
 
 /// Recursively collect block group items from a tree.
 fn collect_block_groups<R: Read + Write + Seek>(
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     logical: u64,
     groups: &mut Vec<BlockGroup>,
 ) -> io::Result<()> {
@@ -133,7 +133,7 @@ fn collect_block_groups<R: Read + Write + Seek>(
 ///
 /// Returns an error if tree reading fails.
 pub fn find_free_extents<R: Read + Write + Seek>(
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     bg_start: u64,
     bg_length: u64,
     min_size: u64,
@@ -187,7 +187,7 @@ pub fn find_free_extents<R: Read + Write + Seek>(
 
 /// Collect allocated extents within a logical address range from the extent tree.
 fn collect_extents_in_range<R: Read + Write + Seek>(
-    fs_info: &mut FsInfo<R>,
+    fs_info: &mut Filesystem<R>,
     logical: u64,
     range_start: u64,
     range_end: u64,
@@ -272,5 +272,4 @@ mod tests {
         assert_eq!(bg.free(), 0);
         assert!(bg.is_data());
     }
-
 }
