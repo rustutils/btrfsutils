@@ -12,6 +12,11 @@ use crate::{
 };
 use std::io::{self, Read, Seek, Write};
 
+/// `BTRFS_HEADER_FLAG_WRITTEN` (bit 0): block has been written to stable storage.
+const HEADER_FLAG_WRITTEN: u64 = 1 << 0;
+/// `BTRFS_HEADER_FLAG_RELOC` (bit 1): block is part of a relocation operation.
+const HEADER_FLAG_RELOC: u64 = 1 << 1;
+
 /// Copy-on-write a tree block.
 ///
 /// If the block's generation matches the current transaction, it has already
@@ -48,6 +53,13 @@ pub fn cow_block<R: Read + Write + Seek>(
     new_eb.set_logical(new_logical);
     new_eb.set_bytenr(new_logical);
     new_eb.set_generation(fs_info.generation);
+
+    // Clear flags inherited from the source block. WRITTEN indicates the
+    // block has been flushed to stable storage (this new copy hasn't been).
+    // RELOC indicates the block is part of a relocation operation (the new
+    // copy is not).
+    let flags = new_eb.flags() & !(HEADER_FLAG_WRITTEN | HEADER_FLAG_RELOC);
+    new_eb.set_flags(flags);
 
     // Queue delayed refs: +1 for new block, -1 for old block
     let level = eb.level();
