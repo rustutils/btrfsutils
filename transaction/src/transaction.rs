@@ -7,6 +7,7 @@
 
 use crate::{
     delayed_ref::DelayedRefQueue,
+    extent_alloc,
     extent_buffer::ITEM_SIZE,
     fs_info::FsInfo,
     items,
@@ -19,7 +20,10 @@ use btrfs_disk::{
     superblock,
     tree::{DiskKey, KeyType},
 };
-use std::io::{self, Read, Seek, Write};
+use std::{
+    collections::BTreeMap,
+    io::{self, Read, Seek, Write},
+};
 
 /// Handle for an in-progress transaction.
 ///
@@ -296,7 +300,11 @@ impl<R: Read + Write + Seek> TransHandle<R> {
         let extent_tree_id = 2u64;
         let nodesize = i64::from(fs_info.nodesize);
 
-        // Track net bytes_used change for block group and superblock updates
+        // Load block groups once so we can map bytenr → block group.
+        let block_groups = extent_alloc::load_block_groups(fs_info)?;
+
+        // Track per-block-group deltas: key is block group start address.
+        let mut bg_deltas: BTreeMap<u64, i64> = BTreeMap::new();
         let mut bytes_used_delta: i64 = 0;
 
         // Convergence loop: drain and process until stable.
@@ -325,6 +333,11 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                         skinny,
                     )?;
                     bytes_used_delta += nodesize;
+                    if let Some(bg_start) =
+                        find_containing_block_group(&block_groups, dref.bytenr)
+                    {
+                        *bg_deltas.entry(bg_start).or_insert(0) += nodesize;
+                    }
                 } else if dref.delta < 0 {
                     self.delete_metadata_extent(
                         fs_info,
@@ -334,6 +347,11 @@ impl<R: Read + Write + Seek> TransHandle<R> {
                         skinny,
                     )?;
                     bytes_used_delta -= nodesize;
+                    if let Some(bg_start) =
+                        find_containing_block_group(&block_groups, dref.bytenr)
+                    {
+                        *bg_deltas.entry(bg_start).or_insert(0) -= nodesize;
+                    }
                 }
             }
 
@@ -345,28 +363,33 @@ impl<R: Read + Write + Seek> TransHandle<R> {
             }
         }
 
-        // Update superblock bytes_used and block group used field
+        // Update superblock bytes_used
         if bytes_used_delta != 0 {
             let current = fs_info.superblock.bytes_used as i64;
             fs_info.superblock.bytes_used = (current + bytes_used_delta) as u64;
+        }
 
-            self.update_block_group_used(fs_info, bytes_used_delta)?;
+        // Update each affected block group's used field individually
+        for (bg_start, delta) in &bg_deltas {
+            if *delta != 0 {
+                self.update_block_group_used(fs_info, *bg_start, *delta)?;
+            }
         }
 
         Ok(())
     }
 
-    /// Update the metadata block group item's `used` field to reflect
-    /// allocation changes during this transaction.
+    /// Update a specific block group item's `used` field.
+    ///
+    /// `bg_start` is the logical start address of the block group (the key's
+    /// objectid). The delta is applied to the current `used` value.
     fn update_block_group_used(
         &mut self,
         fs_info: &mut FsInfo<R>,
+        bg_start: u64,
         bytes_delta: i64,
     ) -> io::Result<()> {
         use btrfs_disk::items::BlockGroupItem;
-
-        // Find the block group that contains our allocation region
-        let alloc_addr = self.alloc_cursor;
 
         // Block group items live in tree 11 (block group tree) or tree 2
         let bg_tree_id = if fs_info.root_bytenr(11).is_some() {
@@ -375,16 +398,16 @@ impl<R: Read + Write + Seek> TransHandle<R> {
             2u64
         };
 
-        // Search for the block group containing alloc_addr.
+        // Search for this block group by its start address.
         // Block group keys: (logical_offset, BLOCK_GROUP_ITEM, length)
         let search_key = DiskKey {
-            objectid: alloc_addr,
+            objectid: bg_start,
             key_type: KeyType::BlockGroupItem,
             offset: 0,
         };
 
         let mut path = BtrfsPath::new();
-        let found = search::search_slot(
+        search::search_slot(
             Some(&mut *self),
             fs_info,
             bg_tree_id,
@@ -394,11 +417,10 @@ impl<R: Read + Write + Seek> TransHandle<R> {
             true,
         )?;
 
-        // If not exact match, back up to find the containing block group
-        if !found && path.slots[0] > 0 {
-            path.slots[0] -= 1;
-        }
-
+        // Block group keys are (start, BLOCK_GROUP_ITEM, length). Our search
+        // key uses offset=0, which is less than the actual key. So search_slot
+        // lands at the block group item (first key >= our search key). Verify
+        // the objectid matches.
         let leaf = match path.nodes[0].as_mut() {
             Some(l) => l,
             None => return Ok(()),
@@ -410,7 +432,9 @@ impl<R: Read + Write + Seek> TransHandle<R> {
         }
 
         let item_key = leaf.item_key(slot);
-        if item_key.key_type != KeyType::BlockGroupItem {
+        if item_key.key_type != KeyType::BlockGroupItem
+            || item_key.objectid != bg_start
+        {
             path.release();
             return Ok(());
         }
@@ -945,6 +969,20 @@ fn update_backup_root<R: Read + Write + Seek>(
         dev_root_level,
         csum_root_level,
     };
+}
+
+/// Find which block group contains a given logical byte address.
+///
+/// Returns the block group's start address, or `None` if the address
+/// doesn't fall within any known block group.
+fn find_containing_block_group(
+    groups: &[extent_alloc::BlockGroup],
+    bytenr: u64,
+) -> Option<u64> {
+    groups
+        .iter()
+        .find(|bg| bytenr >= bg.start && bytenr < bg.start + bg.length)
+        .map(|bg| bg.start)
 }
 
 /// Align a value up to the given alignment.
