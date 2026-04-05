@@ -6,6 +6,7 @@
 //! potentially increasing tree height.
 
 use crate::{
+    balance,
     extent_buffer::{ExtentBuffer, HEADER_SIZE, KEY_PTR_SIZE, key_cmp},
     fs_info::FsInfo,
     path::BtrfsPath,
@@ -29,8 +30,23 @@ pub fn split_leaf<R: Read + Write + Seek>(
     path: &mut BtrfsPath,
     tree_id: u64,
     key: &DiskKey,
-    _data_size: u32,
+    data_size: u32,
 ) -> io::Result<()> {
+    // Before splitting, try redistributing items to a sibling. This is
+    // cheaper than allocating a new leaf and reduces tree growth.
+    if balance::push_leaf_right(trans, fs_info, path, tree_id)? > 0 {
+        let leaf = path.nodes[0].as_ref().unwrap();
+        if leaf.leaf_free_space() >= data_size {
+            return Ok(());
+        }
+    }
+    if balance::push_leaf_left(trans, fs_info, path, tree_id)? > 0 {
+        let leaf = path.nodes[0].as_ref().unwrap();
+        if leaf.leaf_free_space() >= data_size {
+            return Ok(());
+        }
+    }
+
     let leaf = path.nodes[0]
         .as_ref()
         .ok_or_else(|| io::Error::other("split_leaf: no leaf in path"))?;
