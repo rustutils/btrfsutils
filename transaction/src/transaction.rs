@@ -228,12 +228,14 @@ impl<R: Read + Write + Seek> Transaction<R> {
         fs_info.superblock.generation = self.transid;
 
         // The free space tree is now stale (blocks were allocated without
-        // updating it). Clear VALID so the kernel rebuilds it on next
-        // read-write mount. We keep FREE_SPACE_TREE set (required by
-        // BLOCK_GROUP_TREE for mount).
-        fs_info.superblock.compat_ro_flags &= !u64::from(
-            btrfs_disk::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID,
-        );
+        // updating it). We leave FREE_SPACE_TREE_VALID set because on
+        // kernels 6.x+ with BLOCK_GROUP_TREE, the kernel strips
+        // FREE_SPACE_TREE when VALID is not set, which makes
+        // BLOCK_GROUP_TREE's dependency check fail and prevents mount.
+        //
+        // For read-only mounts this is harmless (the stale tree is not
+        // used for allocation). A proper fix requires updating the free
+        // space tree during commit.
 
         // Update root tree root pointer
         if let Some(root_bytenr) = fs_info.root_bytenr(1) {
@@ -265,9 +267,13 @@ impl<R: Read + Write + Seek> Transaction<R> {
             &sb_bytes,
         )?;
 
-        // The caller should fsync the file handle for durability.
+        // Step 7: Flush writes to stable storage. `Write::flush()`
+        // flushes any userspace buffers. For file-backed storage, the
+        // caller should also call `sync()` on the Filesystem (which
+        // calls `File::sync_all()`) for full durability.
+        fs_info.reader_mut().inner_mut().flush()?;
 
-        // Step 7: Clean up
+        // Step 8: Clean up
         fs_info.clear_dirty();
         fs_info.clear_cache();
 

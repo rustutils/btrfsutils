@@ -15,6 +15,7 @@ use btrfs_disk::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs::File,
     io::{self, Read, Seek, Write},
 };
 
@@ -257,10 +258,16 @@ impl<R: Read + Write + Seek> Filesystem<R> {
     ///
     /// Returns an error if any write fails.
     pub fn flush_dirty(&mut self) -> io::Result<()> {
+        /// `BTRFS_HEADER_FLAG_WRITTEN` (bit 0): the kernel requires this
+        /// flag on all tree blocks that have been committed to stable
+        /// storage. Must be set before computing the checksum.
+        const HEADER_FLAG_WRITTEN: u64 = 1 << 0;
+
         let dirty: Vec<u64> = self.dirty.iter().copied().collect();
         for logical in dirty {
             if let Some(eb) = self.block_cache.get(&logical).cloned() {
                 let mut eb = eb;
+                eb.set_flags(eb.flags() | HEADER_FLAG_WRITTEN);
                 eb.update_checksum();
                 self.reader.write_block(eb.logical(), eb.as_bytes())?;
                 self.written.insert(eb.logical());
@@ -298,6 +305,14 @@ impl<R: Read + Write + Seek> Filesystem<R> {
         self.original_roots = self.roots.clone();
     }
 
+    /// Flush pending writes via `Write::flush()`.
+    ///
+    /// Flushes any userspace write buffers. For file-backed storage,
+    /// use [`Filesystem<File>::sync`] instead, which also calls fsync.
+    pub fn flush_writes(&mut self) -> io::Result<()> {
+        self.reader.inner_mut().flush()
+    }
+
     /// Return tree IDs whose root block changed since the last snapshot.
     ///
     /// Compares current roots against the snapshot taken at transaction start.
@@ -322,6 +337,17 @@ impl<R: Read + Write + Seek> Filesystem<R> {
             }
         }
         changed
+    }
+}
+
+impl Filesystem<File> {
+    /// Sync all data to stable storage (fsync).
+    ///
+    /// Calls `File::sync_all()` on the underlying file handle, ensuring
+    /// all written data reaches stable storage. This should be called
+    /// after commit to guarantee durability.
+    pub fn sync(&mut self) -> io::Result<()> {
+        self.reader.inner_mut().sync_all()
     }
 }
 

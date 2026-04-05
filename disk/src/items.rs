@@ -648,6 +648,13 @@ impl fmt::Display for RootItemFlags {
 /// for snapshot management and send/receive.
 #[derive(Debug, Clone)]
 pub struct RootItem {
+    /// Raw bytes of the embedded `btrfs_inode_item` (160 bytes).
+    ///
+    /// The on-disk `ROOT_ITEM` starts with an embedded inode describing the
+    /// root directory of the subvolume. This is preserved as raw bytes to
+    /// avoid losing data during parse/serialize round-trips, since the
+    /// embedded inode fields are not otherwise tracked by this struct.
+    pub inode_data: Vec<u8>,
     /// Generation when this root was last modified.
     pub generation: u64,
     /// Objectid of the root directory inode (always 256 for FS trees).
@@ -708,6 +715,7 @@ impl RootItem {
             return None;
         }
 
+        let inode_data = data[..inode_size].to_vec();
         let mut buf = &data[inode_size..];
         let generation = buf.get_u64_le();
         let root_dirid = buf.get_u64_le();
@@ -817,6 +825,7 @@ impl RootItem {
         };
 
         Some(Self {
+            inode_data,
             generation,
             root_dirid,
             bytenr,
@@ -850,6 +859,7 @@ impl RootItem {
     #[must_use]
     pub fn new_internal(generation: u64, bytenr: u64, level: u8) -> Self {
         Self {
+            inode_data: vec![0u8; 160],
             generation,
             root_dirid: 0,
             bytenr,
@@ -886,11 +896,11 @@ impl RootItem {
     /// fields, padded with zeros to 496 bytes total.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
-        const INODE_ITEM_SIZE: usize = 160;
         let mut buf = Vec::with_capacity(496);
 
-        // btrfs_inode_item (160 bytes) — zeroed for internal tree root items
-        buf.extend_from_slice(&[0u8; INODE_ITEM_SIZE]);
+        // btrfs_inode_item (160 bytes) — preserved from the original on-disk
+        // data, or zeroed for newly created root items.
+        buf.extend_from_slice(&self.inode_data);
 
         buf.put_u64_le(self.generation);
         buf.put_u64_le(self.root_dirid);
@@ -923,8 +933,9 @@ impl RootItem {
         self.stime.write_to(&mut buf);
         self.rtime.write_to(&mut buf);
 
-        // Pad to 496 bytes (160 inode + 336 root fields + reserved)
-        buf.resize(496, 0);
+        // Pad to 439 bytes (sizeof(btrfs_root_item): 160 inode + 279 root
+        // fields including reserved[8]).
+        buf.resize(mem::size_of::<raw::btrfs_root_item>(), 0);
         buf
     }
 }
@@ -2873,7 +2884,7 @@ mod tests {
     fn root_item_to_bytes_round_trip() {
         let original = RootItem::new_internal(42, 65536, 0);
         let bytes = original.to_bytes();
-        assert_eq!(bytes.len(), 496);
+        assert_eq!(bytes.len(), 439);
         let parsed = RootItem::parse(&bytes).expect("parse failed");
         assert_eq!(parsed.generation, 42);
         assert_eq!(parsed.bytenr, 65536);

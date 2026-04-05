@@ -991,6 +991,7 @@ fn mount_verify_subvol_readonly() {
         path.release();
 
         trans.commit(&mut fs).expect("commit failed");
+        fs.sync().expect("sync failed");
     }
 
     // Verify btrfs check passes
@@ -1183,8 +1184,8 @@ fn mount_verify_file_created() {
         let old_data = leaf.item_data(slot).to_vec();
         if let Some(mut inode) = btrfs_disk::items::InodeItem::parse(&old_data)
         {
-            // dir isize += name_len + btrfs_dir_item header (30 bytes)
-            inode.size += file_name.len() as u64 + 30;
+            // dir isize += name_len per dir entry (DIR_ITEM + DIR_INDEX)
+            inode.size += file_name.len() as u64 * 2;
             inode.transid = transid;
             let new_data = InodeItemArgs {
                 generation: inode.generation,
@@ -1202,7 +1203,58 @@ fn mount_verify_file_created() {
         }
         path.release();
 
+        // 6. Update the ROOT_ITEM's embedded inode to match the INODE_ITEM.
+        //    btrfs check validates that the ROOT_ITEM's embedded inode for
+        //    the root directory matches the DIR_INDEX entries.
+        let root_key = DiskKey {
+            objectid: 5,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &root_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )
+        .expect("search ROOT_ITEM failed");
+        assert!(found, "ROOT_ITEM for tree 5 should exist");
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        let ri_data = leaf.item_data(slot).to_vec();
+        if let Some(mut root_item) = RootItem::parse(&ri_data) {
+            // Parse the embedded inode, update size, write back
+            if let Some(mut embedded) =
+                btrfs_disk::items::InodeItem::parse(&root_item.inode_data)
+            {
+                embedded.size += file_name.len() as u64 * 2;
+                let new_inode = InodeItemArgs {
+                    generation: embedded.generation,
+                    size: embedded.size,
+                    nbytes: embedded.nbytes,
+                    nlink: embedded.nlink,
+                    uid: embedded.uid,
+                    gid: embedded.gid,
+                    mode: embedded.mode,
+                    time: ts,
+                }
+                .to_bytes();
+                root_item.inode_data = new_inode;
+            }
+            let new_ri = root_item.to_bytes();
+            if new_ri.len() == ri_data.len() {
+                items::update_item(leaf, slot, &new_ri).unwrap();
+            }
+            fs.mark_dirty(leaf);
+        }
+        path.release();
+
         trans.commit(&mut fs).expect("commit failed");
+        fs.sync().expect("sync failed");
     }
 
     // Phase 2: Verify btrfs check passes (structural integrity)
