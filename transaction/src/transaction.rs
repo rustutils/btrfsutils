@@ -6,8 +6,8 @@
 //! to point to the new root.
 
 use crate::{
+    allocation,
     delayed_ref::DelayedRefQueue,
-    extent_alloc,
     extent_buffer::ITEM_SIZE,
     filesystem::Filesystem,
     items,
@@ -394,7 +394,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         let nodesize = i64::from(fs_info.nodesize);
 
         // Load block groups once so we can map bytenr → block group.
-        let block_groups = extent_alloc::load_block_groups(fs_info)?;
+        let block_groups = allocation::load_block_groups(fs_info)?;
 
         // Track per-block-group deltas: key is block group start address.
         let mut bg_deltas: BTreeMap<u64, i64> = BTreeMap::new();
@@ -703,20 +703,19 @@ impl<R: Read + Write + Seek> Transaction<R> {
         &mut self,
         fs_info: &mut Filesystem<R>,
     ) -> io::Result<()> {
-        use crate::extent_alloc;
+        use crate::allocation;
         use btrfs_disk::items::FreeSpaceInfo;
 
         let fst_id = 10u64;
         if fs_info.root_bytenr(fst_id).is_none() {
             return Ok(());
         }
-        let groups = extent_alloc::load_block_groups(fs_info)?;
+        let groups = allocation::load_block_groups(fs_info)?;
 
         for bg in &groups {
             // Find free ranges within this block group
-            let free_ranges = extent_alloc::find_free_extents(
-                fs_info, bg.start, bg.length, 1,
-            )?;
+            let free_ranges =
+                allocation::find_free_extents(fs_info, bg.start, bg.length, 1)?;
 
             // Delete existing FREE_SPACE_EXTENT items for this block group
             self.delete_free_space_extents(
@@ -1000,20 +999,20 @@ fn find_metadata_alloc_region_after<R: Read + Write + Seek>(
     fs_info: &mut Filesystem<R>,
     min_addr: u64,
 ) -> io::Result<(u64, u64)> {
-    use crate::extent_alloc;
+    use crate::allocation;
 
     let nodesize = u64::from(fs_info.nodesize);
-    let groups = extent_alloc::load_block_groups(fs_info)?;
+    let groups = allocation::load_block_groups(fs_info)?;
 
     // Find metadata block groups with free space, sorted by most free
-    let mut meta_groups: Vec<&extent_alloc::BlockGroup> = groups
+    let mut meta_groups: Vec<&allocation::BlockGroup> = groups
         .iter()
         .filter(|bg| bg.is_metadata() && bg.free() >= nodesize)
         .collect();
     meta_groups.sort_by_key(|bg| std::cmp::Reverse(bg.free()));
 
     for bg in meta_groups {
-        let free_extents = extent_alloc::find_free_extents(
+        let free_extents = allocation::find_free_extents(
             fs_info, bg.start, bg.length, nodesize,
         )?;
 
@@ -1099,7 +1098,7 @@ fn update_backup_root<R: Read + Write + Seek>(
 /// Returns the block group's start address, or `None` if the address
 /// doesn't fall within any known block group.
 fn find_containing_block_group(
-    groups: &[extent_alloc::BlockGroup],
+    groups: &[allocation::BlockGroup],
     bytenr: u64,
 ) -> Option<u64> {
     groups

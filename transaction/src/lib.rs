@@ -19,10 +19,10 @@
 //#![allow(clippy::module_name_repetitions)]
 //#![allow(clippy::cast_possible_truncation)]
 
+pub mod allocation;
 pub mod balance;
 pub mod cow;
 pub mod delayed_ref;
-pub mod extent_alloc;
 pub mod extent_buffer;
 pub mod filesystem;
 pub mod items;
