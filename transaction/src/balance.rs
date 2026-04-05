@@ -318,6 +318,14 @@ pub fn balance_node<R: Read + Write + Seek>(
 ) -> io::Result<bool> {
     let child_bytenr = parent.key_ptr_blockptr(parent_slot);
     let child = fs_info.read_block(child_bytenr)?;
+
+    // Only rebalance internal nodes, not leaves. Leaf merging requires
+    // different logic (moving items with variable-size data, not fixed-size
+    // key pointers).
+    if child.level() == 0 {
+        return Ok(false);
+    }
+
     let child_nritems = child.nritems() as usize;
     let max_ptrs = child.max_key_ptrs() as usize;
 

@@ -439,3 +439,196 @@ fn all_items_searchable_after_split() {
 
     drop(dir);
 }
+
+/// Coverage: push_leaf_left/right COW branch — sibling from a previous
+/// generation must be COWed, which changes its logical address and
+/// requires updating the parent pointer.
+#[test]
+fn balance_cows_sibling_from_previous_generation() {
+    let (dir, img_path) = create_test_image();
+
+    // Transaction 1: insert items to build a multi-leaf tree
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let data = [0xAA; 32];
+        for i in 0..300 {
+            let key = make_key(900_000 + i);
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+                true,
+            )
+            .unwrap();
+            let leaf = path.nodes[0].as_mut().unwrap();
+            items::insert_item(leaf, path.slots[0], &key, &data).unwrap();
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+        trans.commit(&mut fs).unwrap();
+    }
+
+    // Transaction 2: insert more items. The existing leaves have the
+    // previous generation, so split_leaf's push_leaf_left/right will
+    // need to COW the sibling (triggering the left.logical() != left_bytenr
+    // and right.logical() != right_bytenr branches).
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let data = [0xBB; 32];
+        for i in 0..300 {
+            let key = make_key(900_300 + i);
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+                true,
+            )
+            .unwrap();
+            let leaf = path.nodes[0].as_mut().unwrap();
+            items::insert_item(leaf, path.slots[0], &key, &data).unwrap();
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+        trans.commit(&mut fs).unwrap();
+    }
+
+    assert_btrfs_check(&img_path);
+
+    // Verify all 600 items survive
+    {
+        let mut fs = open_rw(&img_path);
+        for i in 0..600 {
+            let key = make_key(900_000 + i);
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                None,
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::ReadOnly,
+                false,
+            )
+            .unwrap();
+            assert!(found, "item {i} not found");
+            path.release();
+        }
+    }
+
+    drop(dir);
+}
+
+/// Coverage: balance_node — deletion from a large tree should trigger
+/// node merging when child nodes become sparse (<25% occupancy).
+/// Also exercises SearchIntent::Delete path in search_slot.
+#[test]
+fn delete_many_items_triggers_node_rebalance() {
+    let (dir, img_path) = create_test_image();
+
+    // Transaction 1: insert enough items to build a multi-level tree
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = TransHandle::start(&mut fs).unwrap();
+        let data = [0xEE; 32];
+        for i in 0..1000 {
+            let key = make_key(1_100_000 + i);
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+                true,
+            )
+            .unwrap();
+            let leaf = path.nodes[0].as_mut().unwrap();
+            items::insert_item(leaf, path.slots[0], &key, &data).unwrap();
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+        trans.commit(&mut fs).unwrap();
+    }
+
+    assert_btrfs_check(&img_path);
+
+    // Transaction 2: delete most items using SearchIntent::Delete
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = TransHandle::start(&mut fs).unwrap();
+        for i in 0..900 {
+            let key = make_key(1_100_000 + i);
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Delete,
+                true,
+            )
+            .unwrap();
+            if found {
+                let leaf = path.nodes[0].as_mut().unwrap();
+                items::del_items(leaf, path.slots[0], 1);
+                fs.mark_dirty(leaf);
+            }
+            path.release();
+        }
+        trans.commit(&mut fs).unwrap();
+    }
+
+    assert_btrfs_check(&img_path);
+
+    // Verify remaining 100 items survive
+    {
+        let mut fs = open_rw(&img_path);
+        for i in 900..1000 {
+            let key = make_key(1_100_000 + i);
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                None,
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::ReadOnly,
+                false,
+            )
+            .unwrap();
+            assert!(found, "item {i} should still exist");
+            path.release();
+        }
+        // Verify deleted items are gone
+        for i in 0..900 {
+            let key = make_key(1_100_000 + i);
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                None,
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::ReadOnly,
+                false,
+            )
+            .unwrap();
+            assert!(!found, "item {i} should have been deleted");
+            path.release();
+        }
+    }
+
+    drop(dir);
+}
