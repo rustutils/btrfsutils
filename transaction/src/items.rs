@@ -230,6 +230,71 @@ pub fn del_items(eb: &mut ExtentBuffer, slot: usize, count: usize) {
     eb.set_nritems(new_nritems as u32);
 }
 
+/// Shrink an existing item's data area by `shrink_by` bytes.
+///
+/// The caller is responsible for first compacting the item's payload (e.g.
+/// `memmove`ing tail bytes left to overwrite a record being removed). This
+/// function then reclaims `shrink_by` bytes of leaf data space by sliding
+/// the data of every item below `slot` (i.e. items at lower data offsets)
+/// upward by `shrink_by` and adjusting their offsets. The shrunk item's
+/// own data offset is *raised* by `shrink_by` to point at the start of
+/// its (now shorter) payload, and its size is reduced.
+///
+/// In on-disk leaf layout, item 0 has the highest data offset and item
+/// `nritems-1` the lowest, so "items below `slot`" in physical-space terms
+/// are items at index `slot+1..nritems`.
+///
+/// # Errors
+///
+/// Returns an error if `shrink_by` exceeds the current item size.
+pub fn shrink_item(
+    eb: &mut ExtentBuffer,
+    slot: usize,
+    shrink_by: u32,
+) -> io::Result<()> {
+    let nritems = eb.nritems() as usize;
+    assert!(slot < nritems, "shrink_item: slot {slot} >= nritems {nritems}");
+    if shrink_by == 0 {
+        return Ok(());
+    }
+    let old_size = eb.item_size(slot);
+    if shrink_by > old_size {
+        return Err(io::Error::other(format!(
+            "shrink_item: shrink_by {shrink_by} > item size {old_size}"
+        )));
+    }
+    let old_off = eb.item_offset(slot);
+    let new_size = old_size - shrink_by;
+
+    // Slide every payload byte at memory addresses in
+    // `[item_offset(nritems-1), item_offset(slot) + new_size)` upward
+    // by `shrink_by`. That moves both slot's now-compacted payload and
+    // every higher-index item's payload, closing the hole that opened
+    // at slot's tail.
+    let lowest_off = if nritems == 0 {
+        old_off
+    } else {
+        eb.item_offset(nritems - 1)
+    };
+    let move_start = HEADER_SIZE + lowest_off as usize;
+    let move_end = HEADER_SIZE + (old_off + new_size) as usize;
+    if move_start < move_end {
+        let dest = move_start + shrink_by as usize;
+        eb.copy_within(move_start..move_end, dest);
+    }
+    for i in (slot + 1)..nritems {
+        let off = eb.item_offset(i);
+        eb.set_item_offset(i, off + shrink_by);
+    }
+
+    // Slot's own offset moves up by shrink_by (its payload now starts
+    // at the higher position; its top edge is unchanged so it still
+    // abuts slot-1's payload).
+    eb.set_item_offset(slot, old_off + shrink_by);
+    eb.set_item_size(slot, new_size);
+    Ok(())
+}
+
 /// Update item data in place. The new data must be the same size as the
 /// existing item data.
 ///
@@ -506,6 +571,55 @@ mod tests {
         // Verify packing: item 0 ends at top
         let end = eb.item_offset(0) + eb.item_size(0);
         assert_eq!(end, eb.nodesize() - HEADER_SIZE as u32);
+    }
+
+    #[test]
+    fn shrink_item_middle_keeps_neighbors() {
+        let mut eb = empty_leaf(4096);
+        insert_item(&mut eb, 0, &make_key(1), &[0x11; 50]).unwrap();
+        insert_item(&mut eb, 1, &make_key(2), &[0x22; 60]).unwrap();
+        insert_item(&mut eb, 2, &make_key(3), &[0x33; 50]).unwrap();
+        let initial_free = eb.leaf_free_space();
+
+        // Pretend the caller already memmoved the inline-ref tail bytes:
+        // we just shrink slot 1 by 20 bytes.
+        shrink_item(&mut eb, 1, 20).unwrap();
+
+        assert_eq!(eb.nritems(), 3);
+        assert_eq!(eb.item_size(1), 40);
+        assert_eq!(eb.item_data(0), &[0x11; 50]);
+        // Slot 1's payload now contains the *first 40 bytes* of the
+        // original 0x22 fill (the upper part survives because the data
+        // moved up; the freed space is at the bottom of memory).
+        assert_eq!(eb.item_data(1), &[0x22; 40]);
+        assert_eq!(eb.item_data(2), &[0x33; 50]);
+        // Free space grew by exactly shrink_by.
+        assert_eq!(eb.leaf_free_space(), initial_free + 20);
+
+        // First item's data still ends at the top of the block.
+        let end = eb.item_offset(0) + eb.item_size(0);
+        assert_eq!(end, eb.nodesize() - HEADER_SIZE as u32);
+    }
+
+    #[test]
+    fn shrink_item_last_slot() {
+        let mut eb = empty_leaf(4096);
+        insert_item(&mut eb, 0, &make_key(1), &[0x11; 50]).unwrap();
+        insert_item(&mut eb, 1, &make_key(2), &[0x22; 60]).unwrap();
+        let initial_free = eb.leaf_free_space();
+
+        shrink_item(&mut eb, 1, 30).unwrap();
+        assert_eq!(eb.item_size(1), 30);
+        assert_eq!(eb.item_data(0), &[0x11; 50]);
+        assert_eq!(eb.item_data(1), &[0x22; 30]);
+        assert_eq!(eb.leaf_free_space(), initial_free + 30);
+    }
+
+    #[test]
+    fn shrink_item_too_much_errors() {
+        let mut eb = empty_leaf(4096);
+        insert_item(&mut eb, 0, &make_key(1), &[0x11; 10]).unwrap();
+        assert!(shrink_item(&mut eb, 0, 11).is_err());
     }
 
     #[test]

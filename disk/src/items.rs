@@ -1062,7 +1062,8 @@ impl FileExtentItem {
 /// Compute the hash used for `EXTENT_DATA_REF` keys, matching the kernel's
 /// `hash_extent_data_ref()`. Uses two independent CRC32C computations
 /// combined into a single u64.
-fn extent_data_ref_hash(root: u64, objectid: u64, offset: u64) -> u64 {
+#[must_use]
+pub fn extent_data_ref_hash(root: u64, objectid: u64, offset: u64) -> u64 {
     let high_crc = raw_crc32c(!0u32, &root.to_le_bytes());
     let low_crc = raw_crc32c(!0u32, &objectid.to_le_bytes());
     let low_crc = raw_crc32c(low_crc, &offset.to_le_bytes());
@@ -1156,6 +1157,29 @@ impl InlineRef {
             | Self::SharedDataBackref { ref_offset, .. }
             | Self::ExtentOwnerRef { ref_offset, .. } => *ref_offset,
         }
+    }
+}
+
+/// On-disk size in bytes of an inline backref record (including its
+/// 1-byte type tag) for a given inline ref type byte.
+///
+/// Returns `None` if `type_byte` is not a recognized inline ref type.
+///
+/// - `TREE_BLOCK_REF`/`EXTENT_OWNER_REF`: 1 (tag) + 8 (root) = 9
+/// - `SHARED_BLOCK_REF`: 1 (tag) + 8 (parent) = 9
+/// - `EXTENT_DATA_REF`: 1 (tag) + 28 (`btrfs_extent_data_ref`) = 29
+/// - `SHARED_DATA_REF`: 1 (tag) + 8 (parent) + 4 (count) = 13
+#[must_use]
+#[allow(clippy::cast_possible_truncation)]
+pub fn inline_ref_size(type_byte: u8) -> Option<usize> {
+    match u32::from(type_byte) {
+        raw::BTRFS_TREE_BLOCK_REF_KEY | raw::BTRFS_EXTENT_OWNER_REF_KEY => {
+            Some(9)
+        }
+        raw::BTRFS_SHARED_BLOCK_REF_KEY => Some(9),
+        raw::BTRFS_EXTENT_DATA_REF_KEY => Some(29),
+        raw::BTRFS_SHARED_DATA_REF_KEY => Some(13),
+        _ => None,
     }
 }
 

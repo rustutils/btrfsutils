@@ -267,7 +267,8 @@ fn alloc_tree_block_creates_extent_ref() {
 
     // Should have a pending delayed ref for this block
     let refs = trans.delayed_refs.drain();
-    let found = refs.iter().any(|r| r.bytenr == logical && r.delta > 0);
+    let found =
+        refs.iter().any(|r| r.key.bytenr() == logical && r.delta > 0);
     assert!(found, "alloc_tree_block should queue a +1 delayed ref");
 
     trans.abort(&mut fs);

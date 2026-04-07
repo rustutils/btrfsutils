@@ -1261,3 +1261,170 @@ fn mount_verify_file_created() {
     assert!(metadata.is_file(), "hello.txt should be a regular file");
     assert_eq!(metadata.len(), 0, "hello.txt should be empty");
 }
+
+/// Stage G: drop a data extent backref through `Transaction::commit` and
+/// verify the parent `EXTENT_ITEM` and any csum tree entries for the
+/// freed range disappear.
+///
+/// This test scans the fixture image for a single-ref data extent with
+/// an inline `EXTENT_DATA_REF`, queues a `drop_data_ref`, commits, then
+/// reopens the image and asserts the extent item and csums are gone.
+#[test]
+fn drop_data_extent_ref_removes_extent_item_and_csums() {
+    use btrfs_disk::items::{ExtentItem, InlineRef};
+
+    let tmp = open_fixture().expect("failed to decompress fixture");
+    // Find a victim data extent.
+    let (victim_bytenr, victim_num_bytes, victim_root, victim_ino, victim_offset) = {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(tmp.path())
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open fixture");
+
+        let start = DiskKey {
+            objectid: 0,
+            key_type: KeyType::from_raw(0),
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            None,
+            &mut fs,
+            2,
+            &start,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search extent tree");
+
+        let mut victim = None;
+        #[allow(clippy::while_let_loop)]
+        'walk: loop {
+            let leaf = match path.leaf() {
+                Some(l) => l,
+                None => break,
+            };
+            let slot = path.slots[0];
+            if slot >= leaf.nritems() as usize {
+                if !search::next_leaf(&mut fs, &mut path).expect("next_leaf") {
+                    break;
+                }
+                continue;
+            }
+            let key = leaf.item_key(slot);
+            if key.key_type == KeyType::ExtentItem {
+                let data = leaf.item_data(slot).to_vec();
+                if let Some(item) = ExtentItem::parse(&data, &key)
+                    && item.is_data()
+                    && item.refs == 1
+                    && item.inline_refs.len() == 1
+                    && let InlineRef::ExtentDataBackref {
+                        root,
+                        objectid,
+                        offset,
+                        count: 1,
+                        ..
+                    } = item.inline_refs[0]
+                {
+                    victim =
+                        Some((key.objectid, key.offset, root, objectid, offset));
+                    break 'walk;
+                }
+            }
+            path.slots[0] = slot + 1;
+        }
+        path.release();
+        victim.expect("fixture has no single-ref data extent")
+    };
+
+    // Drop the backref through a transaction.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(tmp.path())
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen for write");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        trans.delayed_refs.drop_data_ref(
+            victim_bytenr,
+            victim_num_bytes,
+            victim_root,
+            victim_ino,
+            victim_offset,
+            1,
+        );
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Reopen and verify the EXTENT_ITEM is gone.
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(tmp.path())
+        .unwrap();
+    let mut fs = Filesystem::open(file).expect("reopen for verify");
+
+    let key = DiskKey {
+        objectid: victim_bytenr,
+        key_type: KeyType::ExtentItem,
+        offset: victim_num_bytes,
+    };
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        None,
+        &mut fs,
+        2,
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .expect("search after commit");
+    assert!(
+        !found,
+        "EXTENT_ITEM at {victim_bytenr} should be gone after drop+commit"
+    );
+    path.release();
+
+    // And the csum tree should not have any csum item that overlaps
+    // [bytenr, bytenr+num_bytes) any more.
+    if fs.root_bytenr(7).is_some() {
+        let csum_objectid =
+            i64::from(btrfs_disk::raw::BTRFS_EXTENT_CSUM_OBJECTID) as u64;
+        let key = DiskKey {
+            objectid: csum_objectid,
+            key_type: KeyType::ExtentCsum,
+            offset: victim_bytenr,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            7,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("csum search");
+        if found {
+            let leaf = path.leaf().unwrap();
+            let k = leaf.item_key(path.slots[0]);
+            assert!(
+                k.offset >= victim_bytenr + victim_num_bytes
+                    || k.objectid != csum_objectid
+                    || k.key_type != KeyType::ExtentCsum,
+                "csum item at offset {} should not cover freed range [{},{})",
+                k.offset,
+                victim_bytenr,
+                victim_bytenr + victim_num_bytes
+            );
+        }
+        path.release();
+    }
+}

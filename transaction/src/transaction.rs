@@ -9,7 +9,7 @@ use crate::{
     allocation,
     buffer::ITEM_SIZE,
     cow::cow_block,
-    delayed_ref::DelayedRefQueue,
+    delayed_ref::{DelayedRefKey, DelayedRefQueue},
     filesystem::Filesystem,
     free_space::{BlockGroupRangeDeltas, Range},
     items,
@@ -424,6 +424,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     ///
     /// Processing refs modifies the extent tree, which may generate more
     /// delayed refs from COW. Repeats until the queue is empty.
+    #[allow(clippy::too_many_lines)]
     fn flush_delayed_refs(
         &mut self,
         fs_info: &mut Filesystem<R>,
@@ -456,46 +457,102 @@ impl<R: Read + Write + Seek> Transaction<R> {
             }
 
             for dref in refs {
-                if !dref.is_metadata {
-                    continue;
-                }
-
-                if dref.delta > 0 {
-                    self.create_metadata_extent(
-                        fs_info,
-                        extent_tree_id,
-                        dref.bytenr,
-                        dref.level,
-                        dref.owner,
-                        skinny,
-                    )?;
-                    bytes_used_delta += nodesize;
-                    if let Some(bg_start) =
-                        find_containing_block_group(&block_groups, dref.bytenr)
-                    {
-                        *bg_deltas.entry(bg_start).or_insert(0) += nodesize;
-                        self.bg_range_deltas.record_allocated(
-                            bg_start,
-                            Range::new(dref.bytenr, nodesize as u64),
-                        );
+                match dref.key {
+                    DelayedRefKey::Metadata { bytenr, owner_root, level } => {
+                        if dref.delta > 0 {
+                            self.create_metadata_extent(
+                                fs_info,
+                                extent_tree_id,
+                                bytenr,
+                                level,
+                                owner_root,
+                                skinny,
+                            )?;
+                            bytes_used_delta += nodesize;
+                            if let Some(bg_start) =
+                                find_containing_block_group(&block_groups, bytenr)
+                            {
+                                *bg_deltas.entry(bg_start).or_insert(0) +=
+                                    nodesize;
+                                self.bg_range_deltas.record_allocated(
+                                    bg_start,
+                                    Range::new(bytenr, nodesize as u64),
+                                );
+                            }
+                        } else if dref.delta < 0 {
+                            self.delete_metadata_extent(
+                                fs_info,
+                                extent_tree_id,
+                                bytenr,
+                                level,
+                                skinny,
+                            )?;
+                            bytes_used_delta -= nodesize;
+                            if let Some(bg_start) =
+                                find_containing_block_group(&block_groups, bytenr)
+                            {
+                                *bg_deltas.entry(bg_start).or_insert(0) -=
+                                    nodesize;
+                                self.bg_range_deltas.record_freed(
+                                    bg_start,
+                                    Range::new(bytenr, nodesize as u64),
+                                );
+                            }
+                        }
                     }
-                } else if dref.delta < 0 {
-                    self.delete_metadata_extent(
-                        fs_info,
-                        extent_tree_id,
-                        dref.bytenr,
-                        dref.level,
-                        skinny,
-                    )?;
-                    bytes_used_delta -= nodesize;
-                    if let Some(bg_start) =
-                        find_containing_block_group(&block_groups, dref.bytenr)
-                    {
-                        *bg_deltas.entry(bg_start).or_insert(0) -= nodesize;
-                        self.bg_range_deltas.record_freed(
-                            bg_start,
-                            Range::new(dref.bytenr, nodesize as u64),
-                        );
+                    DelayedRefKey::Data {
+                        bytenr,
+                        owner_root,
+                        owner_ino,
+                        owner_offset,
+                    } => {
+                        let num_bytes = dref.num_bytes;
+                        if num_bytes == 0 {
+                            return Err(io::Error::other(
+                                "data delayed ref missing num_bytes",
+                            ));
+                        }
+                        if dref.delta > 0 {
+                            todo!(
+                                "data extent ref add not implemented \
+                                 (Stage G v1 only handles drops)"
+                            );
+                        }
+                        let refs_to_drop = (-dref.delta) as u32;
+                        let new_total_refs = self.drop_data_extent_ref(
+                            fs_info,
+                            extent_tree_id,
+                            bytenr,
+                            num_bytes,
+                            owner_root,
+                            owner_ino,
+                            owner_offset,
+                            refs_to_drop,
+                        )?;
+                        if new_total_refs == 0 {
+                            // Whole data extent has been freed.
+                            self.delete_data_extent_item(
+                                fs_info,
+                                extent_tree_id,
+                                bytenr,
+                                num_bytes,
+                            )?;
+                            self.delete_csums_in_range(
+                                fs_info, bytenr, num_bytes,
+                            )?;
+                            let signed = num_bytes as i64;
+                            bytes_used_delta -= signed;
+                            if let Some(bg_start) =
+                                find_containing_block_group(&block_groups, bytenr)
+                            {
+                                *bg_deltas.entry(bg_start).or_insert(0) -=
+                                    signed;
+                                self.bg_range_deltas.record_freed(
+                                    bg_start,
+                                    Range::new(bytenr, num_bytes),
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -1100,6 +1157,458 @@ impl<R: Read + Write + Seek> Transaction<R> {
         Ok(())
     }
 
+    /// Drop a single `EXTENT_DATA_REF`-shaped backref from a data extent.
+    ///
+    /// Locates the matching backref either inline inside the
+    /// `EXTENT_ITEM` or as a standalone `EXTENT_DATA_REF_KEY` item, then
+    /// decrements (or removes) it and decrements `EXTENT_ITEM.refs` by
+    /// `refs_to_drop`. Returns the new total `refs` value on the parent
+    /// `EXTENT_ITEM`. The caller is responsible for freeing the data
+    /// extent itself when this returns 0.
+    #[allow(clippy::too_many_arguments)]
+    fn drop_data_extent_ref(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        extent_tree_id: u64,
+        bytenr: u64,
+        num_bytes: u64,
+        target_root: u64,
+        target_ino: u64,
+        target_offset: u64,
+        refs_to_drop: u32,
+    ) -> io::Result<u64> {
+        // Step 1: locate the parent EXTENT_ITEM. Data extents always
+        // use the non-skinny EXTENT_ITEM_KEY whose offset is num_bytes.
+        let key = DiskKey {
+            objectid: bytenr,
+            key_type: KeyType::ExtentItem,
+            offset: num_bytes,
+        };
+
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            extent_tree_id,
+            &key,
+            &mut path,
+            SearchIntent::Delete,
+            true,
+        )?;
+        if !found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "drop_data_extent_ref: EXTENT_ITEM not found at bytenr {bytenr} num_bytes {num_bytes}"
+            )));
+        }
+
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("drop_data_extent_ref: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+
+        // Step 2: search the inline area for our backref.
+        let location = locate_inline_data_ref(
+            leaf,
+            slot,
+            target_root,
+            target_ino,
+            target_offset,
+        )?;
+
+        let new_total_refs = if let Some(loc) = location {
+            // Inline path.
+            let result = decrement_inline_data_ref(leaf, slot, &loc, refs_to_drop)?;
+            fs_info.mark_dirty(leaf);
+            result
+        } else {
+            // Step 2 didn't find an inline backref. Decrement the
+            // parent EXTENT_ITEM.refs first while we still hold the
+            // path, then release and walk to the standalone item.
+            let item_data = leaf.item_data(slot);
+            if item_data.len() < 24 {
+                return Err(io::Error::other(
+                    "drop_data_extent_ref: EXTENT_ITEM payload too short",
+                ));
+            }
+            let mut current_refs = u64::from_le_bytes(
+                item_data[0..8].try_into().unwrap(),
+            );
+            if u64::from(refs_to_drop) > current_refs {
+                return Err(io::Error::other(
+                    "drop_data_extent_ref: EXTENT_ITEM.refs underflow",
+                ));
+            }
+            current_refs -= u64::from(refs_to_drop);
+            leaf.item_data_mut(slot)[0..8]
+                .copy_from_slice(&current_refs.to_le_bytes());
+            fs_info.mark_dirty(leaf);
+            path.release();
+
+            self.drop_standalone_data_ref(
+                fs_info,
+                extent_tree_id,
+                bytenr,
+                target_root,
+                target_ino,
+                target_offset,
+                refs_to_drop,
+            )?;
+            return Ok(current_refs);
+        };
+
+        path.release();
+        Ok(new_total_refs)
+    }
+
+    /// Remove a standalone `EXTENT_DATA_REF_KEY` item from the extent
+    /// tree. Walks forward through hash collisions until it finds the
+    /// `(root, ino, offset)` triple matching the target.
+    #[allow(clippy::too_many_arguments)]
+    fn drop_standalone_data_ref(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        extent_tree_id: u64,
+        bytenr: u64,
+        target_root: u64,
+        target_ino: u64,
+        target_offset: u64,
+        refs_to_drop: u32,
+    ) -> io::Result<()> {
+        use btrfs_disk::items::{ExtentDataRef, extent_data_ref_hash};
+
+        let hash =
+            extent_data_ref_hash(target_root, target_ino, target_offset);
+        let key = DiskKey {
+            objectid: bytenr,
+            key_type: KeyType::ExtentDataRef,
+            offset: hash,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            extent_tree_id,
+            &key,
+            &mut path,
+            SearchIntent::Delete,
+            true,
+        )?;
+
+        loop {
+            let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+                io::Error::other("drop_standalone_data_ref: no leaf in path")
+            })?;
+            let nritems = leaf.nritems() as usize;
+            if path.slots[0] >= nritems {
+                if !search::next_leaf(fs_info, &mut path)? {
+                    path.release();
+                    return Err(io::Error::other(
+                        "drop_standalone_data_ref: ran out of leaves",
+                    ));
+                }
+                continue;
+            }
+            let slot = path.slots[0];
+            let item_key = leaf.item_key(slot);
+            if item_key.objectid != bytenr
+                || item_key.key_type != KeyType::ExtentDataRef
+            {
+                path.release();
+                return Err(io::Error::other(format!(
+                    "drop_standalone_data_ref: triple ({target_root},{target_ino},{target_offset}) not found at bytenr {bytenr}"
+                )));
+            }
+
+            let payload = leaf.item_data(slot).to_vec();
+            let parsed = ExtentDataRef::parse(&payload).ok_or_else(|| {
+                io::Error::other(
+                    "drop_standalone_data_ref: malformed EXTENT_DATA_REF",
+                )
+            })?;
+            if parsed.root == target_root
+                && parsed.objectid == target_ino
+                && parsed.offset == target_offset
+            {
+                if refs_to_drop > parsed.count {
+                    return Err(io::Error::other(
+                        "drop_standalone_data_ref: count underflow",
+                    ));
+                }
+                let new_count = parsed.count - refs_to_drop;
+                if new_count == 0 {
+                    items::del_items(leaf, slot, 1);
+                } else {
+                    let mut new_payload = payload.clone();
+                    new_payload[24..28]
+                        .copy_from_slice(&new_count.to_le_bytes());
+                    items::update_item(leaf, slot, &new_payload)?;
+                }
+                fs_info.mark_dirty(leaf);
+                path.release();
+                return Ok(());
+            }
+
+            // Hash collision: advance and retry.
+            path.slots[0] = slot + 1;
+        }
+    }
+
+    /// Remove the `EXTENT_ITEM` for a fully-freed data extent.
+    fn delete_data_extent_item(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        extent_tree_id: u64,
+        bytenr: u64,
+        num_bytes: u64,
+    ) -> io::Result<()> {
+        let key = DiskKey {
+            objectid: bytenr,
+            key_type: KeyType::ExtentItem,
+            offset: num_bytes,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            extent_tree_id,
+            &key,
+            &mut path,
+            SearchIntent::Delete,
+            true,
+        )?;
+        if !found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "delete_data_extent_item: EXTENT_ITEM missing at {bytenr}"
+            )));
+        }
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("delete_data_extent_item: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        items::del_items(leaf, slot, 1);
+        fs_info.mark_dirty(leaf);
+        path.release();
+        Ok(())
+    }
+
+    /// Remove csum coverage for `[bytenr, bytenr + num_bytes)` from the
+    /// csum tree.
+    ///
+    /// Csum items pack one or more sector csums into a single item
+    /// keyed by the logical start offset. A freed data extent may
+    /// occupy any contiguous span of sectors inside such an item, so
+    /// this helper supports three cases per overlapping csum item:
+    ///
+    /// - Entirely contained in the freed range → delete the item.
+    /// - Freed range strictly inside the item → split into a leading
+    ///   and trailing csum item.
+    /// - One side trimmed → delete and re-insert one shorter item.
+    #[allow(clippy::too_many_lines, clippy::items_after_statements)]
+    fn delete_csums_in_range(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        bytenr: u64,
+        num_bytes: u64,
+    ) -> io::Result<()> {
+        let csum_tree_id = 7u64;
+        if fs_info.root_bytenr(csum_tree_id).is_none() {
+            return Ok(());
+        }
+
+        // What survives a partial overlap.
+        struct Surviving {
+            key: DiskKey,
+            payload: Vec<u8>,
+        }
+        // What we plan to do to one csum item.
+        struct CsumOp {
+            old_key: DiskKey,
+            // Up to two surviving sub-items (head and/or tail). Empty
+            // means whole-item deletion.
+            survivors: Vec<Surviving>,
+        }
+
+        // BTRFS_EXTENT_CSUM_OBJECTID == -10 in i64 ==
+        // 0xFFFF_FFFF_FFFF_FFF6. The constant binds as i32 in raw, so
+        // sign-extend through i64.
+        let csum_objectid =
+            i64::from(btrfs_disk::raw::BTRFS_EXTENT_CSUM_OBJECTID) as u64;
+        let sectorsize = u64::from(fs_info.superblock.sectorsize);
+        // v1 only supports CRC32C filesystems (4-byte csums). Other csum
+        // types are not produced by mkfs in this codebase.
+        let csum_size: u64 = 4;
+        let end = bytenr + num_bytes;
+
+        // Pass 1: walk the csum tree once and collect every operation
+        // (full delete or trim/split). Done as a read-only walk so we
+        // never hold an &mut borrow on `path` across calls.
+        let mut ops: Vec<CsumOp> = Vec::new();
+        {
+            // Start at the largest key whose offset <= bytenr.
+            let start_key = DiskKey {
+                objectid: csum_objectid,
+                key_type: KeyType::ExtentCsum,
+                offset: bytenr,
+            };
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                Some(&mut *self),
+                fs_info,
+                csum_tree_id,
+                &start_key,
+                &mut path,
+                SearchIntent::ReadOnly,
+                false,
+            )?;
+            if !found && path.slots[0] > 0 {
+                path.slots[0] -= 1;
+            }
+
+            'walk: loop {
+                let Some(leaf) = path.nodes[0].as_ref() else {
+                    break;
+                };
+                let nritems = leaf.nritems() as usize;
+                if path.slots[0] >= nritems {
+                    if !search::next_leaf(fs_info, &mut path)? {
+                        break;
+                    }
+                    continue;
+                }
+                let slot = path.slots[0];
+                let item_key = leaf.item_key(slot);
+                if item_key.objectid != csum_objectid
+                    || item_key.key_type != KeyType::ExtentCsum
+                {
+                    // For the very first iteration we may have backed
+                    // up onto a non-csum item; advance once and retry
+                    // the type check before bailing.
+                    if ops.is_empty() {
+                        path.slots[0] = slot + 1;
+                        continue;
+                    }
+                    break 'walk;
+                }
+                let item_size = u64::from(leaf.item_size(slot));
+                let csum_start = item_key.offset;
+                let sectors = item_size / csum_size;
+                let csum_end = csum_start + sectors * sectorsize;
+
+                if csum_end <= bytenr {
+                    path.slots[0] = slot + 1;
+                    continue;
+                }
+                if csum_start >= end {
+                    break 'walk;
+                }
+
+                // Compute up-to-two surviving sub-items: head before
+                // bytenr, tail after end. Sectors fully inside the
+                // freed range are dropped. The freed range and csum
+                // item are both sectorsize-aligned by construction.
+                let payload = leaf.item_data(slot).to_vec();
+                let mut survivors: Vec<Surviving> = Vec::new();
+
+                if csum_start < bytenr {
+                    let head_sectors =
+                        ((bytenr - csum_start) / sectorsize) as usize;
+                    let head_bytes = head_sectors * csum_size as usize;
+                    survivors.push(Surviving {
+                        key: DiskKey {
+                            objectid: csum_objectid,
+                            key_type: KeyType::ExtentCsum,
+                            offset: csum_start,
+                        },
+                        payload: payload[..head_bytes].to_vec(),
+                    });
+                }
+                if csum_end > end {
+                    let skipped_sectors =
+                        ((end - csum_start) / sectorsize) as usize;
+                    let tail_start_bytes =
+                        skipped_sectors * csum_size as usize;
+                    let tail_byte_count = (sectors as usize - skipped_sectors)
+                        * csum_size as usize;
+                    survivors.push(Surviving {
+                        key: DiskKey {
+                            objectid: csum_objectid,
+                            key_type: KeyType::ExtentCsum,
+                            offset: end,
+                        },
+                        payload: payload
+                            [tail_start_bytes..tail_start_bytes + tail_byte_count]
+                            .to_vec(),
+                    });
+                }
+
+                ops.push(CsumOp {
+                    old_key: item_key,
+                    survivors,
+                });
+                path.slots[0] = slot + 1;
+            }
+            path.release();
+        }
+
+        // Pass 2: apply each collected op. Re-search per item because
+        // earlier mutations may have COWed leaves and shifted slots.
+        for op in ops {
+            // Delete the original item.
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                Some(&mut *self),
+                fs_info,
+                csum_tree_id,
+                &op.old_key,
+                &mut path,
+                SearchIntent::Delete,
+                true,
+            )?;
+            if found {
+                let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+                    io::Error::other("delete_csums_in_range: no leaf in path")
+                })?;
+                items::del_items(leaf, path.slots[0], 1);
+                fs_info.mark_dirty(leaf);
+            }
+            path.release();
+
+            // Insert any surviving fragments.
+            for sv in op.survivors {
+                if sv.payload.is_empty() {
+                    continue;
+                }
+                let mut path = BtrfsPath::new();
+                let found = search::search_slot(
+                    Some(&mut *self),
+                    fs_info,
+                    csum_tree_id,
+                    &sv.key,
+                    &mut path,
+                    SearchIntent::Insert(
+                        (ITEM_SIZE + sv.payload.len()) as u32,
+                    ),
+                    true,
+                )?;
+                if found {
+                    path.release();
+                    continue;
+                }
+                let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+                    io::Error::other(
+                        "delete_csums_in_range: no leaf for insert",
+                    )
+                })?;
+                items::insert_item(leaf, path.slots[0], &sv.key, &sv.payload)?;
+                fs_info.mark_dirty(leaf);
+                path.release();
+            }
+        }
+        Ok(())
+    }
+
     /// Rebuild free space tree entries by scanning the extent tree.
     ///
     /// For each block group, computes free ranges from the extent tree and
@@ -1391,6 +1900,165 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // will read garbage from disk.
         fs_info.restore_roots_from_snapshot();
     }
+}
+
+/// Position of one inline backref inside an `EXTENT_ITEM` payload.
+#[derive(Debug, Clone, Copy)]
+struct InlineRefLocation {
+    /// Offset of the inline ref's first byte (the type tag) inside
+    /// the item payload.
+    inline_offset: usize,
+    /// Total size of the inline ref including its type tag.
+    inline_size: usize,
+    /// Current `count` field for the matched `EXTENT_DATA_REF` record.
+    current_count: u32,
+}
+
+/// Walk the inline-backref area of an `EXTENT_ITEM` looking for an
+/// `EXTENT_DATA_REF` whose `(root, ino, offset)` triple matches the
+/// target. Returns `Ok(None)` if the backref is not stored inline; the
+/// caller should then look for a standalone `EXTENT_DATA_REF_KEY`
+/// item.
+fn locate_inline_data_ref(
+    leaf: &crate::buffer::ExtentBuffer,
+    slot: usize,
+    target_root: u64,
+    target_ino: u64,
+    target_offset: u64,
+) -> io::Result<Option<InlineRefLocation>> {
+    use btrfs_disk::items::{extent_data_ref_hash, inline_ref_size};
+
+    let item_key = leaf.item_key(slot);
+    let payload = leaf.item_data(slot);
+    if payload.len() < 24 {
+        return Err(io::Error::other(
+            "locate_inline_data_ref: EXTENT_ITEM payload too short",
+        ));
+    }
+    let flags = u64::from_le_bytes(payload[16..24].try_into().unwrap());
+    let is_tree_block = flags
+        & u64::from(btrfs_disk::raw::BTRFS_EXTENT_FLAG_TREE_BLOCK)
+        != 0;
+
+    // Skip header (24) + optional tree_block_info (18 bytes when this
+    // is a non-skinny tree-block extent, i.e. EXTENT_ITEM_KEY).
+    let mut cursor = 24usize;
+    if is_tree_block && item_key.key_type == KeyType::ExtentItem {
+        cursor += 18;
+    }
+    if cursor > payload.len() {
+        return Err(io::Error::other(
+            "locate_inline_data_ref: header overruns payload",
+        ));
+    }
+
+    let target_hash =
+        extent_data_ref_hash(target_root, target_ino, target_offset);
+    let edr_type =
+        btrfs_disk::raw::BTRFS_EXTENT_DATA_REF_KEY as u8;
+
+    while cursor < payload.len() {
+        let type_byte = payload[cursor];
+        let size = inline_ref_size(type_byte).ok_or_else(|| {
+            io::Error::other(format!(
+                "locate_inline_data_ref: unknown inline ref type {type_byte}"
+            ))
+        })?;
+        if cursor + size > payload.len() {
+            return Err(io::Error::other(
+                "locate_inline_data_ref: inline ref overruns payload",
+            ));
+        }
+
+        if type_byte < edr_type {
+            cursor += size;
+            continue;
+        }
+        if type_byte > edr_type {
+            // Past the EXTENT_DATA_REF range; the target isn't inline.
+            return Ok(None);
+        }
+
+        // EXTENT_DATA_REF inline record:
+        //   1 byte type tag, then btrfs_extent_data_ref (28 bytes):
+        //   u64 root, u64 objectid, u64 offset, u32 count.
+        let body = &payload[cursor + 1..cursor + 1 + 28];
+        let r = u64::from_le_bytes(body[0..8].try_into().unwrap());
+        let o = u64::from_le_bytes(body[8..16].try_into().unwrap());
+        let off = u64::from_le_bytes(body[16..24].try_into().unwrap());
+        let count = u32::from_le_bytes(body[24..28].try_into().unwrap());
+
+        if r == target_root && o == target_ino && off == target_offset {
+            return Ok(Some(InlineRefLocation {
+                inline_offset: cursor,
+                inline_size: size,
+                current_count: count,
+            }));
+        }
+
+        // Hash collision OR adjacent EDR record. Inline EDR records are
+        // ordered by extent_data_ref_hash; if we've already passed the
+        // target hash, the target is not inline.
+        let here_hash = extent_data_ref_hash(r, o, off);
+        if here_hash > target_hash {
+            return Ok(None);
+        }
+        cursor += size;
+    }
+
+    Ok(None)
+}
+
+/// Decrement (or remove) an inline `EXTENT_DATA_REF` and the parent
+/// `EXTENT_ITEM.refs` count by `refs_to_drop`. Returns the new total
+/// `EXTENT_ITEM.refs` value.
+fn decrement_inline_data_ref(
+    leaf: &mut crate::buffer::ExtentBuffer,
+    slot: usize,
+    location: &InlineRefLocation,
+    refs_to_drop: u32,
+) -> io::Result<u64> {
+    if refs_to_drop > location.current_count {
+        return Err(io::Error::other(
+            "decrement_inline_data_ref: count underflow",
+        ));
+    }
+
+    // Step 1: decrement EXTENT_ITEM.refs at offset 0..8.
+    let item_data = leaf.item_data(slot);
+    let mut current_refs =
+        u64::from_le_bytes(item_data[0..8].try_into().unwrap());
+    if u64::from(refs_to_drop) > current_refs {
+        return Err(io::Error::other(
+            "decrement_inline_data_ref: EXTENT_ITEM.refs underflow",
+        ));
+    }
+    current_refs -= u64::from(refs_to_drop);
+    leaf.item_data_mut(slot)[0..8]
+        .copy_from_slice(&current_refs.to_le_bytes());
+
+    let new_count = location.current_count - refs_to_drop;
+    if new_count > 0 {
+        // Just rewrite the count field of the inline ref in place.
+        // Inline EDR layout: [type=1B][root=8B][oid=8B][off=8B][count=4B]
+        let count_off = location.inline_offset + 1 + 24;
+        leaf.item_data_mut(slot)[count_off..count_off + 4]
+            .copy_from_slice(&new_count.to_le_bytes());
+        return Ok(current_refs);
+    }
+
+    // Remove the entire inline ref. First memmove the bytes after the
+    // ref left within the item payload, then shrink the item by
+    // `inline_size`.
+    let item_size = leaf.item_size(slot) as usize;
+    let after_off = location.inline_offset + location.inline_size;
+    if after_off < item_size {
+        let payload = leaf.item_data_mut(slot);
+        payload.copy_within(after_off..item_size, location.inline_offset);
+    }
+    items::shrink_item(leaf, slot, location.inline_size as u32)?;
+
+    Ok(current_refs)
 }
 
 /// Find a metadata block group with free space for the bump allocator.
