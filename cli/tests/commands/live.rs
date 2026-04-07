@@ -2535,3 +2535,151 @@ fn rescue_fix_device_size_shrink() {
         "expected no-op message, got: {out2}"
     );
 }
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn rescue_fix_data_checksum_clean() {
+    // Clean filesystem: scan should find no mismatches.
+    let td = tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 256 * 1024 * 1024);
+    file.mkfs_with_args(&["-O", "^block-group-tree"]);
+    let lo = LoopbackDevice::new(file);
+
+    let lo = {
+        let mnt = Mount::new(lo, td.path());
+        let mp = mnt.path();
+        std::fs::write(mp.join("a.bin"), vec![0x42u8; 8 * 1024]).unwrap();
+        std::fs::write(mp.join("b.bin"), vec![0x99u8; 64 * 1024]).unwrap();
+        mnt.into_loopback()
+    };
+
+    let dev = lo.path().to_str().unwrap();
+    let out = btrfs_ok(&["rescue", "fix-data-checksum", "--readonly", dev]);
+    assert!(
+        out.contains("no data checksum mismatch found"),
+        "expected clean scan, got: {out}"
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn rescue_fix_data_checksum_repair() {
+    use btrfs_disk::{
+        reader::filesystem_open,
+        tree::{KeyType, TreeBlock},
+    };
+    use std::io::{Seek, SeekFrom, Write};
+
+    let td = tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 256 * 1024 * 1024);
+    file.mkfs_with_args(&["-O", "^block-group-tree"]);
+    let lo = LoopbackDevice::new(file);
+
+    let lo = {
+        let mnt = Mount::new(lo, td.path());
+        let mp = mnt.path();
+        // A few KiB of distinctive data, large enough to land in a
+        // regular (non-inline) extent.
+        std::fs::write(mp.join("payload.bin"), vec![0xC3u8; 64 * 1024])
+            .unwrap();
+        mnt.into_loopback()
+    };
+
+    // Walk the csum tree (read-only, via disk crate) to find the
+    // first EXTENT_CSUM item and resolve its sector to a physical
+    // offset on the backing device.
+    let dev_path: PathBuf = lo.path().to_path_buf();
+    let (corrupt_logical, corrupt_physical) = {
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .open(&dev_path)
+            .unwrap();
+        let mut open = filesystem_open(f).expect("filesystem_open");
+        let csum_root_bytenr = open
+            .tree_roots
+            .get(&7u64)
+            .map(|(b, _)| *b)
+            .expect("csum tree root present");
+
+        // DFS until we find a leaf with an EXTENT_CSUM item.
+        let mut found: Option<u64> = None;
+        let mut stack = vec![csum_root_bytenr];
+        while let Some(bytenr) = stack.pop() {
+            let block = open
+                .reader
+                .read_tree_block(bytenr)
+                .expect("read tree block");
+            match block {
+                TreeBlock::Node { ptrs, .. } => {
+                    for p in ptrs.into_iter().rev() {
+                        stack.push(p.blockptr);
+                    }
+                }
+                TreeBlock::Leaf { items, .. } => {
+                    if let Some(item) = items
+                        .iter()
+                        .find(|i| i.key.key_type == KeyType::ExtentCsum)
+                    {
+                        found = Some(item.key.offset);
+                        break;
+                    }
+                }
+            }
+        }
+        let logical = found.expect("no EXTENT_CSUM items in csum tree");
+        let physical = open
+            .reader
+            .chunk_cache()
+            .resolve(logical)
+            .expect("chunk cache should resolve csum'd sector");
+        (logical, physical)
+    };
+
+    // Overwrite the first 4 KiB at that physical offset with zeros.
+    // The original payload (0xC3) won't match the stored csum.
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&dev_path)
+            .unwrap();
+        f.seek(SeekFrom::Start(corrupt_physical)).unwrap();
+        f.write_all(&[0u8; 4096]).unwrap();
+        f.sync_all().unwrap();
+    }
+
+    let dev = dev_path.to_str().unwrap();
+
+    // Readonly scan should now flag the corrupted sector.
+    let scan = btrfs_ok(&["rescue", "fix-data-checksum", "--readonly", dev]);
+    let want = format!("logical={corrupt_logical}");
+    assert!(
+        scan.contains(&want),
+        "expected mismatch report for {want}, got: {scan}"
+    );
+
+    // Repair via mirror 1.
+    let fix = btrfs_ok(&["rescue", "fix-data-checksum", "--mirror", "1", dev]);
+    assert!(
+        fix.contains("csum item(s) updated"),
+        "expected repair message, got: {fix}"
+    );
+
+    // After repair, btrfs check should succeed and a re-scan should
+    // be clean.
+    let check = Command::new("btrfs")
+        .args(["check", "--readonly", dev])
+        .output()
+        .expect("failed to run btrfs check");
+    if !check.status.success() {
+        panic!(
+            "btrfs check failed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&check.stdout),
+            String::from_utf8_lossy(&check.stderr)
+        );
+    }
+    let rescan = btrfs_ok(&["rescue", "fix-data-checksum", "--readonly", dev]);
+    assert!(
+        rescan.contains("no data checksum mismatch found"),
+        "expected clean rescan after repair, got: {rescan}"
+    );
+}

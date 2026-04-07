@@ -4,6 +4,13 @@ expression: text
 ---
 Fix data checksum mismatches
 
+Walks the csum tree, recomputes the CRC32C of every covered data block, and
+reports any mismatches. With `--mirror N`, mismatched csums are rewritten in
+place using the data from mirror N (only mirror 1 is currently supported, since
+multi-device write paths are not yet implemented).
+
+The device must not be mounted.
+
 Usage: fix-data-checksum [OPTIONS] <DEVICE>
 
 Arguments:
@@ -21,4 +28,4 @@ Options:
           Update csum item using specified mirror
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
