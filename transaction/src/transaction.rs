@@ -221,25 +221,26 @@ impl<R: Read + Write + Seek> Transaction<R> {
             }
         }
 
-        // Empty-commit short-circuit. If nothing was modified during this
-        // transaction (no dirty blocks, no allocated blocks, no pinned
-        // blocks), there is no on-disk state to write. Bumping
-        // `superblock.generation` anyway would corrupt the filesystem:
-        // the kernel verifies that the root tree's root block has
-        // `header.generation == superblock.generation`, but we never
-        // COWed and rewrote that block, so it still carries the
-        // previous generation. The next mount or `btrfs check` would
+        // Empty-commit short-circuit. If the convergence loop produced
+        // no dirty blocks, the on-disk image is byte-identical to the
+        // previous generation and we must not bump
+        // `superblock.generation` — there is no rewritten root tree
+        // root to back the new generation, so a mount/check would
         // report "parent transid verify failed: wanted N found N-1".
         //
-        // The kernel handles this correctly because it always COWs the
-        // root tree root on every commit, even no-op ones. We don't,
-        // yet — see TODO: implement Option B (force-COW root tree root
-        // on every commit) so empty commits can legitimately advance
-        // the superblock generation, matching kernel semantics.
-        if fs_info.dirty_count() == 0
-            && self.allocated_blocks.is_empty()
-            && self.pinned.is_empty()
-        {
+        // The predicate is measured *after* the convergence loop:
+        // `flush_delayed_refs` and `update_root_items` are what create
+        // dirty blocks, so any earlier check would race them. It is
+        // also independent of `allocated_blocks` and `pinned`, which
+        // are bookkeeping (alloc+drop+pin within one transaction
+        // produces no on-disk change). See PLAN.md Finding 3
+        // invariants I1–I5.
+        //
+        // The kernel handles no-op commits by always COWing the root
+        // tree root, keeping superblock and root header generations in
+        // lockstep. We don't yet — Option B in PLAN.md tracks the
+        // proper fix.
+        if fs_info.dirty_count() == 0 {
             return Ok(());
         }
 

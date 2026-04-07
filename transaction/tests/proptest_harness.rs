@@ -37,11 +37,6 @@ use test_strategy::Arbitrary;
 /// Delete the early return to re-enable.
 #[test]
 fn reproduces_clear_uuid_tree_hang() {
-    // TODO: re-enable once PLAN.md finding 3 (second transid bug
-    // instance, non-empty commit path) is resolved.
-    return;
-
-    #[allow(unreachable_code)]
     let ops = vec![
         Op::AllocBlock,
         Op::AllocBlock,
