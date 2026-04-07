@@ -236,9 +236,8 @@ impl BlockGroupRangeDeltas {
             }
         }
         // Drop empty block groups.
-        self.bgs.retain(|_, d| {
-            !(d.allocated.is_empty() && d.freed.is_empty())
-        });
+        self.bgs
+            .retain(|_, d| !(d.allocated.is_empty() && d.freed.is_empty()));
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&u64, &BlockGroupDelta)> {
@@ -276,22 +275,13 @@ pub enum ApplyError {
     /// An allocated range is not fully contained inside an existing
     /// free range. The FST and the extent tree disagree about who owns
     /// these bytes.
-    AllocatedNotFree {
-        bg_start: u64,
-        range: Range,
-    },
+    AllocatedNotFree { bg_start: u64, range: Range },
     /// A freed range overlaps a range that the FST already considers
     /// free. The same byte was freed twice.
-    FreedAlreadyFree {
-        bg_start: u64,
-        range: Range,
-    },
+    FreedAlreadyFree { bg_start: u64, range: Range },
     /// A range in the resulting free list lies outside the block group
     /// span.
-    OutOfBlockGroup {
-        bg_start: u64,
-        range: Range,
-    },
+    OutOfBlockGroup { bg_start: u64, range: Range },
 }
 
 impl std::fmt::Display for ApplyError {
@@ -378,10 +368,7 @@ pub fn apply_delta(
     let bg_end = bg.end();
     for &r in out.as_slice() {
         if r.start < bg.start || r.end() > bg_end {
-            return Err(ApplyError::OutOfBlockGroup {
-                bg_start,
-                range: r,
-            });
+            return Err(ApplyError::OutOfBlockGroup { bg_start, range: r });
         }
     }
 
@@ -674,9 +661,8 @@ mod tests {
         let bg = Range::new(1000, 1024);
         // Existing range straddles the bg end. The result keeps it,
         // which the bound check rejects.
-        let existing = RangeList::from_sorted_unchecked(vec![Range::new(
-            2000, 100,
-        )]);
+        let existing =
+            RangeList::from_sorted_unchecked(vec![Range::new(2000, 100)]);
         let d = delta(&[], &[]);
         let err = apply_delta(1000, bg, &existing, &d).unwrap_err();
         assert!(matches!(err, ApplyError::OutOfBlockGroup { .. }));

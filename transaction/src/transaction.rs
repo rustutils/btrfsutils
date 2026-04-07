@@ -554,7 +554,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         &mut self,
         fs_info: &mut Filesystem<R>,
     ) -> io::Result<bool> {
-        use crate::free_space::{apply_delta, Range};
+        use crate::free_space::{Range, apply_delta};
         use btrfs_disk::items::FreeSpaceInfoFlags;
 
         let fst_id = 10u64;
@@ -627,7 +627,9 @@ impl<R: Read + Write + Seek> Transaction<R> {
 
             // Step 5: insert new FREE_SPACE_EXTENT items.
             for r in new.as_slice() {
-                self.insert_free_space_extent(fs_info, fst_id, r.start, r.length)?;
+                self.insert_free_space_extent(
+                    fs_info, fst_id, r.start, r.length,
+                )?;
             }
 
             // Step 6: update FREE_SPACE_INFO.extent_count.
