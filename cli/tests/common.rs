@@ -61,6 +61,14 @@ impl BackingFile {
         run("mkfs.btrfs", &["-f", self.path.to_str().unwrap()]);
     }
 
+    /// Run `mkfs.btrfs -f` with extra options.
+    pub fn mkfs_with_args(&self, extra: &[&str]) {
+        let mut args: Vec<&str> = vec!["-f"];
+        args.extend_from_slice(extra);
+        args.push(self.path.to_str().unwrap());
+        run("mkfs.btrfs", &args);
+    }
+
     /// Run our `btrfs-mkfs --rootdir` on this file.
     pub fn mkfs_rootdir(&self, rootdir: &Path, extra_args: &[&str]) {
         let mkfs_bin = our_mkfs_bin();

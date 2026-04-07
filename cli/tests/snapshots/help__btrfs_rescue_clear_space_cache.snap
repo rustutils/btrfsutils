@@ -4,6 +4,16 @@ expression: text
 ---
 Completely remove the v1 or v2 free space cache
 
+For v2, drops the FREE_SPACE_TREE root and clears the FREE_SPACE_TREE and
+FREE_SPACE_TREE_VALID compat_ro flags so that the kernel rebuilds the tree on
+the next mount with `space_cache=v2`.
+
+For v1, see Stage G in transaction/PLAN.md: clearing v1 requires freeing data
+extents owned by the hidden free-space-cache inodes, which the transaction crate
+does not yet support.
+
+The device must not be mounted.
+
 Usage: clear-space-cache <VERSION> <DEVICE>
 
 Arguments:
@@ -17,4 +27,4 @@ Arguments:
 
 Options:
   -h, --help
-          Print help
+          Print help (see a summary with '-h')

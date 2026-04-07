@@ -2413,3 +2413,69 @@ fn rescue_clear_uuid_tree() {
     assert!(mp.join("sub2").exists(), "sub2 should still exist");
     assert!(mp.join("snap1").exists(), "snap1 should still exist");
 }
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn rescue_clear_space_cache_v2() {
+    let td = tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
+    // BLOCK_GROUP_TREE requires FREE_SPACE_TREE, so disable BGT to
+    // get a filesystem where clearing FST is actually legal.
+    file.mkfs_with_args(&["-O", "^block-group-tree"]);
+    let lo = LoopbackDevice::new(file);
+
+    // Mount, write some data so the FST has block-group entries to
+    // rebuild later, then unmount.
+    let lo = {
+        let mnt = Mount::new(lo, td.path());
+        let mp = mnt.path();
+        std::fs::write(mp.join("hello.txt"), b"hello world").unwrap();
+        std::fs::create_dir(mp.join("d")).unwrap();
+        std::fs::write(mp.join("d/payload.bin"), vec![0xAB; 256 * 1024])
+            .unwrap();
+        mnt.into_loopback()
+    };
+
+    let dev = lo.path().to_str().unwrap();
+
+    // v1 path is unimplemented; verify it errors clearly.
+    let v1_out = Command::new(env!("CARGO_BIN_EXE_btrfs"))
+        .args(["rescue", "clear-space-cache", "v1", dev])
+        .output()
+        .expect("failed to run btrfs");
+    assert!(!v1_out.status.success(), "v1 should not be implemented yet");
+    let v1_stderr = String::from_utf8_lossy(&v1_out.stderr);
+    assert!(
+        v1_stderr.contains("not yet implemented"),
+        "expected 'not yet implemented', got: {v1_stderr}"
+    );
+
+    let out = btrfs_ok(&["rescue", "clear-space-cache", "v2", dev]);
+    assert!(
+        out.contains("cleared free space tree")
+            || out.contains("no free space tree"),
+        "expected success message, got: {out}"
+    );
+
+    let check_output = Command::new("btrfs")
+        .args(["check", "--readonly", dev])
+        .output()
+        .expect("failed to run btrfs check");
+    if !check_output.status.success() {
+        let stderr = String::from_utf8_lossy(&check_output.stderr);
+        let stdout = String::from_utf8_lossy(&check_output.stdout);
+        panic!(
+            "btrfs check failed:\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
+        );
+    }
+
+    // Mount read-write to force the kernel to rebuild the free
+    // space tree, then verify the data we wrote earlier is intact.
+    let mnt = Mount::new(lo, td.path());
+    let mp = mnt.path();
+    assert_eq!(std::fs::read(mp.join("hello.txt")).unwrap(), b"hello world");
+    assert_eq!(
+        std::fs::read(mp.join("d/payload.bin")).unwrap(),
+        vec![0xAB; 256 * 1024]
+    );
+}
