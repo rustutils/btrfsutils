@@ -229,18 +229,29 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // extent tree (COW), which generates new delayed refs. Updating
         // root items modifies the root tree (COW), generating more.
         // Alternate until both are stable.
-        let max_passes = 16;
+        let max_passes = 32;
         for pass in 0..max_passes {
             self.flush_delayed_refs(fs_info)?;
             self.update_root_items(fs_info)?;
-            // Re-snapshot roots so changed_roots() only detects new
-            // changes from subsequent COW operations, not the ones we
-            // just processed.
+            // Snapshot roots BEFORE update_free_space_tree so the next
+            // pass's update_root_items picks up the FST root change.
+            // If we snapshotted after update_FST, the new FST root
+            // would already be in the snapshot baseline and would
+            // never be written to the on-disk ROOT_ITEM, leaving the
+            // old extent items referenced by a stale root pointer and
+            // the new ones orphaned.
             fs_info.snapshot_roots();
+            let fst_changed = self.update_free_space_tree(fs_info)?;
 
-            // Stable when no pending refs and no changed roots remain
+            // Stable when no pending refs, no changed roots remain
+            // (changed_roots since the snapshot we just took, which
+            // captures any changes update_free_space_tree made), no
+            // FST updates were produced, and no new range deltas were
+            // accumulated.
             if self.delayed_refs.is_empty()
                 && fs_info.changed_roots().is_empty()
+                && self.bg_range_deltas.is_empty()
+                && !fst_changed
             {
                 break;
             }
@@ -258,15 +269,10 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // Step 4: Update superblock fields
         fs_info.superblock.generation = self.transid;
 
-        // The free space tree is now stale (blocks were allocated without
-        // updating it). We leave FREE_SPACE_TREE_VALID set because on
-        // kernels 6.x+ with BLOCK_GROUP_TREE, the kernel strips
-        // FREE_SPACE_TREE when VALID is not set, which makes
-        // BLOCK_GROUP_TREE's dependency check fail and prevents mount.
-        //
-        // For read-only mounts this is harmless (the stale tree is not
-        // used for allocation). A proper fix requires updating the free
-        // space tree during commit.
+        // The free space tree was updated incrementally inside the
+        // convergence loop above. FREE_SPACE_TREE_VALID stays set
+        // because the on-disk FST is now consistent with the extent
+        // tree.
 
         // Update root tree root pointer
         if let Some(root_bytenr) = fs_info.root_bytenr(1) {
@@ -519,6 +525,357 @@ impl<R: Read + Write + Seek> Transaction<R> {
             }
         }
 
+        Ok(())
+    }
+
+    /// Apply the per-block-group range deltas accumulated in
+    /// `flush_delayed_refs` to the on-disk free space tree.
+    ///
+    /// For each block group with non-empty deltas:
+    ///
+    /// 1. Look up the block group's metadata (length).
+    /// 2. Read the `FREE_SPACE_INFO` item; if its `BITMAPS` flag is
+    ///    set, error out — bitmap layout is out of scope for v1.
+    /// 3. Walk the existing `FREE_SPACE_EXTENT` items for this block
+    ///    group and collect them into a sorted free-range list.
+    /// 4. Apply the delta via [`free_space::apply_delta`] to produce
+    ///    the new free-range list.
+    /// 5. If unchanged, skip. Otherwise delete every existing
+    ///    `FREE_SPACE_EXTENT` for this block group, insert the new
+    ///    set, and update `FREE_SPACE_INFO.extent_count`.
+    ///
+    /// All FST modifications go through the standard COW search path,
+    /// so they generate their own delayed refs and dirty blocks; the
+    /// caller (the commit convergence loop) will pick those up on a
+    /// subsequent pass.
+    ///
+    /// Returns `true` if any FST modifications were made.
+    fn update_free_space_tree(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+    ) -> io::Result<bool> {
+        use crate::free_space::{apply_delta, Range};
+        use btrfs_disk::items::FreeSpaceInfoFlags;
+
+        let fst_id = 10u64;
+        if fs_info.root_bytenr(fst_id).is_none() {
+            // No free space tree on this filesystem.
+            self.bg_range_deltas.clear();
+            return Ok(false);
+        }
+
+        // Take ownership of the current deltas. Any new deltas
+        // produced by FST COW during this call accumulate into
+        // self.bg_range_deltas via the next flush_delayed_refs pass.
+        let deltas = std::mem::take(&mut self.bg_range_deltas);
+        if deltas.is_empty() {
+            return Ok(false);
+        }
+
+        // Look up block group lengths once.
+        let block_groups = allocation::load_block_groups(fs_info)?;
+        let bg_len = |start: u64| -> Option<u64> {
+            block_groups
+                .iter()
+                .find(|bg| bg.start == start)
+                .map(|bg| bg.length)
+        };
+
+        let mut any_changes = false;
+
+        for (bg_start, delta) in deltas.iter() {
+            let bg_start = *bg_start;
+            let bg_length = bg_len(bg_start).ok_or_else(|| {
+                io::Error::other(format!(
+                    "free space tree update: block group {bg_start} not found"
+                ))
+            })?;
+            let bg = Range::new(bg_start, bg_length);
+
+            // Step 1: read FREE_SPACE_INFO and check for bitmap layout.
+            let info = self
+                .read_free_space_info(fs_info, fst_id, bg_start, bg_length)?
+                .ok_or_else(|| {
+                    io::Error::other(format!(
+                        "free space tree update: FREE_SPACE_INFO missing for block group {bg_start}"
+                    ))
+                })?;
+            if info.flags.contains(FreeSpaceInfoFlags::USING_BITMAPS) {
+                return Err(io::Error::other(format!(
+                    "free space tree block group {bg_start} uses bitmap layout (unsupported in v1)"
+                )));
+            }
+
+            // Step 2: read existing FREE_SPACE_EXTENT items.
+            let existing = self.read_free_space_extents(
+                fs_info, fst_id, bg_start, bg_length,
+            )?;
+
+            // Step 3: apply.
+            let new = apply_delta(bg_start, bg, &existing, delta)
+                .map_err(|e| io::Error::other(e.to_string()))?;
+
+            if new == existing {
+                continue;
+            }
+
+            // Step 4: delete all existing FREE_SPACE_EXTENT items for
+            // this block group.
+            self.delete_free_space_extents_in_range(
+                fs_info, fst_id, bg_start, bg_length,
+            )?;
+
+            // Step 5: insert new FREE_SPACE_EXTENT items.
+            for r in new.as_slice() {
+                self.insert_free_space_extent(fs_info, fst_id, r.start, r.length)?;
+            }
+
+            // Step 6: update FREE_SPACE_INFO.extent_count.
+            self.update_free_space_info_count(
+                fs_info,
+                fst_id,
+                bg_start,
+                bg_length,
+                u32::try_from(new.len()).unwrap_or(u32::MAX),
+                info.flags,
+            )?;
+
+            any_changes = true;
+        }
+
+        Ok(any_changes)
+    }
+
+    /// Read the `FREE_SPACE_INFO` item for a block group, if present.
+    fn read_free_space_info(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        fst_id: u64,
+        bg_start: u64,
+        bg_length: u64,
+    ) -> io::Result<Option<btrfs_disk::items::FreeSpaceInfo>> {
+        use btrfs_disk::items::FreeSpaceInfo;
+
+        let key = DiskKey {
+            objectid: bg_start,
+            key_type: KeyType::FreeSpaceInfo,
+            offset: bg_length,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            fst_id,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )?;
+        if !found {
+            path.release();
+            return Ok(None);
+        }
+        let leaf = path.nodes[0].as_ref().ok_or_else(|| {
+            io::Error::other("read_free_space_info: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        let data = leaf.item_data(slot).to_vec();
+        path.release();
+        Ok(FreeSpaceInfo::parse(&data))
+    }
+
+    /// Walk every `FREE_SPACE_EXTENT` item whose objectid lies within
+    /// `[bg_start, bg_start + bg_length)` and collect them into a
+    /// sorted, coalesced [`RangeList`].
+    fn read_free_space_extents(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        fst_id: u64,
+        bg_start: u64,
+        bg_length: u64,
+    ) -> io::Result<crate::free_space::RangeList> {
+        use crate::free_space::{Range, RangeList};
+
+        let bg_end = bg_start + bg_length;
+        let mut out: Vec<Range> = Vec::new();
+
+        let key = DiskKey {
+            objectid: bg_start,
+            key_type: KeyType::FreeSpaceExtent,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            fst_id,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )?;
+
+        loop {
+            let Some(leaf) = path.nodes[0].as_ref() else {
+                break;
+            };
+            let slot = path.slots[0];
+            if slot >= leaf.nritems() as usize {
+                if !search::next_leaf(fs_info, &mut path)? {
+                    break;
+                }
+                continue;
+            }
+            let k = leaf.item_key(slot);
+            if k.objectid >= bg_end {
+                break;
+            }
+            if k.key_type == KeyType::FreeSpaceExtent && k.offset > 0 {
+                out.push(Range::new(k.objectid, k.offset));
+            }
+            path.slots[0] = slot + 1;
+        }
+
+        path.release();
+
+        // The walk is naturally sorted because the FST is keyed
+        // (start, FREE_SPACE_EXTENT, length). Coalescing is a no-op on
+        // a well-formed FST but harmless if the on-disk state somehow
+        // contains touching ranges.
+        let mut list = RangeList::new();
+        for r in out {
+            list.insert(r);
+        }
+        Ok(list)
+    }
+
+    /// Delete every `FREE_SPACE_EXTENT` item whose objectid lies within
+    /// `[bg_start, bg_start + bg_length)`.
+    fn delete_free_space_extents_in_range(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        fst_id: u64,
+        bg_start: u64,
+        bg_length: u64,
+    ) -> io::Result<()> {
+        let bg_end = bg_start + bg_length;
+        loop {
+            let key = DiskKey {
+                objectid: bg_start,
+                key_type: KeyType::FreeSpaceExtent,
+                offset: 0,
+            };
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut *self),
+                fs_info,
+                fst_id,
+                &key,
+                &mut path,
+                SearchIntent::Delete,
+                true,
+            )?;
+
+            let Some(leaf) = path.nodes[0].as_mut() else {
+                path.release();
+                break;
+            };
+            let slot = path.slots[0];
+            if slot >= leaf.nritems() as usize {
+                path.release();
+                break;
+            }
+            let k = leaf.item_key(slot);
+            if k.key_type != KeyType::FreeSpaceExtent || k.objectid >= bg_end {
+                path.release();
+                break;
+            }
+            items::del_items(leaf, slot, 1);
+            fs_info.mark_dirty(leaf);
+            path.release();
+        }
+        Ok(())
+    }
+
+    /// Insert a single `FREE_SPACE_EXTENT` item with no payload.
+    fn insert_free_space_extent(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        fst_id: u64,
+        start: u64,
+        length: u64,
+    ) -> io::Result<()> {
+        let key = DiskKey {
+            objectid: start,
+            key_type: KeyType::FreeSpaceExtent,
+            offset: length,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            fst_id,
+            &key,
+            &mut path,
+            SearchIntent::Insert(ITEM_SIZE as u32),
+            true,
+        )?;
+        if found {
+            path.release();
+            return Ok(());
+        }
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("insert_free_space_extent: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        items::insert_item(leaf, slot, &key, &[])?;
+        fs_info.mark_dirty(leaf);
+        path.release();
+        Ok(())
+    }
+
+    /// Update the `extent_count` field of an existing `FREE_SPACE_INFO`
+    /// item, preserving its flag word.
+    fn update_free_space_info_count(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        fst_id: u64,
+        bg_start: u64,
+        bg_length: u64,
+        new_count: u32,
+        flags: btrfs_disk::items::FreeSpaceInfoFlags,
+    ) -> io::Result<()> {
+        let key = DiskKey {
+            objectid: bg_start,
+            key_type: KeyType::FreeSpaceInfo,
+            offset: bg_length,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            fst_id,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )?;
+        if !found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "update_free_space_info_count: FREE_SPACE_INFO missing for {bg_start}"
+            )));
+        }
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("update_free_space_info_count: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        let mut data = Vec::with_capacity(8);
+        data.extend_from_slice(&new_count.to_le_bytes());
+        data.extend_from_slice(&flags.bits().to_le_bytes());
+        items::update_item(leaf, slot, &data)?;
+        fs_info.mark_dirty(leaf);
+        path.release();
         Ok(())
     }
 

@@ -79,21 +79,11 @@ impl TestFixture {
             .output()
             .expect("btrfs check not found");
 
-        if output.status.success() {
-            return;
-        }
-
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let has_structural_errors = stderr.lines().any(|line| {
-            line.contains("ERROR:")
-                && !line.contains("free space")
-                && !line.contains("cache")
-        });
-
-        if has_structural_errors {
+        if !output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
             panic!(
-                "btrfs check found structural errors:\n--- stderr ---\n{stderr}\n--- stdout ---\n{stdout}"
+                "btrfs check failed:\n--- stderr ---\n{stderr}\n--- stdout ---\n{stdout}"
             );
         }
     }
@@ -688,9 +678,8 @@ pub fn run_sequence(ops: &[Op]) -> Result<(), Failure> {
     })?;
     drop(fs2);
 
-    // `assert_check` panics on structural errors; we want to surface
-    // them as a `Failure` so proptest can shrink. Re-implement the
-    // tolerant check inline.
+    // `assert_check` panics on errors; we want to surface them as a
+    // `Failure` so proptest can shrink.
     let output = Command::new("btrfs")
         .args(["check", "--readonly"])
         .arg(&fixture.path)
@@ -698,14 +687,7 @@ pub fn run_sequence(ops: &[Op]) -> Result<(), Failure> {
         .map_err(|e| Failure::Other(format!("btrfs check spawn: {e}")))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        let structural = stderr.lines().any(|line| {
-            line.contains("ERROR:")
-                && !line.contains("free space")
-                && !line.contains("cache")
-        });
-        if structural {
-            return Err(Failure::CheckFailed { stderr });
-        }
+        return Err(Failure::CheckFailed { stderr });
     }
 
     Ok(())

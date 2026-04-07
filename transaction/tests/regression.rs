@@ -43,17 +43,9 @@ fn assert_btrfs_check(path: &Path) {
         .arg(path)
         .output()
         .expect("btrfs check not found");
-    if output.status.success() {
-        return;
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let has_structural_errors = stderr.lines().any(|line| {
-        line.contains("ERROR:")
-            && !line.contains("free space")
-            && !line.contains("cache")
-    });
-    if has_structural_errors {
+    if !output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
         panic!(
             "btrfs check errors:\n--- stderr ---\n{stderr}\n--- stdout ---\n{stdout}"
         );
