@@ -3,9 +3,12 @@ default:
     @just --list
 
 # Build integration test binaries and run them with root privileges.
+# Arguments are passed on to the test binaries. To only run a specific
+# test, run `just test <test-name>`. To show standard output/error, use
+# `just test --nocapture`.
 #
 # Requires: jq, sudo, btrfs-progs
-test:
+test *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -14,7 +17,7 @@ test:
     unset BTRFS_OUTPUT_FORMAT
 
     # Build first so the user sees compile progress/warnings on stderr.
-    cargo test --all-features
+    cargo test --all-features -- {{ARGS}}
 
     # Then extract the binary paths from the JSON output.
     mapfile -t binaries < <(
@@ -36,7 +39,7 @@ test:
     failed=0
     for binary in "${binaries[@]}"; do
         sudo --preserve-env=LLVM_PROFILE_FILE,INSTA_WORKSPACE_ROOT \
-            "$binary" --ignored --test-threads=1 || failed=1
+            "$binary" --ignored --test-threads=1 {{ARGS}} || failed=1
     done
 
     # anything that we might write when running tests, change back to us.
