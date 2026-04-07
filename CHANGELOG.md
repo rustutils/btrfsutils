@@ -6,11 +6,26 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- `btrfs rescue clear-uuid-tree`: initial implementation that walks the UUID
-  tree, drops extent refs for every block, deletes the ROOT_ITEM, and commits.
-  Currently disabled in tests because the transaction commit hangs when
-  processing the bulk drop_refs — needs transaction crate hardening before
-  it can be relied upon.
+- `btrfs rescue clear-uuid-tree`: walks the UUID tree, drops extent refs
+  for every block, deletes the ROOT_ITEM, and commits. End-to-end test
+  round-trips through a rw mount.
+- transaction: free space tree update during commit (Stage F). Every
+  commit now leaves `FREE_SPACE_EXTENT` and `FREE_SPACE_INFO` items
+  consistent with the extent tree, so rw mounts no longer hang on
+  stale FST entries. Bitmap-layout block groups are detected and
+  rejected with a clear error.
+
+### Changed
+
+- transaction: convergence loop is now `flush_delayed_refs →
+  update_root_items → snapshot_roots → update_free_space_tree`,
+  with the snapshot taken before the FST update so the next pass's
+  `update_root_items` picks up FST root changes. Pass cap raised
+  from 16 to 32.
+- transaction tests: every `btrfs check` helper now runs in strict
+  mode; the previous `free space`/`cache` filters are gone. The
+  proptest harness at `PROPTEST_CASES=1000` passes with strict
+  check.
 
 ## 0.9.0
 

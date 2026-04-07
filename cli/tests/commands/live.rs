@@ -2365,13 +2365,11 @@ fn mkfs_rootdir_lzo_compressed() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn rescue_clear_uuid_tree() {
-    println!("SETUP");
     let td = tempdir().unwrap();
     let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
     file.mkfs();
     let lo = LoopbackDevice::new(file);
 
-    println!("MOUNT");
     // Mount, create subvolumes to populate the UUID tree, then unmount.
     let lo = {
         let mnt = Mount::new(lo, td.path());
@@ -2387,7 +2385,6 @@ fn rescue_clear_uuid_tree() {
         mnt.into_loopback()
     };
 
-    println!("RESCUE");
     let dev = lo.path().to_str().unwrap();
     let out = btrfs_ok(&["rescue", "clear-uuid-tree", dev]);
     assert!(
@@ -2395,7 +2392,6 @@ fn rescue_clear_uuid_tree() {
         "expected success message, got: {out}"
     );
 
-    println!("CHECK");
     let check_output = Command::new("btrfs")
         .args(["check", "--readonly", dev])
         .output()
@@ -2403,26 +2399,15 @@ fn rescue_clear_uuid_tree() {
     if !check_output.status.success() {
         let stderr = String::from_utf8_lossy(&check_output.stderr);
         let stdout = String::from_utf8_lossy(&check_output.stdout);
-        println!("STDOUT: {stdout}\nSTDERR: {stderr}");
-        let has_structural = stdout.lines().chain(stderr.lines()).any(|l| {
-            (l.contains("ERROR") || l.contains("mismatch"))
-                && !l.contains("free space")
-                && !l.contains("cache")
-        });
-        assert!(
-            !has_structural,
-            "btrfs check found structural errors:\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
+        panic!(
+            "btrfs check failed:\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
         );
     }
 
-    // Mount read-only to verify the subvolumes survived. A rw mount
-    // would consult the free space tree, which the transaction crate
-    // currently leaves stale (FREE_SPACE_TREE_VALID is kept set so
-    // BLOCK_GROUP_TREE doesn't strip the FST feature flag, but the
-    // entries themselves are not updated). The kernel's rw mount path
-    // hangs on the inconsistency. RO is sufficient for this test:
-    // we only need to verify the directory tree.
-    let mnt = Mount::with_options(lo, td.path(), &["ro"]);
+    // Mount read-write to verify the subvolumes survived and the
+    // free space tree is consistent enough for the kernel to use it
+    // for allocation decisions.
+    let mnt = Mount::new(lo, td.path());
     let mp = mnt.path();
     assert!(mp.join("sub1").exists(), "sub1 should still exist");
     assert!(mp.join("sub2").exists(), "sub2 should still exist");
