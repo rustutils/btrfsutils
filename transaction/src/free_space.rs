@@ -265,6 +265,155 @@ impl BlockGroupRangeDeltas {
     }
 }
 
+/// Errors produced by [`apply_delta`] when the proposed delta is
+/// inconsistent with the existing free-range list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApplyError {
+    /// The block group's `FREE_SPACE_INFO` item has the BITMAPS flag
+    /// set. Bitmap layout is out of scope for v1; the caller must
+    /// detect this before computing the delta.
+    BitmapLayout { bg_start: u64 },
+    /// An allocated range is not fully contained inside an existing
+    /// free range. The FST and the extent tree disagree about who owns
+    /// these bytes.
+    AllocatedNotFree {
+        bg_start: u64,
+        range: Range,
+    },
+    /// A freed range overlaps a range that the FST already considers
+    /// free. The same byte was freed twice.
+    FreedAlreadyFree {
+        bg_start: u64,
+        range: Range,
+    },
+    /// A range in the resulting free list lies outside the block group
+    /// span.
+    OutOfBlockGroup {
+        bg_start: u64,
+        range: Range,
+    },
+}
+
+impl std::fmt::Display for ApplyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BitmapLayout { bg_start } => write!(
+                f,
+                "free space tree block group {bg_start} uses bitmap layout (unsupported in v1)"
+            ),
+            Self::AllocatedNotFree { bg_start, range } => write!(
+                f,
+                "allocated range {}..{} in block group {bg_start} is not contained in any free extent",
+                range.start,
+                range.end()
+            ),
+            Self::FreedAlreadyFree { bg_start, range } => write!(
+                f,
+                "freed range {}..{} in block group {bg_start} overlaps an existing free extent",
+                range.start,
+                range.end()
+            ),
+            Self::OutOfBlockGroup { bg_start, range } => write!(
+                f,
+                "resulting free range {}..{} lies outside block group {bg_start}",
+                range.start,
+                range.end()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ApplyError {}
+
+/// Apply a per-block-group delta to an existing free-range list,
+/// producing the new free-range list.
+///
+/// `existing` is the current set of `FREE_SPACE_EXTENT` ranges for the
+/// block group, sorted and coalesced. `delta` is the set of byte
+/// ranges allocated and freed during the current transaction (already
+/// passed through `cancel_within_transaction`). `bg` is the block
+/// group's full extent (start + length) and is used to validate the
+/// result.
+///
+/// Returns the new free-range list or an [`ApplyError`] if the delta
+/// is inconsistent with the existing state.
+///
+/// This function is pure: it does not read or write the on-disk FST.
+/// Stage F3 calls it from the commit path with input read out of the
+/// FST and writes the output back.
+pub fn apply_delta(
+    bg_start: u64,
+    bg: Range,
+    existing: &RangeList,
+    delta: &BlockGroupDelta,
+) -> Result<RangeList, ApplyError> {
+    let mut out = existing.clone();
+
+    // Allocated ranges: each must be fully contained in some existing
+    // free range. Subtract from the running list.
+    for &alloc in delta.allocated.as_slice() {
+        if !out.contains(alloc) {
+            return Err(ApplyError::AllocatedNotFree {
+                bg_start,
+                range: alloc,
+            });
+        }
+        out.subtract(alloc);
+    }
+
+    // Freed ranges: each must NOT overlap any existing free range
+    // (after allocations have been subtracted). Insert into the
+    // running list.
+    for &freed in delta.freed.as_slice() {
+        if out.overlaps(freed) {
+            return Err(ApplyError::FreedAlreadyFree {
+                bg_start,
+                range: freed,
+            });
+        }
+        out.insert(freed);
+    }
+
+    // Bound check: every range must lie inside the block group.
+    let bg_end = bg.end();
+    for &r in out.as_slice() {
+        if r.start < bg.start || r.end() > bg_end {
+            return Err(ApplyError::OutOfBlockGroup {
+                bg_start,
+                range: r,
+            });
+        }
+    }
+
+    Ok(out)
+}
+
+impl RangeList {
+    /// True if `range` is fully contained within a single existing
+    /// range in this list.
+    #[must_use]
+    pub fn contains(&self, range: Range) -> bool {
+        if range.is_empty() {
+            return true;
+        }
+        self.ranges
+            .iter()
+            .any(|r| r.start <= range.start && r.end() >= range.end())
+    }
+
+    /// True if `range` overlaps any existing range. Touching does not
+    /// count as overlap (`[100, 110)` does not overlap `[110, 120)`).
+    #[must_use]
+    pub fn overlaps(&self, range: Range) -> bool {
+        if range.is_empty() {
+            return false;
+        }
+        self.ranges
+            .iter()
+            .any(|r| r.start < range.end() && range.start < r.end())
+    }
+}
+
 /// Intersect a range with a range list, returning the per-piece
 /// intersections (sorted, disjoint).
 fn intersect(list: &RangeList, range: Range) -> Vec<Range> {
@@ -428,6 +577,142 @@ mod tests {
         let bg = d.get(0).unwrap();
         assert_eq!(collect(&bg.allocated), &[(100, 50)]);
         assert_eq!(collect(&bg.freed), &[(200, 50)]);
+    }
+
+    fn delta(alloc: &[(u64, u64)], freed: &[(u64, u64)]) -> BlockGroupDelta {
+        BlockGroupDelta {
+            allocated: rl(alloc),
+            freed: rl(freed),
+        }
+    }
+
+    #[test]
+    fn apply_subtract_middle_splits() {
+        let bg = Range::new(0, 1024);
+        let existing = rl(&[(0, 1024)]);
+        let d = delta(&[(400, 100)], &[]);
+        let out = apply_delta(0, bg, &existing, &d).unwrap();
+        assert_eq!(collect(&out), &[(0, 400), (500, 524)]);
+    }
+
+    #[test]
+    fn apply_subtract_whole_range_removes() {
+        let bg = Range::new(0, 1024);
+        let existing = rl(&[(100, 100)]);
+        let d = delta(&[(100, 100)], &[]);
+        let out = apply_delta(0, bg, &existing, &d).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn apply_subtract_left_edge() {
+        let bg = Range::new(0, 1024);
+        let existing = rl(&[(100, 100)]);
+        let d = delta(&[(100, 30)], &[]);
+        let out = apply_delta(0, bg, &existing, &d).unwrap();
+        assert_eq!(collect(&out), &[(130, 70)]);
+    }
+
+    #[test]
+    fn apply_add_merges_both_sides() {
+        let bg = Range::new(0, 1024);
+        let existing = rl(&[(0, 100), (200, 100)]);
+        let d = delta(&[], &[(100, 100)]);
+        let out = apply_delta(0, bg, &existing, &d).unwrap();
+        assert_eq!(collect(&out), &[(0, 300)]);
+    }
+
+    #[test]
+    fn apply_add_inserts_in_middle() {
+        let bg = Range::new(0, 1024);
+        let existing = rl(&[(0, 100), (500, 100)]);
+        let d = delta(&[], &[(200, 100)]);
+        let out = apply_delta(0, bg, &existing, &d).unwrap();
+        assert_eq!(collect(&out), &[(0, 100), (200, 100), (500, 100)]);
+    }
+
+    #[test]
+    fn apply_alloc_outside_free_errors() {
+        let bg = Range::new(0, 1024);
+        let existing = rl(&[(100, 100)]);
+        let d = delta(&[(400, 50)], &[]);
+        let err = apply_delta(0, bg, &existing, &d).unwrap_err();
+        assert!(matches!(err, ApplyError::AllocatedNotFree { .. }));
+    }
+
+    #[test]
+    fn apply_alloc_partial_outside_free_errors() {
+        // Allocation straddles the edge of an existing free range.
+        let bg = Range::new(0, 1024);
+        let existing = rl(&[(100, 100)]);
+        let d = delta(&[(180, 50)], &[]);
+        let err = apply_delta(0, bg, &existing, &d).unwrap_err();
+        assert!(matches!(err, ApplyError::AllocatedNotFree { .. }));
+    }
+
+    #[test]
+    fn apply_freed_overlaps_free_errors() {
+        let bg = Range::new(0, 1024);
+        let existing = rl(&[(100, 100)]);
+        let d = delta(&[], &[(150, 50)]);
+        let err = apply_delta(0, bg, &existing, &d).unwrap_err();
+        assert!(matches!(err, ApplyError::FreedAlreadyFree { .. }));
+    }
+
+    #[test]
+    fn apply_freed_touching_is_ok_and_merges() {
+        // Touching but not overlapping is fine and produces a merge.
+        let bg = Range::new(0, 1024);
+        let existing = rl(&[(100, 100)]);
+        let d = delta(&[], &[(200, 50)]);
+        let out = apply_delta(0, bg, &existing, &d).unwrap();
+        assert_eq!(collect(&out), &[(100, 150)]);
+    }
+
+    #[test]
+    fn apply_result_outside_bg_errors() {
+        let bg = Range::new(1000, 1024);
+        // Existing range straddles the bg end. The result keeps it,
+        // which the bound check rejects.
+        let existing = RangeList::from_sorted_unchecked(vec![Range::new(
+            2000, 100,
+        )]);
+        let d = delta(&[], &[]);
+        let err = apply_delta(1000, bg, &existing, &d).unwrap_err();
+        assert!(matches!(err, ApplyError::OutOfBlockGroup { .. }));
+    }
+
+    #[test]
+    fn apply_alloc_then_free_into_just_freed_slot() {
+        // Subtractions are applied before additions, so freeing into
+        // a slot that was just allocated out of an existing free
+        // range is valid.
+        let bg = Range::new(0, 1024);
+        // Existing free: 0..400. Allocate 100..200. Then free 100..200
+        // back. Result should be 0..400 again.
+        let existing = rl(&[(0, 400)]);
+        let d = delta(&[(100, 100)], &[(100, 100)]);
+        let out = apply_delta(0, bg, &existing, &d).unwrap();
+        assert_eq!(collect(&out), &[(0, 400)]);
+    }
+
+    #[test]
+    fn range_list_contains() {
+        let l = rl(&[(100, 100), (300, 100)]);
+        assert!(l.contains(Range::new(120, 50)));
+        assert!(l.contains(Range::new(100, 100)));
+        assert!(!l.contains(Range::new(150, 100)));
+        assert!(!l.contains(Range::new(50, 10)));
+    }
+
+    #[test]
+    fn range_list_overlaps() {
+        let l = rl(&[(100, 100)]);
+        assert!(l.overlaps(Range::new(150, 10)));
+        assert!(l.overlaps(Range::new(50, 100)));
+        assert!(!l.overlaps(Range::new(200, 50))); // touches
+        assert!(!l.overlaps(Range::new(50, 50))); // touches
+        assert!(!l.overlaps(Range::new(0, 10)));
     }
 
     #[test]
