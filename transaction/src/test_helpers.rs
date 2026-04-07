@@ -405,7 +405,21 @@ fn apply_op<R: io::Read + io::Write + io::Seek>(
             Ok(false)
         }
         Op::RemovePlaygroundRoot => {
-            if !model.playground_removed {
+            // Real callers (rescue clear-uuid-tree) only call
+            // `fs.remove_root` once the tree is in a "clean" state:
+            // ROOT_ITEM is about to be deleted from the root tree, all
+            // owned blocks are queued for drop+pin, and there are no
+            // dirty in-memory blocks belonging to the tree. The harness
+            // does not model the ROOT_ITEM delete or the drop sequence
+            // explicitly, so we approximate "clean" as "model state
+            // matches the last commit". Otherwise the in-memory state
+            // includes a COWed-but-unflushed tree root that
+            // `update_root_items` will refuse to update (because the
+            // tree is no longer in `fs.roots`), leaving a dangling
+            // EXTENT_ITEM and an orphan tree block.
+            let dirty_uncommitted = model.kv != model.committed_kv
+                || !model.owned_blocks.is_empty();
+            if !model.playground_removed && !dirty_uncommitted {
                 fs.remove_root(PLAYGROUND_TREE);
                 model.playground_removed = true;
             }
@@ -417,6 +431,20 @@ fn apply_op<R: io::Read + io::Write + io::Seek>(
             // re-dispatch with the right ownership.
             Ok(true)
         }
+    }
+}
+
+/// Drop and pin every block currently in `model.owned_blocks`,
+/// clearing the list. See the call site comment for the rationale.
+fn drain_owned_blocks<R: io::Read + io::Write + io::Seek>(
+    trans: &mut Transaction<R>,
+    model: &mut Model,
+) {
+    for (bytenr, level) in model.owned_blocks.drain(..) {
+        trans
+            .delayed_refs
+            .drop_ref(bytenr, true, PLAYGROUND_TREE, level);
+        trans.pin_block(bytenr);
     }
 }
 
@@ -581,6 +609,20 @@ pub fn run_sequence(ops: &[Op]) -> Result<(), Failure> {
             })?;
 
         if restart {
+            // Drain any harness-allocated blocks that were never paired
+            // with an explicit DropOwnedBlock. The harness's AllocBlock
+            // primitive *only* reserves an address; unlike a real
+            // `cow_block` caller, it never writes a tree block at that
+            // address, so leaving the +1 delayed ref in place would
+            // create an EXTENT_ITEM pointing at unwritten garbage and
+            // fail `btrfs check` ("tree extent root N has no tree
+            // block found"). Mirror what proptest *would* generate if
+            // it had picked a DropOwnedBlock for each: drop_ref + pin
+            // each owned block before the lifecycle op consumes the
+            // transaction.
+            if matches!(op, Op::Commit | Op::Abort | Op::Reopen) {
+                drain_owned_blocks(&mut trans, &mut model);
+            }
             match op {
                 Op::Commit => {
                     trans.commit(&mut fs).map_err(|err| Failure::OpFailed {
@@ -630,6 +672,7 @@ pub fn run_sequence(ops: &[Op]) -> Result<(), Failure> {
     }
 
     // Final commit + reopen + btrfs check.
+    drain_owned_blocks(&mut trans, &mut model);
     trans
         .commit(&mut fs)
         .map_err(|e| Failure::Other(format!("final commit: {e}")))?;

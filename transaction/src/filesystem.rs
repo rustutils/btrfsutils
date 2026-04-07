@@ -305,6 +305,13 @@ impl<R: Read + Write + Seek> Filesystem<R> {
         self.original_roots = self.roots.clone();
     }
 
+    /// Restore the roots map to the last snapshot. Used by
+    /// `Transaction::abort` to roll back in-memory `set_root_bytenr`
+    /// changes that pointed at COWed-but-never-written bytenrs.
+    pub fn restore_roots_from_snapshot(&mut self) {
+        self.roots = self.original_roots.clone();
+    }
+
     /// Flush pending writes via `Write::flush()`.
     ///
     /// Flushes any userspace write buffers. For file-backed storage,

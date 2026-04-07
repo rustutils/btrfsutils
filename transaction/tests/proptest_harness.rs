@@ -163,10 +163,14 @@ impl From<ArbOp> for Op {
 }
 
 fn proptest_config() -> ProptestConfig {
+    // Default to 100 cases — about 2-3 seconds on a fast box, so the
+    // harness runs as part of every `cargo test` without blowing up
+    // the test wall time. Bump via `PROPTEST_CASES=N` for stress runs
+    // (1000 takes about 25 seconds).
     let cases = std::env::var("PROPTEST_CASES")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+        .unwrap_or(100);
     ProptestConfig {
         cases,
         // Sequences can be expensive (mkfs + commits + btrfs check),
@@ -190,13 +194,6 @@ proptest! {
     fn transaction_sequences_are_consistent(
         ops in prop::collection::vec(any::<ArbOp>(), 0..=30),
     ) {
-        // Off by default — set PROPTEST_CASES=N to opt in. The
-        // transaction crate has known bugs the harness will surface
-        // (see PLAN.md finding 3), and we don't want every
-        // `cargo test` invocation to fail until those are fixed.
-        if std::env::var("PROPTEST_CASES").is_err() {
-            return Ok(());
-        }
         let ops: Vec<Op> = ops.into_iter().map(Into::into).collect();
         if let Err(e) = run_sequence_watchdogged(ops, DEFAULT_TIMEOUT) {
             return Err(TestCaseError::fail(format!("{e}")));

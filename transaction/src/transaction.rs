@@ -1007,6 +1007,11 @@ impl<R: Read + Write + Seek> Transaction<R> {
         fs_info.generation = fs_info.superblock.generation;
         fs_info.clear_dirty();
         fs_info.clear_cache();
+        // Roll back any in-memory `set_root_bytenr` calls made during
+        // the transaction. Without this, the roots map keeps pointing
+        // at COWed-but-never-written bytenrs, and the next transaction
+        // will read garbage from disk.
+        fs_info.restore_roots_from_snapshot();
     }
 }
 
