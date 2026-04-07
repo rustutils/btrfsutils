@@ -28,6 +28,7 @@ pub mod buffer;
 pub mod cow;
 pub mod delayed_ref;
 pub mod filesystem;
+pub mod free_space;
 pub mod items;
 pub mod path;
 pub mod search;

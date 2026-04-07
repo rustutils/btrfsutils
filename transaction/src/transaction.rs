@@ -11,6 +11,7 @@ use crate::{
     cow::cow_block,
     delayed_ref::DelayedRefQueue,
     filesystem::Filesystem,
+    free_space::{BlockGroupRangeDeltas, Range},
     items,
     path::BtrfsPath,
     search::{self, SearchIntent},
@@ -40,6 +41,10 @@ pub struct Transaction<R> {
     allocated_blocks: Vec<u64>,
     /// Delayed reference count updates.
     pub delayed_refs: DelayedRefQueue,
+    /// Per-block-group byte ranges allocated and freed during this
+    /// transaction. Populated by `flush_delayed_refs`. Consumed by the
+    /// free space tree update step (Stage F3). Cleared at commit end.
+    pub bg_range_deltas: BlockGroupRangeDeltas,
     /// Simple bump allocator cursor for metadata blocks.
     alloc_cursor: u64,
     /// End of the allocation region.
@@ -79,6 +84,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
             freed_blocks: Vec::new(),
             allocated_blocks: Vec::new(),
             delayed_refs: DelayedRefQueue::new(),
+            bg_range_deltas: BlockGroupRangeDeltas::new(),
             alloc_cursor: cursor,
             alloc_end: end,
             pinned: BTreeSet::new(),
@@ -299,6 +305,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         fs_info.reader_mut().inner_mut().flush()?;
 
         // Step 8: Clean up
+        self.bg_range_deltas.clear();
         fs_info.clear_dirty();
         fs_info.clear_cache();
 
@@ -461,6 +468,10 @@ impl<R: Read + Write + Seek> Transaction<R> {
                         find_containing_block_group(&block_groups, dref.bytenr)
                     {
                         *bg_deltas.entry(bg_start).or_insert(0) += nodesize;
+                        self.bg_range_deltas.record_allocated(
+                            bg_start,
+                            Range::new(dref.bytenr, nodesize as u64),
+                        );
                     }
                 } else if dref.delta < 0 {
                     self.delete_metadata_extent(
@@ -475,6 +486,10 @@ impl<R: Read + Write + Seek> Transaction<R> {
                         find_containing_block_group(&block_groups, dref.bytenr)
                     {
                         *bg_deltas.entry(bg_start).or_insert(0) -= nodesize;
+                        self.bg_range_deltas.record_freed(
+                            bg_start,
+                            Range::new(dref.bytenr, nodesize as u64),
+                        );
                     }
                 }
             }
@@ -486,6 +501,10 @@ impl<R: Read + Write + Seek> Transaction<R> {
                 ));
             }
         }
+
+        // Cancel ranges that were both allocated and freed within
+        // this transaction. The FST sees neither.
+        self.bg_range_deltas.cancel_within_transaction();
 
         // Update superblock bytes_used
         if bytes_used_delta != 0 {
