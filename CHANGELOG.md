@@ -6,6 +6,31 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs rescue clear-space-cache --version v2`: walks the
+  FREE_SPACE_TREE, drops every block, removes its ROOT_ITEM, clears
+  the `FREE_SPACE_TREE` + `FREE_SPACE_TREE_VALID` compat_ro flags,
+  and commits. The kernel rebuilds the tree on the next mount.
+  Refuses to run on filesystems with `BLOCK_GROUP_TREE` enabled
+  (BGT requires FST). Privileged integration test exercises the
+  full rw remount round-trip. v1 is parked behind Stage G in
+  `transaction/PLAN.md` (data extent ref support gap).
+- `btrfs rescue fix-data-checksum`: walks the csum tree, recomputes
+  CRC32C for every covered sector, and reports mismatches in
+  `--readonly` mode (default). With `--mirror 1`, mismatched csum
+  bytes are rewritten in place via `item_data_mut` and committed in
+  a single transaction. Multi-mirror reads, `--interactive`, and
+  csum types other than CRC32C are not yet supported. Tests cover
+  both the clean-fs scan and a corrupt-and-repair round trip.
+- `btrfs rescue fix-device-size`: full read-pass + decision logic +
+  apply path implemented (walks DEV_ITEMs, rounds down misaligned
+  total_bytes, shrinks past actual device size when no DEV_EXTENT
+  would be lost, mirrors the change into the embedded superblock
+  dev_item, and recomputes superblock total_bytes). Currently
+  parked behind a Stage H bail in `transaction/PLAN.md` because
+  committing chunk-tree changes requires SYSTEM-block-group
+  allocation in the transaction crate; the integration test stays
+  compiled but skips its body unless `FIX_DEVICE_SIZE_ENABLED` is
+  set in the environment.
 - `btrfs rescue clear-uuid-tree`: walks the UUID tree, drops extent refs
   for every block, deletes the ROOT_ITEM, and commits. End-to-end test
   round-trips through a rw mount.
