@@ -140,6 +140,7 @@ dependencies = [
  "btrfs-disk",
  "btrfs-mkfs",
  "btrfs-stream",
+ "btrfs-transaction",
  "btrfs-tune",
  "btrfs-uapi",
  "chrono",

@@ -4,6 +4,12 @@ expression: text
 ---
 Delete uuid tree so that kernel can rebuild it at mount time
 
+The UUID tree maps subvolume UUIDs to their root IDs. If it becomes corrupted it
+can prevent mount or cause subvolume lookup failures. Deleting it is safe
+because the kernel rebuilds it automatically on the next mount.
+
+The device must not be mounted.
+
 Usage: clear-uuid-tree <DEVICE>
 
 Arguments:
@@ -12,4 +18,4 @@ Arguments:
 
 Options:
   -h, --help
-          Print help
+          Print help (see a summary with '-h')

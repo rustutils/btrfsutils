@@ -222,6 +222,31 @@ impl Mount {
     pub fn loopback(&self) -> &LoopbackDevice {
         &self.dev
     }
+
+    /// Unmount and return the underlying loop device for reuse.
+    pub fn into_loopback(self) -> LoopbackDevice {
+        // Close the fd first.
+        let mut this = ManuallyDrop::new(self);
+        // SAFETY: we never use this.file again.
+        unsafe { ManuallyDrop::drop(&mut this.file) };
+
+        let output = Command::new("umount")
+            .arg(&this.mountpoint)
+            .output()
+            .expect("failed to run umount");
+        assert!(
+            output.status.success(),
+            "umount {} failed: {}",
+            this.mountpoint.display(),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        let _ = fs::remove_dir(&this.mountpoint);
+
+        // SAFETY: we take dev out before the ManuallyDrop prevents Drop.
+        // The ManuallyDrop around `this` prevents Mount::drop from running
+        // (which would double-umount and double-drop the file).
+        unsafe { std::ptr::read(&this.dev) }
+    }
 }
 
 impl Drop for Mount {

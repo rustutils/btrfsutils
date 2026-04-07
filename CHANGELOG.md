@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `btrfs rescue clear-uuid-tree`: initial implementation that walks the UUID
+  tree, drops extent refs for every block, deletes the ROOT_ITEM, and commits.
+  Currently disabled in tests because the transaction commit hangs when
+  processing the bulk drop_refs — needs transaction crate hardening before
+  it can be relied upon.
+
 ## 0.9.0
 
 ### Added

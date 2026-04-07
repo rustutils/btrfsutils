@@ -2359,3 +2359,65 @@ fn mkfs_rootdir_lzo_compressed() {
 
     verify_test_data(mp, "random.bin", 64 * 1024);
 }
+
+// ── rescue ──────────────────────────────────────────────────────────
+
+// Disabled: hangs in transaction commit when processing the bulk drop_refs
+// for the UUID tree blocks. The transaction crate needs more stress testing
+// (likely property tests) before this rescue command can be relied upon.
+// Re-enable once the underlying transaction issue is fixed.
+//
+// #[test]
+// #[ignore = "requires elevated privileges"]
+// fn rescue_clear_uuid_tree() {
+//     let td = tempdir().unwrap();
+//     let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
+//     file.mkfs();
+//     let lo = LoopbackDevice::new(file);
+//
+//     // Mount, create subvolumes to populate the UUID tree, then unmount.
+//     let lo = {
+//         let mnt = Mount::new(lo, td.path());
+//         let mp = mnt.path();
+//         btrfs_ok(&["subvolume", "create", mp.join("sub1").to_str().unwrap()]);
+//         btrfs_ok(&["subvolume", "create", mp.join("sub2").to_str().unwrap()]);
+//         btrfs_ok(&[
+//             "subvolume",
+//             "snapshot",
+//             mp.join("sub1").to_str().unwrap(),
+//             mp.join("snap1").to_str().unwrap(),
+//         ]);
+//         mnt.into_loopback()
+//     };
+//
+//     let dev = lo.path().to_str().unwrap();
+//     let out = btrfs_ok(&["rescue", "clear-uuid-tree", dev]);
+//     assert!(
+//         out.contains("Cleared uuid tree"),
+//         "expected success message, got: {out}"
+//     );
+//
+//     let check_output = Command::new("btrfs")
+//         .args(["check", "--readonly", dev])
+//         .output()
+//         .expect("failed to run btrfs check");
+//     if !check_output.status.success() {
+//         let stderr = String::from_utf8_lossy(&check_output.stderr);
+//         let stdout = String::from_utf8_lossy(&check_output.stdout);
+//         let has_structural = stdout.lines().chain(stderr.lines()).any(|l| {
+//             (l.contains("ERROR") || l.contains("mismatch"))
+//                 && !l.contains("free space")
+//                 && !l.contains("cache")
+//         });
+//         assert!(
+//             !has_structural,
+//             "btrfs check found structural errors:\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
+//         );
+//     }
+//
+//     let mnt = Mount::new(lo, td.path());
+//     let mp = mnt.path();
+//     assert!(mp.join("sub1").exists(), "sub1 should still exist");
+//     assert!(mp.join("sub2").exists(), "sub2 should still exist");
+//     assert!(mp.join("snap1").exists(), "snap1 should still exist");
+// }
