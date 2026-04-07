@@ -36,5 +36,5 @@ pub mod transaction;
 
 pub use crate::{filesystem::Filesystem, transaction::Transaction};
 
-#[cfg(test)]
-mod test_helpers;
+#[doc(hidden)]
+pub mod test_helpers;

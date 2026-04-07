@@ -13,8 +13,10 @@ keywords = ["btrfs", "filesystem", "transaction", "userspace"]
 [dependencies]
 btrfs-disk = { workspace = true }
 bytes = { workspace = true }
+tempfile = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
 flate2 = { workspace = true }
-tempfile = { workspace = true }
+proptest = "1"
+test-strategy = "0.4"
