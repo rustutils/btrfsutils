@@ -1186,3 +1186,97 @@ fn cascading_node_split() {
 
     drop(dir);
 }
+
+/// Option B regression: a no-op commit must legitimately advance
+/// `superblock.generation` AND rewrite the root tree root at the new
+/// generation, so `header.generation == superblock.generation` holds.
+/// Before Option B, no-op commits either had to be short-circuited
+/// (Option A) or would corrupt the filesystem with "parent transid
+/// verify failed: wanted N found N-1". See PLAN.md Finding 3 (I1, I2, I7).
+#[test]
+fn empty_commit_advances_generation_and_rewrites_root_tree_root() {
+    let (dir, img_path) = create_test_image();
+
+    let initial_generation;
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).unwrap();
+        initial_generation = fs.superblock.generation;
+
+        let trans = Transaction::start(&mut fs).unwrap();
+        // No operations: this is a true no-op commit.
+        trans.commit(&mut fs).unwrap();
+    }
+
+    // Reopen and verify both invariants.
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(&img_path)
+        .unwrap();
+    let mut fs = Filesystem::open(file).unwrap();
+    assert_eq!(
+        fs.superblock.generation,
+        initial_generation + 1,
+        "no-op commit must advance superblock.generation"
+    );
+
+    let root_bytenr = fs.superblock.root;
+    let eb = fs.read_block(root_bytenr).unwrap();
+    assert_eq!(
+        eb.generation(),
+        fs.superblock.generation,
+        "root tree root header.generation must match superblock.generation \
+         (Option B: every commit force-COWs the root tree root)"
+    );
+
+    drop(fs);
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+/// Two consecutive no-op commits must each advance the generation
+/// independently, leaving the filesystem at `initial + 2`. Catches a
+/// regression where the force-COW would only fire on the first commit.
+#[test]
+fn two_empty_commits_advance_generation_twice() {
+    let (dir, img_path) = create_test_image();
+
+    let initial_generation;
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).unwrap();
+        initial_generation = fs.superblock.generation;
+
+        Transaction::start(&mut fs)
+            .unwrap()
+            .commit(&mut fs)
+            .unwrap();
+        Transaction::start(&mut fs)
+            .unwrap()
+            .commit(&mut fs)
+            .unwrap();
+    }
+
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(&img_path)
+        .unwrap();
+    let mut fs = Filesystem::open(file).unwrap();
+    assert_eq!(fs.superblock.generation, initial_generation + 2);
+    let eb = fs.read_block(fs.superblock.root).unwrap();
+    assert_eq!(eb.generation(), fs.superblock.generation);
+
+    drop(fs);
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}

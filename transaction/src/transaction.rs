@@ -8,6 +8,7 @@
 use crate::{
     allocation,
     buffer::ITEM_SIZE,
+    cow::cow_block,
     delayed_ref::DelayedRefQueue,
     filesystem::Filesystem,
     items,
@@ -194,6 +195,30 @@ impl<R: Read + Write + Seek> Transaction<R> {
     ///
     /// Returns an error if any tree modification, write, or fsync fails.
     pub fn commit(mut self, fs_info: &mut Filesystem<R>) -> io::Result<()> {
+        // Step 0: Force-COW the root tree root so that every commit
+        // rewrites at least one block at the new generation. This keeps
+        // `superblock.generation` and the root tree root's
+        // `header.generation` in lockstep, which is what `btrfs check`
+        // (and the kernel mount path) verify. Without this, a no-op
+        // commit would either need to be short-circuited or would
+        // corrupt the filesystem with "parent transid verify failed".
+        // See PLAN.md Finding 3 invariants I1, I2, I7.
+        //
+        // `cow_block` is idempotent: if the root tree was already COWed
+        // earlier in this transaction (its in-memory generation matches
+        // and the block is not yet written to disk), it returns the
+        // existing buffer unchanged. The new add/drop delayed refs and
+        // the new dirty block flow into the convergence loop below.
+        let root_tree_id = 1u64;
+        if let Some(root_bytenr) = fs_info.root_bytenr(root_tree_id) {
+            let eb = fs_info.read_block(root_bytenr)?;
+            let new_eb =
+                cow_block(&mut self, fs_info, &eb, root_tree_id, None)?;
+            if new_eb.logical() != root_bytenr {
+                fs_info.set_root_bytenr(root_tree_id, new_eb.logical());
+            }
+        }
+
         // Step 1: Convergence loop. Flushing delayed refs modifies the
         // extent tree (COW), which generates new delayed refs. Updating
         // root items modifies the root tree (COW), generating more.
@@ -219,29 +244,6 @@ impl<R: Read + Write + Seek> Transaction<R> {
                     "commit convergence loop did not stabilize",
                 ));
             }
-        }
-
-        // Empty-commit short-circuit. If the convergence loop produced
-        // no dirty blocks, the on-disk image is byte-identical to the
-        // previous generation and we must not bump
-        // `superblock.generation` — there is no rewritten root tree
-        // root to back the new generation, so a mount/check would
-        // report "parent transid verify failed: wanted N found N-1".
-        //
-        // The predicate is measured *after* the convergence loop:
-        // `flush_delayed_refs` and `update_root_items` are what create
-        // dirty blocks, so any earlier check would race them. It is
-        // also independent of `allocated_blocks` and `pinned`, which
-        // are bookkeeping (alloc+drop+pin within one transaction
-        // produces no on-disk change). See PLAN.md Finding 3
-        // invariants I1–I5.
-        //
-        // The kernel handles no-op commits by always COWing the root
-        // tree root, keeping superblock and root header generations in
-        // lockstep. We don't yet — Option B in PLAN.md tracks the
-        // proper fix.
-        if fs_info.dirty_count() == 0 {
-            return Ok(());
         }
 
         // Step 2: Flush all dirty blocks to disk
