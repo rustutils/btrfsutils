@@ -55,6 +55,16 @@ pub struct Filesystem<R> {
     /// transaction, because the on-disk copy is now part of the committed
     /// state and overwriting it would break crash consistency.
     written: BTreeSet<u64>,
+    /// Override for the block-group-tree id used by
+    /// [`block_group_tree_id`](Self::block_group_tree_id). When `Some`,
+    /// callers see this id instead of the auto-detected one. Used by
+    /// the `convert-to-block-group-tree` path to pin allocator
+    /// metadata to the extent tree (id 2) while the new BGT (id 11)
+    /// is being built and is therefore only partially populated.
+    /// Should always be cleared via [`BgTreeOverrideGuard`] (RAII)
+    /// rather than written directly, so panics or early returns
+    /// cannot leak the override into normal operation.
+    bg_tree_override: Option<u64>,
 }
 
 impl<R: Read + Write + Seek> Filesystem<R> {
@@ -101,6 +111,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
             sectorsize,
             block_cache: BTreeMap::new(),
             written: BTreeSet::new(),
+            bg_tree_override: None,
         })
     }
 
@@ -141,6 +152,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
             sectorsize,
             block_cache: BTreeMap::new(),
             written: BTreeSet::new(),
+            bg_tree_override: None,
         })
     }
 
@@ -344,6 +356,78 @@ impl<R: Read + Write + Seek> Filesystem<R> {
             }
         }
         changed
+    }
+
+    /// Return the tree id that holds `BLOCK_GROUP_ITEM` records.
+    ///
+    /// When [`bg_tree_override`](Self::bg_tree_override_for_test) is
+    /// set (typically by the `convert-to-block-group-tree` path),
+    /// returns it verbatim. Otherwise auto-detects: returns 11
+    /// (`BLOCK_GROUP_TREE`) if a root for tree 11 is registered,
+    /// else 2 (`EXTENT_TREE`).
+    ///
+    /// All allocator and block-group-update code paths must consult
+    /// this accessor instead of duplicating the routing logic, so
+    /// that the override mechanism actually works for everything
+    /// that touches block-group state.
+    #[must_use]
+    pub fn block_group_tree_id(&self) -> u64 {
+        if let Some(id) = self.bg_tree_override {
+            return id;
+        }
+        if self.root_bytenr(11).is_some() {
+            11
+        } else {
+            2
+        }
+    }
+
+    /// Set the block-group-tree id override. Prefer
+    /// [`pin_block_group_tree`](Self::pin_block_group_tree) which
+    /// returns an RAII guard that clears the override on drop.
+    ///
+    /// Exposed primarily for unit tests of the routing primitive.
+    #[doc(hidden)]
+    pub fn bg_tree_override_for_test(&mut self, id: Option<u64>) {
+        self.bg_tree_override = id;
+    }
+
+    /// Pin [`block_group_tree_id`](Self::block_group_tree_id) to
+    /// the given tree id and return a guard that restores the
+    /// previous override (typically `None`) when dropped.
+    ///
+    /// Use this in conversion paths so that panics or `?`
+    /// early-returns cannot leave the override stuck on the wrong
+    /// value.
+    pub fn pin_block_group_tree(
+        &mut self,
+        id: u64,
+    ) -> BgTreeOverrideGuard<'_, R> {
+        let prev = self.bg_tree_override;
+        self.bg_tree_override = Some(id);
+        BgTreeOverrideGuard { fs: self, prev }
+    }
+}
+
+/// RAII guard that restores the previous block-group-tree
+/// override on drop. Created by
+/// [`Filesystem::pin_block_group_tree`].
+pub struct BgTreeOverrideGuard<'a, R> {
+    fs: &'a mut Filesystem<R>,
+    prev: Option<u64>,
+}
+
+impl<R> BgTreeOverrideGuard<'_, R> {
+    /// Borrow the underlying filesystem mutably for the duration
+    /// of the guard.
+    pub fn fs_mut(&mut self) -> &mut Filesystem<R> {
+        self.fs
+    }
+}
+
+impl<R> Drop for BgTreeOverrideGuard<'_, R> {
+    fn drop(&mut self) {
+        self.fs.bg_tree_override = self.prev;
     }
 }
 

@@ -70,11 +70,7 @@ impl BlockGroup {
 pub fn load_block_groups<R: Read + Write + Seek>(
     fs_info: &mut Filesystem<R>,
 ) -> io::Result<Vec<BlockGroup>> {
-    let bg_tree_id = if fs_info.root_bytenr(11).is_some() {
-        11u64
-    } else {
-        2u64
-    };
+    let bg_tree_id = fs_info.block_group_tree_id();
 
     let root_bytenr = fs_info.root_bytenr(bg_tree_id).ok_or_else(|| {
         io::Error::other(

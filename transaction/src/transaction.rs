@@ -1160,12 +1160,11 @@ impl<R: Read + Write + Seek> Transaction<R> {
     ) -> io::Result<()> {
         use btrfs_disk::items::BlockGroupItem;
 
-        // Block group items live in tree 11 (block group tree) or tree 2
-        let bg_tree_id = if fs_info.root_bytenr(11).is_some() {
-            11u64
-        } else {
-            2u64
-        };
+        // Block group items live in tree 11 (block group tree) or
+        // tree 2 (extent tree). The routing may also be temporarily
+        // pinned to tree 2 by the convert-to-block-group-tree path
+        // while it builds the BGT, hence the accessor.
+        let bg_tree_id = fs_info.block_group_tree_id();
 
         // Search for this block group by its start address.
         // Block group keys: (logical_offset, BLOCK_GROUP_ITEM, length)

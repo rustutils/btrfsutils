@@ -1859,6 +1859,63 @@ fn create_two_empty_trees_in_one_transaction() {
     drop(dir);
 }
 
+// ----- Stage I.4 prep: bg_tree_override routing primitive -----
+
+#[test]
+fn block_group_tree_id_auto_detects_then_override_pins() {
+    // The routing primitive used by convert-to-block-group-tree.
+    // Four states: (auto, no BGT) -> 2; (auto, BGT registered) -> 11;
+    // (override=Some(2), BGT registered) -> 2; (override cleared, BGT
+    // registered) -> 11. Plus a guard-on-drop assertion.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^block-group-tree"]);
+    let mut fs = open_rw(&img_path);
+
+    // No BGT on this image. Auto-detect must return tree 2.
+    assert!(fs.root_bytenr(11).is_none());
+    assert_eq!(fs.block_group_tree_id(), 2);
+
+    // Register a fake root for tree 11. Auto-detect now flips to 11
+    // even though the bytenr is bogus — this is exactly the
+    // "BGT-just-created" state that breaks the allocator without
+    // an override.
+    fs.set_root_bytenr(11, 0xDEAD_BEEF);
+    assert_eq!(fs.block_group_tree_id(), 11);
+
+    // Pin via the RAII guard. Inside the guard's scope, the
+    // accessor must report 2 even though tree 11 is registered.
+    {
+        let mut guard = fs.pin_block_group_tree(2);
+        assert_eq!(guard.fs_mut().block_group_tree_id(), 2);
+    }
+    // After the guard drops, auto-detect resumes.
+    assert_eq!(fs.block_group_tree_id(), 11);
+
+    // The explicit setter (used by the test path) should agree.
+    fs.bg_tree_override_for_test(Some(2));
+    assert_eq!(fs.block_group_tree_id(), 2);
+    fs.bg_tree_override_for_test(None);
+    assert_eq!(fs.block_group_tree_id(), 11);
+
+    // Drop restores the *previous* override, not unconditionally None:
+    // set an explicit override first, then pin via guard, then drop.
+    fs.bg_tree_override_for_test(Some(7));
+    {
+        let mut guard = fs.pin_block_group_tree(99);
+        assert_eq!(guard.fs_mut().block_group_tree_id(), 99);
+    }
+    assert_eq!(
+        fs.block_group_tree_id(),
+        7,
+        "guard drop must restore the previous override, not unconditionally clear"
+    );
+    fs.bg_tree_override_for_test(None);
+    assert_eq!(fs.block_group_tree_id(), 11);
+
+    drop(fs);
+    drop(dir);
+}
+
 // ----- Stage I.3: convert_to_free_space_tree -----
 
 const COMPAT_RO_FREE_SPACE_TREE: u64 = 1 << 0;
