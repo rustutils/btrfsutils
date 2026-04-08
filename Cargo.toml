@@ -9,6 +9,7 @@ members = [
   "tune",
   "uapi",
   "util/gen",
+  "util/testing",
 ]
 default-members = [
   "cli",
@@ -70,6 +71,7 @@ btrfs-stream = { path = "stream", version = "0.11.0" }
 btrfs-transaction = { path = "transaction", version = "0.11.0" }
 btrfs-tune = { path = "tune", version = "0.11.0" }
 btrfs-uapi = { path = "uapi", version = "0.11.0" }
+btrfs-test-utils = { path = "util/testing", version = "0.11.0" }
 
 # Optimize compression libraries in dev/test builds so gzip snapshot
 # tests don't take forever.

@@ -10,8 +10,8 @@ use btrfs_uapi::{
     subvolume::{self, SubvolumeFlags, subvolume_flags_get},
 };
 use common::{
-    BackingFile, LoopbackDevice, Mount, single_mount, verify_test_data,
-    write_compressible_data, write_test_data,
+    BackingFile, LoopbackDevice, Mount, our_mkfs_bin, single_mount,
+    verify_test_data, write_compressible_data, write_test_data,
 };
 use nix::sys::stat;
 use regex_lite::Regex;
@@ -2401,7 +2401,7 @@ fn mkfs_rootdir_end_to_end() {
 
     // Create image, format with --rootdir, mount.
     let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
-    file.mkfs_rootdir(&rootdir, &[]);
+    file.mkfs_rootdir(&our_mkfs_bin(), &rootdir, &[]);
     let lo = LoopbackDevice::new(file);
     let mnt = Mount::new(lo, td.path());
     let mp = mnt.path();
@@ -2437,7 +2437,7 @@ fn mkfs_rootdir_compressed() {
     write_test_data(&rootdir, "random.bin", 64 * 1024);
 
     let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
-    file.mkfs_rootdir(&rootdir, &["--compress", "zstd"]);
+    file.mkfs_rootdir(&our_mkfs_bin(), &rootdir, &["--compress", "zstd"]);
     let lo = LoopbackDevice::new(file);
     let mnt = Mount::new(lo, td.path());
     let mp = mnt.path();
@@ -2461,7 +2461,7 @@ fn mkfs_rootdir_shrink() {
     write_test_data(&rootdir, "data.bin", 4096);
 
     let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
-    file.mkfs_rootdir(&rootdir, &["--shrink"]);
+    file.mkfs_rootdir(&our_mkfs_bin(), &rootdir, &["--shrink"]);
 
     // Image should be much smaller than 512 MB.
     let img_size = fs::metadata(td.path().join("disk.img")).unwrap().len();
@@ -2493,7 +2493,7 @@ fn mkfs_rootdir_lzo_compressed() {
     write_test_data(&rootdir, "random.bin", 64 * 1024);
 
     let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
-    file.mkfs_rootdir(&rootdir, &["--compress", "lzo"]);
+    file.mkfs_rootdir(&our_mkfs_bin(), &rootdir, &["--compress", "lzo"]);
     let lo = LoopbackDevice::new(file);
     let mnt = Mount::new(lo, td.path());
     let mp = mnt.path();

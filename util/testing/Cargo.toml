@@ -1,0 +1,12 @@
+[package]
+name = "btrfs-test-utils"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+repository.workspace = true
+homepage.workspace = true
+description = "Shared RAII test harness for btrfs integration tests: backing files, loop devices, mounts, deterministic fixtures. Linux only, dev-dependency use only."
+publish = false
+
+[dependencies]
+tempfile = { workspace = true }

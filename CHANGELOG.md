@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- New `btrfs-test-utils` crate at `util/testing/` consolidating the RAII
+  test harness (`BackingFile`, `LoopbackDevice`, `Mount`) and shared data
+  helpers (`write_test_data`, `verify_test_data`, `write_compressible_data`)
+  plus `single_mount`, `deterministic_mount`, `cache_gzipped_image`, and
+  `mount_existing_readonly`. Dev-dependency only, not published.
+
+### Changed
+
+- `cli`, `uapi`, and `stream` integration tests now pull their mount /
+  loopback / backing-file helpers from `btrfs-test-utils` instead of
+  maintaining per-crate copies. Each crate's `tests/common.rs` is now a
+  thin re-export plus crate-local glue for fixture image paths. The
+  duplicate `BackingFile::mkfs_rootdir` no longer embeds a hard-coded
+  `env!("CARGO_BIN_EXE_btrfs")` lookup; callers pass the `btrfs-mkfs`
+  binary path explicitly.
+
 - `btrfs-fuse`: milestone M5 — `listxattr`, `getxattr`, and `statfs`.
   Xattrs are read from `XATTR_ITEM` entries (same `DirItem` wire format as
   directory entries; hash collisions handled by linear name scan). `statfs`

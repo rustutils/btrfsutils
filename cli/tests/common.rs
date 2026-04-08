@@ -1,285 +1,20 @@
 #![allow(dead_code)]
-//! RAII test helpers for btrfs integration tests.
-//!
-//! Each struct consumes and owns the previous layer. Drop cleans up from the
-//! inside out: `Mount` unmounts, then its inner `LoopbackDevice` detaches,
-//! then the `BackingFile` removes the image file.
-//!
-//! ```text
-//! Mount  owns  LoopbackDevice  owns  BackingFile
-//!   │              │                      │
-//!  umount      losetup -d             rm file
-//! ```
+//! Re-exports of the shared test harness from `btrfs-test-utils`, plus cli-
+//! specific glue: fixture image paths rooted under this crate, and the
+//! `btrfs-mkfs` binary lookup (which needs `env!("CARGO_BIN_EXE_btrfs")`
+//! and therefore can only run inside this crate).
 
-use std::{
-    fs::{self, File},
-    io::Write,
-    mem::ManuallyDrop,
-    os::unix::io::{AsFd, BorrowedFd},
-    path::{Path, PathBuf},
-    process::Command,
+pub use btrfs_test_utils::{
+    BackingFile, LoopbackDevice, Mount, cache_gzipped_image,
+    deterministic_mount, mount_existing_readonly, single_mount,
+    verify_test_data, write_compressible_data, write_test_data,
 };
+use std::path::{Path, PathBuf};
 
-/// A file created via `set_len` (fallocate). Drop removes the file.
-pub struct BackingFile {
-    path: PathBuf,
-}
-
-impl BackingFile {
-    pub fn new(dir: &Path, name: &str, size: u64) -> Self {
-        let path = dir.join(name);
-        let file = File::create(&path).unwrap_or_else(|e| {
-            panic!("failed to create {}: {e}", path.display())
-        });
-        file.set_len(size).unwrap_or_else(|e| {
-            panic!("failed to set length of {}: {e}", path.display())
-        });
-        Self { path }
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// Grow or shrink the backing file. Call [`LoopbackDevice::refresh_size`]
-    /// afterwards if a loop device is attached.
-    pub fn resize(&self, new_size: u64) {
-        let file =
-            File::options()
-                .write(true)
-                .open(&self.path)
-                .unwrap_or_else(|e| {
-                    panic!("failed to open {}: {e}", self.path.display())
-                });
-        file.set_len(new_size).unwrap_or_else(|e| {
-            panic!("failed to resize {}: {e}", self.path.display())
-        });
-    }
-
-    /// Run `mkfs.btrfs -f` on this file.
-    pub fn mkfs(&self) {
-        run("mkfs.btrfs", &["-f", self.path.to_str().unwrap()]);
-    }
-
-    /// Run `mkfs.btrfs -f` with extra options.
-    pub fn mkfs_with_args(&self, extra: &[&str]) {
-        let mut args: Vec<&str> = vec!["-f"];
-        args.extend_from_slice(extra);
-        args.push(self.path.to_str().unwrap());
-        run("mkfs.btrfs", &args);
-    }
-
-    /// Run our `btrfs-mkfs --rootdir` on this file.
-    pub fn mkfs_rootdir(&self, rootdir: &Path, extra_args: &[&str]) {
-        let mkfs_bin = our_mkfs_bin();
-        let mut args: Vec<&str> =
-            vec!["-f", "--rootdir", rootdir.to_str().unwrap()];
-        args.extend_from_slice(extra_args);
-        args.push(self.path.to_str().unwrap());
-        run(&mkfs_bin, &args);
-    }
-
-    /// Run `mkfs.btrfs -f` with a fixed UUID and label for deterministic output.
-    pub fn mkfs_with_options(&self, uuid: &str, label: &str) {
-        run(
-            "mkfs.btrfs",
-            &[
-                "-f",
-                "--uuid",
-                uuid,
-                "--label",
-                label,
-                self.path.to_str().unwrap(),
-            ],
-        );
-    }
-}
-
-impl Drop for BackingFile {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
-/// A loop device attached to a file. Optionally owns a [`BackingFile`].
-/// Drop detaches with `losetup -d`, then the inner `BackingFile` (if any)
-/// removes the image file.
-pub struct LoopbackDevice {
-    dev_path: PathBuf,
-    _inner: Option<BackingFile>,
-}
-
-impl LoopbackDevice {
-    /// Attach a loop device to a backing file, consuming it. Call
-    /// [`BackingFile::mkfs`] before this if the file should be formatted.
-    pub fn new(file: BackingFile) -> Self {
-        let dev_path = Self::losetup(file.path());
-        Self {
-            dev_path,
-            _inner: Some(file),
-        }
-    }
-
-    /// Attach a loop device to an existing file without taking ownership.
-    /// The file will not be deleted on drop — only the loop device is detached.
-    pub fn attach_existing(path: &Path) -> Self {
-        let dev_path = Self::losetup(path);
-        Self {
-            dev_path,
-            _inner: None,
-        }
-    }
-
-    fn losetup(path: &Path) -> PathBuf {
-        let output = Command::new("losetup")
-            .args(["--find", "--show", path.to_str().unwrap()])
-            .output()
-            .expect("failed to run losetup");
-        assert!(
-            output.status.success(),
-            "losetup failed: {}",
-            String::from_utf8_lossy(&output.stderr),
-        );
-        PathBuf::from(
-            String::from_utf8(output.stdout)
-                .expect("losetup output is not UTF-8")
-                .trim(),
-        )
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.dev_path
-    }
-
-    pub fn backing_file(&self) -> Option<&BackingFile> {
-        self._inner.as_ref()
-    }
-
-    /// Tell the kernel to re-read the size of the backing file. Call this
-    /// after [`BackingFile::resize`] to make the loop device reflect the new
-    /// size.
-    pub fn refresh_size(&self) {
-        run(
-            "losetup",
-            &["--set-capacity", self.dev_path.to_str().unwrap()],
-        );
-    }
-}
-
-impl Drop for LoopbackDevice {
-    fn drop(&mut self) {
-        let _ = Command::new("losetup")
-            .args(["-d", self.dev_path.to_str().unwrap()])
-            .status();
-    }
-}
-
-/// A mounted btrfs filesystem. Owns the [`LoopbackDevice`]. Keeps an open fd
-/// for ioctl use. Drop closes the fd, unmounts, then the inner
-/// `LoopbackDevice` detaches.
-pub struct Mount {
-    mountpoint: PathBuf,
-    file: ManuallyDrop<File>,
-    dev: LoopbackDevice,
-}
-
-impl Mount {
-    /// Creates `base_dir/mnt` and mounts the loop device there, consuming it.
-    pub fn new(dev: LoopbackDevice, base_dir: &Path) -> Self {
-        Self::with_options(dev, base_dir, &[])
-    }
-
-    /// Creates `base_dir/mnt` and mounts with additional `-o` options.
-    pub fn with_options(
-        dev: LoopbackDevice,
-        base_dir: &Path,
-        extra_opts: &[&str],
-    ) -> Self {
-        let mountpoint = base_dir.join("mnt");
-        fs::create_dir_all(&mountpoint).unwrap_or_else(|e| {
-            panic!("failed to create {}: {e}", mountpoint.display())
-        });
-        let mut args = vec!["-t", "btrfs"];
-        if !extra_opts.is_empty() {
-            args.push("-o");
-            // Join multiple options with commas.
-            let opts = extra_opts.join(",");
-            // Leak the string so it lives long enough — this is test code.
-            args.push(Box::leak(opts.into_boxed_str()));
-        }
-        args.push(dev.path().to_str().unwrap());
-        args.push(mountpoint.to_str().unwrap());
-        run("mount", &args);
-        let file = File::open(&mountpoint).expect("failed to open mount");
-        Self {
-            mountpoint,
-            file: ManuallyDrop::new(file),
-            dev,
-        }
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.mountpoint
-    }
-
-    /// A borrowed fd suitable for btrfs ioctls.
-    pub fn fd(&self) -> BorrowedFd<'_> {
-        self.file.as_fd()
-    }
-
-    pub fn loopback(&self) -> &LoopbackDevice {
-        &self.dev
-    }
-
-    /// Unmount and return the underlying loop device for reuse.
-    pub fn into_loopback(self) -> LoopbackDevice {
-        // Close the fd first.
-        let mut this = ManuallyDrop::new(self);
-        // SAFETY: we never use this.file again.
-        unsafe { ManuallyDrop::drop(&mut this.file) };
-
-        let output = Command::new("umount")
-            .arg(&this.mountpoint)
-            .output()
-            .expect("failed to run umount");
-        assert!(
-            output.status.success(),
-            "umount {} failed: {}",
-            this.mountpoint.display(),
-            String::from_utf8_lossy(&output.stderr),
-        );
-        let _ = fs::remove_dir(&this.mountpoint);
-
-        // SAFETY: we take dev out before the ManuallyDrop prevents Drop.
-        // The ManuallyDrop around `this` prevents Mount::drop from running
-        // (which would double-umount and double-drop the file).
-        unsafe { std::ptr::read(&this.dev) }
-    }
-}
-
-impl Drop for Mount {
-    fn drop(&mut self) {
-        // SAFETY: we never use self.file again after this.
-        unsafe { ManuallyDrop::drop(&mut self.file) };
-
-        let output = Command::new("umount")
-            .arg(&self.mountpoint)
-            .output()
-            .expect("failed to run umount");
-        assert!(
-            output.status.success(),
-            "umount {} failed: {}",
-            self.mountpoint.display(),
-            String::from_utf8_lossy(&output.stderr),
-        );
-        let _ = fs::remove_dir(&self.mountpoint);
-    }
-}
-
-/// Path to our `btrfs-mkfs` binary (in the same target dir as the test binary).
-fn our_mkfs_bin() -> String {
-    // CARGO_BIN_EXE_btrfs points to e.g. target/debug/btrfs.
-    // btrfs-mkfs is in the same directory.
+/// Path to our `btrfs-mkfs` binary (in the same target dir as the test
+/// binary). Uses `env!("CARGO_BIN_EXE_btrfs")` so it only resolves inside
+/// this crate.
+pub fn our_mkfs_bin() -> PathBuf {
     let btrfs = env!("CARGO_BIN_EXE_btrfs");
     let dir = Path::new(btrfs).parent().unwrap();
     let mkfs = dir.join("btrfs-mkfs");
@@ -288,163 +23,28 @@ fn our_mkfs_bin() -> String {
         "btrfs-mkfs not found at {}; run `cargo build -p btrfs-mkfs` first",
         mkfs.display()
     );
-    mkfs.to_str().unwrap().to_string()
+    mkfs
 }
 
-fn run(cmd: &str, args: &[&str]) {
-    let output = Command::new(cmd)
-        .args(args)
-        .output()
-        .unwrap_or_else(|e| panic!("failed to run {cmd}: {e}"));
-    assert!(
-        output.status.success(),
-        "{cmd} {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr),
-    );
-}
-
-/// Write a file filled with a deterministic byte pattern. The pattern uses
-/// `byte = position % 251` (prime modulus avoids alignment artifacts).
-pub fn write_test_data(dir: &Path, name: &str, size: usize) {
-    let path = dir.join(name);
-    let mut file = File::create(&path)
-        .unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
-    let chunk_size = 64 * 1024;
-    let mut buf = vec![0u8; chunk_size];
-    let mut written = 0;
-    while written < size {
-        let n = chunk_size.min(size - written);
-        for (i, b) in buf[..n].iter_mut().enumerate() {
-            *b = ((written + i) % 251) as u8;
-        }
-        file.write_all(&buf[..n]).unwrap();
-        written += n;
-    }
-    file.sync_all().unwrap();
-}
-
-/// Read the file back and assert that every byte matches the pattern written
-/// by [`write_test_data`].
-pub fn verify_test_data(dir: &Path, name: &str, size: usize) {
-    let path = dir.join(name);
-    let data = fs::read(&path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    assert_eq!(
-        data.len(),
-        size,
-        "file size mismatch for {}",
-        path.display()
-    );
-    for (i, &b) in data.iter().enumerate() {
-        assert_eq!(b, (i % 251) as u8, "data mismatch at byte {i}");
-    }
-}
-
-/// Write highly compressible data (all zeros).
-pub fn write_compressible_data(dir: &Path, name: &str, size: usize) {
-    let path = dir.join(name);
-    let mut file = File::create(&path)
-        .unwrap_or_else(|e| panic!("failed to create {}: {e}", path.display()));
-    let chunk_size = 64 * 1024;
-    let buf = vec![0u8; chunk_size];
-    let mut written = 0;
-    while written < size {
-        let n = chunk_size.min(size - written);
-        file.write_all(&buf[..n]).unwrap();
-        written += n;
-    }
-    file.sync_all().unwrap();
-}
-
-/// Create a single-device 512MB btrfs filesystem. Returns the tempdir (must be
-/// kept alive) and the mount.
-pub fn single_mount() -> (tempfile::TempDir, Mount) {
-    let td = tempfile::tempdir().unwrap();
-    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
-    file.mkfs();
-    let lo = LoopbackDevice::new(file);
-    let mnt = Mount::new(lo, td.path());
-    (td, mnt)
-}
-
-/// Fixed UUID used by [`deterministic_mount`] for reproducible test output.
-pub const TEST_UUID: &str = "deadbeef-dead-beef-dead-beefdeadbeef";
-/// Fixed label used by [`deterministic_mount`] for reproducible test output.
-pub const TEST_LABEL: &str = "test-fs";
-
-/// Like [`single_mount`], but with a fixed UUID and label so that command
-/// output is deterministic and suitable for snapshot testing.
-pub fn deterministic_mount() -> (tempfile::TempDir, Mount) {
-    let td = tempfile::tempdir().unwrap();
-    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
-    file.mkfs_with_options(TEST_UUID, TEST_LABEL);
-    let lo = LoopbackDevice::new(file);
-    let mnt = Mount::new(lo, td.path());
-    (td, mnt)
+/// Directory where decompressed fixture images are cached across test runs.
+/// Cleaned by `cargo clean`.
+fn fixture_cache_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-fixtures")
 }
 
 /// Return the path to the cached decompressed fixture image, extracting it
-/// on first use. The cache lives at `target/test-fixtures/test-fs.img` so it
-/// survives across test runs but is cleaned by `cargo clean`.
+/// on first use. The cache lives at `target/test-fixtures/test-fs.img`.
 pub fn cached_fixture_image() -> PathBuf {
-    let cache_dir =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-fixtures");
-    let cached = cache_dir.join("test-fs.img");
-
-    if !cached.exists() {
-        fs::create_dir_all(&cache_dir).unwrap_or_else(|e| {
-            panic!("failed to create {}: {e}", cache_dir.display())
-        });
-        let gz_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/commands/fixture.img.gz");
-        // Decompress to a temp file, then rename atomically to avoid
-        // races when multiple tests check cached.exists() concurrently.
-        let tmp = cache_dir.join("test-fs.img.tmp");
-        let status = Command::new("gunzip")
-            .args(["-k", "-c"])
-            .arg(&gz_path)
-            .stdout(File::create(&tmp).unwrap_or_else(|e| {
-                panic!("failed to create {}: {e}", tmp.display())
-            }))
-            .status()
-            .expect("failed to run gunzip");
-        assert!(status.success(), "gunzip failed");
-        // Atomic rename — other threads will either see the old state
-        // (no file) and also decompress (harmless), or see the final
-        // complete file.
-        let _ = fs::rename(&tmp, &cached);
-    }
-
-    cached
+    let gz = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/commands/fixture.img.gz");
+    cache_gzipped_image(&gz, &fixture_cache_dir(), "test-fs.img")
 }
 
 /// Return the path to the cached decompressed broken image (for check tests).
-/// This image was produced by a pre-fix mkfs --rootdir with known errors.
 pub fn cached_broken_image() -> PathBuf {
-    let cache_dir =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-fixtures");
-    let cached = cache_dir.join("broken.img");
-
-    if !cached.exists() {
-        fs::create_dir_all(&cache_dir).unwrap_or_else(|e| {
-            panic!("failed to create {}: {e}", cache_dir.display())
-        });
-        let gz_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/commands/broken.img.gz");
-        let tmp = cache_dir.join("broken.img.tmp");
-        let status = Command::new("gunzip")
-            .args(["-k", "-c"])
-            .arg(&gz_path)
-            .stdout(File::create(&tmp).unwrap_or_else(|e| {
-                panic!("failed to create {}: {e}", tmp.display())
-            }))
-            .status()
-            .expect("failed to run gunzip");
-        assert!(status.success(), "gunzip failed");
-        let _ = fs::rename(&tmp, &cached);
-    }
-
-    cached
+    let gz = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/commands/broken.img.gz");
+    cache_gzipped_image(&gz, &fixture_cache_dir(), "broken.img")
 }
 
 /// Mount the pre-built fixture image read-only. The decompressed image is
@@ -452,43 +52,5 @@ pub fn cached_broken_image() -> PathBuf {
 /// cost. Each test attaches its own loopback device directly to the shared
 /// cached file — no copy needed since we mount read-only.
 pub fn fixture_mount() -> (tempfile::TempDir, Mount) {
-    let td = tempfile::tempdir().unwrap();
-    let cached = cached_fixture_image();
-
-    let lo = LoopbackDevice::attach_existing(&cached);
-
-    // Mount read-only to preserve the fixture.
-    let mountpoint = td.path().join("mnt");
-    fs::create_dir_all(&mountpoint).unwrap();
-    run(
-        "mount",
-        &[
-            "-t",
-            "btrfs",
-            "-o",
-            "ro",
-            lo.path().to_str().unwrap(),
-            mountpoint.to_str().unwrap(),
-        ],
-    );
-    let file = File::open(&mountpoint).expect("failed to open mount");
-    let mnt = Mount {
-        mountpoint,
-        file: ManuallyDrop::new(file),
-        dev: lo,
-    };
-    (td, mnt)
-}
-
-/// Expands to the name of the function it is invoked from.
-#[macro_export]
-macro_rules! test_name {
-    () => {{
-        fn f() {}
-        let full = std::any::type_name_of_val(&f);
-        let trimmed = full
-            .trim_end_matches("::f")
-            .trim_end_matches("::{{closure}}");
-        trimmed.rsplit("::").next().unwrap_or(trimmed)
-    }};
+    mount_existing_readonly(&cached_fixture_image())
 }

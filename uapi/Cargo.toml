@@ -24,6 +24,7 @@ btrfs-disk = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+btrfs-test-utils = { workspace = true }
 
 [build-dependencies]
 bindgen = { workspace = true }

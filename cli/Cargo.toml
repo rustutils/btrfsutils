@@ -46,5 +46,6 @@ tune = ["dep:btrfs-tune"]
 multicall = []
 
 [dev-dependencies]
+btrfs-test-utils = { workspace = true }
 insta = "1"
 tempfile = "3"

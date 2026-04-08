@@ -153,7 +153,7 @@ fn resize_grow() {
     let dev_before = device_info(mnt.fd(), 1).unwrap().unwrap();
 
     // Grow the backing file and tell the loop device.
-    mnt.loopback().backing_file().resize(400_000_000);
+    mnt.loopback().backing_file().unwrap().resize(400_000_000);
     mnt.loopback().refresh_size();
 
     // Tell btrfs to use the new space.

@@ -5,6 +5,7 @@
 //! specific receive code paths in isolation.
 
 use btrfs_stream::{ReceiveContext, StreamCommand, Timespec};
+use btrfs_test_utils::Mount;
 use std::{
     os::unix::fs::{FileTypeExt, MetadataExt},
     path::{Path, PathBuf},
@@ -14,73 +15,26 @@ use uuid::Uuid;
 
 // ── Test helpers ────────────────────────────────────────────────────
 
-fn run(cmd: &str, args: &[&str]) {
-    let output = Command::new(cmd)
-        .args(args)
-        .output()
-        .unwrap_or_else(|e| panic!("failed to run {cmd}: {e}"));
-    assert!(
-        output.status.success(),
-        "{cmd} {:?} failed:\n{}",
-        args,
-        String::from_utf8_lossy(&output.stderr),
-    );
-}
-
+/// Thin wrapper around (`TempDir`, `Mount`) that keeps the existing
+/// `TestMount::new() -> Self; mnt.path()` API for the per-test setup
+/// functions below. Drop order (inner to outer) handles unmount/detach
+/// before the tempdir is removed.
 struct TestMount {
     _td: tempfile::TempDir,
-    mountpoint: PathBuf,
-    _loop_path: PathBuf,
+    mount: Mount,
 }
 
 impl TestMount {
     fn new() -> Self {
-        let td = tempfile::tempdir().unwrap();
-        let img = td.path().join("disk.img");
-        std::fs::File::create(&img)
-            .unwrap()
-            .set_len(512_000_000)
-            .unwrap();
-        run("mkfs.btrfs", &["-f", img.to_str().unwrap()]);
-
-        let output = Command::new("losetup")
-            .args(["--find", "--show", img.to_str().unwrap()])
-            .output()
-            .expect("losetup failed");
-        assert!(output.status.success());
-        let loop_path =
-            PathBuf::from(String::from_utf8(output.stdout).unwrap().trim());
-
-        let mountpoint = td.path().join("mnt");
-        std::fs::create_dir(&mountpoint).unwrap();
-        run(
-            "mount",
-            &[
-                "-t",
-                "btrfs",
-                loop_path.to_str().unwrap(),
-                mountpoint.to_str().unwrap(),
-            ],
-        );
-
+        let (td, mnt) = btrfs_test_utils::single_mount();
         Self {
             _td: td,
-            mountpoint,
-            _loop_path: loop_path,
+            mount: mnt,
         }
     }
 
     fn path(&self) -> &Path {
-        &self.mountpoint
-    }
-}
-
-impl Drop for TestMount {
-    fn drop(&mut self) {
-        let _ = Command::new("umount").arg(&self.mountpoint).status();
-        let _ = Command::new("losetup")
-            .args(["-d", self._loop_path.to_str().unwrap()])
-            .status();
+        self.mount.path()
     }
 }
 
