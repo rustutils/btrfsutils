@@ -6,9 +6,10 @@
 
 use btrfs_disk::tree::{DiskKey, KeyType};
 use btrfs_transaction::{
-    balance,
+    allocation, balance,
     buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
     cow,
+    extent_walk::{self, AllocatedExtent},
     filesystem::Filesystem,
     items,
     path::BtrfsPath,
@@ -1541,6 +1542,273 @@ fn create_empty_tree_rejects_existing_real_tree() {
     assert!(err.to_string().contains("already exists"), "got: {err}");
     trans.abort(&mut fs);
     drop(fs);
+    drop(dir);
+}
+
+// ----- Stage I.2: read-only extent-tree walker -----
+
+/// Read every `FREE_SPACE_EXTENT` item in the FST whose key
+/// objectid lies inside `[bg_start, bg_start + bg_length)`. Returns
+/// `(start, length)` pairs in ascending order.
+fn read_fst_extents(
+    fs: &mut Filesystem<File>,
+    bg_start: u64,
+    bg_length: u64,
+) -> Vec<(u64, u64)> {
+    let bg_end = bg_start + bg_length;
+    let key = DiskKey {
+        objectid: bg_start,
+        key_type: KeyType::FreeSpaceExtent,
+        offset: 0,
+    };
+    let mut path = BtrfsPath::new();
+    search::search_slot(
+        None,
+        fs,
+        10, // FREE_SPACE_TREE
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .unwrap();
+    let mut out = Vec::new();
+    loop {
+        let Some(leaf) = path.nodes[0].as_ref() else {
+            break;
+        };
+        let slot = path.slots[0];
+        if slot >= leaf.nritems() as usize {
+            if !search::next_leaf(fs, &mut path).unwrap() {
+                break;
+            }
+            continue;
+        }
+        let k = leaf.item_key(slot);
+        if k.objectid >= bg_end {
+            break;
+        }
+        if k.key_type == KeyType::FreeSpaceExtent && k.offset > 0 {
+            out.push((k.objectid, k.offset));
+        }
+        path.slots[0] = slot + 1;
+    }
+    path.release();
+    out
+}
+
+#[test]
+fn extent_walker_matches_fst_for_metadata_block_group() {
+    // Strongest possible end-to-end check: walk allocated extents
+    // for an existing metadata block group, derive free ranges, and
+    // assert they exactly match the on-disk FREE_SPACE_TREE entries
+    // for the same group. mkfs.btrfs writes both, so any divergence
+    // is either a walker bug or a derivation bug.
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+
+    let groups = allocation::load_block_groups(&mut fs).unwrap();
+    let bg = groups
+        .iter()
+        .find(|g| g.is_metadata())
+        .expect("default mkfs creates a metadata block group");
+
+    let mut walked: Vec<AllocatedExtent> = Vec::new();
+    extent_walk::walk_block_group_extents(&mut fs, bg.start, bg.length, |e| {
+        walked.push(e);
+        Ok(())
+    })
+    .unwrap();
+
+    // Walker invariants.
+    assert!(
+        !walked.is_empty(),
+        "metadata BG should have allocated tree blocks"
+    );
+    for w in &walked {
+        assert!(w.start >= bg.start);
+        assert!(w.end() <= bg.start + bg.length);
+        assert!(w.length > 0);
+    }
+    for pair in walked.windows(2) {
+        assert!(
+            pair[0].end() <= pair[1].start,
+            "walker yielded overlapping extents: {:?} {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+
+    let derived =
+        extent_walk::derive_free_ranges(bg.start, bg.length, &walked).unwrap();
+    let derived_pairs: Vec<(u64, u64)> =
+        derived.iter().map(|r| (r.start, r.length)).collect();
+
+    let fst = read_fst_extents(&mut fs, bg.start, bg.length);
+
+    // mkfs's FST should agree with our walker-derived ranges.
+    assert_eq!(
+        derived_pairs, fst,
+        "derived free ranges differ from on-disk FST for BG {}",
+        bg.start
+    );
+
+    // Length conservation across the whole block group.
+    let alloc_total: u64 = walked.iter().map(|e| e.length).sum();
+    let free_total: u64 = derived.iter().map(|r| r.length).sum();
+    assert_eq!(alloc_total + free_total, bg.length);
+
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn extent_walker_visits_all_allocated_extents_in_data_block_group() {
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+    let groups = allocation::load_block_groups(&mut fs).unwrap();
+    let Some(bg) = groups.iter().find(|g| g.is_data()).cloned() else {
+        // Some mkfs builds skip data BG until first write — accept and bail.
+        return;
+    };
+
+    let mut walked: Vec<AllocatedExtent> = Vec::new();
+    extent_walk::walk_block_group_extents(&mut fs, bg.start, bg.length, |e| {
+        walked.push(e);
+        Ok(())
+    })
+    .unwrap();
+
+    let derived =
+        extent_walk::derive_free_ranges(bg.start, bg.length, &walked).unwrap();
+    let derived_pairs: Vec<(u64, u64)> =
+        derived.iter().map(|r| (r.start, r.length)).collect();
+    let fst = read_fst_extents(&mut fs, bg.start, bg.length);
+    assert_eq!(derived_pairs, fst);
+
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn extent_walker_visitor_error_propagates() {
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+    let bg = allocation::load_block_groups(&mut fs)
+        .unwrap()
+        .into_iter()
+        .find(|g| g.is_metadata())
+        .unwrap();
+
+    let err = extent_walk::walk_block_group_extents(
+        &mut fs,
+        bg.start,
+        bg.length,
+        |_| Err(std::io::Error::other("stop here")),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("stop here"));
+
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn extent_walker_visitor_error_short_circuits() {
+    // The visitor should be called at most once before erroring out.
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+    let bg = allocation::load_block_groups(&mut fs)
+        .unwrap()
+        .into_iter()
+        .find(|g| g.is_metadata())
+        .unwrap();
+    let mut count = 0u32;
+    let _ = extent_walk::walk_block_group_extents(
+        &mut fs,
+        bg.start,
+        bg.length,
+        |_| {
+            count += 1;
+            Err(std::io::Error::other("stop"))
+        },
+    );
+    assert_eq!(
+        count, 1,
+        "visitor must be called exactly once before bailing"
+    );
+
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn extent_walker_post_modification_matches_fst() {
+    // After we COW some extent-tree blocks (by inserting items into
+    // the root tree), the walker for the affected metadata BG must
+    // still match the updated FST.
+    let (dir, img_path) = create_test_image();
+
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        let data = [0x9Au8; 64];
+        for i in 0..40u64 {
+            let key = DiskKey {
+                objectid: 600_000 + i,
+                key_type: KeyType::TemporaryItem,
+                offset: 0,
+            };
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+                true,
+            )
+            .unwrap();
+            let leaf = path.nodes[0].as_mut().unwrap();
+            items::insert_item(leaf, path.slots[0], &key, &data).unwrap();
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let mut fs = open_rw(&img_path);
+    for bg in allocation::load_block_groups(&mut fs).unwrap() {
+        if !bg.is_metadata() {
+            continue;
+        }
+        let mut walked = Vec::new();
+        extent_walk::walk_block_group_extents(
+            &mut fs,
+            bg.start,
+            bg.length,
+            |e| {
+                walked.push(e);
+                Ok(())
+            },
+        )
+        .unwrap();
+        let derived =
+            extent_walk::derive_free_ranges(bg.start, bg.length, &walked)
+                .unwrap();
+        let derived_pairs: Vec<(u64, u64)> =
+            derived.iter().map(|r| (r.start, r.length)).collect();
+        let fst = read_fst_extents(&mut fs, bg.start, bg.length);
+        assert_eq!(
+            derived_pairs, fst,
+            "post-mutation: walker disagrees with FST in BG {}",
+            bg.start
+        );
+    }
+
+    drop(fs);
+    assert_btrfs_check(&img_path);
     drop(dir);
 }
 

@@ -27,6 +27,7 @@ pub mod balance;
 pub mod buffer;
 pub mod cow;
 pub mod delayed_ref;
+pub mod extent_walk;
 pub mod filesystem;
 pub mod free_space;
 pub mod items;
