@@ -2438,18 +2438,6 @@ fn rescue_clear_space_cache_v2() {
 
     let dev = lo.path().to_str().unwrap();
 
-    // v1 path is unimplemented; verify it errors clearly.
-    let v1_out = Command::new(env!("CARGO_BIN_EXE_btrfs"))
-        .args(["rescue", "clear-space-cache", "v1", dev])
-        .output()
-        .expect("failed to run btrfs");
-    assert!(!v1_out.status.success(), "v1 should not be implemented yet");
-    let v1_stderr = String::from_utf8_lossy(&v1_out.stderr);
-    assert!(
-        v1_stderr.contains("not yet implemented"),
-        "expected 'not yet implemented', got: {v1_stderr}"
-    );
-
     let out = btrfs_ok(&["rescue", "clear-space-cache", "v2", dev]);
     assert!(
         out.contains("cleared free space tree")
@@ -2477,6 +2465,62 @@ fn rescue_clear_space_cache_v2() {
     assert_eq!(
         std::fs::read(mp.join("d/payload.bin")).unwrap(),
         vec![0xAB; 256 * 1024]
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn rescue_clear_space_cache_v1() {
+    let td = tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
+    // Disable both BGT and FST so the kernel uses the v1 space cache.
+    file.mkfs_with_args(&[
+        "-O",
+        "^block-group-tree",
+        "-O",
+        "^free-space-tree",
+    ]);
+    let lo = LoopbackDevice::new(file);
+
+    // Mount with space_cache=v1 and write enough to force the kernel
+    // to materialize cache files for at least one block group.
+    let lo = {
+        let mnt = Mount::with_options(lo, td.path(), &["space_cache=v1"]);
+        let mp = mnt.path();
+        std::fs::write(mp.join("hello.txt"), b"hello world").unwrap();
+        std::fs::create_dir(mp.join("d")).unwrap();
+        std::fs::write(mp.join("d/payload.bin"), vec![0xCD; 512 * 1024])
+            .unwrap();
+        mnt.into_loopback()
+    };
+
+    let dev = lo.path().to_str().unwrap();
+    let out = btrfs_ok(&["rescue", "clear-space-cache", "v1", dev]);
+    assert!(
+        out.contains("cleared v1 free space cache")
+            || out.contains("no v1 free space cache"),
+        "expected v1 clear message, got: {out}"
+    );
+
+    let check_output = Command::new("btrfs")
+        .args(["check", "--readonly", dev])
+        .output()
+        .expect("failed to run btrfs check");
+    if !check_output.status.success() {
+        let stderr = String::from_utf8_lossy(&check_output.stderr);
+        let stdout = String::from_utf8_lossy(&check_output.stdout);
+        panic!(
+            "btrfs check failed:\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
+        );
+    }
+
+    // Re-mount and verify data is intact.
+    let mnt = Mount::with_options(lo, td.path(), &["space_cache=v1"]);
+    let mp = mnt.path();
+    assert_eq!(std::fs::read(mp.join("hello.txt")).unwrap(), b"hello world");
+    assert_eq!(
+        std::fs::read(mp.join("d/payload.bin")).unwrap(),
+        vec![0xCD; 512 * 1024]
     );
 }
 

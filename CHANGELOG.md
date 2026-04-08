@@ -20,14 +20,20 @@ All notable changes to this project will be documented in this file.
   registers freshly-allocated SYSTEM chunks in the superblock
   bootstrap snippet. New `btrfs-disk` helpers: `chunk_item_bytes`
   serializer, `sys_chunk_array_contains`, `sys_chunk_array_append`.
+- `btrfs rescue clear-space-cache --version v1`: for every block
+  group, deletes the `FREE_SPACE_HEADER` from the root tree, walks
+  the cache inode's `EXTENT_DATA` items dropping each referenced
+  data extent, deletes the `EXTENT_DATA` items and the
+  `INODE_ITEM`, and bumps the superblock `cache_generation` to
+  invalidate the cache. Privileged integration test exercises the
+  full rw remount round-trip with `space_cache=v1`.
 - `btrfs rescue clear-space-cache --version v2`: walks the
   FREE_SPACE_TREE, drops every block, removes its ROOT_ITEM, clears
   the `FREE_SPACE_TREE` + `FREE_SPACE_TREE_VALID` compat_ro flags,
   and commits. The kernel rebuilds the tree on the next mount.
   Refuses to run on filesystems with `BLOCK_GROUP_TREE` enabled
   (BGT requires FST). Privileged integration test exercises the
-  full rw remount round-trip. v1 is parked behind Stage G in
-  `transaction/PLAN.md` (data extent ref support gap).
+  full rw remount round-trip.
 - `btrfs rescue fix-data-checksum`: walks the csum tree, recomputes
   CRC32C for every covered sector, and reports mismatches in
   `--readonly` mode (default). With `--mirror 1`, mismatched csum
