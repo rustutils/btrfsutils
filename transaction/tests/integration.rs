@@ -1262,6 +1262,136 @@ fn mount_verify_file_created() {
     assert_eq!(metadata.len(), 0, "hello.txt should be empty");
 }
 
+/// Force a chunk tree COW by mutating a `DEV_ITEM` in place via
+/// `search_slot(cow=true)`, commit, and verify the new chunk root
+/// resolves cleanly on a fresh open and the mutation persisted.
+///
+/// This exercises the SYSTEM-block-group allocator path and the
+/// `sys_chunk_array` bootstrap update.
+#[test]
+fn chunk_tree_cow_round_trip() {
+    let (dir, img_path) = create_test_image();
+
+    // Phase 1: pick a DEV_ITEM, modify a benign field, commit.
+    // Use `seek_speed` (1 byte at offset 64) which btrfs check ignores;
+    // touching `bytes_used` would trip allocation-tree checks.
+    let (devid, new_seek_speed) = {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let mut trans = Transaction::start(&mut fs).expect("start");
+
+        // DEV_ITEMS objectid = 1, DEV_ITEM key. Pick the smallest.
+        let key = DiskKey {
+            objectid: 1, // BTRFS_DEV_ITEMS_OBJECTID
+            key_type: KeyType::DeviceItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            3, // chunk tree
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true, // COW
+        )
+        .expect("search_slot dev item");
+
+        // Walk forward to the first DEV_ITEM.
+        let leaf = path.nodes[0].as_mut().expect("leaf");
+        let mut slot = path.slots[0];
+        while slot < leaf.nritems() as usize {
+            let k = leaf.item_key(slot);
+            if k.key_type == KeyType::DeviceItem && k.objectid == 1 {
+                break;
+            }
+            slot += 1;
+        }
+        assert!(
+            slot < leaf.nritems() as usize,
+            "no DEV_ITEM in chunk tree"
+        );
+
+        let item_key = leaf.item_key(slot);
+        let devid = item_key.offset;
+
+        // btrfs_dev_item layout (offsets in bytes, little-endian):
+        //   0  u64 devid
+        //   8  u64 total_bytes
+        //   16 u64 bytes_used
+        //   24 u32 io_align
+        //   28 u32 io_width
+        //   32 u32 sector_size
+        //   36 u64 type
+        //   44 u64 generation
+        //   52 u64 start_offset
+        //   60 u32 dev_group
+        //   64 u8  seek_speed   <-- mutated here
+        //   65 u8  bandwidth
+        //   66 [u8; 16] uuid
+        //   82 [u8; 16] fsid
+        let payload = leaf.item_data(slot);
+        let old_seek_speed = payload[64];
+        let new_seek_speed = old_seek_speed ^ 0x55;
+        leaf.item_data_mut(slot)[64] = new_seek_speed;
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+        (devid, new_seek_speed)
+    };
+
+    // Phase 2: reopen and verify.
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(&img_path)
+        .unwrap();
+    let mut fs = Filesystem::open(file).expect("reopen");
+    assert!(
+        fs.root_bytenr(3).is_some(),
+        "chunk root must resolve after COW",
+    );
+
+    let key = DiskKey {
+        objectid: 1,
+        key_type: KeyType::DeviceItem,
+        offset: devid,
+    };
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        None,
+        &mut fs,
+        3,
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .expect("search after reopen");
+    assert!(found, "DEV_ITEM should still exist");
+    let leaf = path.leaf().unwrap();
+    let payload = leaf.item_data(path.slots[0]);
+    let seek_speed = payload[64];
+    assert_eq!(
+        seek_speed, new_seek_speed,
+        "DEV_ITEM seek_speed should reflect the in-transaction edit"
+    );
+    path.release();
+
+    // Phase 3: btrfs check sanity (chunk root pointer + sys_chunk_array
+    // bootstrap have to be internally consistent).
+    assert_btrfs_check(&img_path);
+
+    drop(dir);
+}
+
 /// Stage G: drop a data extent backref through `Transaction::commit` and
 /// verify the parent `EXTENT_ITEM` and any csum tree entries for the
 /// freed range disappear.

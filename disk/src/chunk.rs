@@ -208,6 +208,130 @@ pub fn seed_from_sys_chunk_array(array: &[u8], size: u32) -> ChunkTreeCache {
     cache
 }
 
+/// Serialize a [`ChunkMapping`] into the on-disk `btrfs_chunk` byte
+/// layout (48-byte fixed header + `num_stripes * 32`-byte stripes).
+///
+/// `sector_size` is written into the chunk's `io_align`, `io_width`,
+/// and `sector_size` fields (all three are conventionally equal to the
+/// filesystem sector size).
+#[must_use]
+pub fn chunk_item_bytes(mapping: &ChunkMapping, sector_size: u32) -> Vec<u8> {
+    use bytes::BufMut;
+
+    let chunk_base_size = mem::offset_of!(raw::btrfs_chunk, stripe);
+    let stripe_size = mem::size_of::<raw::btrfs_stripe>();
+    let total = chunk_base_size + mapping.num_stripes as usize * stripe_size;
+    let mut buf: Vec<u8> = Vec::with_capacity(total);
+
+    buf.put_u64_le(mapping.length);
+    // Owner is always EXTENT_TREE objectid (2) for chunk records.
+    buf.put_u64_le(u64::from(raw::BTRFS_EXTENT_TREE_OBJECTID));
+    buf.put_u64_le(mapping.stripe_len);
+    buf.put_u64_le(mapping.chunk_type);
+    buf.put_u32_le(sector_size); // io_align
+    buf.put_u32_le(sector_size); // io_width
+    buf.put_u32_le(sector_size); // sector_size
+    buf.put_u16_le(mapping.num_stripes);
+    buf.put_u16_le(mapping.sub_stripes);
+    debug_assert_eq!(buf.len(), chunk_base_size);
+
+    for stripe in &mapping.stripes {
+        buf.put_u64_le(stripe.devid);
+        buf.put_u64_le(stripe.offset);
+        buf.extend_from_slice(stripe.dev_uuid.as_bytes());
+    }
+    debug_assert_eq!(buf.len(), total);
+    buf
+}
+
+/// Walk the superblock's `sys_chunk_array` and return `true` if it
+/// already contains a record whose `disk_key.offset` matches `bg_start`
+/// (i.e. the system chunk starting at that logical address is already
+/// part of the bootstrap snippet).
+#[must_use]
+pub fn sys_chunk_array_contains(
+    array: &[u8],
+    size: u32,
+    bg_start: u64,
+) -> bool {
+    let array = &array[..size as usize];
+    let disk_key_size = mem::size_of::<raw::btrfs_disk_key>();
+    let mut offset = 0usize;
+    while offset + disk_key_size <= array.len() {
+        // disk_key layout: u64 objectid | u8 type | u64 offset.
+        let mut b = &array[offset + 9..];
+        let key_offset = b.get_u64_le();
+        offset += disk_key_size;
+        if key_offset == bg_start {
+            return true;
+        }
+        let Some((_, consumed)) = parse_chunk_item(&array[offset..], key_offset)
+        else {
+            return false;
+        };
+        offset += consumed;
+    }
+    false
+}
+
+/// Append a single `(disk_key, btrfs_chunk)` record to the
+/// superblock's `sys_chunk_array` byte buffer.
+///
+/// Writes the 17-byte `btrfs_disk_key` followed by `chunk_bytes`
+/// (already serialized via [`chunk_item_bytes`]) starting at offset
+/// `*size`. On success, `*size` is bumped by the record size and
+/// `Ok(new_size)` is returned. Returns `Err` if the record would
+/// overflow the 2048-byte `sys_chunk_array`.
+///
+/// `bg_start` is the chunk's logical start address; it becomes the
+/// `offset` field of the `BTRFS_FIRST_CHUNK_TREE_OBJECTID / CHUNK_ITEM`
+/// disk key.
+///
+/// # Errors
+///
+/// Returns an error if the record does not fit in the remaining
+/// `sys_chunk_array` space.
+///
+/// # Panics
+///
+/// Panics in debug builds if the new array size cannot be represented
+/// in a `u32`. In practice this never happens because callers cap the
+/// buffer at 2048 bytes.
+pub fn sys_chunk_array_append(
+    array: &mut [u8],
+    size: &mut u32,
+    bg_start: u64,
+    chunk_bytes: &[u8],
+) -> Result<u32, &'static str> {
+    use bytes::BufMut;
+
+    let disk_key_size = mem::size_of::<raw::btrfs_disk_key>();
+    let record_size = disk_key_size + chunk_bytes.len();
+    let cur = *size as usize;
+    if cur + record_size > array.len() {
+        return Err("sys_chunk_array overflow");
+    }
+
+    // disk_key: objectid=BTRFS_FIRST_CHUNK_TREE_OBJECTID(256),
+    //           type=BTRFS_CHUNK_ITEM_KEY(228),
+    //           offset=bg_start.
+    #[allow(clippy::cast_possible_truncation)]
+    let chunk_item_type = raw::BTRFS_CHUNK_ITEM_KEY as u8;
+    let mut header = [0u8; 17];
+    {
+        let mut w = &mut header[..];
+        w.put_u64_le(u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID));
+        w.put_u8(chunk_item_type);
+        w.put_u64_le(bg_start);
+    }
+    array[cur..cur + 17].copy_from_slice(&header);
+    array[cur + 17..cur + record_size].copy_from_slice(chunk_bytes);
+
+    let new_size = u32::try_from(cur + record_size).unwrap();
+    *size = new_size;
+    Ok(new_size)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,6 +438,83 @@ mod tests {
         assert_eq!(mapping.num_stripes, 1);
         assert_eq!(mapping.stripes[0].devid, 1);
         assert_eq!(mapping.stripes[0].offset, 5000);
+    }
+
+    fn sample_mapping(logical: u64, length: u64, physical: u64) -> ChunkMapping {
+        ChunkMapping {
+            logical,
+            length,
+            stripe_len: 65536,
+            // SYSTEM | SINGLE
+            chunk_type: u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
+            num_stripes: 1,
+            sub_stripes: 1,
+            stripes: vec![Stripe {
+                devid: 1,
+                offset: physical,
+                dev_uuid: Uuid::from_bytes([0xAB; 16]),
+            }],
+        }
+    }
+
+    #[test]
+    fn chunk_item_bytes_round_trips_via_parser() {
+        let m = sample_mapping(0x100_0000, 0x40_0000, 0x200_0000);
+        let bytes = chunk_item_bytes(&m, 4096);
+        let (parsed, consumed) = parse_chunk_item(&bytes, m.logical).unwrap();
+        assert_eq!(consumed, bytes.len());
+        assert_eq!(parsed.logical, m.logical);
+        assert_eq!(parsed.length, m.length);
+        assert_eq!(parsed.stripe_len, m.stripe_len);
+        assert_eq!(parsed.chunk_type, m.chunk_type);
+        assert_eq!(parsed.num_stripes, 1);
+        assert_eq!(parsed.sub_stripes, 1);
+        assert_eq!(parsed.stripes[0].devid, 1);
+        assert_eq!(parsed.stripes[0].offset, 0x200_0000);
+        assert_eq!(parsed.stripes[0].dev_uuid, m.stripes[0].dev_uuid);
+    }
+
+    #[test]
+    fn sys_chunk_array_append_then_contains_and_seed() {
+        let mut buf = [0u8; 2048];
+        let mut size: u32 = 0;
+        let m1 = sample_mapping(0x100_0000, 0x40_0000, 0x200_0000);
+        let m2 = sample_mapping(0x500_0000, 0x40_0000, 0x600_0000);
+
+        let bytes1 = chunk_item_bytes(&m1, 4096);
+        sys_chunk_array_append(&mut buf, &mut size, m1.logical, &bytes1)
+            .unwrap();
+        assert!(sys_chunk_array_contains(&buf, size, m1.logical));
+        assert!(!sys_chunk_array_contains(&buf, size, m2.logical));
+
+        let bytes2 = chunk_item_bytes(&m2, 4096);
+        sys_chunk_array_append(&mut buf, &mut size, m2.logical, &bytes2)
+            .unwrap();
+        assert!(sys_chunk_array_contains(&buf, size, m2.logical));
+
+        // Seeding from the array should yield both mappings.
+        let cache = seed_from_sys_chunk_array(&buf, size);
+        assert_eq!(cache.len(), 2);
+        assert!(cache.lookup(m1.logical).is_some());
+        assert!(cache.lookup(m2.logical).is_some());
+    }
+
+    #[test]
+    fn sys_chunk_array_append_overflow() {
+        // Tiny array that fits exactly one record (97 bytes for a
+        // single-stripe chunk).
+        let mut buf = [0u8; 100];
+        let mut size: u32 = 0;
+        let m = sample_mapping(0, 0x40_0000, 0);
+        let bytes = chunk_item_bytes(&m, 4096);
+        sys_chunk_array_append(&mut buf, &mut size, m.logical, &bytes).unwrap();
+        // Second append must fail.
+        let m2 = sample_mapping(0x100_0000, 0x40_0000, 0x200_0000);
+        let bytes2 = chunk_item_bytes(&m2, 4096);
+        assert!(
+            sys_chunk_array_append(&mut buf, &mut size, m2.logical, &bytes2)
+                .is_err()
+        );
     }
 
     #[test]

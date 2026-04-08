@@ -32,6 +32,28 @@ use std::{
 /// Tracks dirty blocks and pending reference count changes. Finalized by
 /// either [`commit`](Transaction::commit) (write to disk) or
 /// [`abort`](Transaction::abort) (discard).
+/// Block group kind that the transaction allocator can target.
+///
+/// Metadata block groups hold all tree blocks except the chunk tree;
+/// SYSTEM block groups hold the chunk tree itself, so its blocks can be
+/// resolved by the early-mount bootstrap via the superblock's
+/// `sys_chunk_array`.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum BlockGroupKind {
+    /// A metadata block group (tree blocks for trees other than the
+    /// chunk tree).
+    Metadata,
+    /// A SYSTEM block group (used exclusively for chunk tree blocks).
+    System,
+}
+
+/// Bump allocator state for one [`BlockGroupKind`].
+#[derive(Debug, Clone, Copy)]
+struct AllocCursor {
+    cursor: u64,
+    end: u64,
+}
+
 pub struct Transaction<R> {
     /// The transaction generation (superblock.generation + 1).
     pub transid: u64,
@@ -45,10 +67,10 @@ pub struct Transaction<R> {
     /// transaction. Populated by `flush_delayed_refs`. Consumed by the
     /// free space tree update step (Stage F3). Cleared at commit end.
     pub bg_range_deltas: BlockGroupRangeDeltas,
-    /// Simple bump allocator cursor for metadata blocks.
-    alloc_cursor: u64,
-    /// End of the allocation region.
-    alloc_end: u64,
+    /// Per-kind bump allocator state. Lazily populated on first use of
+    /// each kind so that filesystems without the relevant block group
+    /// type pay no scanning cost up front.
+    alloc: BTreeMap<BlockGroupKind, AllocCursor>,
     /// Logical addresses of blocks freed during this transaction. These
     /// must not be reallocated before the superblock is committed, because
     /// the previous superblock still references them. A crash before commit
@@ -74,10 +96,13 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // Snapshot current roots so we can detect changes at commit time
         fs_info.snapshot_roots();
 
-        // Initialize the temporary bump allocator by finding a metadata
-        // block group with free space. We scan the extent tree to find
-        // block groups and pick one.
-        let (cursor, end) = find_metadata_alloc_region(fs_info)?;
+        // Eagerly seed the metadata cursor — every transaction COWs at
+        // least one metadata block, so failing here is the same as
+        // failing on the first alloc. The SYSTEM cursor is created on
+        // demand the first time the chunk tree is COWed.
+        let (cursor, end) = find_alloc_region_after(fs_info, BlockGroupKind::Metadata, 0)?;
+        let mut alloc = BTreeMap::new();
+        alloc.insert(BlockGroupKind::Metadata, AllocCursor { cursor, end });
 
         Ok(Self {
             transid,
@@ -85,53 +110,56 @@ impl<R: Read + Write + Seek> Transaction<R> {
             allocated_blocks: Vec::new(),
             delayed_refs: DelayedRefQueue::new(),
             bg_range_deltas: BlockGroupRangeDeltas::new(),
-            alloc_cursor: cursor,
-            alloc_end: end,
+            alloc,
             pinned: BTreeSet::new(),
             _phantom: std::marker::PhantomData,
         })
     }
 
-    /// Allocate a new metadata block (nodesize bytes).
+    /// Allocate a new tree block (nodesize bytes) inside a block group
+    /// of `kind`.
     ///
-    /// Uses a bump allocator within a free extent. If the current region is
-    /// exhausted, scans the extent tree for another free extent and continues
-    /// allocating from there.
+    /// Uses a per-kind bump allocator within a free extent. If the
+    /// current region is exhausted, scans the extent tree for another
+    /// free extent of the requested kind and continues from there.
     ///
     /// # Errors
     ///
-    /// Returns an error if no free metadata space is available.
+    /// Returns an error if no block group of the requested kind has
+    /// enough free space.
     pub fn alloc_block(
         &mut self,
         fs_info: &mut Filesystem<R>,
+        kind: BlockGroupKind,
     ) -> io::Result<u64> {
         let nodesize = u64::from(fs_info.nodesize);
 
+        // Lazily seed a cursor for this kind on first use.
+        if !self.alloc.contains_key(&kind) {
+            let (cursor, end) = find_alloc_region_after(fs_info, kind, 0)?;
+            self.alloc.insert(kind, AllocCursor { cursor, end });
+        }
+
         loop {
-            let next = self.alloc_cursor + nodesize;
+            // Snapshot current cursor; we mutate self.alloc below so we
+            // can't hold a borrow into it across the find call.
+            let mut state = *self.alloc.get(&kind).unwrap();
 
-            if next > self.alloc_end {
+            if state.cursor + nodesize > state.end {
                 // Current region exhausted — find another free extent.
-                // Pass the current cursor so we don't re-discover space we
-                // already allocated from (those blocks don't have extent
-                // items yet so they'd appear "free" in the scan).
-                let (cursor, end) = find_metadata_alloc_region_after(
-                    fs_info,
-                    self.alloc_cursor,
-                )?;
-                self.alloc_cursor = cursor;
-                self.alloc_end = end;
-
-                let next = self.alloc_cursor + nodesize;
-                if next > self.alloc_end {
-                    return Err(io::Error::other(
-                        "no metadata block group with enough free space",
-                    ));
+                let (cursor, end) =
+                    find_alloc_region_after(fs_info, kind, state.cursor)?;
+                state = AllocCursor { cursor, end };
+                if state.cursor + nodesize > state.end {
+                    return Err(io::Error::other(format!(
+                        "no {kind:?} block group with enough free space",
+                    )));
                 }
             }
 
-            let logical = self.alloc_cursor;
-            self.alloc_cursor += nodesize;
+            let logical = state.cursor;
+            state.cursor += nodesize;
+            self.alloc.insert(kind, state);
 
             // Skip pinned blocks: these were freed during this transaction
             // but the old superblock still references them. Reusing them
@@ -147,22 +175,32 @@ impl<R: Read + Write + Seek> Transaction<R> {
 
     /// Allocate a new tree block and queue a delayed ref for it.
     ///
-    /// This is the standard allocation entry point for tree blocks. It
-    /// combines physical allocation with extent reference creation as a
-    /// single atomic operation, ensuring every allocated block gets a
-    /// corresponding extent item at commit time.
+    /// Routes the allocation to a SYSTEM block group when COWing the
+    /// chunk tree (tree id 3) and to a metadata block group otherwise.
+    /// SYSTEM allocations are immediately registered in the
+    /// superblock's `sys_chunk_array` so the next mount can resolve
+    /// them via the bootstrap snippet.
     ///
     /// # Errors
     ///
-    /// Returns an error if no free metadata space is available.
+    /// Returns an error if no free metadata space is available, or if
+    /// a SYSTEM allocation cannot be added to the bootstrap snippet.
     pub fn alloc_tree_block(
         &mut self,
         fs_info: &mut Filesystem<R>,
         tree_id: u64,
         level: u8,
     ) -> io::Result<u64> {
-        let logical = self.alloc_block(fs_info)?;
+        let kind = if tree_id == u64::from(btrfs_disk::raw::BTRFS_CHUNK_TREE_OBJECTID) {
+            BlockGroupKind::System
+        } else {
+            BlockGroupKind::Metadata
+        };
+        let logical = self.alloc_block(fs_info, kind)?;
         self.delayed_refs.add_ref(logical, true, tree_id, level);
+        if kind == BlockGroupKind::System {
+            self.ensure_in_sys_chunk_array(fs_info, logical)?;
+        }
         Ok(logical)
     }
 
@@ -1609,6 +1647,114 @@ impl<R: Read + Write + Seek> Transaction<R> {
         Ok(())
     }
 
+    /// Make sure the SYSTEM chunk containing `logical` is registered
+    /// in the superblock's `sys_chunk_array` bootstrap snippet.
+    ///
+    /// At mount time the kernel knows the chunk tree's root bytenr but
+    /// has no way to resolve it to a physical offset until it can read
+    /// chunk items — and chunk items live in the chunk tree itself. The
+    /// circular dependency is broken by the `sys_chunk_array` byte
+    /// buffer in the superblock, which embeds the chunk records for
+    /// every system chunk. Whenever the chunk tree COWs into a system
+    /// chunk that is not yet in that snippet, we must add it.
+    ///
+    /// On filesystems where `logical` already falls inside a system
+    /// chunk that is part of the snippet, this is a no-op.
+    fn ensure_in_sys_chunk_array(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        logical: u64,
+    ) -> io::Result<()> {
+        use btrfs_disk::chunk::{
+            chunk_item_bytes, parse_chunk_item, sys_chunk_array_append,
+            sys_chunk_array_contains,
+        };
+        use btrfs_disk::items::BlockGroupFlags;
+
+        // Locate the system block group containing this logical address.
+        let groups = allocation::load_block_groups(fs_info)?;
+        let bg = groups
+            .iter()
+            .find(|g| {
+                g.flags.contains(BlockGroupFlags::SYSTEM)
+                    && logical >= g.start
+                    && logical < g.start + g.length
+            })
+            .ok_or_else(|| {
+                io::Error::other(format!(
+                    "ensure_in_sys_chunk_array: no SYSTEM block group contains {logical}"
+                ))
+            })?;
+        let bg_start = bg.start;
+
+        // Already in the bootstrap snippet?
+        if sys_chunk_array_contains(
+            &fs_info.superblock.sys_chunk_array,
+            fs_info.superblock.sys_chunk_array_size,
+            bg_start,
+        ) {
+            return Ok(());
+        }
+
+        // Read the corresponding CHUNK_ITEM from the chunk tree.
+        let key = DiskKey {
+            objectid: u64::from(
+                btrfs_disk::raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID,
+            ),
+            key_type: KeyType::ChunkItem,
+            offset: bg_start,
+        };
+        let chunk_tree_id =
+            u64::from(btrfs_disk::raw::BTRFS_CHUNK_TREE_OBJECTID);
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            fs_info,
+            chunk_tree_id,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )?;
+        if !found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "ensure_in_sys_chunk_array: CHUNK_ITEM missing for bg {bg_start}"
+            )));
+        }
+        let leaf = path.nodes[0].as_ref().ok_or_else(|| {
+            io::Error::other("ensure_in_sys_chunk_array: no leaf in path")
+        })?;
+        let item_data = leaf.item_data(path.slots[0]).to_vec();
+        path.release();
+
+        // Reparse the chunk and re-serialize via the clean-room helper
+        // (the on-disk bytes are equivalent, but going through the
+        // ChunkMapping round-trip keeps this independent of the chunk
+        // tree's exact storage format and lets future changes plug in
+        // here in one place).
+        let (mapping, _) =
+            parse_chunk_item(&item_data, bg_start).ok_or_else(|| {
+                io::Error::other(
+                    "ensure_in_sys_chunk_array: malformed CHUNK_ITEM",
+                )
+            })?;
+        let chunk_bytes =
+            chunk_item_bytes(&mapping, fs_info.superblock.sectorsize);
+
+        let new_size = sys_chunk_array_append(
+            &mut fs_info.superblock.sys_chunk_array,
+            &mut fs_info.superblock.sys_chunk_array_size,
+            bg_start,
+            &chunk_bytes,
+        )
+        .map_err(|e| {
+            io::Error::other(format!("ensure_in_sys_chunk_array: {e}"))
+        })?;
+        debug_assert!(new_size > 0);
+        Ok(())
+    }
+
     /// Rebuild free space tree entries by scanning the extent tree.
     ///
     /// For each block group, computes free ranges from the extent tree and
@@ -2061,19 +2207,14 @@ fn decrement_inline_data_ref(
     Ok(current_refs)
 }
 
-/// Find a metadata block group with free space for the bump allocator.
+/// Find a free region inside a block group of the requested kind,
+/// starting at or after `min_addr`.
 ///
-/// Uses proper free space scanning via the extent tree to find actual gaps
-/// between allocated extents. Returns (`first_free_logical`, `region_end`).
-fn find_metadata_alloc_region<R: Read + Write + Seek>(
+/// Uses extent-tree free space scanning to find actual gaps between
+/// allocated extents. Returns `(first_free_logical, region_end)`.
+fn find_alloc_region_after<R: Read + Write + Seek>(
     fs_info: &mut Filesystem<R>,
-) -> io::Result<(u64, u64)> {
-    find_metadata_alloc_region_after(fs_info, 0)
-}
-
-/// Find a free metadata region starting at or after `min_addr`.
-fn find_metadata_alloc_region_after<R: Read + Write + Seek>(
-    fs_info: &mut Filesystem<R>,
+    kind: BlockGroupKind,
     min_addr: u64,
 ) -> io::Result<(u64, u64)> {
     use crate::allocation;
@@ -2081,14 +2222,19 @@ fn find_metadata_alloc_region_after<R: Read + Write + Seek>(
     let nodesize = u64::from(fs_info.nodesize);
     let groups = allocation::load_block_groups(fs_info)?;
 
-    // Find metadata block groups with free space, sorted by most free
-    let mut meta_groups: Vec<&allocation::BlockGroup> = groups
-        .iter()
-        .filter(|bg| bg.is_metadata() && bg.free() >= nodesize)
-        .collect();
-    meta_groups.sort_by_key(|bg| std::cmp::Reverse(bg.free()));
+    let kind_matches = |bg: &&allocation::BlockGroup| match kind {
+        BlockGroupKind::Metadata => bg.is_metadata(),
+        BlockGroupKind::System => bg.is_system(),
+    };
 
-    for bg in meta_groups {
+    let mut candidates: Vec<&allocation::BlockGroup> = groups
+        .iter()
+        .filter(kind_matches)
+        .filter(|bg| bg.free() >= nodesize)
+        .collect();
+    candidates.sort_by_key(|bg| std::cmp::Reverse(bg.free()));
+
+    for bg in candidates {
         let free_extents = allocation::find_free_extents(
             fs_info, bg.start, bg.length, nodesize,
         )?;
@@ -2102,7 +2248,9 @@ fn find_metadata_alloc_region_after<R: Read + Write + Seek>(
         }
     }
 
-    Err(io::Error::other("no metadata block group with free space"))
+    Err(io::Error::other(format!(
+        "no {kind:?} block group with free space",
+    )))
 }
 
 /// Update one backup root slot in the superblock.
