@@ -6,7 +6,7 @@
 //! solid we will replace the walks with a proper key-based descent helper in
 //! `btrfs-disk` and cache decoded inodes.
 
-use crate::{dir, inode, read, stat};
+use crate::{dir, inode, read, stat, xattr};
 use anyhow::Result;
 use btrfs_disk::{
     items::{DirItem, InodeItem},
@@ -15,7 +15,8 @@ use btrfs_disk::{
 };
 use fuser::{
     Errno, FileHandle, FileType, Filesystem, Generation, INodeNo, LockOwner,
-    OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, Request,
+    OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyStatfs,
+    ReplyXattr, Request,
 };
 use std::{
     ffi::OsStr, fs::File, io, mem, os::unix::ffi::OsStrExt, sync::Mutex,
@@ -317,5 +318,99 @@ impl Filesystem for BtrfsFuse {
                 reply.error(Errno::EIO);
             }
         }
+    }
+
+    fn listxattr(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        size: u32,
+        reply: ReplyXattr,
+    ) {
+        let mut state = self.state.lock().unwrap();
+        let oid = inode::fuse_to_btrfs(ino.0);
+        let fs_tree_root = state.fs_tree_root;
+        let names =
+            match xattr::list_xattrs(&mut state.fs.reader, fs_tree_root, oid) {
+                Ok(v) => v,
+                Err(e) => {
+                    log::warn!("listxattr ino={}: {e}", ino.0);
+                    reply.error(Errno::EIO);
+                    return;
+                }
+            };
+
+        let mut buf: Vec<u8> = Vec::new();
+        for name in &names {
+            buf.extend_from_slice(name);
+            buf.push(0);
+        }
+
+        #[allow(clippy::cast_possible_truncation)]
+        if size == 0 {
+            reply.size(buf.len() as u32);
+        } else if buf.len() <= size as usize {
+            reply.data(&buf);
+        } else {
+            reply.error(Errno::ERANGE);
+        }
+    }
+
+    fn getxattr(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        name: &OsStr,
+        size: u32,
+        reply: ReplyXattr,
+    ) {
+        let mut state = self.state.lock().unwrap();
+        let oid = inode::fuse_to_btrfs(ino.0);
+        let fs_tree_root = state.fs_tree_root;
+        match xattr::get_xattr(
+            &mut state.fs.reader,
+            fs_tree_root,
+            oid,
+            name.as_bytes(),
+        ) {
+            Ok(Some(value)) =>
+            {
+                #[allow(clippy::cast_possible_truncation)]
+                if size == 0 {
+                    reply.size(value.len() as u32);
+                } else if value.len() <= size as usize {
+                    reply.data(&value);
+                } else {
+                    reply.error(Errno::ERANGE);
+                }
+            }
+            Ok(None) => reply.error(Errno::ENODATA),
+            Err(e) => {
+                log::warn!(
+                    "getxattr ino={} name={}: {e}",
+                    ino.0,
+                    name.display()
+                );
+                reply.error(Errno::EIO);
+            }
+        }
+    }
+
+    fn statfs(&self, _req: &Request, _ino: INodeNo, reply: ReplyStatfs) {
+        let state = self.state.lock().unwrap();
+        let sb = &state.fs.superblock;
+        let bsize = u64::from(sb.sectorsize);
+        let blocks = sb.total_bytes / bsize;
+        let bfree = sb.total_bytes.saturating_sub(sb.bytes_used) / bsize;
+        reply.statfs(
+            blocks,
+            bfree,
+            bfree, // bavail = bfree (no reserved-for-root concept)
+            0,     // files: inode count (approximate; leave as 0 for v1)
+            0,     // ffree
+            sb.sectorsize,
+            255, // namelen: btrfs max filename length
+            sb.sectorsize,
+        );
     }
 }

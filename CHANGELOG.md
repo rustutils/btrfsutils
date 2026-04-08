@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-fuse`: milestone M5 — `listxattr`, `getxattr`, and `statfs`.
+  Xattrs are read from `XATTR_ITEM` entries (same `DirItem` wire format as
+  directory entries; hash collisions handled by linear name scan). `statfs`
+  reports `total_bytes` / `bytes_used` from the superblock in sectorsize
+  blocks; inode counts are left as 0 for v1.
+
 - `btrfs-fuse`: milestone M4 — full compression support. `read_file` and
   `read_symlink` now decompress zlib, zstd, and lzo extents (both inline
   and regular). LZO uses btrfs per-sector framing (4-byte total-size header
