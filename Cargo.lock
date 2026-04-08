@@ -196,9 +196,12 @@ dependencies = [
  "btrfs-disk",
  "clap",
  "env_logger",
+ "flate2",
  "fuser",
  "libc",
  "log",
+ "lzokay",
+ "zstd",
 ]
 
 [[package]]

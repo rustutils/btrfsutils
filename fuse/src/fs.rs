@@ -261,7 +261,12 @@ impl Filesystem for BtrfsFuse {
         let mut state = self.state.lock().unwrap();
         let oid = inode::fuse_to_btrfs(ino.0);
         let fs_tree_root = state.fs_tree_root;
-        match read::read_symlink(&mut state.fs.reader, fs_tree_root, oid) {
+        match read::read_symlink(
+            &mut state.fs.reader,
+            fs_tree_root,
+            oid,
+            self.blksize,
+        ) {
             Ok(Some(target)) => reply.data(&target),
             Ok(None) => {
                 log::warn!("readlink ino={}: no inline extent found", ino.0);
@@ -301,15 +306,9 @@ impl Filesystem for BtrfsFuse {
             file_size,
             offset,
             size,
+            self.blksize,
         ) {
             Ok(data) => reply.data(&data),
-            Err(e) if e.kind() == io::ErrorKind::Unsupported => {
-                log::warn!(
-                    "read ino={} offset={offset} size={size}: {e}",
-                    ino.0
-                );
-                reply.error(Errno::EOPNOTSUPP);
-            }
             Err(e) => {
                 log::warn!(
                     "read ino={} offset={offset} size={size}: {e}",

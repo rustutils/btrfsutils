@@ -19,3 +19,6 @@ log = { workspace = true }
 env_logger = { workspace = true }
 fuser = { version = "0.17" }
 libc = { workspace = true }
+flate2 = { workspace = true }
+zstd = { workspace = true }
+lzokay = { workspace = true }

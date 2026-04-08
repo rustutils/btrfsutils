@@ -6,11 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-fuse`: milestone M4 — full compression support. `read_file` and
+  `read_symlink` now decompress zlib, zstd, and lzo extents (both inline
+  and regular). LZO uses btrfs per-sector framing (4-byte total-size header
+  + per-sector 4-byte segment headers, padded to `sectorsize` boundaries).
+  Adds `flate2`, `zstd`, and `lzokay` dependencies to `btrfs-fuse`.
+
 - `btrfs-fuse`: milestones M2 and M3 — `readlink`, `read` for inline and
   regular uncompressed extents, and correct `..` parent resolution via
-  `INODE_REF`. Prealloc extents and sparse holes return zeros. Compressed
-  extents return `EOPNOTSUPP` (deferred to M4). Symlinks, hardlinks, and
-  large multi-extent files now work end-to-end.
+  `INODE_REF`. Prealloc extents and sparse holes return zeros. Symlinks,
+  hardlinks, and large multi-extent files now work end-to-end.
 
 ## 0.11.0
 
