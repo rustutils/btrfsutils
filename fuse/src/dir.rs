@@ -34,6 +34,7 @@ pub struct Entry {
 }
 
 impl Entry {
+    #[must_use]
     pub fn from_dir_item(item: &DirItem, key_offset: u64) -> Self {
         Self {
             ino: item.location.objectid,

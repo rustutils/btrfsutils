@@ -22,3 +22,7 @@ libc = { workspace = true }
 flate2 = { workspace = true }
 zstd = { workspace = true }
 lzokay = { workspace = true }
+
+[dev-dependencies]
+btrfs-test-utils = { workspace = true }
+tempfile = { workspace = true }

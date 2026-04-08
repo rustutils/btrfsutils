@@ -186,7 +186,12 @@ pub fn read_symlink<R: io::Read + io::Seek>(
             if ext.extent_type == FileExtentType::Inline {
                 let payload = &raw[EXTENT_HEADER_SIZE..];
                 result = Some(if ext.compression == CompressionType::None {
-                    Ok(payload.to_vec())
+                    // `ram_bytes` is the logical size; the on-disk payload
+                    // may be padded (e.g. mkfs.btrfs --rootdir stores a
+                    // trailing NUL after symlink targets).
+                    #[allow(clippy::cast_possible_truncation)]
+                    let valid_len = (ext.ram_bytes as usize).min(payload.len());
+                    Ok(payload[..valid_len].to_vec())
                 } else {
                     decompress(
                         payload,

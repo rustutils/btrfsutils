@@ -1,10 +1,16 @@
-//! `impl fuser::Filesystem for BtrfsFuse` — milestones M1–M3.
+//! `BtrfsFuse`: the main filesystem type, its inherent operation methods,
+//! and the thin `fuser::Filesystem` adapter.
 //!
-//! Implements `lookup`, `getattr`, `readdir`, `readlink`, and `read` against
-//! the default FS tree by linearly walking it (DFS) and filtering items.
-//! This is intentionally the simplest possible implementation; once M3 is
-//! solid we will replace the walks with a proper key-based descent helper in
-//! `btrfs-disk` and cache decoded inodes.
+//! The inherent methods (`lookup_entry`, `get_attr`, `read_dir`,
+//! `read_symlink`, `read_data`, `list_xattrs`, `get_xattr`, `stat_fs`)
+//! return plain `std::io::Result` / `Option` values and can be driven
+//! directly from tests. The `Filesystem` trait impl at the bottom of this
+//! file is a narrow wrapper that maps each operation's return value to the
+//! appropriate fuser `reply.*` call and maps errors to an `EIO`.
+//!
+//! All methods currently DFS the entire FS tree per call; once the driver
+//! is stable we will replace the walks with a proper key-based descent
+//! helper in `btrfs-disk` and cache decoded inodes.
 
 use crate::{dir, inode, read, stat, xattr};
 use anyhow::Result;
@@ -39,12 +45,34 @@ struct State {
     fs_tree_root: u64,
 }
 
+/// Filesystem-wide statistics returned by [`BtrfsFuse::stat_fs`].
+///
+/// Fields map directly onto the POSIX `statvfs` / `statfs` structures that
+/// FUSE exposes via [`fuser::ReplyStatfs::statfs`], but as a plain struct
+/// so callers can read them without going through the FUSE protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatfsInfo {
+    /// Total blocks (in units of `bsize`).
+    pub blocks: u64,
+    /// Free blocks (in units of `bsize`).
+    pub bfree: u64,
+    /// Blocks available to unprivileged users (same as `bfree` for btrfs).
+    pub bavail: u64,
+    /// Preferred block size.
+    pub bsize: u32,
+    /// Maximum filename length.
+    pub namelen: u32,
+    /// Fragment size (same as `bsize` for btrfs).
+    pub frsize: u32,
+}
+
 pub struct BtrfsFuse {
     state: Mutex<State>,
     blksize: u32,
 }
 
 impl BtrfsFuse {
+    /// Bootstrap the filesystem from an open image file or block device.
     pub fn open(file: File) -> Result<Self> {
         let fs = filesystem_open(file)?;
         let blksize = fs.superblock.sectorsize;
@@ -62,12 +90,199 @@ impl BtrfsFuse {
             blksize,
         })
     }
+
+    /// Filesystem sectorsize, used by the inline `FileAttr` builder.
+    #[must_use]
+    pub fn blksize(&self) -> u32 {
+        self.blksize
+    }
+
+    // -----------------------------------------------------------------
+    // Operation layer — plain `io::Result` returns, no fuser involvement.
+    // -----------------------------------------------------------------
+
+    /// Look up a child of `parent` (a FUSE inode number) by name. Returns
+    /// the child's FUSE inode number and parsed `InodeItem`, or `None` if
+    /// no entry with that name exists.
+    pub fn lookup_entry(
+        &self,
+        parent: u64,
+        name: &[u8],
+    ) -> io::Result<Option<(u64, InodeItem)>> {
+        let mut state = self.state.lock().unwrap();
+        let parent_oid = inode::fuse_to_btrfs(parent);
+        let Some(entry) = state.lookup_in_dir(parent_oid, name)? else {
+            return Ok(None);
+        };
+        let child_oid = entry.location.objectid;
+        let Some(item) = state.read_inode(child_oid)? else {
+            return Ok(None);
+        };
+        Ok(Some((inode::btrfs_to_fuse(child_oid), item)))
+    }
+
+    /// Read the inode item for a FUSE inode number. Returns `None` if no
+    /// matching inode exists.
+    pub fn get_attr(&self, ino: u64) -> io::Result<Option<InodeItem>> {
+        let mut state = self.state.lock().unwrap();
+        let oid = inode::fuse_to_btrfs(ino);
+        state.read_inode(oid)
+    }
+
+    /// List the entries of a directory inode, starting strictly after
+    /// `offset`. `.` and `..` are synthesised at offsets 0 and 1. Returns
+    /// the full list in one shot; the caller is free to paginate.
+    pub fn read_dir(
+        &self,
+        ino: u64,
+        offset: u64,
+    ) -> io::Result<Vec<dir::Entry>> {
+        let mut state = self.state.lock().unwrap();
+        let dir_oid = inode::fuse_to_btrfs(ino);
+        let mut entries: Vec<dir::Entry> = Vec::new();
+
+        if offset == 0 {
+            entries.push(dir::Entry {
+                ino,
+                kind: FileType::Directory,
+                name: b".".to_vec(),
+                offset: 1,
+            });
+        }
+        if offset <= 1 {
+            let parent_oid = state.find_parent_oid(dir_oid)?;
+            entries.push(dir::Entry {
+                ino: inode::btrfs_to_fuse(parent_oid),
+                kind: FileType::Directory,
+                name: b"..".to_vec(),
+                offset: 2,
+            });
+        }
+
+        // Collect DIR_INDEX entries past `offset` in offset-sorted order.
+        let cursor = offset.max(2);
+        let mut dir_entries: Vec<dir::Entry> = Vec::new();
+        state.for_each_item(|key, data| {
+            if key.objectid != dir_oid || key.key_type != KeyType::DirIndex {
+                return;
+            }
+            if key.offset < cursor {
+                return;
+            }
+            for item in DirItem::parse_all(data) {
+                let mut entry = dir::Entry::from_dir_item(&item, key.offset);
+                // Cookie is "next offset to start from", so add 1.
+                entry.offset = key.offset + 1;
+                dir_entries.push(entry);
+            }
+        })?;
+        dir_entries.sort_by_key(|e| e.offset);
+        entries.extend(dir_entries);
+        Ok(entries)
+    }
+
+    /// Read the target of a symbolic link. Returns `None` if the inode has
+    /// no inline extent data or does not exist. The returned byte slice is
+    /// trimmed to the authoritative length from the inode's `size` field,
+    /// since `mkfs.btrfs --rootdir` stores a trailing NUL after the target
+    /// in the inline extent payload (kernel-mounted btrfs relies on
+    /// `inode.size` to find the valid range, not the extent length).
+    pub fn read_symlink(&self, ino: u64) -> io::Result<Option<Vec<u8>>> {
+        let mut state = self.state.lock().unwrap();
+        let oid = inode::fuse_to_btrfs(ino);
+        let Some(inode_item) = state.read_inode(oid)? else {
+            return Ok(None);
+        };
+        let fs_tree_root = state.fs_tree_root;
+        let blksize = self.blksize;
+        let target = read::read_symlink(
+            &mut state.fs.reader,
+            fs_tree_root,
+            oid,
+            blksize,
+        )?;
+        #[allow(clippy::cast_possible_truncation)]
+        Ok(target.map(|mut t| {
+            t.truncate(inode_item.size as usize);
+            t
+        }))
+    }
+
+    /// Read `size` bytes from `ino` starting at `offset`. Returns the bytes
+    /// that actually exist in the file (up to `file_size - offset`).
+    /// Sparse holes and prealloc extents are returned as zeros; compressed
+    /// extents are decompressed.
+    pub fn read_data(
+        &self,
+        ino: u64,
+        offset: u64,
+        size: u32,
+    ) -> io::Result<Vec<u8>> {
+        let mut state = self.state.lock().unwrap();
+        let oid = inode::fuse_to_btrfs(ino);
+        let Some(item) = state.read_inode(oid)? else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("inode {ino} not found"),
+            ));
+        };
+        let file_size = item.size;
+        let fs_tree_root = state.fs_tree_root;
+        let blksize = self.blksize;
+        read::read_file(
+            &mut state.fs.reader,
+            fs_tree_root,
+            oid,
+            file_size,
+            offset,
+            size,
+            blksize,
+        )
+    }
+
+    /// List all xattr names for an inode.
+    pub fn list_xattrs(&self, ino: u64) -> io::Result<Vec<Vec<u8>>> {
+        let mut state = self.state.lock().unwrap();
+        let oid = inode::fuse_to_btrfs(ino);
+        let fs_tree_root = state.fs_tree_root;
+        xattr::list_xattrs(&mut state.fs.reader, fs_tree_root, oid)
+    }
+
+    /// Look up the value of a single xattr by exact name. Returns `None`
+    /// if the xattr does not exist.
+    pub fn get_xattr(
+        &self,
+        ino: u64,
+        name: &[u8],
+    ) -> io::Result<Option<Vec<u8>>> {
+        let mut state = self.state.lock().unwrap();
+        let oid = inode::fuse_to_btrfs(ino);
+        let fs_tree_root = state.fs_tree_root;
+        xattr::get_xattr(&mut state.fs.reader, fs_tree_root, oid, name)
+    }
+
+    /// Filesystem-wide statistics pulled straight from the superblock.
+    #[must_use]
+    pub fn stat_fs(&self) -> StatfsInfo {
+        let state = self.state.lock().unwrap();
+        let sb = &state.fs.superblock;
+        let bsize = u64::from(sb.sectorsize);
+        let blocks = sb.total_bytes / bsize;
+        let bfree = sb.total_bytes.saturating_sub(sb.bytes_used) / bsize;
+        StatfsInfo {
+            blocks,
+            bfree,
+            bavail: bfree,
+            bsize: sb.sectorsize,
+            namelen: 255,
+            frsize: sb.sectorsize,
+        }
+    }
 }
 
 impl State {
     /// DFS the FS tree, calling `visitor(item_key, item_data)` for every leaf
-    /// item. M1: replace with proper key-based descent once we factor a
-    /// `tree_search` helper out of `btrfs-disk`.
+    /// item.
     fn for_each_item<F>(&mut self, mut visitor: F) -> io::Result<()>
     where
         F: FnMut(&btrfs_disk::tree::DiskKey, &[u8]),
@@ -92,26 +307,26 @@ impl State {
         )
     }
 
-    fn read_inode(&mut self, objectid: u64) -> Option<InodeItem> {
+    fn read_inode(&mut self, objectid: u64) -> io::Result<Option<InodeItem>> {
         let mut found = None;
-        let _ = self.for_each_item(|key, data| {
+        self.for_each_item(|key, data| {
             if found.is_some() {
                 return;
             }
             if key.objectid == objectid && key.key_type == KeyType::InodeItem {
                 found = InodeItem::parse(data);
             }
-        });
-        found
+        })?;
+        Ok(found)
     }
 
     fn lookup_in_dir(
         &mut self,
         parent_objectid: u64,
         name: &[u8],
-    ) -> Option<DirItem> {
+    ) -> io::Result<Option<DirItem>> {
         let mut found = None;
-        let _ = self.for_each_item(|key, data| {
+        self.for_each_item(|key, data| {
             if found.is_some() {
                 return;
             }
@@ -126,26 +341,31 @@ impl State {
                     return;
                 }
             }
-        });
-        found
+        })?;
+        Ok(found)
     }
 
     /// Find the btrfs objectid of the parent directory for `oid` via
     /// `INODE_REF`. The `INODE_REF` key offset field contains the parent
     /// objectid directly. Returns `oid` itself if no ref is found.
-    fn find_parent_oid(&mut self, oid: u64) -> u64 {
+    fn find_parent_oid(&mut self, oid: u64) -> io::Result<u64> {
         let mut parent = oid;
-        let _ = self.for_each_item(|key, _data| {
+        self.for_each_item(|key, _data| {
             if parent != oid {
                 return;
             }
             if key.objectid == oid && key.key_type == KeyType::InodeRef {
                 parent = key.offset;
             }
-        });
-        parent
+        })?;
+        Ok(parent)
     }
 }
+
+// -----------------------------------------------------------------------
+// fuser::Filesystem adapter — each method calls an inherent op, maps the
+// result to the matching `reply.*` call, and EIO's any I/O errors.
+// -----------------------------------------------------------------------
 
 impl Filesystem for BtrfsFuse {
     fn lookup(
@@ -155,24 +375,21 @@ impl Filesystem for BtrfsFuse {
         name: &OsStr,
         reply: ReplyEntry,
     ) {
-        let mut state = self.state.lock().unwrap();
-        let parent_oid = inode::fuse_to_btrfs(parent.0);
-        let Some(entry) = state.lookup_in_dir(parent_oid, name.as_bytes())
-        else {
-            reply.error(Errno::ENOENT);
-            return;
-        };
-        let child_oid = entry.location.objectid;
-        let Some(item) = state.read_inode(child_oid) else {
-            reply.error(Errno::ENOENT);
-            return;
-        };
-        let attr = stat::make_attr(
-            inode::btrfs_to_fuse(child_oid),
-            &item,
-            self.blksize,
-        );
-        reply.entry(&TTL, &attr, Generation(0));
+        match self.lookup_entry(parent.0, name.as_bytes()) {
+            Ok(Some((ino, item))) => {
+                let attr = stat::make_attr(ino, &item, self.blksize);
+                reply.entry(&TTL, &attr, Generation(0));
+            }
+            Ok(None) => reply.error(Errno::ENOENT),
+            Err(e) => {
+                log::warn!(
+                    "lookup parent={} name={}: {e}",
+                    parent.0,
+                    name.display()
+                );
+                reply.error(Errno::EIO);
+            }
+        }
     }
 
     fn getattr(
@@ -182,14 +399,17 @@ impl Filesystem for BtrfsFuse {
         _fh: Option<FileHandle>,
         reply: ReplyAttr,
     ) {
-        let mut state = self.state.lock().unwrap();
-        let oid = inode::fuse_to_btrfs(ino.0);
-        let Some(item) = state.read_inode(oid) else {
-            reply.error(Errno::ENOENT);
-            return;
-        };
-        let attr = stat::make_attr(ino.0, &item, self.blksize);
-        reply.attr(&TTL, &attr);
+        match self.get_attr(ino.0) {
+            Ok(Some(item)) => {
+                let attr = stat::make_attr(ino.0, &item, self.blksize);
+                reply.attr(&TTL, &attr);
+            }
+            Ok(None) => reply.error(Errno::ENOENT),
+            Err(e) => {
+                log::warn!("getattr ino={}: {e}", ino.0);
+                reply.error(Errno::EIO);
+            }
+        }
     }
 
     fn readdir(
@@ -200,50 +420,14 @@ impl Filesystem for BtrfsFuse {
         offset: u64,
         mut reply: ReplyDirectory,
     ) {
-        let mut state = self.state.lock().unwrap();
-        let dir_oid = inode::fuse_to_btrfs(ino.0);
-
-        // Synthesise `.` at offset 0 and `..` at offset 1.
-        // The parent objectid comes from the INODE_REF key offset field.
-        let mut entries: Vec<dir::Entry> = Vec::new();
-        if offset == 0 {
-            entries.push(dir::Entry {
-                ino: ino.0,
-                kind: FileType::Directory,
-                name: b".".to_vec(),
-                offset: 1,
-            });
-        }
-        if offset <= 1 {
-            let parent_oid = state.find_parent_oid(dir_oid);
-            entries.push(dir::Entry {
-                ino: inode::btrfs_to_fuse(parent_oid),
-                kind: FileType::Directory,
-                name: b"..".to_vec(),
-                offset: 2,
-            });
-        }
-
-        // Collect DIR_INDEX entries past `offset` in offset-sorted order.
-        let cursor = offset.max(2);
-        let mut dir_entries: Vec<dir::Entry> = Vec::new();
-        let _ = state.for_each_item(|key, data| {
-            if key.objectid != dir_oid || key.key_type != KeyType::DirIndex {
+        let entries = match self.read_dir(ino.0, offset) {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("readdir ino={} offset={offset}: {e}", ino.0);
+                reply.error(Errno::EIO);
                 return;
             }
-            if key.offset < cursor {
-                return;
-            }
-            for item in DirItem::parse_all(data) {
-                let mut entry = dir::Entry::from_dir_item(&item, key.offset);
-                // Cookie is "next offset to start from", so add 1.
-                entry.offset = key.offset + 1;
-                dir_entries.push(entry);
-            }
-        });
-        dir_entries.sort_by_key(|e| e.offset);
-        entries.extend(dir_entries);
-
+        };
         for entry in entries {
             let child_ino = INodeNo(inode::btrfs_to_fuse(entry.ino));
             if reply.add(
@@ -259,15 +443,7 @@ impl Filesystem for BtrfsFuse {
     }
 
     fn readlink(&self, _req: &Request, ino: INodeNo, reply: ReplyData) {
-        let mut state = self.state.lock().unwrap();
-        let oid = inode::fuse_to_btrfs(ino.0);
-        let fs_tree_root = state.fs_tree_root;
-        match read::read_symlink(
-            &mut state.fs.reader,
-            fs_tree_root,
-            oid,
-            self.blksize,
-        ) {
+        match self.read_symlink(ino.0) {
             Ok(Some(target)) => reply.data(&target),
             Ok(None) => {
                 log::warn!("readlink ino={}: no inline extent found", ino.0);
@@ -291,25 +467,11 @@ impl Filesystem for BtrfsFuse {
         _lock: Option<LockOwner>,
         reply: ReplyData,
     ) {
-        let mut state = self.state.lock().unwrap();
-        let oid = inode::fuse_to_btrfs(ino.0);
-        let file_size = if let Some(inode) = state.read_inode(oid) {
-            inode.size
-        } else {
-            reply.error(Errno::ENOENT);
-            return;
-        };
-        let fs_tree_root = state.fs_tree_root;
-        match read::read_file(
-            &mut state.fs.reader,
-            fs_tree_root,
-            oid,
-            file_size,
-            offset,
-            size,
-            self.blksize,
-        ) {
+        match self.read_data(ino.0, offset, size) {
             Ok(data) => reply.data(&data),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                reply.error(Errno::ENOENT);
+            }
             Err(e) => {
                 log::warn!(
                     "read ino={} offset={offset} size={size}: {e}",
@@ -327,18 +489,14 @@ impl Filesystem for BtrfsFuse {
         size: u32,
         reply: ReplyXattr,
     ) {
-        let mut state = self.state.lock().unwrap();
-        let oid = inode::fuse_to_btrfs(ino.0);
-        let fs_tree_root = state.fs_tree_root;
-        let names =
-            match xattr::list_xattrs(&mut state.fs.reader, fs_tree_root, oid) {
-                Ok(v) => v,
-                Err(e) => {
-                    log::warn!("listxattr ino={}: {e}", ino.0);
-                    reply.error(Errno::EIO);
-                    return;
-                }
-            };
+        let names = match self.list_xattrs(ino.0) {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("listxattr ino={}: {e}", ino.0);
+                reply.error(Errno::EIO);
+                return;
+            }
+        };
 
         let mut buf: Vec<u8> = Vec::new();
         for name in &names {
@@ -364,15 +522,7 @@ impl Filesystem for BtrfsFuse {
         size: u32,
         reply: ReplyXattr,
     ) {
-        let mut state = self.state.lock().unwrap();
-        let oid = inode::fuse_to_btrfs(ino.0);
-        let fs_tree_root = state.fs_tree_root;
-        match xattr::get_xattr(
-            &mut state.fs.reader,
-            fs_tree_root,
-            oid,
-            name.as_bytes(),
-        ) {
+        match self.get_xattr(ino.0, name.as_bytes()) {
             Ok(Some(value)) =>
             {
                 #[allow(clippy::cast_possible_truncation)]
@@ -397,20 +547,9 @@ impl Filesystem for BtrfsFuse {
     }
 
     fn statfs(&self, _req: &Request, _ino: INodeNo, reply: ReplyStatfs) {
-        let state = self.state.lock().unwrap();
-        let sb = &state.fs.superblock;
-        let bsize = u64::from(sb.sectorsize);
-        let blocks = sb.total_bytes / bsize;
-        let bfree = sb.total_bytes.saturating_sub(sb.bytes_used) / bsize;
+        let s = self.stat_fs();
         reply.statfs(
-            blocks,
-            bfree,
-            bfree, // bavail = bfree (no reserved-for-root concept)
-            0,     // files: inode count (approximate; leave as 0 for v1)
-            0,     // ffree
-            sb.sectorsize,
-            255, // namelen: btrfs max filename length
-            sb.sectorsize,
+            s.blocks, s.bfree, s.bavail, 0, 0, s.bsize, s.namelen, s.frsize,
         );
     }
 }

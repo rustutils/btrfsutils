@@ -6,6 +6,21 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-fuse`: milestone M6 — library split and integration test harness.
+  The crate is now a hybrid lib + bin: `fuse/src/lib.rs` exposes
+  `BtrfsFuse` and its operation layer (`lookup_entry`, `get_attr`,
+  `read_dir`, `read_symlink`, `read_data`, `list_xattrs`, `get_xattr`,
+  `stat_fs`), each of which returns plain `io::Result` / `Option` values
+  and is independent of `fuser`. The `fuser::Filesystem` trait impl is
+  now a narrow adapter that calls these inherent methods and maps their
+  results to `Reply*` calls. Integration tests in `fuse/tests/basic.rs`
+  drive the operation layer directly without a FUSE mount, so they are
+  unprivileged and run under plain `cargo test`. The tests build a fresh
+  btrfs image per test process via `mkfs.btrfs --rootdir` over a known
+  directory tree and cover lookup, getattr, readdir (including
+  pagination and parent resolution for `..`), read_data (inline, empty,
+  multi-extent, offset, past-EOF, nested), symlinks, xattrs, and statfs.
+
 - New `btrfs-test-utils` crate at `util/testing/` consolidating the RAII
   test harness (`BackingFile`, `LoopbackDevice`, `Mount`) and shared data
   helpers (`write_test_data`, `verify_test_data`, `write_compressible_data`)
