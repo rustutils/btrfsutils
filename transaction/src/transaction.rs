@@ -7,7 +7,7 @@
 
 use crate::{
     allocation,
-    buffer::ITEM_SIZE,
+    buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE},
     cow::cow_block,
     delayed_ref::{DelayedRefKey, DelayedRefQueue},
     filesystem::Filesystem,
@@ -231,6 +231,163 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// Queue a block to be freed after commit.
     pub fn queue_free_block(&mut self, logical: u64) {
         self.freed_blocks.push(logical);
+    }
+
+    /// Materialise a fresh empty global tree with the given objectid.
+    ///
+    /// Allocates a single metadata block, initialises it as an empty
+    /// level-0 leaf carrying `tree_id` as its owner, registers
+    /// `(tree_id -> bytenr)` in the in-memory roots map, and inserts a
+    /// `ROOT_ITEM` keyed `(tree_id, ROOT_ITEM, 0)` into the root tree
+    /// pointing at the new block.
+    ///
+    /// The new leaf and root-item are staged but not flushed; the
+    /// caller must invoke `commit` (possibly after inserting items
+    /// into the new tree) for them to land on disk. Subsequent items
+    /// inserted into the new tree go through the normal
+    /// `search_slot`/insert pipeline and may COW the empty leaf away.
+    ///
+    /// This is the foundation primitive for whole-tree creation
+    /// (e.g. `convert-to-free-space-tree`,
+    /// `convert-to-block-group-tree`). It does **not** create the
+    /// root tree (id 1), the chunk tree (id 3), or the extent tree
+    /// (id 2): those are bootstrap state managed by the superblock
+    /// and the existing transaction pipeline.
+    ///
+    /// Returns the logical bytenr of the freshly allocated leaf.
+    ///
+    /// # Errors
+    ///
+    /// * `tree_id` is `0`, `1`, `2`, or `3`.
+    /// * `tree_id` already has a root in the in-memory roots map.
+    /// * The metadata allocator fails.
+    /// * The root-tree insert fails.
+    pub fn create_empty_tree(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+    ) -> io::Result<u64> {
+        // Reject bootstrap trees: their roots live in the superblock
+        // (1, 3) or are required for the allocator/extent bookkeeping
+        // itself (2). Allowing this primitive to overwrite them would
+        // corrupt the in-memory roots map and break commit.
+        if matches!(tree_id, 0..=3) {
+            return Err(io::Error::other(format!(
+                "create_empty_tree: tree id {tree_id} is reserved bootstrap state",
+            )));
+        }
+
+        if fs_info.root_bytenr(tree_id).is_some() {
+            return Err(io::Error::other(format!(
+                "create_empty_tree: tree id {tree_id} already exists",
+            )));
+        }
+
+        // Source fsid and chunk_tree_uuid from the existing root tree
+        // root block. Every tree block in a healthy btrfs filesystem
+        // shares these (the chunk_tree_uuid is the chunk root's uuid,
+        // and the fsid is the metadata uuid when the METADATA_UUID
+        // incompat flag is set, otherwise the plain fsid). Inheriting
+        // matches what cow_block, split_leaf, and split_node do for
+        // every other allocation, so the new leaf is structurally
+        // indistinguishable from a COWed one to btrfs check.
+        let (fsid, chunk_tree_uuid) = {
+            let root_bytenr = fs_info.root_bytenr(1).ok_or_else(|| {
+                io::Error::other(
+                    "create_empty_tree: root tree (id 1) has no root bytenr",
+                )
+            })?;
+            let eb = fs_info.read_block(root_bytenr)?;
+            (eb.fsid(), eb.chunk_tree_uuid())
+        };
+
+        // Allocate the leaf block and queue its +1 metadata extent
+        // ref. alloc_tree_block routes to a metadata block group and
+        // also records the allocation in bg_range_deltas, which keeps
+        // the free space tree in sync at commit.
+        let new_logical = self.alloc_tree_block(fs_info, tree_id, 0)?;
+
+        // Build the empty leaf header. WRITTEN is left clear: the
+        // commit's flush_dirty pass sets it before checksumming.
+        let nodesize = fs_info.nodesize;
+        let mut new_eb = ExtentBuffer::new_zeroed(nodesize, new_logical);
+        new_eb.set_bytenr(new_logical);
+        new_eb.set_level(0);
+        new_eb.set_nritems(0);
+        new_eb.set_generation(self.transid);
+        new_eb.set_owner(tree_id);
+        new_eb.set_fsid(&fsid);
+        new_eb.set_chunk_tree_uuid(&chunk_tree_uuid);
+        // The header `flags` field encodes the backref revision in
+        // its top 8 bits (BTRFS_BACKREF_REV_SHIFT = 56). Modern btrfs
+        // uses BTRFS_MIXED_BACKREF_REV = 1; a leaf with revision 0
+        // would be parsed as the obsolete pre-mixed-backref format
+        // and rejected by btrfs check. WRITTEN (bit 0) stays clear:
+        // flush_dirty sets it before checksumming.
+        new_eb.set_flags(
+            u64::from(btrfs_disk::raw::BTRFS_MIXED_BACKREF_REV)
+                << btrfs_disk::raw::BTRFS_BACKREF_REV_SHIFT,
+        );
+
+        debug_assert_eq!(new_eb.level(), 0);
+        debug_assert_eq!(new_eb.nritems(), 0);
+        debug_assert_eq!(new_eb.owner(), tree_id);
+        debug_assert_eq!(new_eb.generation(), self.transid);
+        debug_assert_eq!(
+            new_eb.leaf_free_space(),
+            nodesize - HEADER_SIZE as u32,
+            "create_empty_tree: empty leaf must have full free space",
+        );
+
+        fs_info.mark_dirty(&new_eb);
+        fs_info.set_root_bytenr(tree_id, new_logical);
+
+        // Insert the ROOT_ITEM into the root tree.
+        let root_item = RootItem::new_internal(self.transid, new_logical, 0);
+        let root_item_bytes = root_item.to_bytes();
+        let root_item_key = DiskKey {
+            objectid: tree_id,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+
+        let root_tree_id = 1u64;
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            root_tree_id,
+            &root_item_key,
+            &mut path,
+            SearchIntent::Insert((ITEM_SIZE + root_item_bytes.len()) as u32),
+            true,
+        )?;
+        if found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "create_empty_tree: ROOT_ITEM for tree {tree_id} already in root tree",
+            )));
+        }
+
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("create_empty_tree: no leaf in path after search")
+        })?;
+        items::insert_item(
+            leaf,
+            path.slots[0],
+            &root_item_key,
+            &root_item_bytes,
+        )?;
+        fs_info.mark_dirty(leaf);
+        path.release();
+
+        debug_assert_eq!(
+            fs_info.root_bytenr(tree_id),
+            Some(new_logical),
+            "create_empty_tree: roots map not updated",
+        );
+
+        Ok(new_logical)
     }
 
     /// Commit the transaction: update root items, flush delayed refs, write

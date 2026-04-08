@@ -1274,3 +1274,306 @@ fn two_empty_commits_advance_generation_twice() {
     assert_btrfs_check(&img_path);
     drop(dir);
 }
+
+// ----- Stage I.1: create_empty_tree primitive -----
+
+/// Tree id used by tests for the empty-tree primitive. Picks an id
+/// well above the kernel's reserved range (BTRFS_LAST_FREE_OBJECTID
+/// is 0xFFFFFFFFFFFFFF00; everything below 256 is reserved special
+/// trees) and outside the special-cased ones, so a default mkfs.btrfs
+/// will never have it and btrfs check will not run any tree-specific
+/// consistency rules against it.
+const TEST_EMPTY_TREE_ID: u64 = 12;
+
+/// Walk the root tree looking for a `ROOT_ITEM` with `objectid ==
+/// tree_id, type == ROOT_ITEM, offset == 0` and return its parsed
+/// `RootItem` (or `None` if not found).
+fn find_root_item(
+    fs: &mut Filesystem<File>,
+    tree_id: u64,
+) -> Option<btrfs_disk::items::RootItem> {
+    use btrfs_disk::items::RootItem;
+    let key = DiskKey {
+        objectid: tree_id,
+        key_type: KeyType::RootItem,
+        offset: 0,
+    };
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        None,
+        fs,
+        1,
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .unwrap();
+    if !found {
+        path.release();
+        return None;
+    }
+    let leaf = path.nodes[0].as_ref().unwrap();
+    let item = RootItem::parse(leaf.item_data(path.slots[0]));
+    path.release();
+    item
+}
+
+#[test]
+fn create_empty_tree_basic_commit_and_reopen() {
+    let (dir, img_path) = create_test_image();
+    let new_bytenr;
+    let trans_generation;
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        trans_generation = trans.transid;
+        new_bytenr = trans
+            .create_empty_tree(&mut fs, TEST_EMPTY_TREE_ID)
+            .unwrap();
+        assert_eq!(fs.root_bytenr(TEST_EMPTY_TREE_ID), Some(new_bytenr));
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let mut fs = open_rw(&img_path);
+    let bytenr_after = fs
+        .root_bytenr(TEST_EMPTY_TREE_ID)
+        .expect("new tree's ROOT_ITEM should be found at reopen");
+
+    let leaf = fs.read_block(bytenr_after).unwrap();
+    assert_eq!(leaf.level(), 0, "new empty tree must be a level-0 leaf");
+    assert_eq!(leaf.nritems(), 0, "new empty tree must have zero items");
+    assert_eq!(leaf.owner(), TEST_EMPTY_TREE_ID);
+    assert_eq!(leaf.generation(), trans_generation);
+
+    let item = find_root_item(&mut fs, TEST_EMPTY_TREE_ID)
+        .expect("ROOT_ITEM for new tree must exist in root tree");
+    assert_eq!(item.bytenr, bytenr_after);
+    assert_eq!(item.level, 0);
+    assert_eq!(item.generation, trans_generation);
+    assert_eq!(item.refs, 1);
+
+    drop(fs);
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn create_empty_tree_then_insert_items_in_same_transaction() {
+    let (dir, img_path) = create_test_image();
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        trans
+            .create_empty_tree(&mut fs, TEST_EMPTY_TREE_ID)
+            .unwrap();
+
+        let data = [0xEEu8; 16];
+        for i in 0..20u64 {
+            let key = DiskKey {
+                objectid: 1000 + i,
+                key_type: KeyType::TemporaryItem,
+                offset: 0,
+            };
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                TEST_EMPTY_TREE_ID,
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+                true,
+            )
+            .unwrap();
+            let leaf = path.nodes[0].as_mut().unwrap();
+            items::insert_item(leaf, path.slots[0], &key, &data).unwrap();
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let mut fs = open_rw(&img_path);
+    for i in 0..20u64 {
+        let key = DiskKey {
+            objectid: 1000 + i,
+            key_type: KeyType::TemporaryItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            TEST_EMPTY_TREE_ID,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .unwrap();
+        assert!(found, "item objectid {} not found after reopen", 1000 + i);
+        let leaf = path.nodes[0].as_ref().unwrap();
+        assert_eq!(leaf.item_data(path.slots[0]).len(), 16);
+        path.release();
+    }
+
+    drop(fs);
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn create_empty_tree_then_insert_in_second_transaction() {
+    let (dir, img_path) = create_test_image();
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        trans
+            .create_empty_tree(&mut fs, TEST_EMPTY_TREE_ID)
+            .unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+    {
+        let mut fs = open_rw(&img_path);
+        assert!(fs.root_bytenr(TEST_EMPTY_TREE_ID).is_some());
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        let key = DiskKey {
+            objectid: 42,
+            key_type: KeyType::TemporaryItem,
+            offset: 0,
+        };
+        let data = [0x77u8; 8];
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            TEST_EMPTY_TREE_ID,
+            &key,
+            &mut path,
+            SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &key, &data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let mut fs = open_rw(&img_path);
+    let key = DiskKey {
+        objectid: 42,
+        key_type: KeyType::TemporaryItem,
+        offset: 0,
+    };
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        None,
+        &mut fs,
+        TEST_EMPTY_TREE_ID,
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .unwrap();
+    assert!(found);
+    path.release();
+
+    drop(fs);
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn create_empty_tree_rejects_duplicate_id() {
+    let (dir, img_path) = create_test_image();
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        trans
+            .create_empty_tree(&mut fs, TEST_EMPTY_TREE_ID)
+            .unwrap();
+        let err = trans
+            .create_empty_tree(&mut fs, TEST_EMPTY_TREE_ID)
+            .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "got: {err}");
+        trans.commit(&mut fs).unwrap();
+    }
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        let err = trans
+            .create_empty_tree(&mut fs, TEST_EMPTY_TREE_ID)
+            .unwrap_err();
+        assert!(err.to_string().contains("already exists"), "got: {err}");
+        trans.abort(&mut fs);
+    }
+    drop(dir);
+}
+
+#[test]
+fn create_empty_tree_rejects_bootstrap_ids() {
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+    let mut trans = Transaction::start(&mut fs).unwrap();
+    for &reserved in &[0u64, 1, 2, 3] {
+        let err = trans.create_empty_tree(&mut fs, reserved).unwrap_err();
+        assert!(
+            err.to_string().contains("reserved"),
+            "id {reserved}: got {err}"
+        );
+    }
+    trans.abort(&mut fs);
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn create_empty_tree_rejects_existing_real_tree() {
+    // Tree id 5 (FS_TREE) is created by mkfs and must be rejected.
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+    let mut trans = Transaction::start(&mut fs).unwrap();
+    let err = trans.create_empty_tree(&mut fs, 5).unwrap_err();
+    assert!(err.to_string().contains("already exists"), "got: {err}");
+    trans.abort(&mut fs);
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn create_two_empty_trees_in_one_transaction() {
+    // Verifies that allocating two empty trees in a single
+    // transaction does not collide on bytenr or root-item slot.
+    // Uses FS-tree-range ids (above BTRFS_FIRST_FREE_OBJECTID), so
+    // the resulting image is not whole-image valid and we skip
+    // `btrfs check` here — the assertion is purely in-memory and
+    // round-trip-via-reopen.
+    let (dir, img_path) = create_test_image();
+    let id_a: u64 = 0x4000;
+    let id_b: u64 = 0x4001;
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        let bytenr_a = trans.create_empty_tree(&mut fs, id_a).unwrap();
+        let bytenr_b = trans.create_empty_tree(&mut fs, id_b).unwrap();
+        assert_ne!(
+            bytenr_a, bytenr_b,
+            "two empty trees must use distinct leaf bytenrs"
+        );
+        trans.commit(&mut fs).unwrap();
+    }
+    let mut fs = open_rw(&img_path);
+    assert!(fs.root_bytenr(id_a).is_some());
+    assert!(fs.root_bytenr(id_b).is_some());
+    let item_a = find_root_item(&mut fs, id_a).unwrap();
+    let item_b = find_root_item(&mut fs, id_b).unwrap();
+    assert_ne!(item_a.bytenr, item_b.bytenr);
+    assert_eq!(item_a.refs, 1);
+    assert_eq!(item_b.refs, 1);
+    drop(fs);
+    drop(dir);
+}
