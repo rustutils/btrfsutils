@@ -190,6 +190,61 @@ fn filesystem_mkswapfile() {
     );
 }
 
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_resize_offline_grow() {
+    // Start with a 256 MiB image, grow the backing file to 512 MiB,
+    // and use `filesystem resize --offline max` to enlarge the
+    // filesystem in place. btrfs check must then pass.
+    let td = tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 256 * 1024 * 1024);
+    file.mkfs_with_args(&["-O", "^block-group-tree"]);
+
+    // Grow the backing file to 512 MiB.
+    {
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(file.path())
+            .unwrap();
+        f.set_len(512 * 1024 * 1024).unwrap();
+    }
+
+    let dev = file.path().to_str().unwrap();
+    btrfs_ok(&["filesystem", "resize", "--offline", "max", dev]);
+
+    let check = Command::new("btrfs")
+        .args(["check", "--readonly", dev])
+        .output()
+        .expect("failed to run btrfs check");
+    if !check.status.success() {
+        panic!(
+            "btrfs check failed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&check.stdout),
+            String::from_utf8_lossy(&check.stderr)
+        );
+    }
+
+    // Running it again at the same size is a no-op.
+    btrfs_ok(&["filesystem", "resize", "--offline", "max", dev]);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn filesystem_resize_offline_rejects_shrink() {
+    let td = tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 256 * 1024 * 1024);
+    file.mkfs_with_args(&["-O", "^block-group-tree"]);
+
+    let dev = file.path().to_str().unwrap();
+    let (_, _, code) =
+        btrfs(&["filesystem", "resize", "--offline", "-64m", dev]);
+    assert_ne!(code, 0, "shrink should be rejected");
+
+    let (_, _, code2) =
+        btrfs(&["filesystem", "resize", "--offline", "128m", dev]);
+    assert_ne!(code2, 0, "absolute shrink should be rejected");
+}
+
 // ── filesystem resize error cases ────────────────────────────────────
 
 #[test]

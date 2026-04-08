@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `btrfs filesystem resize --offline`: resize an unmounted single-device
+  btrfs image or block device in place. Grow-only (shrinking is
+  rejected). Updates the `DEV_ITEM` in the chunk tree and
+  `superblock.total_bytes` inside a transaction, then extends the
+  backing file for regular-file images. Honors `--dry-run`. Accepts
+  `max` (regular files only), absolute sizes, and `+<amount>` deltas;
+  `cancel`, shrinks, and multi-device filesystems are rejected with
+  clear errors. Privileged integration tests cover the grow path
+  (with `btrfs check`) and shrink rejection.
+
 ## 0.10.0
 
 ### Added
