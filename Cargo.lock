@@ -261,6 +261,7 @@ dependencies = [
  "anyhow",
  "btrfs-disk",
  "btrfs-mkfs",
+ "btrfs-transaction",
  "btrfs-uapi",
  "clap",
  "insta",

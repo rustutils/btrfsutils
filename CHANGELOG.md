@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-tune --convert-to-free-space-tree`: convert an unmounted
+  filesystem to use the v2 free space tree (`FREE_SPACE_TREE`
+  compat_ro feature). Wraps the transaction crate's
+  `convert_to_free_space_tree` (Stage I.3) and commits in a single
+  transaction. Simple-case only: refuses if FST is already enabled,
+  if a stale FST root is present, or if any v1 free-space-cache
+  items remain in the root tree (clear them with
+  `btrfs rescue clear-space-cache` first). Privileged integration
+  test runs the conversion against a `^free-space-tree` image and
+  verifies `btrfs check` plus the resulting `compat_ro` bits.
+
 - `btrfs filesystem resize --offline`: resize an unmounted single-device
   btrfs image or block device in place. Grow-only (shrinking is
   rejected). Updates the `DEV_ITEM` in the chunk tree and

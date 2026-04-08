@@ -55,3 +55,11 @@ UUID:
 Seeding:
   -S <SEEDING>
           Set (1) or clear (0) the seeding flag
+
+Format conversions:
+      --convert-to-free-space-tree
+          Convert the filesystem to use the free space tree (v2 cache). The
+          filesystem must not already have the free-space-tree feature enabled,
+          must not have a stale free space tree root, and must not have any v1
+          free-space-cache items present (clear them with `btrfs rescue
+          clear-space-cache` first)

@@ -7,6 +7,7 @@ use uuid::Uuid;
 const HEADING_FEATURES: &str = "Legacy feature flags";
 const HEADING_UUID: &str = "UUID";
 const HEADING_SEEDING: &str = "Seeding";
+const HEADING_CONVERT: &str = "Format conversions";
 
 /// Modify btrfs filesystem parameters on an unmounted device by writing
 /// directly to the on-disk superblock and tree structures.
@@ -23,6 +24,13 @@ const HEADING_SEEDING: &str = "Seeding";
 #[command(group = ArgGroup::new("uuid_change")
     .args(["metadata_uuid", "set_metadata_uuid", "random_uuid", "set_uuid"])
     .conflicts_with_all(["extref", "skinny_metadata", "no_holes", "seeding"]))]
+#[command(group = ArgGroup::new("convert")
+    .args(["convert_to_free_space_tree"])
+    .conflicts_with_all([
+        "extref", "skinny_metadata", "no_holes",
+        "seeding", "metadata_uuid", "set_metadata_uuid",
+        "random_uuid", "set_uuid",
+    ]))]
 #[allow(clippy::struct_excessive_bools, clippy::doc_markdown)]
 pub struct Arguments {
     /// Enable extended inode refs (extref)
@@ -60,6 +68,14 @@ pub struct Arguments {
         conflicts_with_all = ["extref", "skinny_metadata", "no_holes"],
         help_heading = HEADING_SEEDING)]
     pub seeding: Option<bool>,
+
+    /// Convert the filesystem to use the free space tree (v2 cache).
+    /// The filesystem must not already have the free-space-tree
+    /// feature enabled, must not have a stale free space tree root,
+    /// and must not have any v1 free-space-cache items present
+    /// (clear them with `btrfs rescue clear-space-cache` first).
+    #[arg(long, help_heading = HEADING_CONVERT)]
+    pub convert_to_free_space_tree: bool,
 
     /// Allow dangerous operations without confirmation
     #[arg(short = 'f', long)]

@@ -245,6 +245,48 @@ fn filesystem_resize_offline_rejects_shrink() {
     assert_ne!(code2, 0, "absolute shrink should be rejected");
 }
 
+#[test]
+#[ignore = "requires elevated privileges"]
+fn tune_convert_to_free_space_tree() {
+    // mkfs without the free-space-tree feature, then run
+    // `btrfs tune --convert-to-free-space-tree` and assert btrfs
+    // check is clean and the FREE_SPACE_TREE compat_ro bit is set.
+    let td = tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 256 * 1024 * 1024);
+    file.mkfs_with_args(&["-O", "^free-space-tree,^block-group-tree"]);
+
+    let dev = file.path().to_str().unwrap();
+
+    // Run the conversion via the tune subcommand.
+    btrfs_ok(&["tune", "--convert-to-free-space-tree", dev]);
+
+    // btrfs check must pass.
+    let check = Command::new("btrfs")
+        .args(["check", "--readonly", dev])
+        .output()
+        .expect("failed to run btrfs check");
+    if !check.status.success() {
+        panic!(
+            "btrfs check failed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&check.stdout),
+            String::from_utf8_lossy(&check.stderr)
+        );
+    }
+
+    // Verify the bit is set in the superblock.
+    let dump = btrfs_ok(&["inspect-internal", "dump-super", dev]);
+    assert!(
+        dump.contains("FREE_SPACE_TREE")
+            && dump.contains("FREE_SPACE_TREE_VALID"),
+        "expected FREE_SPACE_TREE + _VALID in dump-super, got:\n{dump}"
+    );
+
+    // Idempotency: a second invocation must fail with the
+    // already-enabled error.
+    let (_, _, code) = btrfs(&["tune", "--convert-to-free-space-tree", dev]);
+    assert_ne!(code, 0, "second conversion should be rejected");
+}
+
 // ── filesystem resize error cases ────────────────────────────────────
 
 #[test]

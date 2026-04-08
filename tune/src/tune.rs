@@ -408,6 +408,50 @@ fn read_validate_mutate_write(
     Ok(sb_buf)
 }
 
+/// Convert an unmounted single-device filesystem to use the v2 free
+/// space tree (`FREE_SPACE_TREE` `compat_ro` feature).
+///
+/// Opens the device through the transaction crate, runs
+/// [`btrfs_transaction::convert::convert_to_free_space_tree`] inside
+/// a fresh transaction, and commits.
+///
+/// # Errors
+///
+/// Returns an error if the device cannot be opened, the transaction
+/// crate refuses the conversion (FST already enabled, stale FST
+/// root present, v1 cache items still in the root tree), or the
+/// commit fails.
+pub fn convert_to_free_space_tree(path: &std::path::Path) -> Result<()> {
+    use btrfs_transaction::{
+        convert, filesystem::Filesystem, transaction::Transaction,
+    };
+    use std::fs::OpenOptions;
+
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .with_context(|| format!("failed to open '{}'", path.display()))?;
+
+    let mut fs = Filesystem::open(file).with_context(|| {
+        format!("failed to open filesystem on '{}'", path.display())
+    })?;
+
+    let mut trans =
+        Transaction::start(&mut fs).context("failed to start transaction")?;
+
+    convert::convert_to_free_space_tree(&mut trans, &mut fs)
+        .context("free space tree conversion failed")?;
+
+    trans
+        .commit(&mut fs)
+        .context("failed to commit conversion transaction")?;
+    fs.sync().context("failed to sync to disk")?;
+
+    println!("converted '{}' to free space tree (v2)", path.display());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
