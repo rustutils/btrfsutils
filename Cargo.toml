@@ -7,6 +7,7 @@ members = [
   "mkfs",
   "tune",
   "transaction",
+  "fuse",
   "util/gen",
 ]
 default-members = [
