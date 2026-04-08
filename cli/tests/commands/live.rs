@@ -2470,6 +2470,60 @@ fn rescue_clear_space_cache_v2() {
 
 #[test]
 #[ignore = "requires elevated privileges"]
+fn rescue_clear_ino_cache_clean_fs() {
+    // The inode_cache mount option was removed from the kernel, so
+    // there's no way to produce real ino-cache items on a modern
+    // system. The best we can do is verify the command runs cleanly
+    // on a fresh filesystem (the common case post-deprecation),
+    // walks every fs tree without corrupting anything, and reports
+    // the no-op message.
+    let td = tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 256 * 1024 * 1024);
+    file.mkfs_with_args(&["-O", "^block-group-tree"]);
+    let lo = LoopbackDevice::new(file);
+
+    // Add a couple of subvolumes so the walk has more than one fs
+    // tree to traverse.
+    let lo = {
+        let mnt = Mount::new(lo, td.path());
+        let mp = mnt.path();
+        let sv1 = mp.join("sv1");
+        let sv2 = mp.join("sv2");
+        Command::new("btrfs")
+            .args(["subvolume", "create", sv1.to_str().unwrap()])
+            .status()
+            .expect("btrfs subvolume create failed");
+        Command::new("btrfs")
+            .args(["subvolume", "create", sv2.to_str().unwrap()])
+            .status()
+            .expect("btrfs subvolume create failed");
+        std::fs::write(sv1.join("file.bin"), vec![0xAA; 4096]).unwrap();
+        mnt.into_loopback()
+    };
+
+    let dev = lo.path().to_str().unwrap();
+    let out = btrfs_ok(&["rescue", "clear-ino-cache", dev]);
+    assert!(
+        out.contains("no inode cache items found")
+            || out.contains("cleared inode cache"),
+        "expected ino-cache clear message, got: {out}"
+    );
+
+    let check_output = Command::new("btrfs")
+        .args(["check", "--readonly", dev])
+        .output()
+        .expect("failed to run btrfs check");
+    if !check_output.status.success() {
+        let stderr = String::from_utf8_lossy(&check_output.stderr);
+        let stdout = String::from_utf8_lossy(&check_output.stdout);
+        panic!(
+            "btrfs check failed:\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
 fn rescue_clear_space_cache_v1() {
     let td = tempdir().unwrap();
     let file = BackingFile::new(td.path(), "disk.img", 512_000_000);

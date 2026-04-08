@@ -4,6 +4,15 @@ expression: text
 ---
 Remove leftover items pertaining to the deprecated inode cache feature
 
+For every fs tree (the default subvolume and every user subvolume), walks the
+items keyed under `BTRFS_FREE_INO_OBJECTID` (and historically also
+`BTRFS_FREE_SPACE_OBJECTID`, which old kernels used for the per-inode cache
+bitmap), drops every referenced data extent via the delayed-ref queue, and
+deletes the items themselves. The transaction crate's data-ref drop path also
+trims the csum tree for any fully-freed extent.
+
+The device must not be mounted.
+
 Usage: clear-ino-cache <DEVICE>
 
 Arguments:
@@ -12,4 +21,4 @@ Arguments:
 
 Options:
   -h, --help
-          Print help
+          Print help (see a summary with '-h')

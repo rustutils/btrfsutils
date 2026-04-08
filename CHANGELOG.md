@@ -20,6 +20,16 @@ All notable changes to this project will be documented in this file.
   registers freshly-allocated SYSTEM chunks in the superblock
   bootstrap snippet. New `btrfs-disk` helpers: `chunk_item_bytes`
   serializer, `sys_chunk_array_contains`, `sys_chunk_array_append`.
+- `btrfs rescue clear-ino-cache`: walks every fs tree, finds items
+  keyed under `BTRFS_FREE_INO_OBJECTID` (and historically also
+  `BTRFS_FREE_SPACE_OBJECTID`, used by old kernels for the per-inode
+  bitmap), drops every referenced data extent via the data-ref
+  delayed-ref path, and deletes the items. Each subvolume's worth of
+  cleanup commits in its own transaction. Privileged integration
+  test runs the no-op path against a fresh filesystem with multiple
+  subvolumes (the `inode_cache` mount option has been removed from
+  the kernel, so a real test fixture is impossible to construct on
+  modern systems).
 - `btrfs rescue clear-space-cache --version v1`: for every block
   group, deletes the `FREE_SPACE_HEADER` from the root tree, walks
   the cache inode's `EXTENT_DATA` items dropping each referenced
