@@ -22,16 +22,19 @@ use std::{
 const ROOT_TREE_OBJECTID: u64 = 1;
 const FS_TREE_OBJECTID: u64 = raw::BTRFS_FS_TREE_OBJECTID as u64;
 const FIRST_FREE_OBJECTID: u64 = raw::BTRFS_FIRST_FREE_OBJECTID as u64;
-const LAST_FREE_OBJECTID: u64 = raw::BTRFS_LAST_FREE_OBJECTID as i64 as u64;
-const FREE_INO_OBJECTID: u64 = raw::BTRFS_FREE_INO_OBJECTID as i64 as u64;
-const FREE_SPACE_OBJECTID: u64 = raw::BTRFS_FREE_SPACE_OBJECTID as i64 as u64;
+const LAST_FREE_OBJECTID: u64 =
+    (raw::BTRFS_LAST_FREE_OBJECTID as i64).cast_unsigned();
+const FREE_INO_OBJECTID: u64 =
+    (raw::BTRFS_FREE_INO_OBJECTID as i64).cast_unsigned();
+const FREE_SPACE_OBJECTID: u64 =
+    (raw::BTRFS_FREE_SPACE_OBJECTID as i64).cast_unsigned();
 
 /// True if `objectid` names a regular filesystem tree (the default
 /// subvolume or a user-created subvolume), as opposed to a
 /// system/internal tree.
 fn is_fs_tree(objectid: u64) -> bool {
     objectid == FS_TREE_OBJECTID
-        || (objectid >= FIRST_FREE_OBJECTID && objectid <= LAST_FREE_OBJECTID)
+        || (FIRST_FREE_OBJECTID..=LAST_FREE_OBJECTID).contains(&objectid)
 }
 
 /// Remove leftover items pertaining to the deprecated inode cache feature
