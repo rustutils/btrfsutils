@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `btrfs-fuse`: milestones M2 and M3 — `readlink`, `read` for inline and
+  regular uncompressed extents, and correct `..` parent resolution via
+  `INODE_REF`. Prealloc extents and sparse holes return zeros. Compressed
+  extents return `EOPNOTSUPP` (deferred to M4). Symlinks, hardlinks, and
+  large multi-extent files now work end-to-end.
+
 ## 0.11.0
 
 ### Added

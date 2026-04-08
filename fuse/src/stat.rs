@@ -7,19 +7,19 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// Convert a btrfs on-disk `Timespec` to a `SystemTime`.
 #[must_use]
 pub fn to_system_time(ts: &Timespec) -> SystemTime {
-    UNIX_EPOCH + Duration::new(ts.sec as u64, ts.nsec)
+    UNIX_EPOCH + Duration::new(ts.sec, ts.nsec)
 }
 
 /// Translate the POSIX mode field's type bits into a `fuser::FileType`.
 #[must_use]
 pub fn mode_to_kind(mode: u32) -> FileType {
-    match mode & libc::S_IFMT as u32 {
-        x if x == libc::S_IFDIR as u32 => FileType::Directory,
-        x if x == libc::S_IFLNK as u32 => FileType::Symlink,
-        x if x == libc::S_IFBLK as u32 => FileType::BlockDevice,
-        x if x == libc::S_IFCHR as u32 => FileType::CharDevice,
-        x if x == libc::S_IFIFO as u32 => FileType::NamedPipe,
-        x if x == libc::S_IFSOCK as u32 => FileType::Socket,
+    match mode & libc::S_IFMT {
+        x if x == libc::S_IFDIR => FileType::Directory,
+        x if x == libc::S_IFLNK => FileType::Symlink,
+        x if x == libc::S_IFBLK => FileType::BlockDevice,
+        x if x == libc::S_IFCHR => FileType::CharDevice,
+        x if x == libc::S_IFIFO => FileType::NamedPipe,
+        x if x == libc::S_IFSOCK => FileType::Socket,
         _ => FileType::RegularFile,
     }
 }
@@ -33,7 +33,9 @@ pub fn make_attr(ino: u64, item: &InodeItem, blksize: u32) -> FileAttr {
     let atime = to_system_time(&item.atime);
     let mtime = to_system_time(&item.mtime);
     let ctime = to_system_time(&item.ctime);
-    let crtime = to_system_time(&item.otime);
+    let btime = to_system_time(&item.otime);
+    #[allow(clippy::cast_possible_truncation)]
+    let rdev = item.rdev as u32; // rdev fits in 20 bits (major:12 + minor:8)
     FileAttr {
         ino,
         size: item.size,
@@ -41,13 +43,13 @@ pub fn make_attr(ino: u64, item: &InodeItem, blksize: u32) -> FileAttr {
         atime,
         mtime,
         ctime,
-        crtime,
+        crtime: btime,
         kind,
         perm,
         nlink: item.nlink,
         uid: item.uid,
         gid: item.gid,
-        rdev: item.rdev as u32,
+        rdev,
         blksize,
         flags: 0,
     }

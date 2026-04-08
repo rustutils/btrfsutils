@@ -1,23 +1,24 @@
 [workspace]
 members = [
-  "uapi",
-  "disk",
-  "stream",
   "cli",
-  "mkfs",
-  "tune",
-  "transaction",
+  "disk",
   "fuse",
+  "mkfs",
+  "stream",
+  "transaction",
+  "tune",
+  "uapi",
   "util/gen",
 ]
 default-members = [
-  "uapi",
-  "disk",
-  "stream",
   "cli",
+  "disk",
+  "fuse",
   "mkfs",
-  "tune",
+  "stream",
   "transaction",
+  "tune",
+  "uapi",
 ]
 resolver = "2"
 
@@ -61,13 +62,14 @@ insta = "1"
 bindgen = "0.72.1"
 
 # internal crates
-btrfs-uapi = { path = "uapi", version = "0.11.0" }
-btrfs-disk = { path = "disk", version = "0.11.0" }
-btrfs-stream = { path = "stream", version = "0.11.0" }
-btrfs-mkfs = { path = "mkfs", version = "0.11.0" }
-btrfs-tune = { path = "tune", version = "0.11.0" }
 btrfs-cli = { path = "cli", version = "0.11.0" }
+btrfs-disk = { path = "disk", version = "0.11.0" }
+btrfs-fuse = { path = "fuse", version = "0.11.0" }
+btrfs-mkfs = { path = "mkfs", version = "0.11.0" }
+btrfs-stream = { path = "stream", version = "0.11.0" }
 btrfs-transaction = { path = "transaction", version = "0.11.0" }
+btrfs-tune = { path = "tune", version = "0.11.0" }
+btrfs-uapi = { path = "uapi", version = "0.11.0" }
 
 # Optimize compression libraries in dev/test builds so gzip snapshot
 # tests don't take forever.

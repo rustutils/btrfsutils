@@ -19,8 +19,7 @@ pub const FUSE_ROOT: u64 = 1;
 #[must_use]
 pub fn fuse_to_btrfs(ino: u64) -> u64 {
     match ino {
-        FUSE_ROOT => BTRFS_ROOT_DIR,
-        BTRFS_ROOT_DIR => BTRFS_ROOT_DIR, // unreachable in practice; safety
+        FUSE_ROOT | BTRFS_ROOT_DIR => BTRFS_ROOT_DIR,
         other => other,
     }
 }

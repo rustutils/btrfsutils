@@ -1,12 +1,12 @@
-//! `impl fuser::Filesystem for BtrfsFuse` — milestone M1.
+//! `impl fuser::Filesystem for BtrfsFuse` — milestones M1–M3.
 //!
-//! Implements `lookup`, `getattr`, and `readdir` against the default FS tree
-//! by linearly walking it (DFS) and filtering items. This is intentionally
-//! the simplest possible implementation; once M1 is solid we will replace
-//! the walks with a proper key-based descent helper in `btrfs-disk` and
-//! cache decoded inodes.
+//! Implements `lookup`, `getattr`, `readdir`, `readlink`, and `read` against
+//! the default FS tree by linearly walking it (DFS) and filtering items.
+//! This is intentionally the simplest possible implementation; once M3 is
+//! solid we will replace the walks with a proper key-based descent helper in
+//! `btrfs-disk` and cache decoded inodes.
 
-use crate::{dir, inode, stat};
+use crate::{dir, inode, read, stat};
 use anyhow::Result;
 use btrfs_disk::{
     items::{DirItem, InodeItem},
@@ -128,6 +128,22 @@ impl State {
         });
         found
     }
+
+    /// Find the btrfs objectid of the parent directory for `oid` via
+    /// `INODE_REF`. The `INODE_REF` key offset field contains the parent
+    /// objectid directly. Returns `oid` itself if no ref is found.
+    fn find_parent_oid(&mut self, oid: u64) -> u64 {
+        let mut parent = oid;
+        let _ = self.for_each_item(|key, _data| {
+            if parent != oid {
+                return;
+            }
+            if key.objectid == oid && key.key_type == KeyType::InodeRef {
+                parent = key.offset;
+            }
+        });
+        parent
+    }
 }
 
 impl Filesystem for BtrfsFuse {
@@ -186,9 +202,8 @@ impl Filesystem for BtrfsFuse {
         let mut state = self.state.lock().unwrap();
         let dir_oid = inode::fuse_to_btrfs(ino.0);
 
-        // Synthesise `.` and `..` at offsets 0 and 1.
-        // M1 sketch: `..` is set to self for the root; real parent
-        // resolution requires walking INODE_REF.
+        // Synthesise `.` at offset 0 and `..` at offset 1.
+        // The parent objectid comes from the INODE_REF key offset field.
         let mut entries: Vec<dir::Entry> = Vec::new();
         if offset == 0 {
             entries.push(dir::Entry {
@@ -199,8 +214,9 @@ impl Filesystem for BtrfsFuse {
             });
         }
         if offset <= 1 {
+            let parent_oid = state.find_parent_oid(dir_oid);
             entries.push(dir::Entry {
-                ino: ino.0,
+                ino: inode::btrfs_to_fuse(parent_oid),
                 kind: FileType::Directory,
                 name: b"..".to_vec(),
                 offset: 2,
@@ -241,18 +257,66 @@ impl Filesystem for BtrfsFuse {
         reply.ok();
     }
 
+    fn readlink(&self, _req: &Request, ino: INodeNo, reply: ReplyData) {
+        let mut state = self.state.lock().unwrap();
+        let oid = inode::fuse_to_btrfs(ino.0);
+        let fs_tree_root = state.fs_tree_root;
+        match read::read_symlink(&mut state.fs.reader, fs_tree_root, oid) {
+            Ok(Some(target)) => reply.data(&target),
+            Ok(None) => {
+                log::warn!("readlink ino={}: no inline extent found", ino.0);
+                reply.error(Errno::EIO);
+            }
+            Err(e) => {
+                log::warn!("readlink ino={}: {e}", ino.0);
+                reply.error(Errno::EIO);
+            }
+        }
+    }
+
     fn read(
         &self,
         _req: &Request,
-        _ino: INodeNo,
+        ino: INodeNo,
         _fh: FileHandle,
-        _offset: u64,
-        _size: u32,
+        offset: u64,
+        size: u32,
         _flags: OpenFlags,
         _lock: Option<LockOwner>,
         reply: ReplyData,
     ) {
-        // M1 stub: file reads land in milestones M2-M4.
-        reply.error(Errno::ENOSYS);
+        let mut state = self.state.lock().unwrap();
+        let oid = inode::fuse_to_btrfs(ino.0);
+        let file_size = if let Some(inode) = state.read_inode(oid) {
+            inode.size
+        } else {
+            reply.error(Errno::ENOENT);
+            return;
+        };
+        let fs_tree_root = state.fs_tree_root;
+        match read::read_file(
+            &mut state.fs.reader,
+            fs_tree_root,
+            oid,
+            file_size,
+            offset,
+            size,
+        ) {
+            Ok(data) => reply.data(&data),
+            Err(e) if e.kind() == io::ErrorKind::Unsupported => {
+                log::warn!(
+                    "read ino={} offset={offset} size={size}: {e}",
+                    ino.0
+                );
+                reply.error(Errno::EOPNOTSUPP);
+            }
+            Err(e) => {
+                log::warn!(
+                    "read ino={} offset={offset} size={size}: {e}",
+                    ino.0
+                );
+                reply.error(Errno::EIO);
+            }
+        }
     }
 }
