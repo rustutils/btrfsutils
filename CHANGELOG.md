@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-fuse` (experimental): new MIT/Apache-2.0 crate providing a
+  userspace FUSE driver built on `btrfs-disk`. M1 sketch implements
+  `lookup`, `getattr`, and `readdir` against the default FS tree of an
+  unmounted image or block device. File reads, xattrs, multi-subvolume
+  support, and key-based tree descent are tracked as follow-ups.
+
 - `btrfs-transaction`: full-tree conversion primitives. Stage I lands
   four new transaction-crate building blocks plus two whole-tree
   conversions:

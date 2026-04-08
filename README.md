@@ -130,6 +130,7 @@ Most commands that talk to the kernel require root privileges or `CAP_SYS_ADMIN`
 | `cli` | The command-line tool, built on top of `uapi`, `disk`, `stream`, and `transaction`. |
 | `mkfs` | Filesystem creation tool (`mkfs.btrfs`). Constructs on-disk B-tree nodes and writes them directly to block devices or image files. |
 | `tune` | Offline superblock tuning tool (`btrfstune`). Modifies feature flags, seeding, and filesystem UUIDs on unmounted devices. |
+| `fuse` *(experimental)* | Userspace FUSE driver (`btrfs-fuse`) built on `btrfs-disk`. Read-only mount of images and block devices, no kernel btrfs required. |
 | `util/gen` | Man page and shell completion generator. Uses `clap_mangen` and `clap_complete` to produce roff man pages and bash/zsh/fish/elvish completions. |
 | `docs` | Documentation, rendered with mdBook. |
 
