@@ -1,13 +1,13 @@
 //! # Whole-tree conversion operations
 //!
 //! Builds new global trees from existing extent-tree state and flips
-//! the matching `compat_ro` superblock bits. Currently provides
-//! [`convert_to_free_space_tree`]; the block-group-tree conversion
-//! will land alongside it.
+//! the matching `compat_ro` superblock bits. Provides
+//! [`convert_to_free_space_tree`] and
+//! [`convert_to_block_group_tree`].
 
 use crate::{
     allocation,
-    buffer::ITEM_SIZE,
+    buffer::{HEADER_SIZE, ITEM_SIZE},
     extent_walk::{self, AllocatedExtent},
     filesystem::Filesystem,
     items,
@@ -21,8 +21,12 @@ use btrfs_disk::{
 };
 use std::io::{self, Read, Seek, Write};
 
+/// Tree id of the extent tree.
+const EXTENT_TREE_ID: u64 = 2;
 /// Tree id of the free space tree.
 const FREE_SPACE_TREE_ID: u64 = 10;
+/// Tree id of the block group tree.
+const BLOCK_GROUP_TREE_ID: u64 = 11;
 /// Tree id of the root tree.
 const ROOT_TREE_ID: u64 = 1;
 
@@ -243,4 +247,240 @@ fn root_tree_has_v1_cache<R: Read + Write + Seek>(
     };
     path.release();
     Ok(result)
+}
+
+/// One snapshotted `BLOCK_GROUP_ITEM` from the extent tree.
+struct BlockGroupItemSnapshot {
+    key: DiskKey,
+    /// Raw on-disk payload bytes, copied verbatim from the extent
+    /// tree leaf so the BGT round-trips byte-for-byte.
+    data: Vec<u8>,
+}
+
+/// Convert a filesystem from no-BGT to a v2 block group tree, in
+/// a single transaction.
+///
+/// The caller must invoke [`Transaction::commit`] afterwards. If
+/// the conversion errors out partway through, the caller is
+/// expected to abort the transaction.
+///
+/// Like [`convert_to_free_space_tree`], this is the simple-case
+/// implementation: it refuses to run if the BGT `compat_ro` bit is
+/// already set, if a stale BGT root is registered, or if the FST
+/// is missing — and refuses if the resulting BGT would need to
+/// span more than one leaf (a hard cap that holds for all current
+/// test images and most production filesystems; lifting it
+/// requires a separate test pass for the leaf-split path under
+/// the bg-tree override).
+///
+/// # Errors
+///
+/// * The block group tree `compat_ro` bit is already set.
+/// * A root for tree id 11 is already registered.
+/// * The free space tree is not enabled (`FREE_SPACE_TREE` bit
+///   missing) or not valid (`FREE_SPACE_TREE_VALID` bit missing).
+///   The kernel requires both for BGT.
+/// * The collected `BLOCK_GROUP_ITEM` records would not fit in a
+///   single BGT leaf (v1 limit).
+/// * Any tree read/write or allocator operation fails.
+pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
+    trans: &mut Transaction<R>,
+    fs_info: &mut Filesystem<R>,
+) -> io::Result<()> {
+    let bgt_bit = u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE);
+    let fst_bit = u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE);
+    let fst_valid_bit =
+        u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID);
+    let compat_ro = fs_info.superblock.compat_ro_flags;
+
+    // Preconditions: refuse-on-weird, no repair attempts.
+    if compat_ro & bgt_bit != 0 {
+        return Err(io::Error::other(
+            "convert_to_block_group_tree: block group tree already enabled",
+        ));
+    }
+    if fs_info.root_bytenr(BLOCK_GROUP_TREE_ID).is_some() {
+        return Err(io::Error::other(
+            "convert_to_block_group_tree: stale block group tree root present (refusing)",
+        ));
+    }
+    if compat_ro & fst_bit == 0 {
+        return Err(io::Error::other(
+            "convert_to_block_group_tree: free space tree must be enabled first (kernel requires FST for BGT)",
+        ));
+    }
+    if compat_ro & fst_valid_bit == 0 {
+        return Err(io::Error::other(
+            "convert_to_block_group_tree: free space tree is not marked VALID (refusing)",
+        ));
+    }
+
+    // Step 1: snapshot every BLOCK_GROUP_ITEM from the extent
+    // tree. This must run BEFORE we pin the override or create
+    // any new tree, because load_block_groups currently routes to
+    // the extent tree (BGT not registered yet) which is what we
+    // want for this read.
+    let snapshots = collect_block_group_items(fs_info)?;
+    debug_assert!(
+        !snapshots.is_empty(),
+        "convert_to_block_group_tree: no block group items found in extent tree",
+    );
+
+    // Step 2: defensive single-leaf check. Each item costs
+    // ITEM_SIZE (descriptor) + payload bytes. The leaf must hold
+    // the items + their data within `nodesize - HEADER_SIZE`.
+    let total_item_bytes: usize =
+        snapshots.iter().map(|s| ITEM_SIZE + s.data.len()).sum();
+    let leaf_capacity = (fs_info.nodesize as usize) - HEADER_SIZE;
+    if total_item_bytes > leaf_capacity {
+        return Err(io::Error::other(format!(
+            "convert_to_block_group_tree: BGT would need a leaf split \
+             ({} block groups, {total_item_bytes} bytes, leaf capacity {leaf_capacity}); \
+             multi-leaf BGT is a v1 limitation",
+            snapshots.len(),
+        )));
+    }
+
+    // Step 3: pin the routing override to the extent tree for the
+    // remainder of the conversion. The guard restores the previous
+    // value (None) on drop, even on panic or `?`.
+    let mut guard = fs_info.pin_block_group_tree(EXTENT_TREE_ID);
+    let fs_info = guard.fs_mut();
+
+    // Step 4: create the BGT root. The internal alloc + root-tree
+    // ROOT_ITEM insert both call the allocator, which now reads
+    // from the extent tree thanks to the override.
+    trans.create_empty_tree(fs_info, BLOCK_GROUP_TREE_ID)?;
+
+    // Step 5: insert every snapshotted BG item into BGT, in the
+    // order returned by collect_block_group_items (already sorted
+    // by extent-tree compound key, so by BG start). Inserts go
+    // into the freshly created empty leaf and never need a split
+    // because of the step-2 capacity check.
+    for snap in &snapshots {
+        insert_in_tree(
+            trans,
+            fs_info,
+            BLOCK_GROUP_TREE_ID,
+            &snap.key,
+            &snap.data,
+        )?;
+    }
+
+    // Step 6: delete every BG item from the extent tree. These
+    // deletions go through the standard search_slot Delete path,
+    // which COWs extent tree leaves and may rebalance neighbours.
+    // The override holds, so any allocator call during these COWs
+    // continues to read BG state from the extent tree (which is
+    // semantically still consistent — we are removing
+    // BLOCK_GROUP_ITEM records, not changing BG identities).
+    for snap in &snapshots {
+        delete_one(trans, fs_info, EXTENT_TREE_ID, &snap.key)?;
+    }
+
+    // Step 7: flip the compat_ro bit. The in-memory superblock is
+    // serialised by the commit path.
+    fs_info.superblock.compat_ro_flags |= bgt_bit;
+
+    // Guard drops here, restoring bg_tree_override to None. Past
+    // this point, fs_info.block_group_tree_id() returns 11 and
+    // any subsequent allocator/update_block_group_used calls
+    // (notably from the upcoming commit's flush_delayed_refs)
+    // route to the freshly populated BGT.
+    Ok(())
+}
+
+/// Walk the extent tree and snapshot every `BLOCK_GROUP_ITEM`
+/// (key + raw payload bytes) in ascending compound-key order.
+fn collect_block_group_items<R: Read + Write + Seek>(
+    fs_info: &mut Filesystem<R>,
+) -> io::Result<Vec<BlockGroupItemSnapshot>> {
+    let mut out: Vec<BlockGroupItemSnapshot> = Vec::new();
+
+    // Position the cursor at (0, 0, 0) and walk forward; the
+    // compound-key search will land at-or-before the first item.
+    // BG items are typically sparse — a few per filesystem — so
+    // the linear scan is fine.
+    let start_key = DiskKey {
+        objectid: 0,
+        key_type: KeyType::from_raw(0),
+        offset: 0,
+    };
+    let mut path = BtrfsPath::new();
+    search::search_slot(
+        None,
+        fs_info,
+        EXTENT_TREE_ID,
+        &start_key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )?;
+
+    loop {
+        let Some(leaf) = path.nodes[0].as_ref() else {
+            break;
+        };
+        let slot = path.slots[0];
+        if slot >= leaf.nritems() as usize {
+            if !next_leaf(fs_info, &mut path)? {
+                break;
+            }
+            continue;
+        }
+        let k = leaf.item_key(slot);
+        if k.key_type == KeyType::BlockGroupItem {
+            out.push(BlockGroupItemSnapshot {
+                key: k,
+                data: leaf.item_data(slot).to_vec(),
+            });
+        }
+        path.slots[0] = slot + 1;
+    }
+    path.release();
+
+    // The walk yields items in compound-key order, which for
+    // BLOCK_GROUP_ITEM (keyed `(start, BLOCK_GROUP_ITEM, length)`)
+    // is BG-start order — exactly what BGT expects.
+    debug_assert!(
+        out.windows(2).all(|w| {
+            (w[0].key.objectid, w[0].key.offset)
+                < (w[1].key.objectid, w[1].key.offset)
+        }),
+        "collect_block_group_items: items not strictly sorted by (start, length)",
+    );
+    Ok(out)
+}
+
+/// Delete a single item identified by exact key from the given
+/// tree. Errors if the key is not found.
+fn delete_one<R: Read + Write + Seek>(
+    trans: &mut Transaction<R>,
+    fs_info: &mut Filesystem<R>,
+    tree_id: u64,
+    key: &DiskKey,
+) -> io::Result<()> {
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        Some(&mut *trans),
+        fs_info,
+        tree_id,
+        key,
+        &mut path,
+        SearchIntent::Delete,
+        true,
+    )?;
+    if !found {
+        path.release();
+        return Err(io::Error::other(format!(
+            "delete_one: key {key:?} not found in tree {tree_id}",
+        )));
+    }
+    let leaf = path.nodes[0]
+        .as_mut()
+        .ok_or_else(|| io::Error::other("delete_one: no leaf in path"))?;
+    items::del_items(leaf, path.slots[0], 1);
+    fs_info.mark_dirty(leaf);
+    path.release();
+    Ok(())
 }

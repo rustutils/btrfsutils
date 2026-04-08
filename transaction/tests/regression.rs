@@ -2024,6 +2024,264 @@ fn convert_to_free_space_tree_idempotent_after_one_run() {
     drop(dir);
 }
 
+// ----- Stage I.4: convert_to_block_group_tree -----
+
+const COMPAT_RO_BLOCK_GROUP_TREE: u64 = 1 << 3;
+
+/// Walk a tree, calling `visit(key, payload_bytes)` for every leaf
+/// item. Read-only.
+fn walk_tree_items(
+    fs: &mut Filesystem<File>,
+    tree_id: u64,
+    mut visit: impl FnMut(DiskKey, &[u8]),
+) {
+    let start = DiskKey {
+        objectid: 0,
+        key_type: KeyType::from_raw(0),
+        offset: 0,
+    };
+    let mut path = BtrfsPath::new();
+    search::search_slot(
+        None,
+        fs,
+        tree_id,
+        &start,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .unwrap();
+    loop {
+        let Some(leaf) = path.nodes[0].as_ref() else {
+            break;
+        };
+        let slot = path.slots[0];
+        if slot >= leaf.nritems() as usize {
+            if !search::next_leaf(fs, &mut path).unwrap() {
+                break;
+            }
+            continue;
+        }
+        let k = leaf.item_key(slot);
+        let data = leaf.item_data(slot).to_vec();
+        visit(k, &data);
+        path.slots[0] = slot + 1;
+    }
+    path.release();
+}
+
+fn collect_bg_items_from(
+    fs: &mut Filesystem<File>,
+    tree_id: u64,
+) -> Vec<(DiskKey, Vec<u8>)> {
+    let mut out = Vec::new();
+    walk_tree_items(fs, tree_id, |k, data| {
+        if k.key_type == KeyType::BlockGroupItem {
+            out.push((k, data.to_vec()));
+        }
+    });
+    out
+}
+
+#[test]
+fn convert_to_block_group_tree_basic() {
+    // Start without BGT, run the conversion, commit, reopen, and
+    // assert btrfs check accepts the resulting image.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^block-group-tree"]);
+
+    // Snapshot the BG items from the extent tree before conversion.
+    let pre = {
+        let mut fs = open_rw(&img_path);
+        assert_eq!(
+            fs.superblock.compat_ro_flags & COMPAT_RO_BLOCK_GROUP_TREE,
+            0
+        );
+        assert!(fs.root_bytenr(11).is_none());
+        collect_bg_items_from(&mut fs, 2)
+    };
+    assert!(
+        !pre.is_empty(),
+        "extent tree must have BG items pre-conversion"
+    );
+
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::convert_to_block_group_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let mut fs = open_rw(&img_path);
+    assert_ne!(
+        fs.superblock.compat_ro_flags & COMPAT_RO_BLOCK_GROUP_TREE,
+        0
+    );
+    assert!(fs.root_bytenr(11).is_some());
+
+    // Extent tree must contain zero BLOCK_GROUP_ITEM entries.
+    let post_extent = collect_bg_items_from(&mut fs, 2);
+    assert!(
+        post_extent.is_empty(),
+        "extent tree should have no BG items after conversion, found {}",
+        post_extent.len()
+    );
+
+    // BGT must contain a 1:1 mapping from the pre snapshot:
+    // identical keys, identical chunk_objectid + flags, and a
+    // non-decreasing `used` field. The `used` field legitimately
+    // grows during commit because the conversion allocates new
+    // metadata blocks (the BGT root leaf and COWs from the
+    // extent-tree deletes) and the convergence loop's
+    // update_block_group_used routes those increments through
+    // the just-built BGT — exactly what we want to verify.
+    use btrfs_disk::items::BlockGroupItem;
+    let post_bgt = collect_bg_items_from(&mut fs, 11);
+    assert_eq!(
+        post_bgt.len(),
+        pre.len(),
+        "BGT item count mismatch: pre={} post={}",
+        pre.len(),
+        post_bgt.len()
+    );
+    for (i, ((pk, pd), (qk, qd))) in pre.iter().zip(post_bgt.iter()).enumerate()
+    {
+        assert_eq!(pk.objectid, qk.objectid, "BG {i} objectid");
+        assert_eq!(pk.key_type, qk.key_type, "BG {i} key_type");
+        assert_eq!(pk.offset, qk.offset, "BG {i} offset");
+        let pre_bg = BlockGroupItem::parse(pd).expect("pre parse");
+        let post_bg = BlockGroupItem::parse(qd).expect("post parse");
+        assert_eq!(
+            pre_bg.chunk_objectid, post_bg.chunk_objectid,
+            "BG {i} chunk_objectid"
+        );
+        assert_eq!(pre_bg.flags, post_bg.flags, "BG {i} flags");
+        assert!(
+            post_bg.used >= pre_bg.used,
+            "BG {i} used regressed: pre={} post={}",
+            pre_bg.used,
+            post_bg.used
+        );
+    }
+
+    drop(fs);
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn convert_to_block_group_tree_rejects_already_enabled() {
+    // Default mkfs already has BGT. Conversion must refuse.
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+    assert_ne!(
+        fs.superblock.compat_ro_flags & COMPAT_RO_BLOCK_GROUP_TREE,
+        0,
+        "default mkfs should have BGT enabled (sanity check)"
+    );
+    let mut trans = Transaction::start(&mut fs).unwrap();
+    let err =
+        convert::convert_to_block_group_tree(&mut trans, &mut fs).unwrap_err();
+    assert!(err.to_string().contains("already enabled"), "got: {err}");
+    trans.abort(&mut fs);
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn convert_to_block_group_tree_rejects_when_fst_missing() {
+    // Without FST, conversion must refuse — kernel requires FST
+    // for BGT.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^free-space-tree"]);
+    let mut fs = open_rw(&img_path);
+    assert_eq!(fs.superblock.compat_ro_flags & COMPAT_RO_FREE_SPACE_TREE, 0);
+    let mut trans = Transaction::start(&mut fs).unwrap();
+    let err =
+        convert::convert_to_block_group_tree(&mut trans, &mut fs).unwrap_err();
+    assert!(
+        err.to_string().contains("free space tree must be enabled"),
+        "got: {err}"
+    );
+    trans.abort(&mut fs);
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn convert_to_block_group_tree_then_mutate_and_check() {
+    // After conversion, run a mutating transaction that allocates
+    // new metadata blocks. The convergence loop's
+    // update_block_group_used must route to BGT (override
+    // cleared, tree 11 registered). btrfs check must accept the
+    // result.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^block-group-tree"]);
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::convert_to_block_group_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+    {
+        let mut fs = open_rw(&img_path);
+        // After conversion, the routing accessor must report 11.
+        assert_eq!(fs.block_group_tree_id(), 11);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        let data = [0xC3u8; 64];
+        for i in 0..50u64 {
+            let key = DiskKey {
+                objectid: 900_000 + i,
+                key_type: KeyType::TemporaryItem,
+                offset: 0,
+            };
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+                true,
+            )
+            .unwrap();
+            let leaf = path.nodes[0].as_mut().unwrap();
+            items::insert_item(leaf, path.slots[0], &key, &data).unwrap();
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+        trans.commit(&mut fs).unwrap();
+    }
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn convert_to_block_group_tree_idempotent_after_one_run() {
+    // Running the conversion a second time on the same image
+    // must fail with "already enabled" — i.e. we never produce
+    // duplicate BGT roots.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^block-group-tree"]);
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::convert_to_block_group_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        let err = convert::convert_to_block_group_tree(&mut trans, &mut fs)
+            .unwrap_err();
+        assert!(err.to_string().contains("already enabled"));
+        trans.abort(&mut fs);
+    }
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
 #[test]
 fn convert_to_free_space_tree_then_mutate_and_recommit() {
     // After conversion, ordinary insert transactions must continue
