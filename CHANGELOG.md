@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.11.0
+
 ### Added
 
 - `btrfs-fuse` (experimental): new MIT/Apache-2.0 crate providing a

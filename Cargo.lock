@@ -149,7 +149,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-cli"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "btrfs-disk",
@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-disk"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "bindgen",
  "bitflags",
@@ -190,7 +190,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-fuse"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "btrfs-disk",
@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-gen"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "btrfs-cli",
  "btrfs-mkfs",
@@ -215,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-mkfs"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "blake2",
@@ -238,7 +238,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-stream"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "btrfs-uapi",
@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-transaction"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "btrfs-disk",
  "bytes",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-tune"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "btrfs-disk",
@@ -284,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "btrfs-uapi"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "bindgen",
  "bitflags",
