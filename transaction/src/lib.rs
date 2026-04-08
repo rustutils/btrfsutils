@@ -25,6 +25,7 @@
 pub mod allocation;
 pub mod balance;
 pub mod buffer;
+pub mod convert;
 pub mod cow;
 pub mod delayed_ref;
 pub mod extent_walk;

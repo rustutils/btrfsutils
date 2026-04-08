@@ -8,7 +8,7 @@ use btrfs_disk::tree::{DiskKey, KeyType};
 use btrfs_transaction::{
     allocation, balance,
     buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
-    cow,
+    convert, cow,
     extent_walk::{self, AllocatedExtent},
     filesystem::Filesystem,
     items,
@@ -23,14 +23,27 @@ use std::{
 };
 
 fn create_test_image() -> (tempfile::TempDir, PathBuf) {
+    create_test_image_with_features(&[])
+}
+
+/// Like [`create_test_image`] but passes additional `-O` flags to
+/// `mkfs.btrfs`. Use `&["^free-space-tree"]` to start without FST
+/// so the convert path can build it.
+fn create_test_image_with_features(
+    features: &[&str],
+) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::TempDir::new().expect("failed to create temp dir");
     let img_path = dir.path().join("test.img");
     let file = File::create(&img_path).expect("failed to create image file");
     file.set_len(128 * 1024 * 1024)
         .expect("failed to set image size");
     drop(file);
-    let status = Command::new("mkfs.btrfs")
-        .args(["-f", "-q"])
+    let mut cmd = Command::new("mkfs.btrfs");
+    cmd.args(["-f", "-q"]);
+    for f in features {
+        cmd.arg("-O").arg(f);
+    }
+    let status = cmd
         .arg(&img_path)
         .status()
         .expect("mkfs.btrfs not found — install btrfs-progs");
@@ -1843,5 +1856,158 @@ fn create_two_empty_trees_in_one_transaction() {
     assert_eq!(item_a.refs, 1);
     assert_eq!(item_b.refs, 1);
     drop(fs);
+    drop(dir);
+}
+
+// ----- Stage I.3: convert_to_free_space_tree -----
+
+const COMPAT_RO_FREE_SPACE_TREE: u64 = 1 << 0;
+const COMPAT_RO_FREE_SPACE_TREE_VALID: u64 = 1 << 1;
+
+#[test]
+fn convert_to_free_space_tree_basic() {
+    // Start without FST, run the conversion, commit, reopen, and
+    // assert btrfs check accepts the resulting image.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^free-space-tree"]);
+
+    {
+        let mut fs = open_rw(&img_path);
+        // Sanity: starting state has no FST.
+        assert_eq!(
+            fs.superblock.compat_ro_flags & COMPAT_RO_FREE_SPACE_TREE,
+            0
+        );
+        assert!(fs.root_bytenr(10).is_none());
+
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::convert_to_free_space_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let mut fs = open_rw(&img_path);
+    // Both compat_ro bits should be set, FST root must be present.
+    let bits = fs.superblock.compat_ro_flags;
+    assert_ne!(bits & COMPAT_RO_FREE_SPACE_TREE, 0);
+    assert_ne!(bits & COMPAT_RO_FREE_SPACE_TREE_VALID, 0);
+    assert_eq!(fs.superblock.cache_generation, 0);
+    assert!(fs.root_bytenr(10).is_some());
+
+    // Walker / FST cross-check on every block group: derived free
+    // ranges from the extent tree must equal the FST entries we
+    // built. (Same invariant as the I.2 tests, now over our own
+    // newly-built FST.)
+    for bg in allocation::load_block_groups(&mut fs).unwrap() {
+        let mut walked = Vec::new();
+        extent_walk::walk_block_group_extents(
+            &mut fs,
+            bg.start,
+            bg.length,
+            |e| {
+                walked.push(e);
+                Ok(())
+            },
+        )
+        .unwrap();
+        let derived =
+            extent_walk::derive_free_ranges(bg.start, bg.length, &walked)
+                .unwrap();
+        let derived_pairs: Vec<(u64, u64)> =
+            derived.iter().map(|r| (r.start, r.length)).collect();
+        let fst = read_fst_extents(&mut fs, bg.start, bg.length);
+        assert_eq!(
+            derived_pairs, fst,
+            "convert: walker disagrees with FST in BG {}",
+            bg.start
+        );
+    }
+
+    drop(fs);
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn convert_to_free_space_tree_rejects_already_enabled() {
+    // Default mkfs already has FST. Conversion must refuse.
+    let (dir, img_path) = create_test_image();
+    let mut fs = open_rw(&img_path);
+    assert_ne!(fs.superblock.compat_ro_flags & COMPAT_RO_FREE_SPACE_TREE, 0);
+    let mut trans = Transaction::start(&mut fs).unwrap();
+    let err =
+        convert::convert_to_free_space_tree(&mut trans, &mut fs).unwrap_err();
+    assert!(err.to_string().contains("already enabled"), "got: {err}");
+    trans.abort(&mut fs);
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn convert_to_free_space_tree_idempotent_after_one_run() {
+    // Running the conversion a second time on the same filesystem
+    // should fail with "already enabled" — i.e. we never produce
+    // duplicate FST roots.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^free-space-tree"]);
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::convert_to_free_space_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        let err = convert::convert_to_free_space_tree(&mut trans, &mut fs)
+            .unwrap_err();
+        assert!(err.to_string().contains("already enabled"));
+        trans.abort(&mut fs);
+    }
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn convert_to_free_space_tree_then_mutate_and_recommit() {
+    // After conversion, ordinary insert transactions must continue
+    // to work and the FST must stay consistent (the existing
+    // Stage F update path must accept our hand-built FST as input).
+    let (dir, img_path) =
+        create_test_image_with_features(&["^free-space-tree"]);
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::convert_to_free_space_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        let data = [0x55u8; 48];
+        for i in 0..50u64 {
+            let key = DiskKey {
+                objectid: 800_000 + i,
+                key_type: KeyType::TemporaryItem,
+                offset: 0,
+            };
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+                true,
+            )
+            .unwrap();
+            let leaf = path.nodes[0].as_mut().unwrap();
+            items::insert_item(leaf, path.slots[0], &key, &data).unwrap();
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+        trans.commit(&mut fs).unwrap();
+    }
+    assert_btrfs_check(&img_path);
     drop(dir);
 }
