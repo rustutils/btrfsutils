@@ -2258,6 +2258,153 @@ fn convert_to_block_group_tree_then_mutate_and_check() {
 }
 
 #[test]
+fn convert_to_block_group_tree_multi_leaf_synthetic() {
+    // Verifies that BGT conversion correctly handles the
+    // multi-leaf case: when there are too many BLOCK_GROUP_ITEM
+    // records to fit in a single leaf, the standard split path
+    // runs and the routing override keeps the allocator reading
+    // from the extent tree across the splits.
+    //
+    // Real test images only have 3 block groups so we cannot
+    // exercise this against mkfs output. Instead we hand-insert
+    // ~400 fake BLOCK_GROUP_ITEM records into the extent tree
+    // before conversion. Each fake item carries DATA flags so the
+    // metadata allocator skips it (filters by `is_metadata`),
+    // leaving the real metadata BG free to satisfy the COW
+    // allocations triggered during BGT splits.
+    //
+    // The result is intentionally not whole-image consistent —
+    // the fake BG records reference bytenrs that no chunk backs —
+    // so this test does NOT run `btrfs check`. Its purpose is to
+    // exercise the leaf-split code path under the override.
+    use btrfs_disk::items::{BlockGroupFlags, BlockGroupItem};
+
+    let (dir, img_path) =
+        create_test_image_with_features(&["^block-group-tree"]);
+
+    // Step A: hand-insert 400 fake BLOCK_GROUP_ITEM records into
+    // the extent tree at impossible bytenrs (10 TiB+). Sorted
+    // ascending so each insert appends.
+    const FAKE_COUNT: u64 = 400;
+    const FAKE_BASE: u64 = 10 * 1024 * 1024 * 1024 * 1024; // 10 TiB
+    const FAKE_STRIDE: u64 = 1024 * 1024 * 1024; // 1 GiB apart
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        let payload = BlockGroupItem {
+            used: 0,
+            chunk_objectid: 256,
+            // DATA flag means the metadata allocator's
+            // is_metadata() filter rejects this BG, so it never
+            // gets picked for COW allocations during the
+            // conversion. We just need the records to exist in
+            // the extent tree so the converter copies them.
+            flags: BlockGroupFlags::DATA,
+        }
+        .to_bytes();
+        for i in 0..FAKE_COUNT {
+            let bytenr = FAKE_BASE + i * FAKE_STRIDE;
+            let key = DiskKey {
+                objectid: bytenr,
+                key_type: KeyType::BlockGroupItem,
+                offset: FAKE_STRIDE,
+            };
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                2, // extent tree
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + payload.len()) as u32),
+                true,
+            )
+            .unwrap();
+            let leaf = path.nodes[0].as_mut().unwrap();
+            items::insert_item(leaf, path.slots[0], &key, &payload).unwrap();
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+        trans.commit(&mut fs).unwrap();
+    }
+
+    // Step B: snapshot the pre-conversion extent-tree BG count
+    // (real BGs from mkfs + the fakes we just added).
+    let pre_count = {
+        let mut fs = open_rw(&img_path);
+        collect_bg_items_from(&mut fs, 2).len()
+    };
+    assert!(
+        pre_count >= FAKE_COUNT as usize,
+        "expected at least {FAKE_COUNT} BG items pre-conversion, got {pre_count}",
+    );
+
+    // Step C: run the conversion. Without the multi-leaf lift
+    // this would fail with the old "BGT would need a leaf split"
+    // error.
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::convert_to_block_group_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+
+    // Step D: assert the BGT contains every item and that the
+    // resulting tree is multi-level (level >= 1, i.e. has at
+    // least one internal node — proves a split actually
+    // happened).
+    let mut fs = open_rw(&img_path);
+    assert_ne!(
+        fs.superblock.compat_ro_flags & COMPAT_RO_BLOCK_GROUP_TREE,
+        0
+    );
+    let bgt_root_bytenr = fs.root_bytenr(11).expect("BGT root present");
+    let bgt_root = fs.read_block(bgt_root_bytenr).unwrap();
+    assert!(
+        bgt_root.level() >= 1,
+        "BGT root should be a non-leaf after multi-leaf conversion (level={})",
+        bgt_root.level()
+    );
+
+    let post_bgt = collect_bg_items_from(&mut fs, 11);
+    assert_eq!(
+        post_bgt.len(),
+        pre_count,
+        "BGT post-conversion item count should match pre-conversion extent-tree count",
+    );
+
+    let post_extent = collect_bg_items_from(&mut fs, 2);
+    assert!(
+        post_extent.is_empty(),
+        "extent tree should have no BG items after conversion, found {}",
+        post_extent.len()
+    );
+
+    // Spot-check: every 50th fake key we inserted is present in
+    // BGT with the same payload bytes.
+    let payload_check = BlockGroupItem {
+        used: 0,
+        chunk_objectid: 256,
+        flags: BlockGroupFlags::DATA,
+    }
+    .to_bytes();
+    for i in (0..FAKE_COUNT).step_by(50) {
+        let bytenr = FAKE_BASE + i * FAKE_STRIDE;
+        let found = post_bgt.iter().find(|(k, _)| {
+            k.objectid == bytenr && k.key_type == KeyType::BlockGroupItem
+        });
+        let (_, data) = found
+            .unwrap_or_else(|| panic!("fake BG {bytenr} missing from BGT"));
+        assert_eq!(data, &payload_check, "fake BG {bytenr} payload differs");
+    }
+
+    drop(fs);
+    // No btrfs check: the fake BG records make the image
+    // intentionally inconsistent.
+    drop(dir);
+}
+
+#[test]
 fn convert_to_block_group_tree_idempotent_after_one_run() {
     // Running the conversion a second time on the same image
     // must fail with "already enabled" — i.e. we never produce

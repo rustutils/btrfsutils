@@ -7,7 +7,7 @@
 
 use crate::{
     allocation,
-    buffer::{HEADER_SIZE, ITEM_SIZE},
+    buffer::ITEM_SIZE,
     extent_walk::{self, AllocatedExtent},
     filesystem::Filesystem,
     items,
@@ -267,11 +267,12 @@ struct BlockGroupItemSnapshot {
 /// Like [`convert_to_free_space_tree`], this is the simple-case
 /// implementation: it refuses to run if the BGT `compat_ro` bit is
 /// already set, if a stale BGT root is registered, or if the FST
-/// is missing — and refuses if the resulting BGT would need to
-/// span more than one leaf (a hard cap that holds for all current
-/// test images and most production filesystems; lifting it
-/// requires a separate test pass for the leaf-split path under
-/// the bg-tree override).
+/// is missing.
+///
+/// Multi-leaf BGT is supported: the routing override holds across
+/// `split_leaf` calls triggered during BGT population, so any
+/// allocator metadata reads continue to consult the extent tree
+/// while the BGT is being built.
 ///
 /// # Errors
 ///
@@ -280,8 +281,6 @@ struct BlockGroupItemSnapshot {
 /// * The free space tree is not enabled (`FREE_SPACE_TREE` bit
 ///   missing) or not valid (`FREE_SPACE_TREE_VALID` bit missing).
 ///   The kernel requires both for BGT.
-/// * The collected `BLOCK_GROUP_ITEM` records would not fit in a
-///   single BGT leaf (v1 limit).
 /// * Any tree read/write or allocator operation fails.
 pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
     trans: &mut Transaction<R>,
@@ -326,37 +325,23 @@ pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
         "convert_to_block_group_tree: no block group items found in extent tree",
     );
 
-    // Step 2: defensive single-leaf check. Each item costs
-    // ITEM_SIZE (descriptor) + payload bytes. The leaf must hold
-    // the items + their data within `nodesize - HEADER_SIZE`.
-    let total_item_bytes: usize =
-        snapshots.iter().map(|s| ITEM_SIZE + s.data.len()).sum();
-    let leaf_capacity = (fs_info.nodesize as usize) - HEADER_SIZE;
-    if total_item_bytes > leaf_capacity {
-        return Err(io::Error::other(format!(
-            "convert_to_block_group_tree: BGT would need a leaf split \
-             ({} block groups, {total_item_bytes} bytes, leaf capacity {leaf_capacity}); \
-             multi-leaf BGT is a v1 limitation",
-            snapshots.len(),
-        )));
-    }
-
-    // Step 3: pin the routing override to the extent tree for the
+    // Step 2: pin the routing override to the extent tree for the
     // remainder of the conversion. The guard restores the previous
     // value (None) on drop, even on panic or `?`.
     let mut guard = fs_info.pin_block_group_tree(EXTENT_TREE_ID);
     let fs_info = guard.fs_mut();
 
-    // Step 4: create the BGT root. The internal alloc + root-tree
+    // Step 3: create the BGT root. The internal alloc + root-tree
     // ROOT_ITEM insert both call the allocator, which now reads
     // from the extent tree thanks to the override.
     trans.create_empty_tree(fs_info, BLOCK_GROUP_TREE_ID)?;
 
-    // Step 5: insert every snapshotted BG item into BGT, in the
+    // Step 4: insert every snapshotted BG item into BGT, in the
     // order returned by collect_block_group_items (already sorted
     // by extent-tree compound key, so by BG start). Inserts go
-    // into the freshly created empty leaf and never need a split
-    // because of the step-2 capacity check.
+    // into the freshly created empty leaf; if there are too many
+    // for a single leaf the standard split path runs and the
+    // override keeps the allocator reading from the extent tree.
     for snap in &snapshots {
         insert_in_tree(
             trans,
@@ -367,7 +352,7 @@ pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
         )?;
     }
 
-    // Step 6: delete every BG item from the extent tree. These
+    // Step 5: delete every BG item from the extent tree. These
     // deletions go through the standard search_slot Delete path,
     // which COWs extent tree leaves and may rebalance neighbours.
     // The override holds, so any allocator call during these COWs
@@ -378,7 +363,7 @@ pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
         delete_one(trans, fs_info, EXTENT_TREE_ID, &snap.key)?;
     }
 
-    // Step 7: flip the compat_ro bit. The in-memory superblock is
+    // Step 6: flip the compat_ro bit. The in-memory superblock is
     // serialised by the commit path.
     fs_info.superblock.compat_ro_flags |= bgt_bit;
 
