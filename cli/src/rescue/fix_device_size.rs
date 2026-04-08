@@ -278,25 +278,10 @@ fn sum_corrected_total_bytes<R: Read + Write + Seek>(
 
 impl Runnable for RescueFixDeviceSizeCommand {
     fn run(&self, _ctx: &RunContext) -> Result<()> {
-        // The read pass and the algorithm below are correct, but
-        // committing requires COWing the chunk tree. The transaction
-        // crate's allocator always pulls from a metadata block group
-        // (alloc_block in transaction.rs), so the new chunk-root
-        // block ends up outside any SYSTEM chunk in `sys_chunk_array`
-        // and the next mount cannot resolve it. See "Stage H — chunk
-        // tree COW" in transaction/PLAN.md.
-        bail!(
-            "fix-device-size is not yet implemented: chunk tree COW \
-             requires SYSTEM-block-group allocation in the transaction \
-             crate (see Stage H in transaction/PLAN.md)"
-        );
-
-        #[allow(unreachable_code)]
         if is_mounted(&self.device) {
             bail!("{} is currently mounted", self.device.display());
         }
 
-        #[allow(unreachable_code)]
         let file = OpenOptions::new()
             .read(true)
             .write(true)

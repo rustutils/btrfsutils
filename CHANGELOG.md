@@ -6,6 +6,20 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-transaction`: data extent ref drop support. The delayed-ref
+  queue keys metadata vs. data backrefs separately, the flush path
+  locates `EXTENT_DATA_REF` records inline or as standalone items,
+  decrements `EXTENT_ITEM.refs`, deletes fully-freed extents, and
+  trims overlapping `EXTENT_CSUM` items (with full head/tail/split
+  handling). New `btrfs-disk` helpers: pub `extent_data_ref_hash`,
+  `inline_ref_size`. New `transaction::items::shrink_item`.
+- `btrfs-transaction`: chunk tree COW support. The allocator now
+  distinguishes `BlockGroupKind::Metadata` from `BlockGroupKind::System`
+  with separate per-kind cursors, `alloc_tree_block` routes the
+  chunk tree to a SYSTEM block group, and `ensure_in_sys_chunk_array`
+  registers freshly-allocated SYSTEM chunks in the superblock
+  bootstrap snippet. New `btrfs-disk` helpers: `chunk_item_bytes`
+  serializer, `sys_chunk_array_contains`, `sys_chunk_array_append`.
 - `btrfs rescue clear-space-cache --version v2`: walks the
   FREE_SPACE_TREE, drops every block, removes its ROOT_ITEM, clears
   the `FREE_SPACE_TREE` + `FREE_SPACE_TREE_VALID` compat_ro flags,
@@ -21,16 +35,12 @@ All notable changes to this project will be documented in this file.
   a single transaction. Multi-mirror reads, `--interactive`, and
   csum types other than CRC32C are not yet supported. Tests cover
   both the clean-fs scan and a corrupt-and-repair round trip.
-- `btrfs rescue fix-device-size`: full read-pass + decision logic +
-  apply path implemented (walks DEV_ITEMs, rounds down misaligned
-  total_bytes, shrinks past actual device size when no DEV_EXTENT
-  would be lost, mirrors the change into the embedded superblock
-  dev_item, and recomputes superblock total_bytes). Currently
-  parked behind a Stage H bail in `transaction/PLAN.md` because
-  committing chunk-tree changes requires SYSTEM-block-group
-  allocation in the transaction crate; the integration test stays
-  compiled but skips its body unless `FIX_DEVICE_SIZE_ENABLED` is
-  set in the environment.
+- `btrfs rescue fix-device-size`: walks DEV_ITEMs, rounds down
+  misaligned `total_bytes`, shrinks past the actual device size
+  when no DEV_EXTENT would be lost, mirrors the change into the
+  embedded superblock dev_item, and recomputes superblock
+  `total_bytes`. Privileged integration test exercises the
+  shrink case end-to-end and verifies via `btrfs check`.
 - `btrfs rescue clear-uuid-tree`: walks the UUID tree, drops extent refs
   for every block, deletes the ROOT_ITEM, and commits. End-to-end test
   round-trips through a rw mount.

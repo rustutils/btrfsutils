@@ -2483,14 +2483,6 @@ fn rescue_clear_space_cache_v2() {
 #[test]
 #[ignore = "requires elevated privileges"]
 fn rescue_fix_device_size_shrink() {
-    // The read pass and key algorithm are correct, but committing
-    // chunk tree changes requires SYSTEM-block-group COW support in
-    // the transaction crate (see Stage H in transaction/PLAN.md).
-    // Keep the test compiled so it stays maintained, but skip the
-    // body until the underlying gap is fixed.
-    if std::env::var_os("FIX_DEVICE_SIZE_ENABLED").is_none() {
-        return;
-    }
     let td = tempdir().unwrap();
     let file = BackingFile::new(td.path(), "disk.img", 512 * 1024 * 1024);
     // Disable BGT to keep the filesystem layout simple. The fresh
