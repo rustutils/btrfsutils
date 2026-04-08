@@ -44,23 +44,6 @@ The only unwrapped ioctls are 7 superseded v1 variants (balance, clone,
 defrag, logical_ino, snap_create, snap_destroy, subvol_create) where the
 v2 is already wrapped.
 
-## Testing
-
-- **Unit tests**: inline `#[cfg(test)]` modules across most wrapper modules.
-  Cover struct parsing, search key construction, cursor advancement, builder
-  patterns, Display implementations, and helper functions. No privileges needed.
-- **Integration tests**: exercise ioctl wrappers against real btrfs filesystems
-  on loopback devices. Cover balance, device, scrub, subvolume, quota, qgroup,
-  send/receive, and more. Require root.
-
-```sh
-# Run unit tests (no privileges needed)
-cargo test -p btrfs-uapi
-
-# Run integration tests (requires root)
-just test
-```
-
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or

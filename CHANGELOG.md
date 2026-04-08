@@ -6,6 +6,45 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-transaction`: full-tree conversion primitives. Stage I lands
+  four new transaction-crate building blocks plus two whole-tree
+  conversions:
+
+  - **`Transaction::create_empty_tree(fs_info, tree_id)`** (Stage I.1):
+    allocate one metadata block, initialise it as an empty level-0
+    leaf with the inherited fsid + chunk_tree_uuid, register the new
+    `(tree_id -> bytenr)` mapping in the in-memory roots map, and
+    insert a `ROOT_ITEM` into the root tree. Rejects bootstrap ids
+    `0..=3` and any tree id already present.
+  - **`extent_walk` module** (Stage I.2): read-only
+    `walk_block_group_extents` callback-style scanner over
+    `EXTENT_ITEM` and `METADATA_ITEM` keys within a block group's
+    logical range, plus `derive_free_ranges` for computing
+    complementary free ranges. Detects overlap and out-of-bounds
+    extents.
+  - **`convert::convert_to_free_space_tree`** (Stage I.3): single-
+    transaction path that creates the FST root, walks every block
+    group, derives free ranges, inserts `FREE_SPACE_INFO` and
+    `FREE_SPACE_EXTENT` items, sets the `FREE_SPACE_TREE` +
+    `FREE_SPACE_TREE_VALID` `compat_ro` bits, and zeros
+    `cache_generation`. Simple-case only.
+  - **`Filesystem::block_group_tree_id` + `bg_tree_override`** (Stage
+    I.4 prep): single accessor for routing block-group reads,
+    replacing the duplicated inline routing in
+    `allocation::load_block_groups` and
+    `Transaction::update_block_group_used`. The override pin is the
+    load-bearing primitive that lets the BGT conversion populate the
+    new tree without the allocator routing to it mid-flight.
+  - **`convert::convert_to_block_group_tree`** (Stage I.4):
+    single-transaction path that creates the BGT root via the
+    Stage I.1 primitive, copies every `BLOCK_GROUP_ITEM` from the
+    extent tree into BGT, deletes the originals from the extent
+    tree, and sets the `BLOCK_GROUP_TREE` `compat_ro` bit. The
+    `bg_tree_override` is held on tree id 2 for the duration of the
+    function so allocator calls keep reading from the extent tree.
+    Lifts the initial single-leaf cap: the conversion now handles
+    block group counts that span multiple BGT leaves.
+
 - `btrfs-tune --convert-to-block-group-tree`: convert an unmounted
   filesystem to use the block group tree (`BLOCK_GROUP_TREE`
   compat_ro feature). Wraps the transaction crate's

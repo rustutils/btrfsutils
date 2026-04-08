@@ -13,6 +13,13 @@
 //!
 //! This is a clean-room implementation based on the on-disk format
 //! specification and UAPI headers. It is licensed MIT/Apache-2.0.
+//!
+//! # Stability
+//!
+//! This is a pre-1.0, experimental crate. It is a clean-room
+//! reimplementation of btrfs's read-write tree machinery and may
+//! have edge cases that testing doesn't cover. Do not use it on
+//! filesystems you care about without taking a backup first.
 
 #![warn(clippy::pedantic)]
 #![allow(clippy::cast_possible_truncation)] // nodesize ≤ 64K, offsets always fit u32

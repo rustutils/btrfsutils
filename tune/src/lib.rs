@@ -17,6 +17,16 @@
 //! - **Full fsid rewrite** (`-u`, `-U UUID`): rewrite the fsid in every
 //!   tree block header and device item on disk, with crash-safety via
 //!   `BTRFS_SUPER_FLAG_CHANGING_FSID`.
+//!
+//! # Stability
+//!
+//! This is a pre-1.0 release. The conversion operations
+//! (`--convert-to-free-space-tree`, `--convert-to-block-group-tree`)
+//! are experimental: they go through the new `btrfs-transaction`
+//! crate, which is a clean-room reimplementation and may have
+//! edge cases that testing doesn't cover. Take a backup before
+//! running them on filesystems you care about. The other
+//! operations (feature flags, seeding, UUID changes) are stable.
 
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]

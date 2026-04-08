@@ -8,6 +8,16 @@
 //! Not all commands from btrfs-progs are implemented yet. Run `btrfs help` to
 //! see what is available. Most commands require root privileges or
 //! `CAP_SYS_ADMIN`.
+//!
+//! # Stability
+//!
+//! This is a pre-1.0 release. Read-only commands are stable. The
+//! mutating commands that go through the new `btrfs-transaction`
+//! crate (offline `filesystem resize`, the `rescue` subcommands,
+//! and the `tune` conversions when built with the `tune` feature)
+//! are experimental and may have edge cases that testing doesn't
+//! cover. Take a backup before running them on filesystems you
+//! care about.
 
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]

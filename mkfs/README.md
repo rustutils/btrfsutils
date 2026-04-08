@@ -78,20 +78,6 @@ btrfs-mkfs -f /dev/sda1
 - Zoned device support
 - Mixed data+metadata mode (`-M`)
 
-## Testing
-
-Unit tests cover checksum algorithms, superblock construction, and leaf building.
-Privileged integration tests create filesystem images, verify them with
-`btrfs check`, then mount and exercise read/write operations.
-
-```sh
-# Run unit tests
-cargo test -p btrfs-mkfs
-
-# Run integration tests (requires root and btrfs-progs installed)
-just test
-```
-
 ## License
 
 Licensed under the [GNU General Public License v2.0](LICENSE.md).

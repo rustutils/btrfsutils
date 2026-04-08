@@ -4,6 +4,14 @@ Implementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs)
 command-line tool used to inspect and manage btrfs filesystems, written in
 Rust.
 
+> This is a pre-1.0 release. Read-only commands are stable. The
+> mutating commands that go through the new `btrfs-transaction`
+> crate (offline `filesystem resize`, the `rescue` subcommands,
+> and the `tune` conversions when built with the `tune` feature)
+> are experimental and may have edge cases that testing doesn't
+> cover. Take a backup before running them on filesystems you
+> care about.
+
 This crate builds the `btrfs` binary. If you are a user who wants to manage
 btrfs filesystems, install this. If you are a developer building tools on
 top of btrfs, depend on `btrfs-uapi`, `btrfs-disk`, or `btrfs-stream`

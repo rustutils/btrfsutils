@@ -2,9 +2,10 @@
 
 Atomic, COW-based modification of btrfs filesystem images.
 
-> Warning: This crate is experimental. It is a clean-room reimplementation of
-> btrfs's transaction process. As such, it may not fully match the behaviour of
-> the reference implementation. It also has not been tested extensively.
+> This is a pre-1.0, experimental crate. It is a clean-room
+> reimplementation of btrfs's read-write tree machinery and may
+> have edge cases that testing doesn't cover. Do not use it on
+> filesystems you care about without taking a backup first.
 
 This crate sits on top of `btrfs-disk` and provides the write-side
 machinery that the parsing crate deliberately doesn't: copy-on-write
@@ -146,10 +147,6 @@ proptest-based playground tree harness exercises insert/delete
 sequences against an in-memory model and verifies that
 `Transaction::commit` produces a structurally valid filesystem
 on every step.
-
-```sh
-cargo test -p btrfs-transaction
-```
 
 ## License
 

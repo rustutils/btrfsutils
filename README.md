@@ -4,11 +4,18 @@ An implementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs)
 utilities for creating, managing and inspecting btrfs filesystems, written in
 Rust.
 
+> Warning: some of the implemented functionality in this repository is
+> considered experimental. Specifically, the `btrfs-transaction` is
+> experimental, because it is based off a clean-room reimplementation, so it
+> may have edge cases that testing doesn't cover. Features which rely on it
+> (`btrfs-tune`, the `btrfs rescue` subcommands) are as well. 
+
 This project contains low-level libraries for interacting with the btrfs kernel
 driver (`btrfs-uapi`), parsing and writing on-disk data structures
-(`btrfs-disk`), parsing and handling btrfs send streams (`btrfs-stream`). The
-goal for these is to be useful libraries that can be used in other projects to
-interact with btrfs filesystems programmatically.
+(`btrfs-disk`), parsing and handling btrfs send streams (`btrfs-stream`), and
+performing transactional read-write modifications to unmounted filesystems
+(`btrfs-transaction`). The goal for these is to be useful libraries that can
+be used in other projects to interact with btrfs filesystems programmatically.
 
 It also contains high-level CLI crates (`btrfs-cli` for the `btrfs` utility,
 and `btrfs-mkfs` for the `mkfs.btrfs` utility, `btrfs-tune` for the `btrfstune`
@@ -24,9 +31,9 @@ or have a simpler implementation.
 - **Opt-in added features**. Pass `--format modern` or set `BTRFS_OUTPUT_FORMAT=modern`
   to opt in to cleaner-looking output, progress bars, adaptive column widths.
 - **Reusable libraries.** Bring btrfs to Rust through the low-level crates
-  (`btrfs-uapi`, `btrfs-disk`, `btrfs-stream`) that you can use in your own
-  code. Permissively licensed under MIT/Apache-2.0, and written from scratch
-  to be ergonomic.
+  (`btrfs-uapi`, `btrfs-disk`, `btrfs-stream`, `btrfs-transaction`) that you
+  can use in your own code. Permissively licensed under MIT/Apache-2.0, and
+  written from scratch to be ergonomic.
 
 ## Status
 
@@ -36,6 +43,14 @@ and produce output matching the C original.
 `btrfs check` is fully implemented with 7-phase read-only filesystem
 verification. `btrfs rescue` is implemented for every subcommand
 except `chunk-recover`, which remains a stub.
+
+The `btrfs-transaction` crate provides COW-correct read-write access
+to unmounted filesystems, including delayed-ref bookkeeping, free
+space tree updates, chunk tree COW, and full-tree conversions for
+the v2 free space tree and the block group tree. It backs the
+offline `btrfs filesystem resize`, the rescue commands, and the
+`btrfs-tune --convert-to-free-space-tree` /
+`--convert-to-block-group-tree` operations.
 
 ## Installation
 
@@ -111,7 +126,8 @@ Most commands that talk to the kernel require root privileges or `CAP_SYS_ADMIN`
 | `uapi` | Safe Rust wrappers around btrfs kernel ioctls, sysfs, and procfs. Linux-only. |
 | `disk` | Platform-independent parsing and serialization of btrfs on-disk structures. Used by `cli` for dump-super/dump-tree and by `mkfs` for filesystem creation. |
 | `stream` | Send stream parser and receive operations. Platform-independent parser with optional Linux-only receive support. |
-| `cli` | The command-line tool, built on top of `uapi`, `disk`, and `stream`. |
+| `transaction` | Transactional read-write access to unmounted filesystems. COW-correct tree edits, delayed-ref bookkeeping, free space tree and chunk tree updates, full-tree conversions. Platform-independent. |
+| `cli` | The command-line tool, built on top of `uapi`, `disk`, `stream`, and `transaction`. |
 | `mkfs` | Filesystem creation tool (`mkfs.btrfs`). Constructs on-disk B-tree nodes and writes them directly to block devices or image files. |
 | `tune` | Offline superblock tuning tool (`btrfstune`). Modifies feature flags, seeding, and filesystem UUIDs on unmounted devices. |
 | `util/gen` | Man page and shell completion generator. Uses `clap_mangen` and `clap_complete` to produce roff man pages and bash/zsh/fish/elvish completions. |
@@ -128,9 +144,10 @@ cargo test
 
 For the integration tests, due to the fact that they interact with the kernel
 and will test privileged operations (many tests create and mount a file-backed
-btrfs filesystem), they require superuser privileges. Because running `sudo cargo test` is generally a bad idea, this repository has a wrapper that will build
-tests (as your user), and then run only integration tests with `sudo`. This
-is the recommended way to run the entire test suite.
+btrfs filesystem), they require superuser privileges. Because running
+`sudo cargo test` is generally a bad idea, this repository has a wrapper that
+will build tests (as your user), and then run only integration tests with
+`sudo`. This is the recommended way to run the entire test suite.
 
 ```
 just test
@@ -143,12 +160,20 @@ installed. This uses the same functionality as the `just test`.
 just coverage
 ```
 
+For more details on the test layout (unit vs. integration vs. snapshot tests,
+fixtures, the `cargo insta` workflow, and how the privileged harness is
+wired up), see the
+[testing guide](https://rustutils.gitlab.io/btrfsutils/dev/testing.html) in
+the developer docs.
+
 ## License
 
-The library crates (`btrfs-uapi`, `btrfs-disk`, `btrfs-stream`) are original
-work that implement parsers for on-disk data structures, shims around kernel
-syscalls, and parsers for the send stream wire protocol. They are licensed
-under either of [Apache License, Version 2.0](uapi/LICENSE-APACHE) or
+The library crates (`btrfs-uapi`, `btrfs-disk`, `btrfs-stream`,
+`btrfs-transaction`) are original work that implement parsers for on-disk
+data structures, shims around kernel syscalls, parsers for the send stream
+wire protocol, and a clean-room transactional read-write engine for
+unmounted filesystems. They are licensed under either of
+[Apache License, Version 2.0](uapi/LICENSE-APACHE) or
 [MIT license](uapi/LICENSE-MIT) at your option. This license allows them
 be used easily in other Rust crates.
 
