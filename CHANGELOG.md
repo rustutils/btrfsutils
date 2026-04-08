@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-tune --convert-to-block-group-tree`: convert an unmounted
+  filesystem to use the block group tree (`BLOCK_GROUP_TREE`
+  compat_ro feature). Wraps the transaction crate's
+  `convert_to_block_group_tree` (Stage I.4) and commits in a
+  single transaction. Requires the free space tree to be enabled
+  first (kernel invariant). Can be combined with
+  `--convert-to-free-space-tree` in one invocation; both
+  conversions then run in sequence. Privileged integration tests
+  cover the basic conversion (verified with `btrfs check` and
+  `dump-super`) and the FST-required precondition.
+
 - `btrfs-tune --convert-to-free-space-tree`: convert an unmounted
   filesystem to use the v2 free space tree (`FREE_SPACE_TREE`
   compat_ro feature). Wraps the transaction crate's

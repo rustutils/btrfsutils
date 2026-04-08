@@ -25,7 +25,8 @@ const HEADING_CONVERT: &str = "Format conversions";
     .args(["metadata_uuid", "set_metadata_uuid", "random_uuid", "set_uuid"])
     .conflicts_with_all(["extref", "skinny_metadata", "no_holes", "seeding"]))]
 #[command(group = ArgGroup::new("convert")
-    .args(["convert_to_free_space_tree"])
+    .args(["convert_to_free_space_tree", "convert_to_block_group_tree"])
+    .multiple(true)
     .conflicts_with_all([
         "extref", "skinny_metadata", "no_holes",
         "seeding", "metadata_uuid", "set_metadata_uuid",
@@ -76,6 +77,15 @@ pub struct Arguments {
     /// (clear them with `btrfs rescue clear-space-cache` first).
     #[arg(long, help_heading = HEADING_CONVERT)]
     pub convert_to_free_space_tree: bool,
+
+    /// Convert the filesystem to use the block group tree. The
+    /// filesystem must not already have the block-group-tree feature
+    /// enabled and must already have the free-space-tree feature
+    /// enabled (the kernel requires FST for BGT). When combined with
+    /// --convert-to-free-space-tree, both conversions run in
+    /// sequence.
+    #[arg(long, help_heading = HEADING_CONVERT)]
+    pub convert_to_block_group_tree: bool,
 
     /// Allow dangerous operations without confirmation
     #[arg(short = 'f', long)]

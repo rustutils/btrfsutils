@@ -26,12 +26,14 @@ pub fn run(args: &Arguments) -> Result<()> {
         args.metadata_uuid || args.set_metadata_uuid.is_some();
     let has_uuid_rewrite = args.random_uuid || args.set_uuid.is_some();
     let has_convert_fst = args.convert_to_free_space_tree;
+    let has_convert_bgt = args.convert_to_block_group_tree;
 
     if !has_legacy
         && !has_seeding
         && !has_metadata_uuid
         && !has_uuid_rewrite
         && !has_convert_fst
+        && !has_convert_bgt
     {
         bail!("at least one option must be specified (see --help)");
     }
@@ -91,11 +93,16 @@ pub fn run(args: &Arguments) -> Result<()> {
         crate::tune::change_uuid(&mut file, uuid)?;
     }
 
-    if has_convert_fst {
+    if has_convert_fst || has_convert_bgt {
         // Drop the bare-file handle: the transaction crate opens
         // its own handle on the same path.
         drop(file);
-        crate::tune::convert_to_free_space_tree(&args.device)?;
+        if has_convert_fst {
+            crate::tune::convert_to_free_space_tree(&args.device)?;
+        }
+        if has_convert_bgt {
+            crate::tune::convert_to_block_group_tree(&args.device)?;
+        }
     }
 
     Ok(())

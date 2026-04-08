@@ -63,3 +63,10 @@ Format conversions:
           must not have a stale free space tree root, and must not have any v1
           free-space-cache items present (clear them with `btrfs rescue
           clear-space-cache` first)
+
+      --convert-to-block-group-tree
+          Convert the filesystem to use the block group tree. The filesystem
+          must not already have the block-group-tree feature enabled and must
+          already have the free-space-tree feature enabled (the kernel requires
+          FST for BGT). When combined with --convert-to-free-space-tree, both
+          conversions run in sequence

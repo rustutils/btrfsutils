@@ -287,6 +287,58 @@ fn tune_convert_to_free_space_tree() {
     assert_ne!(code, 0, "second conversion should be rejected");
 }
 
+#[test]
+#[ignore = "requires elevated privileges"]
+fn tune_convert_to_block_group_tree() {
+    // mkfs without the block-group-tree feature (FST is on by
+    // default in modern mkfs), then run
+    // `btrfs tune --convert-to-block-group-tree` and assert btrfs
+    // check is clean and the BLOCK_GROUP_TREE compat_ro bit is set.
+    let td = tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 256 * 1024 * 1024);
+    file.mkfs_with_args(&["-O", "^block-group-tree"]);
+
+    let dev = file.path().to_str().unwrap();
+
+    btrfs_ok(&["tune", "--convert-to-block-group-tree", dev]);
+
+    let check = Command::new("btrfs")
+        .args(["check", "--readonly", dev])
+        .output()
+        .expect("failed to run btrfs check");
+    if !check.status.success() {
+        panic!(
+            "btrfs check failed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&check.stdout),
+            String::from_utf8_lossy(&check.stderr)
+        );
+    }
+
+    let dump = btrfs_ok(&["inspect-internal", "dump-super", dev]);
+    assert!(
+        dump.contains("BLOCK_GROUP_TREE"),
+        "expected BLOCK_GROUP_TREE in dump-super, got:\n{dump}"
+    );
+
+    // Idempotency: a second invocation must fail.
+    let (_, _, code) = btrfs(&["tune", "--convert-to-block-group-tree", dev]);
+    assert_ne!(code, 0, "second conversion should be rejected");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn tune_convert_to_bgt_requires_fst() {
+    // BGT depends on FST. mkfs without either, then attempt the
+    // BGT conversion: should be rejected.
+    let td = tempdir().unwrap();
+    let file = BackingFile::new(td.path(), "disk.img", 256 * 1024 * 1024);
+    file.mkfs_with_args(&["-O", "^block-group-tree,^free-space-tree"]);
+
+    let dev = file.path().to_str().unwrap();
+    let (_, _, code) = btrfs(&["tune", "--convert-to-block-group-tree", dev]);
+    assert_ne!(code, 0, "BGT without FST should be rejected");
+}
+
 // ── filesystem resize error cases ────────────────────────────────────
 
 #[test]

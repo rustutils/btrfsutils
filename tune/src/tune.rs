@@ -452,6 +452,49 @@ pub fn convert_to_free_space_tree(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Convert an unmounted single-device filesystem to use the block
+/// group tree (`BLOCK_GROUP_TREE` `compat_ro` feature).
+///
+/// Opens the device through the transaction crate, runs
+/// [`btrfs_transaction::convert::convert_to_block_group_tree`]
+/// inside a fresh transaction, and commits.
+///
+/// # Errors
+///
+/// Returns an error if the device cannot be opened, the transaction
+/// crate refuses the conversion (BGT already enabled, FST not
+/// enabled, stale BGT root present), or the commit fails.
+pub fn convert_to_block_group_tree(path: &std::path::Path) -> Result<()> {
+    use btrfs_transaction::{
+        convert, filesystem::Filesystem, transaction::Transaction,
+    };
+    use std::fs::OpenOptions;
+
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .with_context(|| format!("failed to open '{}'", path.display()))?;
+
+    let mut fs = Filesystem::open(file).with_context(|| {
+        format!("failed to open filesystem on '{}'", path.display())
+    })?;
+
+    let mut trans =
+        Transaction::start(&mut fs).context("failed to start transaction")?;
+
+    convert::convert_to_block_group_tree(&mut trans, &mut fs)
+        .context("block group tree conversion failed")?;
+
+    trans
+        .commit(&mut fs)
+        .context("failed to commit conversion transaction")?;
+    fs.sync().context("failed to sync to disk")?;
+
+    println!("converted '{}' to block group tree", path.display());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
