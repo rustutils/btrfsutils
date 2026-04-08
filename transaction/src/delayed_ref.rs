@@ -44,7 +44,9 @@ impl DelayedRefKey {
     #[must_use]
     pub fn bytenr(&self) -> u64 {
         match self {
-            Self::Metadata { bytenr, .. } | Self::Data { bytenr, .. } => *bytenr,
+            Self::Metadata { bytenr, .. } | Self::Data { bytenr, .. } => {
+                *bytenr
+            }
         }
     }
 
@@ -107,7 +109,11 @@ impl DelayedRefQueue {
             is_metadata,
             "add_ref is metadata-only; call add_data_ref for data refs"
         );
-        let key = DelayedRefKey::Metadata { bytenr, owner_root, level };
+        let key = DelayedRefKey::Metadata {
+            bytenr,
+            owner_root,
+            level,
+        };
         self.refs.entry(key).or_default().delta += 1;
     }
 
@@ -123,7 +129,11 @@ impl DelayedRefQueue {
             is_metadata,
             "drop_ref is metadata-only; call drop_data_ref for data refs"
         );
-        let key = DelayedRefKey::Metadata { bytenr, owner_root, level };
+        let key = DelayedRefKey::Metadata {
+            bytenr,
+            owner_root,
+            level,
+        };
         self.refs.entry(key).or_default().delta -= 1;
     }
 

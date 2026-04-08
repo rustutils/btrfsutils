@@ -140,10 +140,7 @@ impl Runnable for RescueClearInoCacheCommand {
         }
 
         if total_subvols == 0 {
-            println!(
-                "no inode cache items found on {}",
-                self.device.display()
-            );
+            println!("no inode cache items found on {}", self.device.display());
         } else {
             println!(
                 "cleared inode cache on {} ({} subvolume(s), {} item(s), {} data extent(s) freed)",
@@ -185,9 +182,7 @@ fn collect_fs_tree_ids<R: Read + Write + Seek>(
         };
         let nritems = leaf.nritems() as usize;
         if path.slots[0] >= nritems {
-            if !search::next_leaf(fs, &mut path)
-                .context("next_leaf failed")?
-            {
+            if !search::next_leaf(fs, &mut path).context("next_leaf failed")? {
                 break;
             }
             continue;
@@ -242,9 +237,7 @@ fn collect_for_objectid<R: Read + Write + Seek>(
         false,
     )
     .with_context(|| {
-        format!(
-            "failed to search tree {tree_id} for objectid {objectid:#x}"
-        )
+        format!("failed to search tree {tree_id} for objectid {objectid:#x}")
     })?;
 
     loop {
@@ -253,9 +246,7 @@ fn collect_for_objectid<R: Read + Write + Seek>(
         };
         let nritems = leaf.nritems() as usize;
         if path.slots[0] >= nritems {
-            if !search::next_leaf(fs, &mut path)
-                .context("next_leaf failed")?
-            {
+            if !search::next_leaf(fs, &mut path).context("next_leaf failed")? {
                 break;
             }
             continue;
@@ -328,4 +319,3 @@ fn delete_one_item<R: Read + Write + Seek>(
     path.release();
     Ok(true)
 }
-

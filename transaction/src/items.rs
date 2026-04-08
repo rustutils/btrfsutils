@@ -253,7 +253,10 @@ pub fn shrink_item(
     shrink_by: u32,
 ) -> io::Result<()> {
     let nritems = eb.nritems() as usize;
-    assert!(slot < nritems, "shrink_item: slot {slot} >= nritems {nritems}");
+    assert!(
+        slot < nritems,
+        "shrink_item: slot {slot} >= nritems {nritems}"
+    );
     if shrink_by == 0 {
         return Ok(());
     }

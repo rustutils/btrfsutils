@@ -175,11 +175,14 @@ Emergency recovery tools for damaged filesystems.
 | `btrfs rescue super-recover <dev>` | Restore superblock from mirrors |
 | `btrfs rescue zero-log <dev>` | Clear the log tree pointer |
 | `btrfs rescue create-control-device` | Create `/dev/btrfs-control` if missing |
+| `btrfs rescue fix-device-size <dev>` | Re-align device and superblock sizes |
+| `btrfs rescue fix-data-checksum [--readonly\|--mirror 1] <dev>` | Scan and (with `--mirror 1`) repair data csums |
+| `btrfs rescue clear-uuid-tree <dev>` | Drop the UUID tree so the kernel rebuilds it |
+| `btrfs rescue clear-space-cache <v1\|v2> <dev>` | Clear the v1 or v2 free space cache |
+| `btrfs rescue clear-ino-cache <dev>` | Remove leftover items from the deprecated inode cache |
 
-Six additional subcommands (`fix-device-size`, `chunk-recover`,
-`clear-space-cache`, `clear-uuid-tree`, `clear-ino-cache`,
-`fix-data-checksum`) have argument parsing scaffolded but are not yet
-implemented.
+`btrfs rescue chunk-recover` has argument parsing scaffolded but is
+not yet implemented.
 
 ## btrfs-mkfs
 

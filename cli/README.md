@@ -52,14 +52,14 @@ tool directly.
 - **scrub**: start, cancel, resume, status, limit
 - **send**: full and incremental, multi-subvolume, protocol v1/v2, --compressed-data, --no-data
 - **receive**: v1/v2/v3 streams, encoded write with decompression fallback, --dump, --chroot
-- **rescue**: super-recover, zero-log, create-control-device
+- **rescue**: super-recover, zero-log, create-control-device, fix-device-size, fix-data-checksum, clear-uuid-tree, clear-space-cache (v1 and v2), clear-ino-cache
 - **restore**: file recovery from damaged/unmounted filesystems with metadata, xattrs, snapshots, compression, path filtering
 - **subvolume**: create, delete, snapshot, show, list, get-default, set-default, get-flags, set-flags, find-new, sync
 - **check**: read-only filesystem verification with 7 phases (superblock, tree structure, extent refs, chunk/block group, FS tree inodes, checksum tree, root refs)
 
 ### Stubs (argument parsing only)
 
-- **rescue**: fix-device-size, chunk-recover, clear-space-cache, clear-uuid-tree, clear-ino-cache, clear-free-space-tree
+- **rescue**: chunk-recover
 
 ### Notable missing flags
 

@@ -1312,10 +1312,7 @@ fn chunk_tree_cow_round_trip() {
             }
             slot += 1;
         }
-        assert!(
-            slot < leaf.nritems() as usize,
-            "no DEV_ITEM in chunk tree"
-        );
+        assert!(slot < leaf.nritems() as usize, "no DEV_ITEM in chunk tree");
 
         let item_key = leaf.item_key(slot);
         let devid = item_key.offset;
@@ -1405,7 +1402,13 @@ fn drop_data_extent_ref_removes_extent_item_and_csums() {
 
     let tmp = open_fixture().expect("failed to decompress fixture");
     // Find a victim data extent.
-    let (victim_bytenr, victim_num_bytes, victim_root, victim_ino, victim_offset) = {
+    let (
+        victim_bytenr,
+        victim_num_bytes,
+        victim_root,
+        victim_ino,
+        victim_offset,
+    ) = {
         let file = File::options()
             .read(true)
             .write(true)
@@ -1459,8 +1462,13 @@ fn drop_data_extent_ref_removes_extent_item_and_csums() {
                         ..
                     } = item.inline_refs[0]
                 {
-                    victim =
-                        Some((key.objectid, key.offset, root, objectid, offset));
+                    victim = Some((
+                        key.objectid,
+                        key.offset,
+                        root,
+                        objectid,
+                        offset,
+                    ));
                     break 'walk;
                 }
             }

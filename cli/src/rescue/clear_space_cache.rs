@@ -29,8 +29,7 @@ const ROOT_TREE_OBJECTID: u64 = 1;
 
 /// Special objectid that holds v1 free space cache headers
 /// (`BTRFS_FREE_SPACE_OBJECTID` == -11 sign-extended).
-const FREE_SPACE_OBJECTID: u64 =
-    raw::BTRFS_FREE_SPACE_OBJECTID as i64 as u64;
+const FREE_SPACE_OBJECTID: u64 = raw::BTRFS_FREE_SPACE_OBJECTID as i64 as u64;
 
 /// The v1 free space header item is stored under key type 0 (no
 /// dedicated `KeyType` variant; this matches the kernel and
@@ -157,9 +156,7 @@ fn read_v1_cache_entry<R: Read + Write + Seek>(
         };
         let nritems = leaf.nritems() as usize;
         if path.slots[0] >= nritems {
-            if !search::next_leaf(fs, &mut path)
-                .context("next_leaf failed")?
-            {
+            if !search::next_leaf(fs, &mut path).context("next_leaf failed")? {
                 break;
             }
             continue;
@@ -227,7 +224,9 @@ fn delete_one_item<R: Read + Write + Seek>(
         SearchIntent::Delete,
         true,
     )
-    .with_context(|| format!("failed to search for {key:?} in tree {tree_id}"))?;
+    .with_context(|| {
+        format!("failed to search for {key:?} in tree {tree_id}")
+    })?;
     if !found {
         path.release();
         return Ok(false);

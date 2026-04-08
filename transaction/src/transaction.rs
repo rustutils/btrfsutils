@@ -17,7 +17,11 @@ use crate::{
     search::{self, SearchIntent},
 };
 use btrfs_disk::{
-    items::{ExtentItem, RootItem},
+    chunk::{
+        chunk_item_bytes, parse_chunk_item, sys_chunk_array_append,
+        sys_chunk_array_contains,
+    },
+    items::{BlockGroupFlags, ExtentItem, RootItem},
     superblock,
     tree::{DiskKey, KeyType},
 };
@@ -100,7 +104,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // least one metadata block, so failing here is the same as
         // failing on the first alloc. The SYSTEM cursor is created on
         // demand the first time the chunk tree is COWed.
-        let (cursor, end) = find_alloc_region_after(fs_info, BlockGroupKind::Metadata, 0)?;
+        let (cursor, end) =
+            find_alloc_region_after(fs_info, BlockGroupKind::Metadata, 0)?;
         let mut alloc = BTreeMap::new();
         alloc.insert(BlockGroupKind::Metadata, AllocCursor { cursor, end });
 
@@ -135,6 +140,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         let nodesize = u64::from(fs_info.nodesize);
 
         // Lazily seed a cursor for this kind on first use.
+        #[allow(clippy::map_entry)]
         if !self.alloc.contains_key(&kind) {
             let (cursor, end) = find_alloc_region_after(fs_info, kind, 0)?;
             self.alloc.insert(kind, AllocCursor { cursor, end });
@@ -175,7 +181,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
 
     /// Allocate a new tree block and queue a delayed ref for it.
     ///
-    /// Routes the allocation to a SYSTEM block group when COWing the
+    /// Routes the allocation to a SYSTEM block group when COW'ing the
     /// chunk tree (tree id 3) and to a metadata block group otherwise.
     /// SYSTEM allocations are immediately registered in the
     /// superblock's `sys_chunk_array` so the next mount can resolve
@@ -191,7 +197,9 @@ impl<R: Read + Write + Seek> Transaction<R> {
         tree_id: u64,
         level: u8,
     ) -> io::Result<u64> {
-        let kind = if tree_id == u64::from(btrfs_disk::raw::BTRFS_CHUNK_TREE_OBJECTID) {
+        let kind = if tree_id
+            == u64::from(btrfs_disk::raw::BTRFS_CHUNK_TREE_OBJECTID)
+        {
             BlockGroupKind::System
         } else {
             BlockGroupKind::Metadata
@@ -496,7 +504,11 @@ impl<R: Read + Write + Seek> Transaction<R> {
 
             for dref in refs {
                 match dref.key {
-                    DelayedRefKey::Metadata { bytenr, owner_root, level } => {
+                    DelayedRefKey::Metadata {
+                        bytenr,
+                        owner_root,
+                        level,
+                    } => {
                         if dref.delta > 0 {
                             self.create_metadata_extent(
                                 fs_info,
@@ -507,9 +519,10 @@ impl<R: Read + Write + Seek> Transaction<R> {
                                 skinny,
                             )?;
                             bytes_used_delta += nodesize;
-                            if let Some(bg_start) =
-                                find_containing_block_group(&block_groups, bytenr)
-                            {
+                            if let Some(bg_start) = find_containing_block_group(
+                                &block_groups,
+                                bytenr,
+                            ) {
                                 *bg_deltas.entry(bg_start).or_insert(0) +=
                                     nodesize;
                                 self.bg_range_deltas.record_allocated(
@@ -526,9 +539,10 @@ impl<R: Read + Write + Seek> Transaction<R> {
                                 skinny,
                             )?;
                             bytes_used_delta -= nodesize;
-                            if let Some(bg_start) =
-                                find_containing_block_group(&block_groups, bytenr)
-                            {
+                            if let Some(bg_start) = find_containing_block_group(
+                                &block_groups,
+                                bytenr,
+                            ) {
                                 *bg_deltas.entry(bg_start).or_insert(0) -=
                                     nodesize;
                                 self.bg_range_deltas.record_freed(
@@ -580,9 +594,10 @@ impl<R: Read + Write + Seek> Transaction<R> {
                             )?;
                             let signed = num_bytes as i64;
                             bytes_used_delta -= signed;
-                            if let Some(bg_start) =
-                                find_containing_block_group(&block_groups, bytenr)
-                            {
+                            if let Some(bg_start) = find_containing_block_group(
+                                &block_groups,
+                                bytenr,
+                            ) {
                                 *bg_deltas.entry(bg_start).or_insert(0) -=
                                     signed;
                                 self.bg_range_deltas.record_freed(
@@ -1256,7 +1271,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
 
         let new_total_refs = if let Some(loc) = location {
             // Inline path.
-            let result = decrement_inline_data_ref(leaf, slot, &loc, refs_to_drop)?;
+            let result =
+                decrement_inline_data_ref(leaf, slot, &loc, refs_to_drop)?;
             fs_info.mark_dirty(leaf);
             result
         } else {
@@ -1269,9 +1285,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
                     "drop_data_extent_ref: EXTENT_ITEM payload too short",
                 ));
             }
-            let mut current_refs = u64::from_le_bytes(
-                item_data[0..8].try_into().unwrap(),
-            );
+            let mut current_refs =
+                u64::from_le_bytes(item_data[0..8].try_into().unwrap());
             if u64::from(refs_to_drop) > current_refs {
                 return Err(io::Error::other(
                     "drop_data_extent_ref: EXTENT_ITEM.refs underflow",
@@ -1315,8 +1330,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     ) -> io::Result<()> {
         use btrfs_disk::items::{ExtentDataRef, extent_data_ref_hash};
 
-        let hash =
-            extent_data_ref_hash(target_root, target_ino, target_offset);
+        let hash = extent_data_ref_hash(target_root, target_ino, target_offset);
         let key = DiskKey {
             objectid: bytenr,
             key_type: KeyType::ExtentDataRef,
@@ -1565,8 +1579,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
                 if csum_end > end {
                     let skipped_sectors =
                         ((end - csum_start) / sectorsize) as usize;
-                    let tail_start_bytes =
-                        skipped_sectors * csum_size as usize;
+                    let tail_start_bytes = skipped_sectors * csum_size as usize;
                     let tail_byte_count = (sectors as usize - skipped_sectors)
                         * csum_size as usize;
                     survivors.push(Surviving {
@@ -1575,8 +1588,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
                             key_type: KeyType::ExtentCsum,
                             offset: end,
                         },
-                        payload: payload
-                            [tail_start_bytes..tail_start_bytes + tail_byte_count]
+                        payload: payload[tail_start_bytes
+                            ..tail_start_bytes + tail_byte_count]
                             .to_vec(),
                     });
                 }
@@ -1625,9 +1638,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
                     csum_tree_id,
                     &sv.key,
                     &mut path,
-                    SearchIntent::Insert(
-                        (ITEM_SIZE + sv.payload.len()) as u32,
-                    ),
+                    SearchIntent::Insert((ITEM_SIZE + sv.payload.len()) as u32),
                     true,
                 )?;
                 if found {
@@ -1665,11 +1676,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
         fs_info: &mut Filesystem<R>,
         logical: u64,
     ) -> io::Result<()> {
-        use btrfs_disk::chunk::{
-            chunk_item_bytes, parse_chunk_item, sys_chunk_array_append,
-            sys_chunk_array_contains,
-        };
-        use btrfs_disk::items::BlockGroupFlags;
+        // clippy
+        let _ = self;
 
         // Locate the system block group containing this logical address.
         let groups = allocation::load_block_groups(fs_info)?;
@@ -2082,9 +2090,8 @@ fn locate_inline_data_ref(
         ));
     }
     let flags = u64::from_le_bytes(payload[16..24].try_into().unwrap());
-    let is_tree_block = flags
-        & u64::from(btrfs_disk::raw::BTRFS_EXTENT_FLAG_TREE_BLOCK)
-        != 0;
+    let is_tree_block =
+        flags & u64::from(btrfs_disk::raw::BTRFS_EXTENT_FLAG_TREE_BLOCK) != 0;
 
     // Skip header (24) + optional tree_block_info (18 bytes when this
     // is a non-skinny tree-block extent, i.e. EXTENT_ITEM_KEY).
@@ -2100,8 +2107,7 @@ fn locate_inline_data_ref(
 
     let target_hash =
         extent_data_ref_hash(target_root, target_ino, target_offset);
-    let edr_type =
-        btrfs_disk::raw::BTRFS_EXTENT_DATA_REF_KEY as u8;
+    let edr_type = btrfs_disk::raw::BTRFS_EXTENT_DATA_REF_KEY as u8;
 
     while cursor < payload.len() {
         let type_byte = payload[cursor];
@@ -2180,8 +2186,7 @@ fn decrement_inline_data_ref(
         ));
     }
     current_refs -= u64::from(refs_to_drop);
-    leaf.item_data_mut(slot)[0..8]
-        .copy_from_slice(&current_refs.to_le_bytes());
+    leaf.item_data_mut(slot)[0..8].copy_from_slice(&current_refs.to_le_bytes());
 
     let new_count = location.current_count - refs_to_drop;
     if new_count > 0 {

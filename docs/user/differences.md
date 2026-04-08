@@ -11,9 +11,9 @@ These features from btrfs-progs are not yet implemented:
 - `btrfs check --repair` and related write-mode flags (`--init-csum-tree`,
   `--init-extent-tree`, etc.). Read-only checking works.
 - `btrfs check --mode lowmem` (currently only the default mode is supported).
-- `btrfs rescue` subcommands that modify the filesystem: `fix-device-size`,
-  `chunk-recover`, `clear-space-cache`, `clear-uuid-tree`, `clear-ino-cache`,
-  `fix-data-checksum`. These are stubbed and pending transaction infrastructure.
+- `btrfs rescue chunk-recover`. Other write-mode rescue subcommands
+  (`fix-device-size`, `clear-space-cache`, `clear-uuid-tree`,
+  `clear-ino-cache`, `fix-data-checksum`) are implemented.
 - `btrfs filesystem resize --offline`.
 - `btrfs-mkfs` zoned device support.
 - `btrfs-tune --convert-to-free-space-tree` and `--convert-to-block-group-tree`.

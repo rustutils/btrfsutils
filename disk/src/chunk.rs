@@ -265,7 +265,8 @@ pub fn sys_chunk_array_contains(
         if key_offset == bg_start {
             return true;
         }
-        let Some((_, consumed)) = parse_chunk_item(&array[offset..], key_offset)
+        let Some((_, consumed)) =
+            parse_chunk_item(&array[offset..], key_offset)
         else {
             return false;
         };
@@ -440,7 +441,11 @@ mod tests {
         assert_eq!(mapping.stripes[0].offset, 5000);
     }
 
-    fn sample_mapping(logical: u64, length: u64, physical: u64) -> ChunkMapping {
+    fn sample_mapping(
+        logical: u64,
+        length: u64,
+        physical: u64,
+    ) -> ChunkMapping {
         ChunkMapping {
             logical,
             length,

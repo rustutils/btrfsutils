@@ -34,9 +34,8 @@ This project is under active development. Most commands are fully implemented
 and produce output matching the C original.
 
 `btrfs check` is fully implemented with 7-phase read-only filesystem
-verification. `btrfs rescue` is partially implemented: `super-recover`,
-`zero-log`, and `create-control-device` work, with 6 remaining subcommands
-as stubs pending transaction infrastructure.
+verification. `btrfs rescue` is implemented for every subcommand
+except `chunk-recover`, which remains a stub.
 
 ## Installation
 

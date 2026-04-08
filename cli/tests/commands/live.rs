@@ -2528,12 +2528,7 @@ fn rescue_clear_space_cache_v1() {
     let td = tempdir().unwrap();
     let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
     // Disable both BGT and FST so the kernel uses the v1 space cache.
-    file.mkfs_with_args(&[
-        "-O",
-        "^block-group-tree",
-        "-O",
-        "^free-space-tree",
-    ]);
+    file.mkfs_with_args(&["-O", "^block-group-tree", "-O", "^free-space-tree"]);
     let lo = LoopbackDevice::new(file);
 
     // Mount with space_cache=v1 and write enough to force the kernel
