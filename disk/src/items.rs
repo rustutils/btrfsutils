@@ -1413,6 +1413,35 @@ impl ExtentItem {
         debug_assert_eq!(buf.len(), Self::NON_SKINNY_SIZE);
         buf
     }
+
+    /// Size of a data extent item with one inline `EXTENT_DATA_REF`.
+    ///
+    /// Layout: extent header (24) + inline ref type (1) + data ref (28) = 53.
+    pub const DATA_INLINE_SIZE: usize = 53;
+
+    /// Serialize a data extent item (`EXTENT_ITEM`) with a single inline
+    /// `EXTENT_DATA_REF` backref (53 bytes).
+    #[must_use]
+    pub fn to_bytes_data(
+        refs: u64,
+        generation: u64,
+        root: u64,
+        objectid: u64,
+        offset: u64,
+        count: u32,
+    ) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(Self::DATA_INLINE_SIZE);
+        buf.put_u64_le(refs); // extent header: refs
+        buf.put_u64_le(generation); // extent header: generation
+        buf.put_u64_le(ExtentFlags::DATA.bits()); // flags
+        buf.put_u8(KeyType::ExtentDataRef.to_raw()); // inline type tag
+        buf.put_u64_le(root); // btrfs_extent_data_ref.root
+        buf.put_u64_le(objectid); // btrfs_extent_data_ref.objectid
+        buf.put_u64_le(offset); // btrfs_extent_data_ref.offset
+        buf.put_u32_le(count); // btrfs_extent_data_ref.count
+        debug_assert_eq!(buf.len(), Self::DATA_INLINE_SIZE);
+        buf
+    }
 }
 
 /// Standalone data extent backreference (non-inline).

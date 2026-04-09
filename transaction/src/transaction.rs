@@ -855,45 +855,68 @@ impl<R: Read + Write + Seek> Transaction<R> {
                             ));
                         }
                         if dref.delta > 0 {
-                            todo!(
-                                "data extent ref add not implemented \
-                                 (Stage G v1 only handles drops)"
-                            );
-                        }
-                        let refs_to_drop = (-dref.delta) as u32;
-                        let new_total_refs = self.drop_data_extent_ref(
-                            fs_info,
-                            extent_tree_id,
-                            bytenr,
-                            num_bytes,
-                            owner_root,
-                            owner_ino,
-                            owner_offset,
-                            refs_to_drop,
-                        )?;
-                        if new_total_refs == 0 {
-                            // Whole data extent has been freed.
-                            self.delete_data_extent_item(
+                            let count = dref.delta as u32;
+                            self.create_data_extent(
                                 fs_info,
                                 extent_tree_id,
                                 bytenr,
                                 num_bytes,
-                            )?;
-                            self.delete_csums_in_range(
-                                fs_info, bytenr, num_bytes,
+                                owner_root,
+                                owner_ino,
+                                owner_offset,
+                                count,
                             )?;
                             let signed = num_bytes as i64;
-                            bytes_used_delta -= signed;
+                            bytes_used_delta += signed;
                             if let Some(bg_start) = find_containing_block_group(
                                 &block_groups,
                                 bytenr,
                             ) {
-                                *bg_deltas.entry(bg_start).or_insert(0) -=
+                                *bg_deltas.entry(bg_start).or_insert(0) +=
                                     signed;
-                                self.bg_range_deltas.record_freed(
+                                self.bg_range_deltas.record_allocated(
                                     bg_start,
                                     Range::new(bytenr, num_bytes),
                                 );
+                            }
+                        } else if dref.delta < 0 {
+                            let refs_to_drop = (-dref.delta) as u32;
+                            let new_total_refs = self.drop_data_extent_ref(
+                                fs_info,
+                                extent_tree_id,
+                                bytenr,
+                                num_bytes,
+                                owner_root,
+                                owner_ino,
+                                owner_offset,
+                                refs_to_drop,
+                            )?;
+                            if new_total_refs == 0 {
+                                // Whole data extent has been freed.
+                                self.delete_data_extent_item(
+                                    fs_info,
+                                    extent_tree_id,
+                                    bytenr,
+                                    num_bytes,
+                                )?;
+                                self.delete_csums_in_range(
+                                    fs_info, bytenr, num_bytes,
+                                )?;
+                                let signed = num_bytes as i64;
+                                bytes_used_delta -= signed;
+                                if let Some(bg_start) =
+                                    find_containing_block_group(
+                                        &block_groups,
+                                        bytenr,
+                                    )
+                                {
+                                    *bg_deltas.entry(bg_start).or_insert(0) -=
+                                        signed;
+                                    self.bg_range_deltas.record_freed(
+                                        bg_start,
+                                        Range::new(bytenr, num_bytes),
+                                    );
+                                }
                             }
                         }
                     }
@@ -1435,6 +1458,70 @@ impl<R: Read + Write + Seek> Transaction<R> {
 
         let leaf = path.nodes[0].as_mut().ok_or_else(|| {
             io::Error::other("create_metadata_extent: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+
+        items::insert_item(leaf, slot, &key, &data)?;
+        fs_info.mark_dirty(leaf);
+        path.release();
+
+        Ok(())
+    }
+
+    /// Create an `EXTENT_ITEM` in the extent tree for a newly allocated data
+    /// extent with a single inline `EXTENT_DATA_REF` backref.
+    #[allow(clippy::too_many_arguments)]
+    fn create_data_extent(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        extent_tree_id: u64,
+        bytenr: u64,
+        num_bytes: u64,
+        owner_root: u64,
+        owner_ino: u64,
+        owner_offset: u64,
+        count: u32,
+    ) -> io::Result<()> {
+        let key = DiskKey {
+            objectid: bytenr,
+            key_type: KeyType::ExtentItem,
+            offset: num_bytes,
+        };
+
+        let data = ExtentItem::to_bytes_data(
+            u64::from(count),
+            self.transid,
+            owner_root,
+            owner_ino,
+            owner_offset,
+            count,
+        );
+        debug_assert_eq!(data.len(), ExtentItem::DATA_INLINE_SIZE);
+
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            extent_tree_id,
+            &key,
+            &mut path,
+            SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+            true,
+        )?;
+
+        if found {
+            // Extent item already exists. For v1 (mkfs), each data extent
+            // has exactly one backref; duplicates shouldn't happen.
+            debug_assert!(
+                false,
+                "create_data_extent: extent item already exists at {bytenr}"
+            );
+            path.release();
+            return Ok(());
+        }
+
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("create_data_extent: no leaf in path")
         })?;
         let slot = path.slots[0];
 

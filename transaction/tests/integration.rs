@@ -1599,3 +1599,825 @@ fn drop_data_extent_ref_removes_extent_item_and_csums() {
         path.release();
     }
 }
+
+// ---- Stage J: mkfs migration prerequisites ----
+
+/// Helper: find the first data block group in a filesystem image.
+fn find_data_block_group(
+    fs: &mut Filesystem<File>,
+) -> btrfs_transaction::allocation::BlockGroup {
+    let groups = btrfs_transaction::allocation::load_block_groups(fs)
+        .expect("load_block_groups");
+    groups
+        .into_iter()
+        .find(|bg| bg.is_data())
+        .expect("no data block group found")
+}
+
+// -- J.2: Data block group accounting --
+
+#[test]
+fn data_block_group_loaded() {
+    let (_dir, img_path) = create_test_image();
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(&img_path)
+        .unwrap();
+    let mut fs = Filesystem::open(file).expect("open");
+
+    let groups = btrfs_transaction::allocation::load_block_groups(&mut fs)
+        .expect("load_block_groups");
+
+    let data_groups: Vec<_> = groups.iter().filter(|bg| bg.is_data()).collect();
+    assert!(
+        !data_groups.is_empty(),
+        "our mkfs image should contain at least one data block group"
+    );
+
+    for bg in &data_groups {
+        assert!(bg.length > 0, "data block group length must be > 0");
+        assert!(
+            bg.used <= bg.length,
+            "data block group used ({}) exceeds length ({})",
+            bg.used,
+            bg.length
+        );
+    }
+}
+
+#[test]
+fn find_containing_bg_for_data_address() {
+    let (_dir, img_path) = create_test_image();
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(&img_path)
+        .unwrap();
+    let mut fs = Filesystem::open(file).expect("open");
+
+    let groups = btrfs_transaction::allocation::load_block_groups(&mut fs)
+        .expect("load_block_groups");
+    let data_bg = groups.iter().find(|bg| bg.is_data()).unwrap();
+
+    // Address inside should match
+    let inside = data_bg.start + data_bg.length / 2;
+    let found = groups
+        .iter()
+        .find(|bg| inside >= bg.start && inside < bg.start + bg.length)
+        .map(|bg| bg.start);
+    assert_eq!(found, Some(data_bg.start));
+
+    // Address well outside any block group should not match
+    let outside = u64::MAX - 1;
+    let found = groups
+        .iter()
+        .find(|bg| outside >= bg.start && outside < bg.start + bg.length)
+        .map(|bg| bg.start);
+    assert_eq!(found, None);
+}
+
+#[test]
+fn data_bg_used_update() {
+    let (_dir, img_path) = create_test_image();
+
+    let original_used;
+    let bg_start;
+
+    // Start a transaction, manually bump data BG used, commit.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let data_bg = find_data_block_group(&mut fs);
+        bg_start = data_bg.start;
+        original_used = data_bg.used;
+
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        let test_bytenr = data_bg.start + data_bg.used + 4096;
+        let test_num_bytes = 4096u64;
+        assert!(
+            test_bytenr + test_num_bytes <= data_bg.start + data_bg.length,
+            "not enough free space in data block group for test"
+        );
+
+        trans.delayed_refs.add_data_ref(
+            test_bytenr,
+            test_num_bytes,
+            5, // FS tree
+            257,
+            0,
+            1,
+        );
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Reopen and verify block group used increased.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+        let data_bg = find_data_block_group(&mut fs);
+        assert_eq!(data_bg.start, bg_start);
+        assert!(
+            data_bg.used > original_used,
+            "data block group used ({}) should have increased from original ({})",
+            data_bg.used,
+            original_used,
+        );
+    }
+
+    // No btrfs check — orphaned extent by design (only testing BG accounting).
+}
+
+// -- J.1: Data extent ref creation --
+
+#[test]
+fn create_data_extent_basic() {
+    use btrfs_disk::items::{ExtentFlags, ExtentItem, InlineRef};
+
+    let (_dir, img_path) = create_test_image();
+
+    let test_bytenr;
+    let test_num_bytes = 4096u64;
+
+    // Find a free address inside the data block group.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let data_bg = find_data_block_group(&mut fs);
+        // Pick an address past existing allocations.
+        test_bytenr = data_bg.start + data_bg.used + 4096;
+        assert!(
+            test_bytenr + test_num_bytes <= data_bg.start + data_bg.length,
+            "not enough free space in data block group"
+        );
+    }
+
+    // Add a data extent ref via the delayed ref pipeline.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open for write");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        trans.delayed_refs.add_data_ref(
+            test_bytenr,
+            test_num_bytes,
+            5,   // owner root: FS tree
+            257, // owner inode
+            0,   // file offset
+            1,   // refs_to_add
+        );
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Reopen and verify the extent item exists with correct payload.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+
+        let key = DiskKey {
+            objectid: test_bytenr,
+            key_type: KeyType::ExtentItem,
+            offset: test_num_bytes,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            2,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search extent tree");
+        assert!(found, "EXTENT_ITEM not found at {test_bytenr}");
+
+        let leaf = path.leaf().unwrap();
+        let data = leaf.item_data(path.slots[0]).to_vec();
+        let item = ExtentItem::parse(&data, &key)
+            .expect("failed to parse EXTENT_ITEM");
+
+        assert_eq!(item.refs, 1);
+        assert!(item.flags.contains(ExtentFlags::DATA));
+        assert!(!item.flags.contains(ExtentFlags::TREE_BLOCK));
+        assert_eq!(item.inline_refs.len(), 1);
+
+        match &item.inline_refs[0] {
+            InlineRef::ExtentDataBackref {
+                root,
+                objectid,
+                offset,
+                count,
+                ..
+            } => {
+                assert_eq!(*root, 5, "owner root");
+                assert_eq!(*objectid, 257, "owner inode");
+                assert_eq!(*offset, 0, "file offset");
+                assert_eq!(*count, 1, "ref count");
+            }
+            other => panic!("expected ExtentDataBackref, got {other:?}"),
+        }
+        path.release();
+    }
+
+    // Note: btrfs check would report a backref mismatch because
+    // there's no FILE_EXTENT_DATA in the FS tree. That's by design
+    // for this unit test — create_then_drop_data_extent tests the
+    // full round trip with btrfs check.
+}
+
+#[test]
+fn create_data_extent_multiple() {
+    let (_dir, img_path) = create_test_image();
+    let num_bytes = 4096u64;
+    let bytenr_a;
+    let bytenr_b;
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let data_bg = find_data_block_group(&mut fs);
+        bytenr_a = data_bg.start + data_bg.used + 4096;
+        bytenr_b = bytenr_a + num_bytes + 4096; // leave a gap
+        assert!(
+            bytenr_b + num_bytes <= data_bg.start + data_bg.length,
+            "not enough free space for two extents"
+        );
+    }
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open for write");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        trans
+            .delayed_refs
+            .add_data_ref(bytenr_a, num_bytes, 5, 257, 0, 1);
+        trans
+            .delayed_refs
+            .add_data_ref(bytenr_b, num_bytes, 5, 257, num_bytes, 1);
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Verify both exist.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+
+        for &bytenr in &[bytenr_a, bytenr_b] {
+            let key = DiskKey {
+                objectid: bytenr,
+                key_type: KeyType::ExtentItem,
+                offset: num_bytes,
+            };
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                None,
+                &mut fs,
+                2,
+                &key,
+                &mut path,
+                SearchIntent::ReadOnly,
+                false,
+            )
+            .expect("search");
+            assert!(found, "EXTENT_ITEM not found at {bytenr}");
+            path.release();
+        }
+    }
+
+    // No btrfs check — orphaned extents by design (no FILE_EXTENT_DATA).
+}
+
+#[test]
+fn create_then_drop_data_extent() {
+    let (_dir, img_path) = create_test_image();
+    let num_bytes = 4096u64;
+    let test_bytenr;
+    let original_used;
+
+    // Find the data BG and record its used bytes.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let data_bg = find_data_block_group(&mut fs);
+        test_bytenr = data_bg.start + data_bg.used + 4096;
+        original_used = data_bg.used;
+        assert!(
+            test_bytenr + num_bytes <= data_bg.start + data_bg.length,
+            "not enough free space"
+        );
+    }
+
+    // Create the data extent.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open for write");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        trans
+            .delayed_refs
+            .add_data_ref(test_bytenr, num_bytes, 5, 257, 0, 1);
+        trans.commit(&mut fs).expect("commit create");
+        fs.sync().expect("sync");
+    }
+
+    // Drop it in a second transaction.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open for drop");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        trans
+            .delayed_refs
+            .drop_data_ref(test_bytenr, num_bytes, 5, 257, 0, 1);
+        trans.commit(&mut fs).expect("commit drop");
+        fs.sync().expect("sync");
+    }
+
+    // Verify the extent item is gone.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+
+        let key = DiskKey {
+            objectid: test_bytenr,
+            key_type: KeyType::ExtentItem,
+            offset: num_bytes,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            2,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search");
+        assert!(!found, "EXTENT_ITEM should be gone after drop");
+        path.release();
+
+        // Block group used should return to original.
+        let data_bg = find_data_block_group(&mut fs);
+        assert_eq!(
+            data_bg.used, original_used,
+            "block group used should return to original after create+drop"
+        );
+    }
+
+    assert_btrfs_check(&img_path);
+}
+
+// -- J.3: Csum tree item insertion --
+
+#[test]
+fn csum_tree_insert_basic() {
+    let (_dir, img_path) = create_test_image();
+    let csum_objectid =
+        i64::from(btrfs_disk::raw::BTRFS_EXTENT_CSUM_OBJECTID) as u64;
+    let disk_bytenr = 1024 * 1024u64; // arbitrary logical address
+
+    // 256 KB extent at 4K sectors = 64 sectors * 4 bytes = 256 bytes of csums
+    let csum_data: Vec<u8> = (0..256).map(|i| (i & 0xFF) as u8).collect();
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+
+        let key = DiskKey {
+            objectid: csum_objectid,
+            key_type: KeyType::ExtentCsum,
+            offset: disk_bytenr,
+        };
+
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            7, // csum tree
+            &key,
+            &mut path,
+            SearchIntent::Insert(
+                (btrfs_transaction::buffer::ITEM_SIZE + csum_data.len()) as u32,
+            ),
+            true,
+        )
+        .expect("search csum tree");
+        assert!(!found, "csum key should not pre-exist");
+
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        items::insert_item(leaf, slot, &key, &csum_data).expect("insert");
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Verify csum item exists after reopen.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+
+        let key = DiskKey {
+            objectid: csum_objectid,
+            key_type: KeyType::ExtentCsum,
+            offset: disk_bytenr,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            7,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search");
+        assert!(found, "csum item should exist after commit");
+
+        let leaf = path.leaf().unwrap();
+        let data = leaf.item_data(path.slots[0]).to_vec();
+        assert_eq!(data.len(), 256, "csum payload length");
+        assert_eq!(data, csum_data, "csum payload content");
+        path.release();
+    }
+
+    assert_btrfs_check(&img_path);
+}
+
+#[test]
+fn csum_tree_insert_multiple() {
+    let (_dir, img_path) = create_test_image();
+    let csum_objectid =
+        i64::from(btrfs_disk::raw::BTRFS_EXTENT_CSUM_OBJECTID) as u64;
+
+    let base_bytenr = 2 * 1024 * 1024u64;
+    let extent_size = 256 * 1024u64; // 256 KB per extent
+    let csum_size = (extent_size / 4096 * 4) as usize; // 256 bytes
+    let count = 10;
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+
+        for i in 0..count {
+            let disk_bytenr = base_bytenr + i * extent_size;
+            let csum_data: Vec<u8> = (0..csum_size)
+                .map(|b| (i as u8).wrapping_add(b as u8))
+                .collect();
+
+            let key = DiskKey {
+                objectid: csum_objectid,
+                key_type: KeyType::ExtentCsum,
+                offset: disk_bytenr,
+            };
+
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                7,
+                &key,
+                &mut path,
+                SearchIntent::Insert(
+                    (btrfs_transaction::buffer::ITEM_SIZE + csum_data.len())
+                        as u32,
+                ),
+                true,
+            )
+            .expect("search");
+            assert!(!found);
+
+            let leaf = path.nodes[0].as_mut().unwrap();
+            let slot = path.slots[0];
+            items::insert_item(leaf, slot, &key, &csum_data).expect("insert");
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Verify all 10 exist in order.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+
+        for i in 0..count {
+            let disk_bytenr = base_bytenr + i * extent_size;
+            let key = DiskKey {
+                objectid: csum_objectid,
+                key_type: KeyType::ExtentCsum,
+                offset: disk_bytenr,
+            };
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                None,
+                &mut fs,
+                7,
+                &key,
+                &mut path,
+                SearchIntent::ReadOnly,
+                false,
+            )
+            .expect("search");
+            assert!(found, "csum item {i} should exist");
+            path.release();
+        }
+    }
+
+    assert_btrfs_check(&img_path);
+}
+
+#[test]
+fn csum_tree_root_item_updated() {
+    let (_dir, img_path) = create_test_image();
+    let csum_objectid =
+        i64::from(btrfs_disk::raw::BTRFS_EXTENT_CSUM_OBJECTID) as u64;
+
+    let csum_root_before;
+
+    // Record csum tree root before modification.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let fs = Filesystem::open(file).expect("open");
+        csum_root_before = fs.root_bytenr(7).expect("csum tree root");
+    }
+
+    // Insert a csum item, commit.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open for write");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+
+        let key = DiskKey {
+            objectid: csum_objectid,
+            key_type: KeyType::ExtentCsum,
+            offset: 42 * 1024 * 1024,
+        };
+        let csum_data = vec![0xABu8; 64];
+
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            7,
+            &key,
+            &mut path,
+            SearchIntent::Insert(
+                (btrfs_transaction::buffer::ITEM_SIZE + csum_data.len()) as u32,
+            ),
+            true,
+        )
+        .expect("search");
+        assert!(!found);
+
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        items::insert_item(leaf, slot, &key, &csum_data).expect("insert");
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Verify csum tree root changed.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let fs = Filesystem::open(file).expect("reopen");
+        let csum_root_after = fs.root_bytenr(7).expect("csum tree root");
+        assert_ne!(
+            csum_root_before, csum_root_after,
+            "csum tree root bytenr should change after insertion"
+        );
+    }
+
+    assert_btrfs_check(&img_path);
+}
+
+// -- J.4: Bootstrap verification --
+
+#[test]
+fn open_our_mkfs_image() {
+    let (_dir, img_path) = create_test_image();
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(&img_path)
+        .unwrap();
+    let fs = Filesystem::open(file).expect("open our mkfs image");
+
+    assert!(
+        fs.superblock.magic_is_valid(),
+        "superblock magic should be valid"
+    );
+    assert_eq!(fs.superblock.nodesize, 16384);
+
+    // All standard trees should be present.
+    assert!(fs.root_bytenr(1).is_some(), "root tree (1) missing");
+    assert!(fs.root_bytenr(2).is_some(), "extent tree (2) missing");
+    assert!(fs.root_bytenr(3).is_some(), "chunk tree (3) missing");
+    assert!(fs.root_bytenr(5).is_some(), "fs tree (5) missing");
+    assert!(fs.root_bytenr(7).is_some(), "csum tree (7) missing");
+}
+
+#[test]
+fn transaction_on_our_mkfs_image() {
+    let (_dir, img_path) = create_test_image();
+
+    // Use the csum tree (7) with a proper EXTENT_CSUM key to test the
+    // full open → start → insert → commit → reopen cycle.
+    let csum_tree_id = 7u64;
+    let csum_objectid =
+        i64::from(btrfs_disk::raw::BTRFS_EXTENT_CSUM_OBJECTID) as u64;
+    let test_bytenr = 99 * 1024 * 1024u64;
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+
+        let key = DiskKey {
+            objectid: csum_objectid,
+            key_type: KeyType::ExtentCsum,
+            offset: test_bytenr,
+        };
+        let data = vec![0xABu8; 64];
+
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            csum_tree_id,
+            &key,
+            &mut path,
+            SearchIntent::Insert(
+                (btrfs_transaction::buffer::ITEM_SIZE + data.len()) as u32,
+            ),
+            true,
+        )
+        .expect("search");
+        assert!(!found);
+
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        items::insert_item(leaf, slot, &key, &data).expect("insert");
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Reopen and verify the item exists.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+
+        let key = DiskKey {
+            objectid: csum_objectid,
+            key_type: KeyType::ExtentCsum,
+            offset: test_bytenr,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            csum_tree_id,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search");
+        assert!(found, "csum item should exist after commit");
+
+        let leaf = path.leaf().unwrap();
+        let data = leaf.item_data(path.slots[0]).to_vec();
+        assert_eq!(data, vec![0xABu8; 64]);
+        path.release();
+    }
+
+    assert_btrfs_check(&img_path);
+}
+
+#[test]
+fn allocator_finds_free_space_in_mkfs_image() {
+    let (_dir, img_path) = create_test_image();
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(&img_path)
+        .unwrap();
+    let mut fs = Filesystem::open(file).expect("open");
+
+    // Load block groups and find the metadata BG.
+    let groups = btrfs_transaction::allocation::load_block_groups(&mut fs)
+        .expect("load_block_groups");
+    let meta_bg = groups
+        .iter()
+        .find(|bg| bg.is_metadata())
+        .expect("no metadata block group");
+    assert!(
+        meta_bg.free() > 0,
+        "metadata block group should have free space (used={}, length={})",
+        meta_bg.used,
+        meta_bg.length,
+    );
+
+    // Transaction::start succeeds (which internally runs the allocator).
+    let _trans = Transaction::start(&mut fs).expect("start txn");
+}
