@@ -102,15 +102,6 @@ impl Runnable for CheckCommand {
         if self.init_extent_tree {
             bail!("--init-extent-tree is not yet supported");
         }
-        if self.backup {
-            bail!("--backup is not yet supported");
-        }
-        if self.tree_root.is_some() {
-            bail!("--tree-root is not yet supported");
-        }
-        if self.chunk_root.is_some() {
-            bail!("--chunk-root is not yet supported");
-        }
         if self.qgroup_report {
             bail!("--qgroup-report is not yet supported");
         }
@@ -141,8 +132,13 @@ impl Runnable for CheckCommand {
         #[allow(clippy::cast_possible_truncation)] // mirror index fits in u32
         let mirror = self.superblock.unwrap_or(0) as u32;
 
-        let mut open =
-            reader::filesystem_open_mirror(file.try_clone()?, mirror)?;
+        let mut open = open_with_overrides(
+            file.try_clone()?,
+            mirror,
+            self.backup,
+            self.tree_root,
+            self.chunk_root,
+        )?;
 
         let sb = &open.superblock;
         eprintln!("Checking filesystem on {}", self.device.display());
@@ -246,4 +242,78 @@ impl Runnable for CheckCommand {
 
         Ok(())
     }
+}
+
+/// Open a filesystem for checking, applying root pointer overrides.
+///
+/// Supports `--backup` (use best backup root from the superblock),
+/// `--tree-root` (override the root tree pointer), and `--chunk-root`
+/// (override the chunk tree pointer).
+fn open_with_overrides(
+    file: File,
+    mirror: u32,
+    backup: bool,
+    tree_root: Option<u64>,
+    chunk_root: Option<u64>,
+) -> Result<reader::OpenFilesystem<File>> {
+    use btrfs_disk::{chunk, superblock as sb_mod};
+
+    // If no overrides, use the standard path.
+    if !backup && tree_root.is_none() && chunk_root.is_none() {
+        return Ok(reader::filesystem_open_mirror(file, mirror)?);
+    }
+
+    // Read the superblock first, then apply overrides before walking trees.
+    let mut reader = file;
+    let mut sb = sb_mod::read_superblock(&mut reader, mirror)?;
+
+    // --backup: find the best backup root (highest generation with nonzero tree_root).
+    if backup {
+        let best = sb
+            .backup_roots
+            .iter()
+            .filter(|b| b.tree_root != 0)
+            .max_by_key(|b| b.tree_root_gen);
+
+        if let Some(b) = best {
+            eprintln!(
+                "Using backup root: tree_root={:#x} (gen {}), chunk_root={:#x} (gen {})",
+                b.tree_root, b.tree_root_gen, b.chunk_root, b.chunk_root_gen,
+            );
+            sb.root = b.tree_root;
+            sb.root_level = b.tree_root_level;
+            sb.chunk_root = b.chunk_root;
+            sb.chunk_root_level = b.chunk_root_level;
+            sb.generation = b.tree_root_gen;
+        } else {
+            bail!("no valid backup roots found in superblock");
+        }
+    }
+
+    // Explicit overrides take precedence over --backup.
+    if let Some(bytenr) = tree_root {
+        eprintln!("Using tree root override: {bytenr:#x}");
+        sb.root = bytenr;
+    }
+    if let Some(bytenr) = chunk_root {
+        eprintln!("Using chunk root override: {bytenr:#x}");
+        sb.chunk_root = bytenr;
+    }
+
+    // Bootstrap chunk cache and walk the (possibly overridden) chunk tree.
+    let chunk_cache = chunk::seed_from_sys_chunk_array(
+        &sb.sys_chunk_array,
+        sb.sys_chunk_array_size,
+    );
+    let mut block_reader =
+        btrfs_disk::reader::BlockReader::new(reader, sb.nodesize, chunk_cache);
+
+    reader::read_chunk_tree(&mut block_reader, sb.chunk_root)?;
+    let tree_roots = reader::read_root_tree(&mut block_reader, sb.root)?;
+
+    Ok(reader::OpenFilesystem {
+        reader: block_reader,
+        superblock: sb,
+        tree_roots,
+    })
 }

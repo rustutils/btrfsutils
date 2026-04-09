@@ -241,7 +241,14 @@ pub fn filesystem_open_with_cache<R: Read + Seek>(
 }
 
 /// Recursively read the chunk tree to populate the chunk cache.
-fn read_chunk_tree<R: Read + Seek>(
+///
+/// Starting from the given root block, walks all leaves and inserts any
+/// `CHUNK_ITEM` entries that are not already present in the cache.
+///
+/// # Errors
+///
+/// Returns an error if any tree block read fails.
+pub fn read_chunk_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
 ) -> io::Result<()> {
@@ -278,8 +285,12 @@ fn read_chunk_tree<R: Read + Seek>(
 
 /// Read the root tree to collect all tree root pointers.
 ///
-/// Returns a map of `tree_id` (objectid) -> root block logical address.
-fn read_root_tree<R: Read + Seek>(
+/// Returns a map of `tree_id` (objectid) -> `(root_bytenr, key_offset)`.
+///
+/// # Errors
+///
+/// Returns an error if any tree block read fails.
+pub fn read_root_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
 ) -> io::Result<BTreeMap<u64, (u64, u64)>> {
