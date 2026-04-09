@@ -249,26 +249,44 @@ fn search_extent_tree() {
 /// # Panics
 ///
 /// Panics if the temp directory cannot be created, the image file cannot be
-/// written, or `mkfs.btrfs` is not available or fails.
+/// written, or `btrfs-mkfs` is not available or fails.
 fn create_test_image() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::TempDir::new().expect("failed to create temp dir");
     let img_path = dir.path().join("test.img");
 
     // Create a 128 MiB sparse file
     let file = File::create(&img_path).expect("failed to create image file");
-    file.set_len(128 * 1024 * 1024)
+    file.set_len(256 * 1024 * 1024)
         .expect("failed to set image size");
     drop(file);
 
-    // Run mkfs.btrfs
-    let status = Command::new("mkfs.btrfs")
+    let mkfs = find_our_mkfs();
+    let status = Command::new(&mkfs)
         .args(["-f", "-q"])
         .arg(&img_path)
         .status()
-        .expect("mkfs.btrfs not found — install btrfs-progs");
-    assert!(status.success(), "mkfs.btrfs failed with {status}");
+        .unwrap_or_else(|e| {
+            panic!("btrfs-mkfs at {} failed to run: {e}", mkfs.display())
+        });
+    assert!(status.success(), "btrfs-mkfs failed with {status}");
 
     (dir, img_path)
+}
+
+fn find_our_mkfs() -> PathBuf {
+    let exe =
+        std::env::current_exe().expect("cannot determine test binary path");
+    let target_dir = exe
+        .parent()
+        .and_then(Path::parent)
+        .expect("cannot determine target directory");
+    let mkfs = target_dir.join("btrfs-mkfs");
+    assert!(
+        mkfs.exists(),
+        "btrfs-mkfs not found at {}; run `cargo build -p btrfs-mkfs` first",
+        mkfs.display()
+    );
+    mkfs
 }
 
 /// Run `btrfs check` on an image, asserting it passes cleanly.
@@ -399,6 +417,21 @@ fn write_insert_item_and_verify() {
 #[test]
 fn write_delete_item_and_verify() {
     let (dir, img_path) = create_test_image();
+
+    // Our mkfs doesn't create a UUID tree (tree 9), so create one first.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open failed");
+        let mut trans = Transaction::start(&mut fs).expect("start failed");
+        trans
+            .create_empty_tree(&mut fs, 9)
+            .expect("create UUID tree failed");
+        trans.commit(&mut fs).expect("commit failed");
+    }
 
     // Find the UUID tree ROOT_ITEM (tree ID 9) and delete it
     let uuid_key = DiskKey {

@@ -14,7 +14,8 @@
 //! `umount`, `mkfs.btrfs`, `gunzip`) so this crate has no dependency on any
 //! of the workspace library crates. It is intended for use as a
 //! `[dev-dependencies]` entry only — production code must not link against
-//! it.
+//! it. [`find_our_mkfs`] locates the workspace's `btrfs-mkfs` binary for
+//! callers that want to use it instead of the system `mkfs.btrfs`.
 //!
 //! # Binary path parameters
 //!
@@ -41,6 +42,35 @@ pub const TEST_UUID: &str = "deadbeef-dead-beef-dead-beefdeadbeef";
 
 /// Fixed label used by [`deterministic_mount`] for reproducible test output.
 pub const TEST_LABEL: &str = "test-fs";
+
+/// Locate the `btrfs-mkfs` binary in the same target directory as the
+/// running test binary.
+///
+/// The test binary lives at `target/{profile}/deps/test_name-hash`. The
+/// `btrfs-mkfs` binary lives at `target/{profile}/btrfs-mkfs`. We walk
+/// up from the test binary to find it.
+///
+/// # Panics
+///
+/// Panics if the binary cannot be found (e.g. `cargo build -p btrfs-mkfs`
+/// was not run).
+#[must_use]
+pub fn find_our_mkfs() -> PathBuf {
+    let exe =
+        std::env::current_exe().expect("cannot determine test binary path");
+    // exe = target/debug/deps/test_name-hash
+    let target_dir = exe
+        .parent() // target/debug/deps/
+        .and_then(Path::parent) // target/debug/
+        .expect("cannot determine target directory from test binary path");
+    let mkfs = target_dir.join("btrfs-mkfs");
+    assert!(
+        mkfs.exists(),
+        "btrfs-mkfs not found at {}; run `cargo build -p btrfs-mkfs` first",
+        mkfs.display()
+    );
+    mkfs
+}
 
 /// A file created via `set_len` (fallocate). Drop removes the file.
 pub struct BackingFile {
@@ -80,12 +110,12 @@ impl BackingFile {
         });
     }
 
-    /// Run `mkfs.btrfs -f` on this file.
+    /// Format this file as a btrfs filesystem using `mkfs.btrfs`.
     pub fn mkfs(&self) {
         run("mkfs.btrfs", &["-f", self.path.to_str().unwrap()]);
     }
 
-    /// Run `mkfs.btrfs -f` with extra options.
+    /// Format with extra options using `mkfs.btrfs`.
     pub fn mkfs_with_args(&self, extra: &[&str]) {
         let mut args: Vec<&str> = vec!["-f"];
         args.extend_from_slice(extra);
@@ -93,11 +123,30 @@ impl BackingFile {
         run("mkfs.btrfs", &args);
     }
 
+    /// Format this file using our `btrfs-mkfs` (located via
+    /// [`find_our_mkfs`]).
+    pub fn mkfs_ours(&self) {
+        let mkfs = find_our_mkfs();
+        run(
+            mkfs.to_str().unwrap(),
+            &["-f", "-q", self.path.to_str().unwrap()],
+        );
+    }
+
+    /// Format with extra options using our `btrfs-mkfs`.
+    pub fn mkfs_ours_with_args(&self, extra: &[&str]) {
+        let mkfs = find_our_mkfs();
+        let mut args: Vec<&str> = vec!["-f", "-q"];
+        args.extend_from_slice(extra);
+        args.push(self.path.to_str().unwrap());
+        run(mkfs.to_str().unwrap(), &args);
+    }
+
     /// Run our `btrfs-mkfs --rootdir` on this file.
     ///
     /// `mkfs_bin` is the path to the `btrfs-mkfs` binary, which the caller
-    /// must locate (typically via `env!("CARGO_BIN_EXE_btrfs-mkfs")` or by
-    /// resolving a sibling of `env!("CARGO_BIN_EXE_btrfs")`).
+    /// must locate (typically via [`find_our_mkfs`] or
+    /// `env!("CARGO_BIN_EXE_btrfs")`).
     pub fn mkfs_rootdir(
         &self,
         mkfs_bin: &Path,
@@ -111,7 +160,8 @@ impl BackingFile {
         run(mkfs_bin.to_str().unwrap(), &args);
     }
 
-    /// Run `mkfs.btrfs -f` with a fixed UUID and label for deterministic output.
+    /// Format with a fixed UUID and label for deterministic output
+    /// using `mkfs.btrfs`.
     pub fn mkfs_with_options(&self, uuid: &str, label: &str) {
         run(
             "mkfs.btrfs",

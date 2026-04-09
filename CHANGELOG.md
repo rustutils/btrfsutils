@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs check`: `--backup`, `--tree-root`, `--chunk-root` flags for
+  recovery from damaged root/chunk tree pointers.
+
+- `btrfs-transaction`: structural invariant assertions throughout the
+  crate. `debug_assert!` checks validate tree block structure (key
+  ordering, data layout, bytenr consistency) at every modification
+  point. Hard `assert!` checks guard against catastrophic errors
+  (superblock corruption, generation inconsistency) even in release
+  builds. Includes `ExtentBuffer::check_leaf()`, `check_node()`, and
+  `check()` validation methods.
+
 - `rescue chunk-recover`: raw device scan for surviving chunk-tree
   leaves, conflict resolution and chunk map reconstruction, and detailed
   text report. `--apply` writes the reconstructed chunk tree via the

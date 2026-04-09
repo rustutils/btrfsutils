@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 //! Shared test helpers for creating in-memory filesystem state.
 //!
-//! These helpers create real btrfs filesystem images via `mkfs.btrfs`,
+//! These helpers create real btrfs filesystem images via `btrfs-mkfs`,
 //! open them as `Filesystem`, and start transactions. This enables unit tests
 //! that exercise the full COW/split/balance pipeline with real on-disk
 //! structures, without requiring elevated privileges.
@@ -16,9 +16,32 @@ use crate::{
 };
 use btrfs_disk::tree::{DiskKey, KeyType};
 use std::{
-    collections::BTreeMap, fs::File, io, path::PathBuf, process::Command,
-    sync::mpsc, thread, time::Duration,
+    collections::BTreeMap,
+    fs::File,
+    io,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::mpsc,
+    thread,
+    time::Duration,
 };
+
+/// Locate the `btrfs-mkfs` binary relative to the running test binary.
+fn find_our_mkfs() -> PathBuf {
+    let exe =
+        std::env::current_exe().expect("cannot determine test binary path");
+    let target_dir = exe
+        .parent()
+        .and_then(Path::parent)
+        .expect("cannot determine target directory from test binary path");
+    let mkfs = target_dir.join("btrfs-mkfs");
+    assert!(
+        mkfs.exists(),
+        "btrfs-mkfs not found at {}; run `cargo build -p btrfs-mkfs` first",
+        mkfs.display()
+    );
+    mkfs
+}
 
 /// A test fixture that owns a temp directory and provides access to the
 /// filesystem image within it.
@@ -34,11 +57,11 @@ impl Default for TestFixture {
 }
 
 impl TestFixture {
-    /// Create a new 128 MiB btrfs filesystem image via `mkfs.btrfs`.
+    /// Create a new 128 MiB btrfs filesystem image via `btrfs-mkfs`.
     ///
     /// # Panics
     ///
-    /// Panics if mkfs.btrfs is not available or fails.
+    /// Panics if the `btrfs-mkfs` binary is not available or fails.
     #[must_use]
     pub fn new() -> Self {
         let dir = tempfile::TempDir::new().expect("failed to create temp dir");
@@ -46,16 +69,19 @@ impl TestFixture {
 
         let file =
             File::create(&img_path).expect("failed to create image file");
-        file.set_len(128 * 1024 * 1024)
+        file.set_len(256 * 1024 * 1024)
             .expect("failed to set image size");
         drop(file);
 
-        let status = Command::new("mkfs.btrfs")
+        let mkfs = find_our_mkfs();
+        let status = Command::new(&mkfs)
             .args(["-f", "-q"])
             .arg(&img_path)
             .status()
-            .expect("mkfs.btrfs not found — install btrfs-progs");
-        assert!(status.success(), "mkfs.btrfs failed with {status}");
+            .unwrap_or_else(|e| {
+                panic!("btrfs-mkfs at {} failed to run: {e}", mkfs.display())
+            });
+        assert!(status.success(), "btrfs-mkfs failed with {status}");
 
         Self {
             _dir: dir,
@@ -584,6 +610,22 @@ pub fn run_sequence(ops: &[Op]) -> Result<(), Failure> {
     let mut fs = fixture
         .open()
         .map_err(|e| Failure::Other(format!("open: {e}")))?;
+
+    // Our btrfs-mkfs doesn't create a UUID tree (tree 9), which the
+    // harness uses as its playground. Create it before starting.
+    if fs.root_bytenr(PLAYGROUND_TREE).is_none() {
+        let mut setup = Transaction::start(&mut fs)
+            .map_err(|e| Failure::Other(format!("setup start: {e}")))?;
+        setup
+            .create_empty_tree(&mut fs, PLAYGROUND_TREE)
+            .map_err(|e| {
+                Failure::Other(format!("create playground tree: {e}"))
+            })?;
+        setup
+            .commit(&mut fs)
+            .map_err(|e| Failure::Other(format!("setup commit: {e}")))?;
+    }
+
     let mut trans = Transaction::start(&mut fs)
         .map_err(|e| Failure::Other(format!("start: {e}")))?;
     let mut model = Model::default();

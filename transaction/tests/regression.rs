@@ -22,20 +22,51 @@ use std::{
     process::Command,
 };
 
-fn create_test_image() -> (tempfile::TempDir, PathBuf) {
-    create_test_image_with_features(&[])
+fn find_our_mkfs() -> PathBuf {
+    let exe =
+        std::env::current_exe().expect("cannot determine test binary path");
+    let target_dir = exe
+        .parent()
+        .and_then(Path::parent)
+        .expect("cannot determine target directory");
+    let mkfs = target_dir.join("btrfs-mkfs");
+    assert!(
+        mkfs.exists(),
+        "btrfs-mkfs not found at {}; run `cargo build -p btrfs-mkfs` first",
+        mkfs.display()
+    );
+    mkfs
 }
 
-/// Like [`create_test_image`] but passes additional `-O` flags to
-/// `mkfs.btrfs`. Use `&["^free-space-tree"]` to start without FST
-/// so the convert path can build it.
+fn create_test_image() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::TempDir::new().expect("failed to create temp dir");
+    let img_path = dir.path().join("test.img");
+    let file = File::create(&img_path).expect("failed to create image file");
+    file.set_len(256 * 1024 * 1024)
+        .expect("failed to set image size");
+    drop(file);
+    let mkfs = find_our_mkfs();
+    let status = Command::new(&mkfs)
+        .args(["-f", "-q"])
+        .arg(&img_path)
+        .status()
+        .unwrap_or_else(|e| {
+            panic!("btrfs-mkfs at {} failed to run: {e}", mkfs.display())
+        });
+    assert!(status.success(), "btrfs-mkfs failed with {status}");
+    (dir, img_path)
+}
+
+/// Create a test image using the system `mkfs.btrfs` with additional
+/// `-O` flags. Used by tests that need feature combinations our mkfs
+/// doesn't fully support yet (e.g. `^free-space-tree`).
 fn create_test_image_with_features(
     features: &[&str],
 ) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::TempDir::new().expect("failed to create temp dir");
     let img_path = dir.path().join("test.img");
     let file = File::create(&img_path).expect("failed to create image file");
-    file.set_len(128 * 1024 * 1024)
+    file.set_len(256 * 1024 * 1024)
         .expect("failed to set image size");
     drop(file);
     let mut cmd = Command::new("mkfs.btrfs");
