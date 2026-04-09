@@ -193,7 +193,7 @@ fn mkfs_superblock_generation_is_one() {
 
 #[test]
 fn mkfs_too_small_fails() {
-    let too_small = 100 * 1024 * 1024; // 100 MiB, too small for metadata DUP + data
+    let too_small = 20 * 1024 * 1024; // 20 MiB, too small for system + meta DUP + data
     let image = create_image(too_small);
     let mut cfg = test_config(too_small);
     let err = make_btrfs_on_err(&image, &mut cfg);
@@ -220,8 +220,8 @@ fn has_btrfs_superblock_after_mkfs() {
 #[test]
 fn minimum_device_size_matches_expected() {
     let min = mkfs::minimum_device_size(16384);
-    // 5 MiB (system) + 64 MiB (2 * 32M meta DUP) + 64 MiB (data) = 133 MiB
-    assert_eq!(min, 133 * 1024 * 1024);
+    // 5 MiB (system) + 16 MiB (2 * 8M meta DUP) + 8 MiB (data) = 29 MiB
+    assert_eq!(min, 29 * 1024 * 1024);
 }
 
 #[test]

@@ -241,14 +241,16 @@ impl ChunkLayout {
         assert!(!devices.is_empty());
         let total_bytes: u64 = devices.iter().map(|d| d.total_bytes).sum();
 
-        // Meta stripe size: clamp(total/10, 32M, 256M), round down to STRIPE_LEN.
+        // Meta stripe size: clamp(total/10, 8M, 256M), round down to STRIPE_LEN.
+        // The 8M minimum matches btrfs-progs calc_size for small volumes.
+        // The kernel allocates larger chunks at runtime as needed.
         let meta_size =
-            (total_bytes / 10).clamp(32 * 1024 * 1024, 256 * 1024 * 1024);
+            (total_bytes / 10).clamp(8 * 1024 * 1024, 256 * 1024 * 1024);
         let meta_size = meta_size / STRIPE_LEN * STRIPE_LEN;
 
-        // Data size: clamp(total/10, 64M, 1G), round down to STRIPE_LEN.
+        // Data size: clamp(total/10, 8M, 1G), round down to STRIPE_LEN.
         let data_size =
-            (total_bytes / 10).clamp(64 * 1024 * 1024, 1024 * 1024 * 1024);
+            (total_bytes / 10).clamp(8 * 1024 * 1024, 1024 * 1024 * 1024);
         let data_size = data_size / STRIPE_LEN * STRIPE_LEN;
 
         // Build metadata stripes based on profile.
@@ -720,19 +722,24 @@ mod tests {
 
     #[test]
     fn chunk_layout_256m() {
-        // 256 MiB device: meta = min(256M, 25.6M) -> 32M (minimum), data = min(1G, 25.6M) -> 64M
+        // 256 MiB device: 256M/10 = 25.6M, rounded down to STRIPE_LEN
         let devs = single_device(256 * 1024 * 1024);
         let cl =
             ChunkLayout::new(&devs, Profile::Dup, Profile::Single).unwrap();
-        assert_eq!(cl.meta_size, 32 * 1024 * 1024);
-        assert_eq!(cl.data_size, 64 * 1024 * 1024);
+        let expected_stripe =
+            (256 * 1024 * 1024 / 10) / STRIPE_LEN * STRIPE_LEN;
+        assert_eq!(cl.meta_size, expected_stripe);
+        assert_eq!(cl.data_size, expected_stripe);
         assert_eq!(cl.meta_stripes.len(), 2);
         assert_eq!(cl.meta_stripes[0].offset, CHUNK_START);
-        assert_eq!(cl.meta_stripes[1].offset, CHUNK_START + 32 * 1024 * 1024);
+        assert_eq!(cl.meta_stripes[1].offset, CHUNK_START + expected_stripe);
         assert_eq!(cl.data_stripes.len(), 1);
-        assert_eq!(cl.data_stripes[0].offset, CHUNK_START + 64 * 1024 * 1024);
+        assert_eq!(
+            cl.data_stripes[0].offset,
+            CHUNK_START + 2 * expected_stripe
+        );
         assert_eq!(cl.meta_logical, CHUNK_START);
-        assert_eq!(cl.data_logical, CHUNK_START + 32 * 1024 * 1024);
+        assert_eq!(cl.data_logical, CHUNK_START + expected_stripe);
     }
 
     #[test]
@@ -759,11 +766,21 @@ mod tests {
 
     #[test]
     fn chunk_layout_too_small() {
-        // 100 MiB: needs 5M + 2*32M + 64M = 133M, doesn't fit
-        let devs = single_device(100 * 1024 * 1024);
+        // 20 MiB: needs 5M + 2*8M + 8M = 29M, doesn't fit
+        let devs = single_device(20 * 1024 * 1024);
         assert!(
             ChunkLayout::new(&devs, Profile::Dup, Profile::Single).is_none()
         );
+    }
+
+    #[test]
+    fn chunk_layout_small_device() {
+        // 64 MiB: fits with 8M chunks (5M + 2*8M + 8M = 29M)
+        let devs = single_device(64 * 1024 * 1024);
+        let cl =
+            ChunkLayout::new(&devs, Profile::Dup, Profile::Single).unwrap();
+        assert_eq!(cl.meta_size, 8 * 1024 * 1024);
+        assert_eq!(cl.data_size, 8 * 1024 * 1024);
     }
 
     #[test]
@@ -771,10 +788,10 @@ mod tests {
         let devs = single_device(256 * 1024 * 1024);
         let cl =
             ChunkLayout::new(&devs, Profile::Dup, Profile::Single).unwrap();
-        // system(4M) + 2*meta(32M) + data(64M) = 132M
+        // system(4M) + 2*meta + data
         assert_eq!(
             cl.total_bytes_used(),
-            SYSTEM_GROUP_SIZE + 2 * 32 * 1024 * 1024 + 64 * 1024 * 1024
+            SYSTEM_GROUP_SIZE + 2 * cl.meta_size + cl.data_size
         );
     }
 
@@ -783,10 +800,10 @@ mod tests {
         let devs = single_device(256 * 1024 * 1024);
         let cl =
             ChunkLayout::new(&devs, Profile::Dup, Profile::Single).unwrap();
-        // All chunks on device 1: system(4M) + 2*meta(32M) + data(64M) = 132M
+        // All chunks on device 1: system(4M) + 2*meta + data
         assert_eq!(
             cl.dev_bytes_used_for(1),
-            SYSTEM_GROUP_SIZE + 2 * 32 * 1024 * 1024 + 64 * 1024 * 1024
+            SYSTEM_GROUP_SIZE + 2 * cl.meta_size + cl.data_size
         );
     }
 

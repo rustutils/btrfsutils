@@ -78,11 +78,16 @@ pub fn run(args: &Arguments) -> Result<()> {
     let mut devices = Vec::with_capacity(num_devices);
     for (i, dev_path) in args.devices.iter().enumerate() {
         let devid = (i + 1) as u64;
-        let total_bytes = if let Some(byte_count) = args.byte_count {
+        let raw_bytes = if let Some(byte_count) = args.byte_count {
             byte_count.0
         } else {
             mkfs::device_size(dev_path)?
         };
+        // Align down to sector boundary. Loop devices round down to
+        // sector size, so the kernel rejects total_bytes > device_size
+        // on non-aligned files. Matches btrfs-progs behavior.
+        let total_bytes =
+            raw_bytes / u64::from(sectorsize) * u64::from(sectorsize);
 
         let min_size = mkfs::minimum_device_size(nodesize);
         if total_bytes < min_size {

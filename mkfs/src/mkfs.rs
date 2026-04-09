@@ -2409,15 +2409,16 @@ fn build_quota_tree(
     Ok(leaf.finish())
 }
 
-/// Must fit the system group (5 MiB), metadata DUP (2 x 32 MiB minimum),
-/// and data SINGLE (64 MiB minimum): 5 + 64 + 64 = 133 MiB.
+/// Minimum device size for the default single-device layout (DUP
+/// metadata + SINGLE data). Must fit the system group (5 MiB),
+/// metadata DUP (2 x 8 MiB), and data SINGLE (8 MiB): 29 MiB.
 #[must_use]
 pub fn minimum_device_size(nodesize: u32) -> u64 {
     let _ = nodesize;
-    // System (5M) + 2 * min_meta (32M) + min_data (64M) = 133M.
+    // System (5M) + 2 * min_meta (8M) + min_data (8M) = 29M.
     // ChunkLayout::new enforces this via data_phys + data_size <= total.
     SYSTEM_GROUP_OFFSET
         + SYSTEM_GROUP_SIZE
-        + 2 * 32 * 1024 * 1024
-        + 64 * 1024 * 1024
+        + 2 * 8 * 1024 * 1024
+        + 8 * 1024 * 1024
 }
