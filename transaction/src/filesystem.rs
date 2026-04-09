@@ -247,7 +247,37 @@ impl<R: Read + Write + Seek> Filesystem<R> {
     /// Store an extent buffer in the cache and mark it dirty, without writing
     /// to disk yet. The actual disk write happens at commit time.
     pub fn mark_dirty(&mut self, eb: &ExtentBuffer) {
+        // Every modified block passes through here. Validate structural
+        // invariants in debug builds to catch corruption early.
+        debug_assert!(
+            eb.check().is_ok(),
+            "mark_dirty: block at {} failed validation: {}",
+            eb.logical(),
+            eb.check().unwrap_err(),
+        );
+        // The block's generation should match the current transaction.
+        // A dirty block from an older generation means COW was skipped.
+        debug_assert_eq!(
+            eb.generation(),
+            self.generation,
+            "mark_dirty: block at {} has generation {} but filesystem \
+             generation is {} (was COW skipped?)",
+            eb.logical(),
+            eb.generation(),
+            self.generation,
+        );
         self.dirty.insert(eb.logical());
+        self.block_cache.insert(eb.logical(), eb.clone());
+    }
+
+    /// Insert a block into the in-memory cache without marking it dirty.
+    ///
+    /// This is for test code that needs to simulate blocks already present
+    /// on disk. Production code should use [`mark_dirty`](Self::mark_dirty)
+    /// (for newly modified blocks) or [`read_block`](Self::read_block)
+    /// (to read from disk).
+    #[doc(hidden)]
+    pub fn seed_cache(&mut self, eb: &ExtentBuffer) {
         self.block_cache.insert(eb.logical(), eb.clone());
     }
 
@@ -331,6 +361,16 @@ impl<R: Read + Write + Seek> Filesystem<R> {
         for logical in dirty {
             if let Some(eb) = self.block_cache.get(&logical).cloned() {
                 let mut eb = eb;
+                // Validate before writing to stable storage. This is
+                // the last chance to catch corruption before it lands
+                // on disk.
+                debug_assert!(
+                    eb.check().is_ok(),
+                    "flush_dirty: block at {} failed validation before \
+                     write: {}",
+                    eb.logical(),
+                    eb.check().unwrap_err(),
+                );
                 eb.set_flags(eb.flags() | HEADER_FLAG_WRITTEN);
                 eb.update_checksum();
                 self.reader.write_block(eb.logical(), eb.as_bytes())?;

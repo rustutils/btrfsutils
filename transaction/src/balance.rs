@@ -8,7 +8,10 @@
 //! merging with a sibling to prevent excessive tree bloat.
 
 use crate::{
-    buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE},
+    buffer::{
+        ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE,
+        debug_assert_leaf_valid,
+    },
     cow::cow_block,
     filesystem::Filesystem,
     path::BtrfsPath,
@@ -87,6 +90,12 @@ pub fn push_leaf_left<R: Read + Write + Seek>(
     // previous generation, modifying it in place would overwrite the
     // committed state and break crash consistency.
     let mut left = cow_block(trans, fs_info, &left, tree_id, None)?;
+    debug_assert_eq!(
+        left.generation(),
+        fs_info.generation,
+        "push_leaf_left: left sibling at {} not COW'd to current generation",
+        left.logical(),
+    );
     if left.logical() != left_bytenr {
         // COW allocated a new block — update the parent's pointer
         let parent = path.nodes[parent_level].as_mut().unwrap();
@@ -113,11 +122,16 @@ pub fn push_leaf_left<R: Read + Write + Seek>(
             .copy_from_slice(src_data);
     }
     left.set_nritems((left_nritems + push_count) as u32);
+
+    // Validate the left sibling after pushing items into it.
+    debug_assert_leaf_valid(&left);
+
     fs_info.mark_dirty(&left);
 
     // Remove pushed items from the current leaf
     let leaf = path.nodes[0].as_mut().unwrap();
     crate::items::del_items(leaf, 0, push_count);
+    // del_items already calls debug_assert_leaf_valid internally.
     fs_info.mark_dirty(leaf);
 
     // Update the parent's key pointer for this leaf (first key changed)
@@ -148,6 +162,7 @@ pub fn push_leaf_left<R: Read + Write + Seek>(
 /// # Errors
 ///
 /// Returns an error if block I/O fails.
+#[allow(clippy::too_many_lines)]
 pub fn push_leaf_right<R: Read + Write + Seek>(
     trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
@@ -212,6 +227,12 @@ pub fn push_leaf_right<R: Read + Write + Seek>(
     // previous generation, modifying it in place would overwrite the
     // committed state and break crash consistency.
     let mut right = cow_block(trans, fs_info, &right, tree_id, None)?;
+    debug_assert_eq!(
+        right.generation(),
+        fs_info.generation,
+        "push_leaf_right: right sibling at {} not COW'd to current generation",
+        right.logical(),
+    );
     if right.logical() != right_bytenr {
         // COW allocated a new block — update the parent's pointer
         let parent = path.nodes[parent_level].as_mut().unwrap();
@@ -276,6 +297,10 @@ pub fn push_leaf_right<R: Read + Write + Seek>(
             .copy_from_slice(src_data);
     }
     right.set_nritems((right_nritems + push_count) as u32);
+
+    // Validate the right sibling after pushing items into it.
+    debug_assert_leaf_valid(&right);
+
     fs_info.mark_dirty(&right);
 
     // Truncate our leaf

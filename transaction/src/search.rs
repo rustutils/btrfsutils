@@ -153,10 +153,22 @@ pub fn search_slot<R: Read + Write + Seek>(
     }
 
     let mut level = eb.level();
+    // The root's level must be within the maximum B-tree depth.
+    assert!(
+        (level as usize) < crate::buffer::BTRFS_MAX_LEVEL,
+        "search_slot: root level {} exceeds max {}",
+        level,
+        crate::buffer::BTRFS_MAX_LEVEL - 1,
+    );
 
     loop {
         if level == 0 {
             // Leaf: binary search for the key
+            debug_assert!(
+                eb.is_leaf(),
+                "search_slot: level is 0 but block at {} is not a leaf",
+                eb.logical(),
+            );
             let result = leaf_bin_search(&eb, key);
             path.nodes[0] = Some(eb);
             path.slots[0] = result.slot;
@@ -252,7 +264,26 @@ pub fn search_slot<R: Read + Write + Seek>(
 
         // Read the child block
         let child_bytenr = eb.key_ptr_blockptr(slot);
+        debug_assert!(
+            child_bytenr != 0,
+            "search_slot: node at {} slot {slot} has blockptr 0",
+            eb.logical(),
+        );
         let mut child = fs_info.read_block(child_bytenr)?;
+
+        // Parent-child level invariant: child must be exactly one level
+        // below the parent.
+        debug_assert_eq!(
+            child.level() + 1,
+            level,
+            "search_slot: child at {} has level {} but parent at {} \
+             has level {} (expected child level {})",
+            child_bytenr,
+            child.level(),
+            eb.logical(),
+            level,
+            level - 1,
+        );
 
         // COW the child if needed
         if cow && let Some(trans) = trans.as_deref_mut() {
@@ -318,10 +349,20 @@ pub fn next_leaf<R: Read + Write + Seek>(
         let slot = path.slots[level as usize];
         let child_bytenr = parent.key_ptr_blockptr(slot);
         let child = fs_info.read_block(child_bytenr)?;
+        debug_assert_eq!(
+            child.level() + 1,
+            level,
+            "next_leaf: child level mismatch at bytenr {child_bytenr}",
+        );
         level -= 1;
         path.nodes[level as usize] = Some(child);
         path.slots[level as usize] = 0;
     }
+
+    debug_assert!(
+        path.nodes[0].as_ref().is_some_and(ExtentBuffer::is_leaf),
+        "next_leaf: path[0] is not a leaf after descent",
+    );
 
     Ok(true)
 }

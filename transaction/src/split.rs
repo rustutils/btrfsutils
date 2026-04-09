@@ -7,7 +7,10 @@
 
 use crate::{
     balance,
-    buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE, key_cmp},
+    buffer::{
+        ExtentBuffer, HEADER_SIZE, ITEM_SIZE, KEY_PTR_SIZE,
+        debug_assert_leaf_valid, debug_assert_node_valid, key_cmp,
+    },
     filesystem::Filesystem,
     path::BtrfsPath,
     transaction::Transaction,
@@ -24,6 +27,7 @@ use std::io::{self, Read, Seek, Write};
 /// # Errors
 ///
 /// Returns an error if block allocation or I/O fails.
+#[allow(clippy::too_many_lines)]
 pub fn split_leaf<R: Read + Write + Seek>(
     trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
@@ -140,6 +144,29 @@ pub fn split_leaf<R: Read + Write + Seek>(
         }
     }
 
+    // Both halves must be non-empty and structurally valid.
+    debug_assert!(
+        old_leaf.nritems() > 0,
+        "split_leaf: old leaf at {} is empty after split",
+        old_leaf.logical(),
+    );
+    debug_assert!(
+        new_leaf.nritems() > 0,
+        "split_leaf: new leaf at {} is empty after split",
+        new_leaf.logical(),
+    );
+    debug_assert_leaf_valid(old_leaf);
+    debug_assert_leaf_valid(&new_leaf);
+    // The new leaf's first key must be strictly greater than the old
+    // leaf's last key — the split must preserve global key ordering.
+    debug_assert!(
+        key_cmp(
+            &old_leaf.item_key(old_leaf.nritems() as usize - 1),
+            &new_leaf.item_key(0),
+        ) == std::cmp::Ordering::Less,
+        "split_leaf: old leaf's last key >= new leaf's first key",
+    );
+
     fs_info.mark_dirty(old_leaf);
     fs_info.mark_dirty(&new_leaf);
 
@@ -211,6 +238,21 @@ pub fn split_node<R: Read + Write + Seek>(
     // Truncate original node
     let old_node = path.nodes[level as usize].as_mut().unwrap();
     old_node.set_nritems(split as u32);
+
+    // Both halves must be non-empty and structurally valid.
+    debug_assert!(
+        old_node.nritems() > 0,
+        "split_node: old node at {} is empty after split",
+        old_node.logical(),
+    );
+    debug_assert!(
+        new_node.nritems() > 0,
+        "split_node: new node at {} is empty after split",
+        new_node.logical(),
+    );
+    debug_assert_node_valid(old_node);
+    debug_assert_node_valid(&new_node);
+
     fs_info.mark_dirty(old_node);
     fs_info.mark_dirty(&new_node);
 
@@ -320,6 +362,9 @@ fn insert_ptr_in_parent<R: Read + Write + Seek>(
     // Write the new key pointer
     parent.set_key_ptr(slot, key, child_logical, fs_info.generation);
     parent.set_nritems(parent_nritems as u32 + 1);
+
+    debug_assert_node_valid(parent);
+
     fs_info.mark_dirty(parent);
 
     Ok(())
@@ -392,6 +437,8 @@ fn create_new_root<R: Read + Write + Seek>(
     // Pointer 1: new split (right child)
     new_root.set_key_ptr(1, right_key, right_logical, fs_info.generation);
 
+    debug_assert_node_valid(&new_root);
+
     fs_info.mark_dirty(&new_root);
     fs_info.set_root_bytenr(tree_id, new_logical);
 
@@ -422,6 +469,7 @@ mod tests {
         data_size: usize,
     ) -> ExtentBuffer {
         let mut eb = ExtentBuffer::new_zeroed(nodesize, 65536);
+        eb.set_bytenr(65536);
         eb.set_level(0);
         eb.set_nritems(0);
         eb.set_generation(1);
@@ -466,6 +514,7 @@ mod tests {
     fn data_aware_split_point_variable_items() {
         // Mix of small and large items
         let mut eb = ExtentBuffer::new_zeroed(4096, 65536);
+        eb.set_bytenr(65536);
         eb.set_level(0);
         eb.set_nritems(0);
         eb.set_generation(1);
@@ -503,6 +552,7 @@ mod tests {
     fn split_point_clamps_minimum() {
         // With 2 items where the first is huge, split should be 1 (not 0)
         let mut eb = ExtentBuffer::new_zeroed(4096, 65536);
+        eb.set_bytenr(65536);
         eb.set_level(0);
         eb.set_nritems(0);
         eb.set_generation(1);

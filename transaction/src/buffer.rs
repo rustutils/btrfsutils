@@ -401,6 +401,226 @@ impl ExtentBuffer {
     pub fn max_key_ptrs(&self) -> u32 {
         (self.nodesize() - HEADER_SIZE as u32) / KEY_PTR_SIZE as u32
     }
+
+    /// Validate leaf structural invariants.
+    ///
+    /// Checks that are cheap (O(nritems), no I/O) but verify the
+    /// fundamental on-disk layout rules:
+    ///
+    /// - `level == 0`
+    /// - `bytenr == logical`
+    /// - Keys are in ascending order
+    /// - Data offsets are in descending order (item 0 highest)
+    /// - Item data regions do not overlap each other
+    /// - Item data regions fit within the block
+    /// - No overlap between item descriptors and item data
+    ///
+    /// Returns `Ok(())` if valid, or `Err(description)` on the first
+    /// violation found.
+    pub fn check_leaf(&self) -> Result<(), String> {
+        if self.level() != 0 {
+            return Err(format!(
+                "check_leaf: block at {} has level {} (expected 0)",
+                self.logical,
+                self.level()
+            ));
+        }
+        if self.bytenr() != self.logical {
+            return Err(format!(
+                "check_leaf: bytenr {} != logical {}",
+                self.bytenr(),
+                self.logical
+            ));
+        }
+        let nritems = self.nritems() as usize;
+        let nodesize = self.nodesize() as usize;
+
+        // Item descriptors must fit within the block.
+        let items_end = HEADER_SIZE + nritems * ITEM_SIZE;
+        if items_end > nodesize {
+            return Err(format!(
+                "check_leaf: {nritems} items need {items_end} bytes, \
+                 block is only {nodesize}",
+            ));
+        }
+
+        if nritems == 0 {
+            return Ok(());
+        }
+
+        // Keys must be in ascending order.
+        for i in 1..nritems {
+            let prev = self.item_key(i - 1);
+            let curr = self.item_key(i);
+            if key_cmp(&prev, &curr) != std::cmp::Ordering::Less {
+                return Err(format!(
+                    "check_leaf: key at slot {} ({:?}) >= key at slot {i} ({curr:?})",
+                    i - 1,
+                    prev,
+                ));
+            }
+        }
+
+        // Data offsets must be descending, and data must fit in the block.
+        // Item 0 has the highest data offset; item N-1 the lowest.
+        let first_data_end = HEADER_SIZE
+            + self.item_offset(0) as usize
+            + self.item_size(0) as usize;
+        if first_data_end > nodesize {
+            return Err(format!(
+                "check_leaf: item 0 data ends at {first_data_end}, \
+                 beyond block size {nodesize}",
+            ));
+        }
+
+        for i in 1..nritems {
+            let prev_off = self.item_offset(i - 1);
+            let curr_off = self.item_offset(i);
+            let curr_size = self.item_size(i);
+            // Descending offsets (equal allowed for zero-size items).
+            if curr_off > prev_off {
+                return Err(format!(
+                    "check_leaf: offset at slot {i} ({curr_off}) > \
+                     offset at slot {} ({prev_off})",
+                    i - 1,
+                ));
+            }
+            // Current item's data must not overlap the previous item's data.
+            // prev occupies [prev_off, prev_off + prev_size).
+            // curr occupies [curr_off, curr_off + curr_size).
+            // Since offsets descend, curr_off + curr_size must <= prev_off.
+            if curr_off + curr_size > prev_off {
+                return Err(format!(
+                    "check_leaf: item {i} data [{curr_off}..{}] overlaps \
+                     item {} data [{prev_off}..{}]",
+                    curr_off + curr_size,
+                    i - 1,
+                    prev_off + self.item_size(i - 1),
+                ));
+            }
+        }
+
+        // Item descriptors must not overlap the data area.
+        let data_start = HEADER_SIZE + self.item_offset(nritems - 1) as usize;
+        if items_end > data_start {
+            return Err(format!(
+                "check_leaf: item descriptors end at {items_end} but \
+                 data starts at {data_start}",
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Validate internal node structural invariants.
+    ///
+    /// Checks:
+    ///
+    /// - `level > 0`
+    /// - `bytenr == logical`
+    /// - `nritems <= max_key_ptrs`
+    /// - Key pointers are in ascending order
+    /// - All `blockptr` values are nonzero
+    ///
+    /// Returns `Ok(())` if valid, or `Err(description)` on the first
+    /// violation found.
+    pub fn check_node(&self) -> Result<(), String> {
+        if self.level() == 0 {
+            return Err(format!(
+                "check_node: block at {} has level 0 (expected > 0)",
+                self.logical,
+            ));
+        }
+        if self.bytenr() != self.logical {
+            return Err(format!(
+                "check_node: bytenr {} != logical {}",
+                self.bytenr(),
+                self.logical
+            ));
+        }
+        let nritems = self.nritems() as usize;
+        let max_ptrs = self.max_key_ptrs() as usize;
+        if nritems > max_ptrs {
+            return Err(format!(
+                "check_node: {nritems} key pointers exceeds maximum {max_ptrs}",
+            ));
+        }
+
+        for i in 0..nritems {
+            if self.key_ptr_blockptr(i) == 0 {
+                return Err(format!("check_node: slot {i} has blockptr 0",));
+            }
+        }
+
+        for i in 1..nritems {
+            let prev = self.key_ptr_key(i - 1);
+            let curr = self.key_ptr_key(i);
+            if key_cmp(&prev, &curr) != std::cmp::Ordering::Less {
+                return Err(format!(
+                    "check_node: key at slot {} ({:?}) >= key at slot {i} ({curr:?})",
+                    i - 1,
+                    prev,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate this block as either a leaf or a node based on its level.
+    ///
+    /// Returns `Ok(())` if valid, or `Err(description)` on violation.
+    pub fn check(&self) -> Result<(), String> {
+        if self.level() == 0 {
+            self.check_leaf()
+        } else {
+            self.check_node()
+        }
+    }
+}
+
+/// Assert that a leaf block is structurally valid.
+///
+/// This is a `debug_assert!`-level check: compiled out in release builds.
+/// Walks all items to verify key ordering, data offset ordering, no
+/// overlaps, and descriptor/data region separation.
+#[inline]
+pub fn debug_assert_leaf_valid(eb: &ExtentBuffer) {
+    debug_assert!(
+        eb.check_leaf().is_ok(),
+        "leaf invariant violation at logical {}: {}",
+        eb.logical(),
+        eb.check_leaf().unwrap_err(),
+    );
+}
+
+/// Assert that an internal node is structurally valid.
+///
+/// This is a `debug_assert!`-level check: compiled out in release builds.
+/// Walks all key pointers to verify key ordering, nonzero blockptrs, and
+/// capacity limits.
+#[inline]
+pub fn debug_assert_node_valid(eb: &ExtentBuffer) {
+    debug_assert!(
+        eb.check_node().is_ok(),
+        "node invariant violation at logical {}: {}",
+        eb.logical(),
+        eb.check_node().unwrap_err(),
+    );
+}
+
+/// Assert that a tree block (leaf or node) is structurally valid.
+///
+/// Dispatches to [`debug_assert_leaf_valid`] or [`debug_assert_node_valid`]
+/// based on the block's level.
+#[inline]
+pub fn debug_assert_block_valid(eb: &ExtentBuffer) {
+    debug_assert!(
+        eb.check().is_ok(),
+        "block invariant violation at logical {}: {}",
+        eb.logical(),
+        eb.check().unwrap_err(),
+    );
 }
 
 #[allow(clippy::missing_fields_in_debug)]
@@ -710,5 +930,141 @@ mod tests {
         eb.zero_range(20, 2);
         assert_eq!(eb.as_bytes()[20], 0);
         assert_eq!(eb.as_bytes()[21], 0);
+    }
+
+    #[test]
+    fn check_leaf_valid() {
+        let mut eb = make_leaf(4096, 0, 1, 5);
+        eb.set_bytenr(65536);
+        assert!(eb.check_leaf().is_ok());
+
+        // Add two properly-formed items.
+        let mut data_end = 4096u32;
+        let key0 = DiskKey {
+            objectid: 1,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        data_end -= 100;
+        eb.set_item_key(0, &key0);
+        eb.set_item_offset(0, data_end - HEADER_SIZE as u32);
+        eb.set_item_size(0, 100);
+
+        let key1 = DiskKey {
+            objectid: 2,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        data_end -= 50;
+        eb.set_item_key(1, &key1);
+        eb.set_item_offset(1, data_end - HEADER_SIZE as u32);
+        eb.set_item_size(1, 50);
+
+        eb.set_nritems(2);
+        assert!(eb.check_leaf().is_ok());
+    }
+
+    #[test]
+    fn check_leaf_bad_key_order() {
+        let mut eb = make_leaf(4096, 0, 1, 5);
+        eb.set_bytenr(65536);
+        eb.set_nritems(2);
+
+        // Insert keys out of order.
+        let key0 = DiskKey {
+            objectid: 10,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let key1 = DiskKey {
+            objectid: 5,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        eb.set_item_key(0, &key0);
+        eb.set_item_offset(0, 4096 - HEADER_SIZE as u32 - 50);
+        eb.set_item_size(0, 50);
+        eb.set_item_key(1, &key1);
+        eb.set_item_offset(1, 4096 - HEADER_SIZE as u32 - 100);
+        eb.set_item_size(1, 50);
+
+        let err = eb.check_leaf().unwrap_err();
+        assert!(err.contains("key at slot 0"), "{err}");
+    }
+
+    #[test]
+    fn check_leaf_bytenr_mismatch() {
+        let mut eb = make_leaf(4096, 0, 1, 5);
+        eb.set_bytenr(99999); // doesn't match logical (65536)
+        let err = eb.check_leaf().unwrap_err();
+        assert!(err.contains("bytenr"), "{err}");
+    }
+
+    #[test]
+    fn check_node_valid() {
+        let mut eb = make_node(4096, 2, 1, 10);
+        let key0 = DiskKey {
+            objectid: 1,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let key1 = DiskKey {
+            objectid: 100,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        eb.set_key_ptr(0, &key0, 65536, 10);
+        eb.set_key_ptr(1, &key1, 131072, 10);
+        assert!(eb.check_node().is_ok());
+    }
+
+    #[test]
+    fn check_node_bad_key_order() {
+        let mut eb = make_node(4096, 2, 1, 10);
+        let key0 = DiskKey {
+            objectid: 100,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let key1 = DiskKey {
+            objectid: 1,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        eb.set_key_ptr(0, &key0, 65536, 10);
+        eb.set_key_ptr(1, &key1, 131072, 10);
+        let err = eb.check_node().unwrap_err();
+        assert!(err.contains("key at slot 0"), "{err}");
+    }
+
+    #[test]
+    fn check_node_zero_blockptr() {
+        let mut eb = make_node(4096, 1, 1, 10);
+        let key0 = DiskKey {
+            objectid: 1,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        eb.set_key_ptr_key(0, &key0);
+        eb.set_key_ptr_blockptr(0, 0);
+        eb.set_key_ptr_generation(0, 10);
+        let err = eb.check_node().unwrap_err();
+        assert!(err.contains("blockptr 0"), "{err}");
+    }
+
+    #[test]
+    fn check_dispatches_by_level() {
+        let mut leaf = make_leaf(4096, 0, 1, 5);
+        leaf.set_bytenr(65536);
+        assert!(leaf.check().is_ok());
+
+        let mut node = make_node(4096, 1, 1, 10);
+        let key = DiskKey {
+            objectid: 1,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        node.set_key_ptr(0, &key, 65536, 10);
+        assert!(node.check().is_ok());
     }
 }

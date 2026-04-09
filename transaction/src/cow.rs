@@ -62,12 +62,48 @@ pub fn cow_block<R: Read + Write + Seek>(
     let flags = new_eb.flags() & !(HEADER_FLAG_WRITTEN | HEADER_FLAG_RELOC);
     new_eb.set_flags(flags);
 
+    // Post-COW invariants: the new block must have the current
+    // transaction's generation, WRITTEN must be cleared, and bytenr
+    // must match the new logical address.
+    debug_assert_eq!(
+        new_eb.generation(),
+        fs_info.generation,
+        "cow_block: new block at {new_logical} has wrong generation",
+    );
+    debug_assert_eq!(
+        new_eb.bytenr(),
+        new_logical,
+        "cow_block: bytenr/logical mismatch after COW",
+    );
+    debug_assert_eq!(
+        new_eb.flags() & HEADER_FLAG_WRITTEN,
+        0,
+        "cow_block: WRITTEN flag not cleared on new block",
+    );
+    debug_assert_eq!(
+        new_eb.level(),
+        eb.level(),
+        "cow_block: level changed during COW",
+    );
+    debug_assert_eq!(
+        new_eb.nritems(),
+        eb.nritems(),
+        "cow_block: nritems changed during COW",
+    );
+
     // Queue -1 delayed ref for the old block being replaced, and pin it
     // so the allocator doesn't reuse the address before commit.
     trans
         .delayed_refs
         .drop_ref(eb.logical(), true, tree_id, level);
     trans.pin_block(eb.logical());
+
+    // The old block must be pinned after this point.
+    debug_assert!(
+        trans.is_pinned(eb.logical()),
+        "cow_block: old block at {} not pinned after COW",
+        eb.logical(),
+    );
 
     // Mark the new block dirty
     fs_info.mark_dirty(&new_eb);

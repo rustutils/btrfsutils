@@ -8,7 +8,9 @@
 //! payloads grow backward from the end of the block. The free space is the
 //! gap between them.
 
-use crate::buffer::{ExtentBuffer, HEADER_SIZE, ITEM_SIZE};
+use crate::buffer::{
+    ExtentBuffer, HEADER_SIZE, ITEM_SIZE, debug_assert_leaf_valid,
+};
 use btrfs_disk::tree::DiskKey;
 use std::io;
 
@@ -149,6 +151,9 @@ pub fn insert_item(
     // Increment nritems
     eb.set_nritems(nritems as u32 + 1);
 
+    // Post-insert validation: the leaf must still be structurally valid.
+    debug_assert_leaf_valid(eb);
+
     Ok(())
 }
 
@@ -228,6 +233,9 @@ pub fn del_items(eb: &mut ExtentBuffer, slot: usize, count: usize) {
     }
 
     eb.set_nritems(new_nritems as u32);
+
+    // Post-delete validation.
+    debug_assert_leaf_valid(eb);
 }
 
 /// Shrink an existing item's data area by `shrink_by` bytes.
@@ -295,6 +303,10 @@ pub fn shrink_item(
     // abuts slot-1's payload).
     eb.set_item_offset(slot, old_off + shrink_by);
     eb.set_item_size(slot, new_size);
+
+    // Post-shrink validation.
+    debug_assert_leaf_valid(eb);
+
     Ok(())
 }
 
@@ -330,6 +342,7 @@ mod tests {
 
     fn empty_leaf(nodesize: u32) -> ExtentBuffer {
         let mut eb = ExtentBuffer::new_zeroed(nodesize, 65536);
+        eb.set_bytenr(65536);
         eb.set_level(0);
         eb.set_nritems(0);
         eb.set_generation(1);

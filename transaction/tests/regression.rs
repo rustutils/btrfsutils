@@ -652,6 +652,7 @@ fn make_node(
     start_oid: u64,
 ) -> ExtentBuffer {
     let mut eb = ExtentBuffer::new_zeroed(nodesize, logical);
+    eb.set_bytenr(logical);
     eb.set_level(1);
     eb.set_nritems(n as u32);
     eb.set_generation(generation);
@@ -688,12 +689,15 @@ fn balance_node_merge_right() {
     let right = make_node(nodesize, 0x2000_4000, old_gen, 3, 300);
     let third = make_node(nodesize, 0x2000_8000, generation, 5, 600);
 
-    fs.mark_dirty(&child);
-    fs.mark_dirty(&right);
+    // Old-gen blocks are seeded into the cache (not marked dirty) to
+    // simulate blocks already on disk. balance_node will COW them.
+    fs.seed_cache(&child);
+    fs.seed_cache(&right);
     fs.mark_dirty(&third);
 
     // Parent with 3 children
     let mut parent = ExtentBuffer::new_zeroed(nodesize, 0x3000_0000);
+    parent.set_bytenr(0x3000_0000);
     parent.set_level(2);
     parent.set_nritems(3);
     parent.set_generation(generation);
@@ -796,11 +800,13 @@ fn balance_node_merge_left() {
     let child = make_node(nodesize, 0x4000_4000, old_gen, 2, 400);
     let right = make_node(nodesize, 0x4000_8000, generation, max_ptrs - 1, 600);
 
-    fs.mark_dirty(&left);
-    fs.mark_dirty(&child);
+    // Old-gen blocks are seeded into the cache to simulate on-disk state.
+    fs.seed_cache(&left);
+    fs.seed_cache(&child);
     fs.mark_dirty(&right);
 
     let mut parent = ExtentBuffer::new_zeroed(nodesize, 0x5000_0000);
+    parent.set_bytenr(0x5000_0000);
     parent.set_level(2);
     parent.set_nritems(3);
     parent.set_generation(generation);
@@ -888,6 +894,7 @@ fn balance_node_not_sparse_skips() {
     fs.mark_dirty(&right);
 
     let mut parent = ExtentBuffer::new_zeroed(nodesize, 0x7000_0000);
+    parent.set_bytenr(0x7000_0000);
     parent.set_level(2);
     parent.set_nritems(2);
     parent.set_generation(generation);
@@ -945,6 +952,7 @@ fn balance_node_too_full_to_merge() {
     fs.mark_dirty(&right);
 
     let mut parent = ExtentBuffer::new_zeroed(nodesize, 0x9000_0000);
+    parent.set_bytenr(0x9000_0000);
     parent.set_level(2);
     parent.set_nritems(3);
     parent.set_generation(generation);

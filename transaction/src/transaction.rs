@@ -95,6 +95,13 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// Returns an error if the filesystem state cannot be prepared.
     pub fn start(fs_info: &mut Filesystem<R>) -> io::Result<Self> {
         let transid = fs_info.superblock.generation + 1;
+        // Generation must advance monotonically.
+        assert!(
+            transid > fs_info.superblock.generation,
+            "start: transid {transid} did not advance beyond superblock \
+             generation {}",
+            fs_info.superblock.generation,
+        );
         fs_info.generation = transid;
 
         // Snapshot current roots so we can detect changes at commit time
@@ -174,6 +181,19 @@ impl<R: Read + Write + Seek> Transaction<R> {
                 continue;
             }
 
+            // Sanity: we should never allocate a pinned address
+            // (the pinned check above should have caught it).
+            debug_assert!(
+                !self.pinned.contains(&logical),
+                "alloc_block: allocated pinned address {logical:#x}",
+            );
+            // The address must be nodesize-aligned.
+            debug_assert_eq!(
+                logical % u64::from(fs_info.nodesize),
+                0,
+                "alloc_block: address {logical:#x} not aligned to nodesize {}",
+                fs_info.nodesize,
+            );
             self.allocated_blocks.push(logical);
             return Ok(logical);
         }
@@ -578,6 +598,36 @@ impl<R: Read + Write + Seek> Transaction<R> {
                 fs_info.superblock.chunk_root_level = eb.level();
             }
         }
+
+        // Pre-write superblock invariants. These are hard assertions
+        // (not debug_assert) because writing a corrupt superblock is
+        // unrecoverable.
+        assert_eq!(
+            fs_info.superblock.generation, self.transid,
+            "commit: superblock generation {} != transid {}",
+            fs_info.superblock.generation, self.transid,
+        );
+        assert_eq!(
+            fs_info.superblock.root,
+            fs_info.root_bytenr(1).unwrap_or(0),
+            "commit: superblock.root doesn't match in-memory root tree root",
+        );
+        // bytes_used must be at least 6 * nodesize (kernel minimum).
+        let min_bytes_used = 6 * u64::from(fs_info.nodesize);
+        assert!(
+            fs_info.superblock.bytes_used >= min_bytes_used,
+            "commit: bytes_used {} below kernel minimum {} \
+             (6 * nodesize {})",
+            fs_info.superblock.bytes_used,
+            min_bytes_used,
+            fs_info.nodesize,
+        );
+        // All delayed refs must have been flushed.
+        assert!(
+            self.delayed_refs.is_empty(),
+            "commit: {} delayed refs still pending at superblock write",
+            self.delayed_refs.len(),
+        );
 
         // Step 5: Update backup roots (rotating through 4 slots)
         let backup_idx = (self.transid % 4) as usize;
