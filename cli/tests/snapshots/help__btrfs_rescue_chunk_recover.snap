@@ -2,7 +2,15 @@
 source: cli/tests/help.rs
 expression: text
 ---
-Recover the chunk tree by scanning the devices one by one
+Recover the chunk tree by scanning the device for surviving chunk data.
+
+Sweeps the raw device for tree blocks that belong to the chunk tree, extracts
+CHUNK_ITEM and DEV_ITEM records, resolves conflicts between duplicates found at
+different generations, and reports whether a coherent chunk tree can be
+reconstructed.
+
+By default this is a read-only scan that reports whether recovery is possible.
+Use --apply to actually write the reconstructed chunk tree.
 
 Usage: chunk-recover [OPTIONS] <DEVICE>
 
@@ -14,5 +22,8 @@ Options:
   -y, --yes
           Assume an answer of 'yes' to all questions
 
+      --apply
+          Write the reconstructed chunk tree to disk
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')

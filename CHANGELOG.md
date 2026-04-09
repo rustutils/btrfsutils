@@ -6,6 +6,19 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `rescue chunk-recover`: raw device scan for surviving chunk-tree
+  leaves, conflict resolution and chunk map reconstruction, and detailed
+  text report. `--apply` writes the reconstructed chunk tree via the
+  transaction crate.
+
+- `btrfs-disk`: `BlockReader::new` constructor and `filesystem_open_with_cache`
+  for opening filesystems with a pre-built chunk cache (used by chunk-recover).
+
+- `btrfs-transaction`: `Filesystem::open_with_chunk_cache` and
+  `Transaction::rebuild_chunk_tree` for chunk tree recovery.
+
+- `btrfs-disk`: `ChunkItem::to_mapping` conversion method.
+
 - `btrfs-fuse`: milestone M6 — library split and integration test harness.
   The crate is now a hybrid lib + bin: `fuse/src/lib.rs` exposes
   `BtrfsFuse` and its operation layer (`lookup_entry`, `get_attr`,

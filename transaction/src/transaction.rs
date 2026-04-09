@@ -390,6 +390,89 @@ impl<R: Read + Write + Seek> Transaction<R> {
         Ok(new_logical)
     }
 
+    /// Replace the chunk tree with a fresh empty one.
+    ///
+    /// This is the apply primitive for `rescue chunk-recover`. It:
+    ///
+    /// 1. Clears and rebuilds the superblock's `sys_chunk_array` from
+    ///    the provided SYSTEM chunk records. This ensures that
+    ///    `ensure_in_sys_chunk_array` (called during SYSTEM block
+    ///    allocation) finds the entries already present and skips the
+    ///    chunk tree read that would fail on a damaged filesystem.
+    ///
+    /// 2. Allocates a fresh SYSTEM block for the new chunk tree root.
+    ///
+    /// 3. Initializes it as an empty level-0 leaf owned by tree ID 3,
+    ///    with proper fsid, `chunk_tree_uuid`, and backref revision.
+    ///
+    /// After this call, the caller inserts `DEV_ITEM` and `CHUNK_ITEM`
+    /// records into tree ID 3 via the normal `search_slot`/`insert_item`
+    /// pipeline, then calls `commit()`. The commit automatically updates
+    /// `superblock.chunk_root` and `chunk_root_level`.
+    ///
+    /// `system_chunks` is a list of `(bg_start, chunk_bytes)` pairs
+    /// where `chunk_bytes` is the serialized `btrfs_chunk` (from
+    /// `chunk_item_bytes`). Only SYSTEM-type chunks should be included.
+    ///
+    /// Returns the logical address of the new chunk tree root leaf.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `sys_chunk_array` overflows, the allocator
+    /// fails, or the root tree is unreadable.
+    pub fn rebuild_chunk_tree(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        system_chunks: &[(u64, Vec<u8>)],
+    ) -> io::Result<u64> {
+        // Step 1: rebuild sys_chunk_array from the provided SYSTEM chunks.
+        fs_info.superblock.sys_chunk_array_size = 0;
+        fs_info.superblock.sys_chunk_array = [0; 2048];
+        for (bg_start, chunk_bytes) in system_chunks {
+            sys_chunk_array_append(
+                &mut fs_info.superblock.sys_chunk_array,
+                &mut fs_info.superblock.sys_chunk_array_size,
+                *bg_start,
+                chunk_bytes,
+            )
+            .map_err(io::Error::other)?;
+        }
+
+        // Step 2: allocate a fresh SYSTEM block for the chunk tree root.
+        // ensure_in_sys_chunk_array will find the entry and return early.
+        let chunk_tree_id =
+            u64::from(btrfs_disk::raw::BTRFS_CHUNK_TREE_OBJECTID);
+        let new_logical = self.alloc_tree_block(fs_info, chunk_tree_id, 0)?;
+
+        // Step 3: initialize as empty leaf, same pattern as create_empty_tree.
+        let (fsid, chunk_tree_uuid) = {
+            let root_bytenr = fs_info.root_bytenr(1).ok_or_else(|| {
+                io::Error::other("rebuild_chunk_tree: root tree has no root")
+            })?;
+            let eb = fs_info.read_block(root_bytenr)?;
+            (eb.fsid(), eb.chunk_tree_uuid())
+        };
+
+        let nodesize = fs_info.nodesize;
+        let mut new_eb = ExtentBuffer::new_zeroed(nodesize, new_logical);
+        new_eb.set_bytenr(new_logical);
+        new_eb.set_level(0);
+        new_eb.set_nritems(0);
+        new_eb.set_generation(self.transid);
+        new_eb.set_owner(chunk_tree_id);
+        new_eb.set_fsid(&fsid);
+        new_eb.set_chunk_tree_uuid(&chunk_tree_uuid);
+        new_eb.set_flags(
+            u64::from(btrfs_disk::raw::BTRFS_MIXED_BACKREF_REV)
+                << btrfs_disk::raw::BTRFS_BACKREF_REV_SHIFT,
+        );
+
+        fs_info.mark_dirty(&new_eb);
+        fs_info.set_root_bytenr(chunk_tree_id, new_logical);
+
+        Ok(new_logical)
+    }
+
     /// Commit the transaction: update root items, flush delayed refs, write
     /// all dirty blocks, update the superblock, and write to all mirrors.
     ///

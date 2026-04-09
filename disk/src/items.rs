@@ -1599,6 +1599,31 @@ impl ChunkItem {
     }
 }
 
+impl ChunkItem {
+    /// Convert to a `ChunkMapping` for use with `chunk_item_bytes` and
+    /// `ChunkTreeCache`.
+    #[must_use]
+    pub fn to_mapping(&self, logical: u64) -> crate::chunk::ChunkMapping {
+        crate::chunk::ChunkMapping {
+            logical,
+            length: self.length,
+            stripe_len: self.stripe_len,
+            chunk_type: self.chunk_type.bits(),
+            num_stripes: self.num_stripes,
+            sub_stripes: self.sub_stripes,
+            stripes: self
+                .stripes
+                .iter()
+                .map(|s| crate::chunk::Stripe {
+                    devid: s.devid,
+                    offset: s.offset,
+                    dev_uuid: s.dev_uuid,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Device item describing a single device in the filesystem.
 ///
 /// Stored in the device tree and embedded in the superblock. Contains the

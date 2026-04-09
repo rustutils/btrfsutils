@@ -12,8 +12,8 @@ require CAP_SYS_ADMIN and an unmounted filesystem.
 Usage: rescue <COMMAND>
 
 Commands:
-  chunk-recover          Recover the chunk tree by scanning the devices one by
-                         one
+  chunk-recover          Recover the chunk tree by scanning the device for
+                         surviving chunk data
   super-recover          Recover bad superblocks from good copies
   zero-log               Clear the tree log (usable if it's corrupted and
                          prevents mount)

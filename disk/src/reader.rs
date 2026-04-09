@@ -24,6 +24,21 @@ pub struct BlockReader<R> {
     chunk_cache: ChunkTreeCache,
 }
 
+impl<R> BlockReader<R> {
+    /// Create a new block reader with a pre-built chunk cache.
+    ///
+    /// This is useful when the on-disk chunk tree is damaged and the
+    /// cache has been reconstructed from other sources (e.g. raw device
+    /// scan in `rescue chunk-recover`).
+    pub fn new(reader: R, nodesize: u32, chunk_cache: ChunkTreeCache) -> Self {
+        Self {
+            reader,
+            nodesize,
+            chunk_cache,
+        }
+    }
+}
+
 impl<R: Read + Seek> BlockReader<R> {
     /// Read raw bytes at a logical address, resolving to physical via the chunk cache.
     ///
@@ -186,6 +201,36 @@ pub fn filesystem_open_mirror<R: Read + Seek>(
     read_chunk_tree(&mut block_reader, sb.chunk_root)?;
 
     // Step 4: read the root tree to collect tree roots
+    let tree_roots = read_root_tree(&mut block_reader, sb.root)?;
+
+    Ok(OpenFilesystem {
+        reader: block_reader,
+        superblock: sb,
+        tree_roots,
+    })
+}
+
+/// Open a btrfs filesystem using a pre-built chunk cache.
+///
+/// Skips the chunk tree walk entirely, using the provided cache for
+/// all logical-to-physical address resolution. This is the entry point
+/// for `rescue chunk-recover --apply`, where the on-disk chunk tree is
+/// damaged and the cache has been reconstructed from a raw device scan.
+///
+/// The root tree is still read normally (it becomes accessible once the
+/// correct chunk mappings are in place).
+///
+/// # Errors
+///
+/// Returns an error if the superblock read or root tree walk fails.
+pub fn filesystem_open_with_cache<R: Read + Seek>(
+    reader: R,
+    mirror: u32,
+    chunk_cache: ChunkTreeCache,
+) -> io::Result<OpenFilesystem<R>> {
+    let mut reader = reader;
+    let sb = superblock::read_superblock(&mut reader, mirror)?;
+    let mut block_reader = BlockReader::new(reader, sb.nodesize, chunk_cache);
     let tree_roots = read_root_tree(&mut block_reader, sb.root)?;
 
     Ok(OpenFilesystem {

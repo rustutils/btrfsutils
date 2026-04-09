@@ -10,6 +10,7 @@
 
 use crate::buffer::ExtentBuffer;
 use btrfs_disk::{
+    chunk::ChunkTreeCache,
     reader::{self, BlockReader, OpenFilesystem},
     superblock::Superblock,
 };
@@ -126,6 +127,57 @@ impl<R: Read + Write + Seek> Filesystem<R> {
             superblock,
             tree_roots,
         } = reader::filesystem_open_mirror(handle, mirror)?;
+
+        let generation = superblock.generation;
+        let nodesize = superblock.nodesize;
+        let sectorsize = superblock.sectorsize;
+
+        let mut roots: BTreeMap<u64, u64> = tree_roots
+            .into_iter()
+            .map(|(id, (bytenr, _offset))| (id, bytenr))
+            .collect();
+
+        roots.insert(1, superblock.root);
+        roots.insert(3, superblock.chunk_root);
+
+        let original_roots = roots.clone();
+
+        Ok(Self {
+            reader,
+            superblock,
+            roots,
+            original_roots,
+            dirty: BTreeSet::new(),
+            generation,
+            nodesize,
+            sectorsize,
+            block_cache: BTreeMap::new(),
+            written: BTreeSet::new(),
+            bg_tree_override: None,
+        })
+    }
+
+    /// Open a btrfs filesystem using a pre-built chunk cache.
+    ///
+    /// Skips the chunk tree walk entirely, using the provided cache for
+    /// logical-to-physical address resolution. This is the entry point
+    /// for recovery tools like `rescue chunk-recover --apply`, where the
+    /// on-disk chunk tree is damaged and the cache has been reconstructed
+    /// from a raw device scan.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any I/O operation fails during bootstrap.
+    pub fn open_with_chunk_cache(
+        handle: R,
+        mirror: u32,
+        chunk_cache: ChunkTreeCache,
+    ) -> io::Result<Self> {
+        let OpenFilesystem {
+            reader,
+            superblock,
+            tree_roots,
+        } = reader::filesystem_open_with_cache(handle, mirror, chunk_cache)?;
 
         let generation = superblock.generation;
         let nodesize = superblock.nodesize;
