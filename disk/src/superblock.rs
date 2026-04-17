@@ -481,7 +481,7 @@ fn parse_label(raw_label: &[std::os::raw::c_char; 256]) -> String {
     let bytes: Vec<u8> = raw_label
         .iter()
         .take_while(|&&c| c != 0)
-        .map(|&c| c.cast_unsigned())
+        .map(|&c| c as u8)
         .collect();
     String::from_utf8_lossy(&bytes).into_owned()
 }
@@ -679,7 +679,7 @@ pub fn write_superblock_all_mirrors(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::Cursor, mem};
+    use std::{io::Cursor, mem, os::raw::c_char};
 
     // --- super_mirror_offset ---
 
@@ -755,24 +755,24 @@ mod tests {
 
     #[test]
     fn parse_label_normal() {
-        let mut raw_label = [0i8; 256];
+        let mut raw_label = [c_char::default(); 256];
         for (i, &b) in b"my-volume".iter().enumerate() {
-            raw_label[i] = b as i8;
+            raw_label[i] = b as c_char;
         }
         assert_eq!(parse_label(&raw_label), "my-volume");
     }
 
     #[test]
     fn parse_label_empty() {
-        let raw_label = [0i8; 256];
+        let raw_label = [c_char::default(); 256];
         assert_eq!(parse_label(&raw_label), "");
     }
 
     #[test]
     fn parse_label_stops_at_nul() {
-        let mut raw_label = [0i8; 256];
+        let mut raw_label = [c_char::default(); 256];
         for (i, &b) in b"hello\0world".iter().enumerate() {
-            raw_label[i] = b as i8;
+            raw_label[i] = b as c_char;
         }
         assert_eq!(parse_label(&raw_label), "hello");
     }

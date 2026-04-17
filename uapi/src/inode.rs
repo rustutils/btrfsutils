@@ -14,7 +14,10 @@ use crate::{
     },
     tree_search::{SearchFilter, tree_search},
 };
-use std::os::fd::{AsRawFd, BorrowedFd};
+use std::os::{
+    fd::{AsRawFd, BorrowedFd},
+    raw::c_char,
+};
 
 /// Look up the tree ID (root ID) of the subvolume containing the given file or directory.
 ///
@@ -104,7 +107,7 @@ pub fn ino_paths(fd: BorrowedFd<'_>, inum: u64) -> nix::Result<Vec<String>> {
 
         // The path string starts at the base of val array plus the offset
         let val_base = container.val.as_ptr() as usize;
-        let path_ptr = (val_base + val_offset) as *const i8;
+        let path_ptr = (val_base + val_offset) as *const c_char;
 
         // Convert C string to Rust String
         let c_str = unsafe { std::ffi::CStr::from_ptr(path_ptr) };
