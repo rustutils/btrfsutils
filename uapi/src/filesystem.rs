@@ -103,7 +103,7 @@ pub fn wait_sync(fd: BorrowedFd, transid: u64) -> nix::Result<()> {
 ///
 /// Returns `Err` if the ioctl fails.
 pub fn label_get(fd: BorrowedFd) -> nix::Result<CString> {
-    let mut buf = [0i8; BTRFS_LABEL_SIZE as usize];
+    let mut buf = [0 as c_char; BTRFS_LABEL_SIZE as usize];
     unsafe { btrfs_ioc_get_fslabel(fd.as_raw_fd(), &raw mut buf) }?;
     let cstr = unsafe { CStr::from_ptr(buf.as_ptr()) };
     // CStr::to_owned() copies the bytes into a freshly allocated CString,
@@ -129,7 +129,7 @@ pub fn label_set(fd: BorrowedFd, label: &CStr) -> nix::Result<()> {
     if bytes.len() >= BTRFS_LABEL_SIZE as usize {
         return Err(nix::errno::Errno::EINVAL);
     }
-    let mut buf = [0i8; BTRFS_LABEL_SIZE as usize];
+    let mut buf = [0 as c_char; BTRFS_LABEL_SIZE as usize];
     for (i, &b) in bytes.iter().enumerate() {
         buf[i] = b as c_char;
     }
