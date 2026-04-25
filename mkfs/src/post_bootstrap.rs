@@ -23,9 +23,7 @@
 
 use crate::{args::Profile, mkfs::MkfsConfig, write::ChecksumType};
 use anyhow::{Context, Result};
-use btrfs_disk::raw::{
-    BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE, BTRFS_UUID_TREE_OBJECTID,
-};
+use btrfs_disk::raw::BTRFS_UUID_TREE_OBJECTID;
 use btrfs_transaction::{Filesystem, Transaction};
 use std::{collections::BTreeMap, fs::OpenOptions, path::Path};
 
@@ -56,12 +54,16 @@ fn profile_supported(profile: Profile) -> bool {
 /// Decide whether to run the post-bootstrap transaction for `cfg`.
 ///
 /// Skips for any profile we haven't verified (see [`profile_supported`])
-/// and for filesystems built with `^free-space-tree`. The latter is
-/// PLAN B.2: mkfs's bootstrap writes a stale FST root + leaf even when
-/// the compat_ro flag is cleared, which the transaction commit's FST
-/// update step trips on. Resolving that needs a clean-room plan to
-/// either teach mkfs to fully omit the FST or to teach the transaction
-/// commit to detect-and-clean a stale FST root.
+/// and for filesystems whose checksum type isn't CRC32C (transaction
+/// crate's commit pipeline doesn't yet dispatch on csum type — needs
+/// its own clean-room step).
+///
+/// `^free-space-tree` (PLAN B.2) used to be on this skip list too, but
+/// the transaction crate's `update_free_space_tree` now respects the
+/// `FREE_SPACE_TREE` compat_ro flag and treats a cleared flag as "no
+/// FST", so it's safe to run post-bootstrap on those images. mkfs
+/// still leaves a stale FST tree leaf around in that case (a separate
+/// fix); the kernel ignores it.
 fn should_run(cfg: &MkfsConfig) -> bool {
     if !profile_supported(cfg.metadata_profile) {
         return false;
@@ -69,15 +71,6 @@ fn should_run(cfg: &MkfsConfig) -> bool {
     if !profile_supported(cfg.data_profile) {
         return false;
     }
-    let fst_bit = u64::from(BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE);
-    if cfg.compat_ro_flags & fst_bit == 0 {
-        return false;
-    }
-    // The transaction crate's commit pipeline currently only knows how
-    // to checksum tree blocks under CRC32C. xxhash / SHA256 / BLAKE2b
-    // mkfs images need to be skipped until the transaction crate's
-    // checksum dispatch grows beyond CRC32C — a separate clean-room
-    // step.
     if !matches!(cfg.csum_type, ChecksumType::Crc32c) {
         return false;
     }

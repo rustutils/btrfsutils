@@ -1946,8 +1946,17 @@ impl<R: Read + Write + Seek> Transaction<R> {
         use btrfs_disk::items::FreeSpaceInfoFlags;
 
         let fst_id = 10u64;
-        if fs_info.root_bytenr(fst_id).is_none() {
-            // No free space tree on this filesystem.
+        // Skip the FST update when the FREE_SPACE_TREE compat_ro flag
+        // is cleared, regardless of whether a tree at id 10 exists on
+        // disk. mkfs images built with `^free-space-tree` carry a
+        // stale empty FST leaf today (mkfs PLAN B.2) — the kernel
+        // ignores it because the flag is cleared, and so should we.
+        // Also skip when the tree simply doesn't exist.
+        let fst_flag =
+            u64::from(btrfs_disk::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE);
+        if fs_info.superblock.compat_ro_flags & fst_flag == 0
+            || fs_info.root_bytenr(fst_id).is_none()
+        {
             self.bg_range_deltas.clear();
             return Ok(false);
         }

@@ -147,6 +147,13 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `btrfs-transaction`: `update_free_space_tree` now respects the
+  `FREE_SPACE_TREE` compat_ro flag — when the flag is cleared, the
+  FST update is skipped even if a tree-id-10 root is present on disk.
+  Lets `btrfs-mkfs --features ^free-space-tree` run through
+  `post_bootstrap` cleanly (mkfs leaves a stale FST leaf around in
+  that case; the kernel ignores it because the flag is cleared).
+
 - `btrfs-transaction`: `DelayedRefQueue` now uses `BTreeMap` (was
   `HashMap`), so `flush_delayed_refs` iterates queued refs in
   deterministic key order. Without this, successive transaction
