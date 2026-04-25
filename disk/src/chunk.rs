@@ -359,6 +359,31 @@ mod tests {
         }
     }
 
+    /// Build a chunk mapping with arbitrary stripes. Each entry is
+    /// `(devid, physical_offset)`.
+    fn make_multi_stripe_mapping(
+        logical: u64,
+        length: u64,
+        stripes: &[(u64, u64)],
+    ) -> ChunkMapping {
+        ChunkMapping {
+            logical,
+            length,
+            stripe_len: 65536,
+            chunk_type: 0,
+            num_stripes: stripes.len() as u16,
+            sub_stripes: 0,
+            stripes: stripes
+                .iter()
+                .map(|&(devid, offset)| Stripe {
+                    devid,
+                    offset,
+                    dev_uuid: Uuid::nil(),
+                })
+                .collect(),
+        }
+    }
+
     #[test]
     fn empty_cache() {
         let cache = ChunkTreeCache::default();
@@ -405,6 +430,106 @@ mod tests {
         assert_eq!(m.logical, 1000);
         assert_eq!(m.length, 500);
         assert!(cache.lookup(500).is_none());
+    }
+
+    #[test]
+    fn resolve_returns_first_stripe_only() {
+        // For a multi-stripe mapping, the single-result `resolve` always
+        // picks stripe[0]'s (devid, physical). Useful for read paths
+        // where any mirror is fine; write paths use `resolve_all`.
+        let mut cache = ChunkTreeCache::default();
+        cache.insert(make_multi_stripe_mapping(
+            1000,
+            500,
+            &[(1, 2000), (2, 9000)],
+        ));
+        assert_eq!(cache.resolve(1000), Some((1, 2000)));
+        assert_eq!(cache.resolve(1100), Some((1, 2100)));
+        assert_eq!(cache.resolve(1499), Some((1, 2499)));
+    }
+
+    #[test]
+    fn resolve_all_dup_returns_two_offsets_same_devid() {
+        // DUP profile: 2 stripes, both on devid 1, at distinct physical
+        // offsets. The on-device write path writes to both copies via
+        // the same handle, but the cache must report both placements.
+        let mut cache = ChunkTreeCache::default();
+        cache.insert(make_multi_stripe_mapping(
+            1000,
+            500,
+            &[(1, 2000), (1, 50000)],
+        ));
+        assert_eq!(cache.resolve_all(1000), Some(vec![(1, 2000), (1, 50000)]),);
+        // Within-chunk offset propagates to every stripe's physical.
+        assert_eq!(cache.resolve_all(1100), Some(vec![(1, 2100), (1, 50100)]),);
+    }
+
+    #[test]
+    fn resolve_all_raid1_returns_two_devids() {
+        // RAID1: stripes on different devices. `write_block` must
+        // route each placement to its own device handle.
+        let mut cache = ChunkTreeCache::default();
+        cache.insert(make_multi_stripe_mapping(
+            1000,
+            500,
+            &[(1, 2000), (2, 9000)],
+        ));
+        assert_eq!(cache.resolve_all(1000), Some(vec![(1, 2000), (2, 9000)]),);
+        assert_eq!(cache.resolve_all(1250), Some(vec![(1, 2250), (2, 9250)]),);
+    }
+
+    #[test]
+    fn resolve_all_raid1c3_returns_three_stripes() {
+        let mut cache = ChunkTreeCache::default();
+        cache.insert(make_multi_stripe_mapping(
+            1000,
+            500,
+            &[(1, 2000), (2, 9000), (3, 0x10_0000)],
+        ));
+        let placements = cache.resolve_all(1100).unwrap();
+        assert_eq!(placements.len(), 3);
+        assert_eq!(placements[0], (1, 2100));
+        assert_eq!(placements[1], (2, 9100));
+        assert_eq!(placements[2], (3, 0x10_0000 + 100));
+    }
+
+    #[test]
+    fn resolve_all_raid1c4_returns_four_stripes() {
+        let mut cache = ChunkTreeCache::default();
+        cache.insert(make_multi_stripe_mapping(
+            1000,
+            500,
+            &[(1, 2000), (2, 9000), (3, 0x10_0000), (4, 0x20_0000)],
+        ));
+        let placements = cache.resolve_all(1100).unwrap();
+        assert_eq!(placements.len(), 4);
+        assert_eq!(placements[0], (1, 2100));
+        assert_eq!(placements[3], (4, 0x20_0000 + 100));
+    }
+
+    #[test]
+    fn resolve_all_returns_none_outside_chunks() {
+        let mut cache = ChunkTreeCache::default();
+        cache.insert(make_multi_stripe_mapping(
+            1000,
+            500,
+            &[(1, 2000), (2, 9000)],
+        ));
+        assert_eq!(cache.resolve_all(999), None);
+        assert_eq!(cache.resolve_all(1500), None);
+    }
+
+    #[test]
+    fn resolve_all_with_non_dense_devids() {
+        // btrfs allows device removal that leaves devid gaps. Stripes
+        // on devids {1, 5} should resolve correctly.
+        let mut cache = ChunkTreeCache::default();
+        cache.insert(make_multi_stripe_mapping(
+            0,
+            1000,
+            &[(1, 100), (5, 999_000)],
+        ));
+        assert_eq!(cache.resolve_all(42), Some(vec![(1, 142), (5, 999_042)]),);
     }
 
     #[test]

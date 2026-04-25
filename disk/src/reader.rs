@@ -890,3 +890,237 @@ fn collect_root_items<R: Read + Seek>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chunk::{ChunkMapping, Stripe};
+    use std::io::Cursor;
+    use uuid::Uuid;
+
+    /// Build a per-device cursor backed by a `len`-byte zero-filled
+    /// `Vec<u8>` for use as a fake device.
+    fn make_device(len: usize) -> Cursor<Vec<u8>> {
+        Cursor::new(vec![0u8; len])
+    }
+
+    /// Build a chunk mapping with arbitrary stripes. Each entry is
+    /// `(devid, physical_offset)`.
+    fn make_mapping(
+        logical: u64,
+        length: u64,
+        stripes: &[(u64, u64)],
+    ) -> ChunkMapping {
+        ChunkMapping {
+            logical,
+            length,
+            stripe_len: 65536,
+            chunk_type: 0,
+            num_stripes: stripes.len() as u16,
+            sub_stripes: 0,
+            stripes: stripes
+                .iter()
+                .map(|&(devid, offset)| Stripe {
+                    devid,
+                    offset,
+                    dev_uuid: Uuid::nil(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Build a `BlockReader` over the supplied per-devid cursors with
+    /// the given chunk cache contents and a 4 KiB nodesize.
+    fn make_reader(
+        devices: &[(u64, usize)],
+        mappings: &[ChunkMapping],
+    ) -> BlockReader<Cursor<Vec<u8>>> {
+        let mut handles = BTreeMap::new();
+        for &(devid, len) in devices {
+            handles.insert(devid, make_device(len));
+        }
+        let mut cache = ChunkTreeCache::default();
+        for m in mappings {
+            cache.insert(m.clone());
+        }
+        BlockReader::new_multi(handles, 4096, cache)
+    }
+
+    #[test]
+    fn read_block_routes_to_correct_devid() {
+        // Two devices, each carrying distinguishable bytes at the
+        // physical offset that the chunk mapping resolves the logical
+        // address to. resolve picks stripe[0]; we put devid=2 first
+        // in the stripe list to verify routing follows that, not the
+        // numerically-lowest devid.
+        let mapping =
+            make_mapping(1_000_000, 4096, &[(2, 50_000), (1, 20_000)]);
+        let mut reader = make_reader(&[(1, 100_000), (2, 100_000)], &[mapping]);
+
+        // Seed each device's cursor with a recognizable byte at the
+        // physical offset we'll route to.
+        reader.devices_mut().get_mut(&1).unwrap().get_mut()
+            [20_000..20_000 + 4096]
+            .fill(0xAA);
+        reader.devices_mut().get_mut(&2).unwrap().get_mut()
+            [50_000..50_000 + 4096]
+            .fill(0xBB);
+
+        // resolve picks stripe[0] = (devid=2, phys=50_000), so the
+        // read returns 0xBB bytes.
+        let buf = reader.read_block(1_000_000).expect("read_block");
+        assert_eq!(buf.len(), 4096);
+        assert!(buf.iter().all(|&b| b == 0xBB), "expected all 0xBB");
+    }
+
+    #[test]
+    fn read_data_routes_to_correct_devid() {
+        let mapping = make_mapping(1_000_000, 4096, &[(5, 8000)]);
+        let mut reader = make_reader(&[(5, 100_000)], &[mapping]);
+        reader.devices_mut().get_mut(&5).unwrap().get_mut()[8000..8000 + 100]
+            .fill(0xCC);
+
+        let buf = reader.read_data(1_000_000, 100).expect("read_data");
+        assert_eq!(buf, vec![0xCC; 100]);
+    }
+
+    #[test]
+    fn write_block_fans_out_to_all_stripes() {
+        // RAID1: 2 devices, write_block must update both at the
+        // resolved physical offsets, leaving everything else zero.
+        let mapping = make_mapping(2_000_000, 4096, &[(1, 1000), (2, 7000)]);
+        let mut reader = make_reader(&[(1, 100_000), (2, 100_000)], &[mapping]);
+
+        let payload = vec![0xDDu8; 4096];
+        reader
+            .write_block(2_000_000, &payload)
+            .expect("write_block");
+
+        let dev1 = reader.devices().get(&1).unwrap().get_ref();
+        let dev2 = reader.devices().get(&2).unwrap().get_ref();
+        assert_eq!(&dev1[1000..1000 + 4096], &payload[..]);
+        assert_eq!(&dev2[7000..7000 + 4096], &payload[..]);
+        // Untouched regions still zero on both devices.
+        assert!(dev1[..1000].iter().all(|&b| b == 0));
+        assert!(dev1[1000 + 4096..].iter().all(|&b| b == 0));
+        assert!(dev2[..7000].iter().all(|&b| b == 0));
+        assert!(dev2[7000 + 4096..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn write_block_fans_out_to_dup_same_devid() {
+        // DUP profile: both copies on the same device, at distinct
+        // physical offsets. write_block must hit both.
+        let mapping = make_mapping(3_000_000, 4096, &[(1, 1000), (1, 50_000)]);
+        let mut reader = make_reader(&[(1, 100_000)], &[mapping]);
+
+        let payload = vec![0xEEu8; 4096];
+        reader
+            .write_block(3_000_000, &payload)
+            .expect("write_block");
+
+        let dev = reader.devices().get(&1).unwrap().get_ref();
+        assert_eq!(&dev[1000..1000 + 4096], &payload[..]);
+        assert_eq!(&dev[50_000..50_000 + 4096], &payload[..]);
+    }
+
+    #[test]
+    fn write_block_three_devices_raid1c3() {
+        let mapping = make_mapping(4_000_000, 4096, &[(1, 0), (2, 0), (3, 0)]);
+        let mut reader =
+            make_reader(&[(1, 8192), (2, 8192), (3, 8192)], &[mapping]);
+
+        let payload = vec![0xFFu8; 4096];
+        reader
+            .write_block(4_000_000, &payload)
+            .expect("write_block");
+
+        for &devid in &[1u64, 2, 3] {
+            let dev = reader.devices().get(&devid).unwrap().get_ref();
+            assert_eq!(
+                &dev[..4096],
+                &payload[..],
+                "devid {devid} mirror missing"
+            );
+        }
+    }
+
+    #[test]
+    fn read_block_missing_devid_errors() {
+        // Chunk cache references devid 9, but the handle map only has
+        // devids 1 and 2. Reads must surface a clear error rather than
+        // panicking or silently mis-routing.
+        let mapping = make_mapping(5_000_000, 4096, &[(9, 0)]);
+        let mut reader = make_reader(&[(1, 8192), (2, 8192)], &[mapping]);
+
+        let err = reader.read_block(5_000_000).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(
+            err.to_string().contains("device 9"),
+            "expected error to mention devid 9, got: {err}"
+        );
+    }
+
+    #[test]
+    fn write_block_missing_devid_errors() {
+        let mapping = make_mapping(5_000_000, 4096, &[(1, 0), (9, 0)]);
+        let mut reader = make_reader(&[(1, 8192)], &[mapping]);
+
+        let err = reader.write_block(5_000_000, &[0u8; 4096]).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("device 9"));
+    }
+
+    #[test]
+    fn read_block_unmapped_logical_errors() {
+        // No chunk for this logical address.
+        let mut reader = make_reader(&[(1, 8192)], &[]);
+        let err = reader.read_block(1_000_000).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("not mapped"));
+    }
+
+    #[test]
+    fn new_single_inserts_under_supplied_devid() {
+        // BlockReader::new wraps the handle under the explicit devid
+        // so multi-device callers can mix it with other handles later.
+        let cursor = make_device(8192);
+        let cache = ChunkTreeCache::default();
+        let reader = BlockReader::new(cursor, 7, 4096, cache);
+        assert_eq!(reader.devices().len(), 1);
+        assert!(reader.devices().contains_key(&7));
+    }
+
+    #[test]
+    fn new_multi_with_disjoint_devids() {
+        // Sparse devid map (1 and 5 only — devid 3 was removed).
+        // Both reads and writes should route correctly.
+        let mapping = make_mapping(0, 4096, &[(1, 100), (5, 200)]);
+        let mut reader = make_reader(&[(1, 8192), (5, 8192)], &[mapping]);
+
+        let payload = vec![0x77u8; 4096];
+        reader.write_block(0, &payload).expect("write_block");
+        let dev1 = reader.devices().get(&1).unwrap().get_ref();
+        let dev5 = reader.devices().get(&5).unwrap().get_ref();
+        assert_eq!(&dev1[100..100 + 4096], &payload[..]);
+        assert_eq!(&dev5[200..200 + 4096], &payload[..]);
+    }
+
+    #[test]
+    #[should_panic(expected = "filesystem has 2 devices")]
+    fn single_device_mut_panics_on_multi_device() {
+        let mapping = make_mapping(0, 4096, &[(1, 0), (2, 0)]);
+        let mut reader = make_reader(&[(1, 4096), (2, 4096)], &[mapping]);
+        let _ = reader.single_device_mut();
+    }
+
+    #[test]
+    fn single_device_mut_returns_handle_for_single_device() {
+        let mapping = make_mapping(0, 4096, &[(1, 0)]);
+        let mut reader = make_reader(&[(1, 8192)], &[mapping]);
+        // Verify it doesn't panic and we can use the returned handle.
+        // Write a marker byte and confirm via the map view.
+        reader.single_device_mut().get_mut()[42] = 0x99;
+        assert_eq!(reader.devices().get(&1).unwrap().get_ref()[42], 0x99);
+    }
+}
