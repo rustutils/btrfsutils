@@ -110,6 +110,16 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
   `EXTENT_CSUM` items into the csum tree, splitting payloads that
   would exceed leaf capacity into multiple keyed items. Errors on
   non-CRC32C filesystems.
+- **`Transaction::update_inode_nbytes(tree, ino, delta)`**: signed
+  in-place patch of the inode's `nbytes` field at the fixed struct
+  offset. Preserves all other fields (including `flags`, `rdev`,
+  `sequence`) that round-tripping via `InodeItemArgs` would lose.
+- **`Transaction::write_file_data(tree, ino, file_offset, data,
+  nodatasum)`**: high-level helper that splits `data` into ≤1 MiB
+  chunks, allocates each as a regular extent, inserts the
+  `EXTENT_DATA` item, computes csums (unless `nodatasum`), and
+  bumps the inode's `nbytes`. Inline extents and compression are
+  not yet handled and must be done with the lower-level helpers.
 
 ### Free space tree
 

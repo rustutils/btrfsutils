@@ -520,6 +520,192 @@ impl<R: Read + Write + Seek> Transaction<R> {
         Ok(())
     }
 
+    /// Adjust an inode's `nbytes` field by `delta` bytes.
+    ///
+    /// Reads the inode's `INODE_ITEM` at `(inode, INODE_ITEM, 0)` in
+    /// `tree_id`, patches the 8-byte `nbytes` field in place, and marks
+    /// the leaf dirty. All other inode fields are preserved verbatim
+    /// (in-place patching avoids round-tripping fields not modeled by
+    /// `InodeItemArgs`, e.g. `flags`, `rdev`, `sequence`).
+    ///
+    /// `delta` is signed: positive grows `nbytes` (write/append), negative
+    /// shrinks it (truncate/COW drop). The result must not underflow.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `INODE_ITEM` is missing, if its payload is
+    /// shorter than the field offset, or if applying `delta` would
+    /// underflow.
+    pub fn update_inode_nbytes(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        inode: u64,
+        delta: i64,
+    ) -> io::Result<()> {
+        if delta == 0 {
+            return Ok(());
+        }
+
+        let nbytes_off =
+            std::mem::offset_of!(btrfs_disk::raw::btrfs_inode_item, nbytes);
+
+        let key = DiskKey {
+            objectid: inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            tree_id,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )?;
+        if !found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "update_inode_nbytes: INODE_ITEM missing for inode {inode} in \
+                 tree {tree_id}"
+            )));
+        }
+
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("update_inode_nbytes: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        let item_len = leaf.item_size(slot) as usize;
+        if item_len < nbytes_off + 8 {
+            path.release();
+            return Err(io::Error::other(format!(
+                "update_inode_nbytes: INODE_ITEM payload {item_len} bytes < {}",
+                nbytes_off + 8,
+            )));
+        }
+
+        let payload = leaf.item_data_mut(slot);
+        let mut current = u64::from_le_bytes(
+            payload[nbytes_off..nbytes_off + 8].try_into().unwrap(),
+        );
+        if delta < 0 {
+            let abs = (-delta) as u64;
+            current = current.checked_sub(abs).ok_or_else(|| {
+                io::Error::other(format!(
+                    "update_inode_nbytes: underflow (current {current}, delta {delta})"
+                ))
+            })?;
+        } else {
+            current = current.checked_add(delta as u64).ok_or_else(|| {
+                io::Error::other("update_inode_nbytes: overflow")
+            })?;
+        }
+        payload[nbytes_off..nbytes_off + 8]
+            .copy_from_slice(&current.to_le_bytes());
+        fs_info.mark_dirty(leaf);
+        path.release();
+        Ok(())
+    }
+
+    /// Write `data` as the file content of `inode` in `tree_id` starting
+    /// at `file_offset`. The inode's `INODE_ITEM` must already exist.
+    ///
+    /// Splits `data` into extents of at most 1 MiB each. For each chunk:
+    ///
+    /// 1. Allocate a data extent via [`alloc_data_extent`](Self::alloc_data_extent)
+    ///    (writes the bytes, queues a `+1` `EXTENT_DATA_REF`).
+    /// 2. Insert an `EXTENT_DATA` item via
+    ///    [`insert_file_extent`](Self::insert_file_extent), with `num_bytes`,
+    ///    `ram_bytes`, and `disk_num_bytes` all set to the chunk's
+    ///    sectorsize-aligned size.
+    /// 3. If `nodatasum == false`, insert per-sector CRC32C csums via
+    ///    [`insert_csums`](Self::insert_csums).
+    /// 4. Bump the inode's `nbytes` by the chunk's aligned size.
+    ///
+    /// This is the MVP write path: it does not handle inline extents
+    /// (small-file tail packing) or compression. Callers wanting either
+    /// must use the lower-level helpers directly.
+    ///
+    /// The file's logical size (`INODE_ITEM.size`) is the caller's
+    /// responsibility — `write_file_data` only adjusts `nbytes`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `data` is empty, if any allocation/insert
+    /// fails, or if the inode's `INODE_ITEM` is missing.
+    pub fn write_file_data(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        inode: u64,
+        file_offset: u64,
+        data: &[u8],
+        nodatasum: bool,
+    ) -> io::Result<()> {
+        use btrfs_disk::items::{CompressionType, FileExtentItem};
+
+        if data.is_empty() {
+            return Err(io::Error::other(
+                "write_file_data: empty data not supported",
+            ));
+        }
+
+        const MAX_EXTENT_SIZE: usize = 1024 * 1024;
+        let sectorsize = u64::from(fs_info.sectorsize);
+
+        let mut chunk_offset = 0usize;
+        while chunk_offset < data.len() {
+            let chunk_end = (chunk_offset + MAX_EXTENT_SIZE).min(data.len());
+            let chunk = &data[chunk_offset..chunk_end];
+            let chunk_logical_offset = file_offset + chunk_offset as u64;
+            let aligned = align_up(chunk.len() as u64, sectorsize);
+
+            let logical = self.alloc_data_extent(
+                fs_info,
+                chunk,
+                tree_id,
+                inode,
+                chunk_logical_offset,
+            )?;
+
+            let extent_data = FileExtentItem::to_bytes_regular(
+                self.transid,
+                aligned,
+                CompressionType::None,
+                false,
+                logical,
+                aligned,
+                0,
+                aligned,
+            );
+            self.insert_file_extent(
+                fs_info,
+                tree_id,
+                inode,
+                chunk_logical_offset,
+                &extent_data,
+            )?;
+
+            if !nodatasum {
+                // Read back the on-disk bytes (already zero-padded by
+                // alloc_data_extent) so csums match exactly what landed
+                // on the platter.
+                let on_disk = fs_info
+                    .reader_mut()
+                    .read_data(logical, aligned as usize)?;
+                self.insert_csums(fs_info, logical, &on_disk)?;
+            }
+
+            self.update_inode_nbytes(fs_info, tree_id, inode, aligned as i64)?;
+
+            chunk_offset = chunk_end;
+        }
+
+        Ok(())
+    }
+
     /// Mark a block as pinned (freed but not yet committed).
     ///
     /// Pinned blocks must not be reallocated during this transaction.

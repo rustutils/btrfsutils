@@ -2234,16 +2234,13 @@ fn insert_csums_round_trips_per_sector_crc32c() {
     }
 }
 
-/// End-to-end: create a regular file with real content using
-/// `alloc_data_extent` + `insert_file_extent` + `insert_csums`, plus the
-/// surrounding INODE_ITEM/REF and parent dir entries, and verify the
-/// result with `btrfs check`.
+/// End-to-end: create a regular file with real content using the
+/// high-level `write_file_data` helper, plus the surrounding
+/// INODE_ITEM/REF and parent dir entries, and verify the result with
+/// `btrfs check`.
 #[test]
 fn write_file_data_passes_btrfs_check() {
-    use btrfs_disk::items::{
-        CompressionType, DirItem, FileExtentItem, InodeItemArgs, InodeRef,
-        Timespec,
-    };
+    use btrfs_disk::items::{DirItem, InodeItemArgs, InodeRef, Timespec};
 
     let (_dir, img_path) = create_test_image();
 
@@ -2251,8 +2248,8 @@ fn write_file_data_passes_btrfs_check() {
     let file_inode = 257u64;
     let dir_index = 100u64;
     let root_dir_inode = 256u64;
-    // Payload spans more than one sector so the extent is naturally
-    // regular (mkfs would inline anything < ~4095 bytes).
+    // Payload spans more than one sector so write_file_data emits a
+    // regular extent (the future inline path would handle smaller).
     let payload: Vec<u8> = (0..6000u32).map(|i| (i & 0xFF) as u8).collect();
     let payload = payload.as_slice();
 
@@ -2263,8 +2260,6 @@ fn write_file_data_passes_btrfs_check() {
             .open(&img_path)
             .unwrap();
         let mut fs = Filesystem::open(file).expect("open");
-        let sectorsize = u64::from(fs.sectorsize);
-        let aligned = (payload.len() as u64).div_ceil(sectorsize) * sectorsize;
         let transid = fs.superblock.generation + 1;
         let ts = Timespec {
             sec: 1_700_000_000,
@@ -2273,18 +2268,12 @@ fn write_file_data_passes_btrfs_check() {
 
         let mut trans = Transaction::start(&mut fs).expect("start txn");
 
-        // 1. Allocate the data extent and write the bytes to disk.
-        let logical = trans
-            .alloc_data_extent(&mut fs, payload, 5, file_inode, 0)
-            .expect("alloc_data_extent");
-
-        // 2. INODE_ITEM for the new file. For a non-compressed regular
-        //    extent btrfs accounts `nbytes` as the on-disk
-        //    `disk_num_bytes` (sector-aligned).
+        // 1. INODE_ITEM for the new file. nbytes starts at 0;
+        //    write_file_data bumps it as data extents land.
         let inode_data = InodeItemArgs {
             generation: transid,
             size: payload.len() as u64,
-            nbytes: aligned,
+            nbytes: 0,
             nlink: 1,
             uid: 0,
             gid: 0,
@@ -2477,39 +2466,307 @@ fn write_file_data_passes_btrfs_check() {
         fs.mark_dirty(leaf);
         path.release();
 
-        // 8. EXTENT_DATA item pointing at the data extent.
-        //    For a non-compressed regular extent btrfs check requires
-        //    `num_bytes` (and therefore `ram_bytes`) to be sectorsize-
-        //    aligned and to equal `disk_num_bytes`. The on-disk file
-        //    size (smaller than the extent) is recorded only in the
-        //    INODE_ITEM, not in the extent.
-        let extent_data = FileExtentItem::to_bytes_regular(
-            transid,
-            aligned,
-            CompressionType::None,
-            false,
-            logical,
-            aligned,
-            0,
-            aligned,
-        );
+        // 8. Write the file content. Allocates one data extent, writes
+        //    the bytes to disk, inserts the EXTENT_DATA item, computes
+        //    per-sector csums, and bumps INODE.nbytes — all in one call.
         trans
-            .insert_file_extent(&mut fs, 5, file_inode, 0, &extent_data)
-            .expect("insert_file_extent");
-
-        // 9. Csums for the on-disk (zero-padded) bytes.
-        let mut padded = Vec::with_capacity(aligned as usize);
-        padded.extend_from_slice(payload);
-        padded.resize(aligned as usize, 0);
-        trans
-            .insert_csums(&mut fs, logical, &padded)
-            .expect("insert_csums");
+            .write_file_data(&mut fs, 5, file_inode, 0, payload, false)
+            .expect("write_file_data");
 
         trans.commit(&mut fs).expect("commit");
         fs.sync().expect("sync");
     }
 
     // The acid test: btrfs check must accept the resulting filesystem.
+    assert_btrfs_check(&img_path);
+}
+
+/// Multi-chunk variant: a payload larger than `MAX_EXTENT_SIZE` (1 MiB)
+/// must produce multiple `EXTENT_DATA` items, each at the correct
+/// `file_offset`, with cumulative `nbytes` matching the total.
+#[test]
+fn write_file_data_multi_chunk_passes_btrfs_check() {
+    use btrfs_disk::items::{
+        DirItem, FileExtentBody, FileExtentItem, FileExtentType, InodeItemArgs,
+        InodeRef, Timespec,
+    };
+
+    let (_dir, img_path) = create_test_image();
+
+    let file_name = b"big.bin";
+    let file_inode = 257u64;
+    let dir_index = 100u64;
+    let root_dir_inode = 256u64;
+    // ~2.5 MiB: forces three chunks (1 MiB + 1 MiB + 0.5 MiB tail).
+    let payload_len: usize = 1024 * 1024 * 2 + 512 * 1024;
+    let payload: Vec<u8> = (0..payload_len).map(|i| (i & 0xFF) as u8).collect();
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let transid = fs.superblock.generation + 1;
+        let ts = Timespec {
+            sec: 1_700_000_000,
+            nsec: 0,
+        };
+
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+
+        let inode_data = InodeItemArgs {
+            generation: transid,
+            size: payload.len() as u64,
+            nbytes: 0,
+            nlink: 1,
+            uid: 0,
+            gid: 0,
+            mode: 0o100644,
+            time: ts,
+        }
+        .to_bytes();
+        let inode_key = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &inode_key,
+            &mut path,
+            SearchIntent::Insert((25 + inode_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &inode_key, &inode_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        let iref_data = InodeRef::serialize(dir_index, file_name);
+        let iref_key = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeRef,
+            offset: root_dir_inode,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &iref_key,
+            &mut path,
+            SearchIntent::Insert((25 + iref_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &iref_key, &iref_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        let location = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let dir_data = DirItem::serialize(
+            &location,
+            transid,
+            btrfs_disk::raw::BTRFS_FT_REG_FILE as u8,
+            file_name,
+        );
+        let dir_item_key = DiskKey {
+            objectid: root_dir_inode,
+            key_type: KeyType::DirItem,
+            offset: u64::from(btrfs_disk::util::btrfs_name_hash(file_name)),
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_item_key,
+            &mut path,
+            SearchIntent::Insert((25 + dir_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &dir_item_key, &dir_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        let dir_index_key = DiskKey {
+            objectid: root_dir_inode,
+            key_type: KeyType::DirIndex,
+            offset: dir_index,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_index_key,
+            &mut path,
+            SearchIntent::Insert((25 + dir_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &dir_index_key, &dir_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // Bump parent dir size and ROOT_ITEM embedded inode.
+        let dir_inode_key = DiskKey {
+            objectid: root_dir_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_inode_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )
+        .unwrap();
+        assert!(found);
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        let old_data = leaf.item_data(slot).to_vec();
+        let mut inode = btrfs_disk::items::InodeItem::parse(&old_data).unwrap();
+        inode.size += file_name.len() as u64 * 2;
+        inode.transid = transid;
+        let new_data = InodeItemArgs {
+            generation: inode.generation,
+            size: inode.size,
+            nbytes: inode.nbytes,
+            nlink: inode.nlink,
+            uid: inode.uid,
+            gid: inode.gid,
+            mode: inode.mode,
+            time: ts,
+        }
+        .to_bytes();
+        items::update_item(leaf, slot, &new_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        let root_key = DiskKey {
+            objectid: 5,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &root_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )
+        .unwrap();
+        assert!(found);
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        let ri_data = leaf.item_data(slot).to_vec();
+        let mut root_item = RootItem::parse(&ri_data).unwrap();
+        let mut embedded =
+            btrfs_disk::items::InodeItem::parse(&root_item.inode_data).unwrap();
+        embedded.size += file_name.len() as u64 * 2;
+        let new_inode = InodeItemArgs {
+            generation: embedded.generation,
+            size: embedded.size,
+            nbytes: embedded.nbytes,
+            nlink: embedded.nlink,
+            uid: embedded.uid,
+            gid: embedded.gid,
+            mode: embedded.mode,
+            time: ts,
+        }
+        .to_bytes();
+        root_item.inode_data = new_inode;
+        let new_ri = root_item.to_bytes();
+        assert_eq!(new_ri.len(), ri_data.len());
+        items::update_item(leaf, slot, &new_ri).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // The actual write — three chunks.
+        trans
+            .write_file_data(&mut fs, 5, file_inode, 0, &payload, false)
+            .expect("write_file_data");
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Reopen and verify three EXTENT_DATA items at the expected
+    // file offsets exist.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+
+        let mut total_num_bytes = 0u64;
+        let mut count = 0;
+        let expected_offsets = [0u64, 1024 * 1024, 2 * 1024 * 1024];
+        for expected_offset in expected_offsets {
+            let key = DiskKey {
+                objectid: file_inode,
+                key_type: KeyType::ExtentData,
+                offset: expected_offset,
+            };
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                None,
+                &mut fs,
+                5,
+                &key,
+                &mut path,
+                SearchIntent::ReadOnly,
+                false,
+            )
+            .unwrap();
+            assert!(
+                found,
+                "EXTENT_DATA missing at file_offset {expected_offset}"
+            );
+            let leaf = path.leaf().unwrap();
+            let data = leaf.item_data(path.slots[0]).to_vec();
+            let fei = FileExtentItem::parse(&data).unwrap();
+            assert_eq!(fei.extent_type, FileExtentType::Regular);
+            if let FileExtentBody::Regular { num_bytes, .. } = fei.body {
+                total_num_bytes += num_bytes;
+            } else {
+                panic!("expected regular body");
+            }
+            path.release();
+            count += 1;
+        }
+        assert_eq!(count, 3, "expected three chunks");
+        // Aligned total: 2.5 MiB rounds up to 2.5 MiB (already aligned).
+        assert_eq!(total_num_bytes, payload_len as u64);
+    }
+
     assert_btrfs_check(&img_path);
 }
 

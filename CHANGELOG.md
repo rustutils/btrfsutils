@@ -47,6 +47,16 @@ All notable changes to this project will be documented in this file.
   body) and `FileExtentItem::to_bytes_inline` (21-byte header + raw payload)
   serializers, plus `HEADER_SIZE` and `REGULAR_SIZE` constants.
 
+- `btrfs-transaction`: high-level data write helpers.
+  `Transaction::update_inode_nbytes` patches an inode's `nbytes` field
+  in place at the fixed struct offset, preserving all other fields
+  (including `flags`, `rdev`, `sequence`). `Transaction::write_file_data`
+  is the single entry point for writing file content: splits the input
+  into ≤1 MiB chunks, allocates each as a regular data extent, inserts
+  the `EXTENT_DATA` items, computes per-sector CRC32C csums (unless
+  `nodatasum`), and bumps the inode's `nbytes`. The MVP does not yet
+  handle inline extents or compression.
+
 ### Fixed
 
 - `mkfs --rootdir`: `EXTENT_DATA` items for files whose size is not a
