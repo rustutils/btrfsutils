@@ -29,6 +29,7 @@ bytes = { workspace = true }
 clap = { workspace = true }
 uuid = { workspace = true }
 btrfs-disk = { workspace = true }
+btrfs-transaction = { workspace = true }
 btrfs-uapi = { workspace = true }
 crc32c = { workspace = true }
 xxhash-rust = { workspace = true }

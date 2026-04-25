@@ -47,6 +47,7 @@ pub mod args;
 pub mod items;
 pub mod layout;
 pub mod mkfs;
+pub mod post_bootstrap;
 pub mod rootdir;
 pub mod run;
 pub mod tree;

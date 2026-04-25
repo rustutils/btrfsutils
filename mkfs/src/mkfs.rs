@@ -511,6 +511,15 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
     for file in &files {
         file.sync_all().context("fsync failed")?;
     }
+
+    // Files closed when `files` drops, then post_bootstrap reopens via
+    // the transaction crate. Drop here explicitly to avoid holding two
+    // sets of write handles to the same path.
+    drop(files);
+
+    crate::post_bootstrap::run(cfg)
+        .context("post-bootstrap transaction failed")?;
+
     Ok(())
 }
 
@@ -1114,6 +1123,15 @@ pub fn make_btrfs_with_rootdir(
     for file in &files {
         file.sync_all().context("fsync failed")?;
     }
+
+    // Files closed when `files` drops, then post_bootstrap reopens via
+    // the transaction crate. Drop here to avoid holding two sets of
+    // write handles to the same path.
+    drop(files);
+
+    crate::post_bootstrap::run(cfg)
+        .context("post-bootstrap transaction failed")?;
+
     Ok(())
 }
 

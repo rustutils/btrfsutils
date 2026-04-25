@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-mkfs`: post-bootstrap transaction step. After the in-memory
+  bootstrap layout is written to disk, mkfs reopens the image with
+  `btrfs-transaction` and runs a single transaction that fills in
+  the empty UUID tree (objectid 9). btrfs-progs creates this tree
+  by default but our mkfs's hand-built bootstrap omitted it
+  (PLAN B.3). The kernel populates UUID-tree entries lazily on
+  snapshot/send, so an empty tree is the correct initial state.
+
+  This is the first integration of the transaction crate into
+  mkfs's write path. It's gated on a profile + feature allowlist
+  (SINGLE/DUP/RAID1/RAID1C3/RAID1C4 metadata + data, FST enabled,
+  CRC32C csum) — other configurations are skipped silently because
+  the transaction crate doesn't yet handle them or has known
+  compatibility gaps with mkfs's existing output. The skip list
+  shrinks as the migration progresses; see `mkfs/PLAN.md`.
+
 - `btrfs check`: `--backup`, `--tree-root`, `--chunk-root` flags for
   recovery from damaged root/chunk tree pointers.
 

@@ -181,14 +181,19 @@ fn mkfs_superblock_has_label() {
 }
 
 #[test]
-fn mkfs_superblock_generation_is_one() {
+fn mkfs_superblock_generation_increments_through_post_bootstrap() {
+    // Bootstrap writes generation=1, then the post-bootstrap
+    // transaction (UUID tree creation) commits at generation=2.
+    // For unsupported profiles (RAID0/5/10) post_bootstrap is a
+    // no-op so the bootstrap generation is left at 1; this test
+    // uses the default DUP/SINGLE profile which is supported.
     let image = create_image(MIN_SIZE);
     let mut cfg = test_config(MIN_SIZE);
     make_btrfs_on(&image, &mut cfg);
 
     let mut file = File::open(image.path()).unwrap();
     let sb = read_superblock(&mut file, 0).unwrap();
-    assert_eq!(sb.generation, 1);
+    assert_eq!(sb.generation, 2);
 }
 
 #[test]

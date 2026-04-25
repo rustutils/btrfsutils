@@ -226,6 +226,7 @@ dependencies = [
  "anyhow",
  "blake2",
  "btrfs-disk",
+ "btrfs-transaction",
  "btrfs-uapi",
  "bytes",
  "clap",
