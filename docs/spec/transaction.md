@@ -742,7 +742,7 @@ Embedded in root items and stored standalone in FS trees.
 | 0 | 8 | `generation` | NFS generation. |
 | 8 | 8 | `transid` | Last modifying transaction. |
 | 16 | 8 | `size` | File size. |
-| 24 | 8 | `nbytes` | Disk bytes allocated. |
+| 24 | 8 | `nbytes` | Sum of `EXTENT_DATA.num_bytes` for regular/prealloc extents plus inline payload length. See [File data extents](#file-data-extents). |
 | 32 | 8 | `block_group` | Block group hint for allocation. |
 | 40 | 4 | `nlink` | Hard link count. |
 | 44 | 4 | `uid` | User ID. |
@@ -821,6 +821,100 @@ Both use the same data format:
 | 16 | 2 | `name_len` | Length of the subvolume name. |
 | 18 | N | `name` | Subvolume name (not NUL-terminated). |
 
+## File data extents
+
+Regular file content lives in `EXTENT_DATA` items in the FS tree, keyed
+`(inode#, EXTENT_DATA, file_offset)`. Each item describes a contiguous
+range of the file's logical bytes; consecutive items must cover
+non-overlapping ranges. Three extent types exist:
+
+- `BTRFS_FILE_EXTENT_INLINE` (0): data embedded directly in the leaf.
+- `BTRFS_FILE_EXTENT_REG` (1): pointer to a separate data extent on disk.
+- `BTRFS_FILE_EXTENT_PREALLOC` (2): reserved on disk but not yet written.
+
+### Common header (21 bytes)
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0 | 8 | `generation` | Transid at extent creation. |
+| 8 | 8 | `ram_bytes` | Uncompressed size of the extent's data. |
+| 16 | 1 | `compression` | 0=none, 1=zlib, 2=LZO, 3=zstd. |
+| 17 | 1 | `encryption` | Always 0. |
+| 18 | 2 | `other_encoding` | Always 0. |
+| 20 | 1 | `extent_type` | 0=inline, 1=regular, 2=prealloc. |
+
+### Regular and prealloc body (32 bytes follow header)
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 21 | 8 | `disk_bytenr` | Logical address of data extent (0 = hole). |
+| 29 | 8 | `disk_num_bytes` | On-disk size, sectorsize-aligned. |
+| 37 | 8 | `offset` | Byte offset into the on-disk extent (bookend; 0 for non-shared). |
+| 45 | 8 | `num_bytes` | Logical file bytes covered by this item. |
+
+### Inline body
+
+For inline extents the bytes after the 21-byte header are the (possibly
+compressed) file data. There is no `disk_bytenr`, no extent-tree entry,
+and no csum entry: the inline payload is covered by the FS tree leaf's
+own checksum.
+
+For LZO inline extents the embedded bytes carry an additional framing
+header: `[4B total_len LE] [4B seg_len LE] [lzo1x compressed bytes]`,
+where `total_len` includes the 8-byte framing header itself.
+
+### Validation rules
+
+These invariants are enforced by `btrfs check` and must hold for any
+`EXTENT_DATA` written by userspace:
+
+- **Regular and prealloc extents**: `num_bytes` must be sectorsize-aligned
+  and non-zero. `disk_num_bytes` must also be sectorsize-aligned.
+  `num_bytes + offset <= ram_bytes`.
+- **Inline extents**: total embedded payload (compressed or not) must
+  fit in a leaf, capped at `min(nodesize - 147, sectorsize - 1)` bytes
+  on a default filesystem. The 147 = `HEADER_SIZE` (101) + `ITEM_SIZE`
+  (25) + 21-byte file-extent header. The `sectorsize - 1` cap is btrfs's
+  rule that sector-or-larger files must use a regular extent.
+- **`INODE.nbytes`**: sum of `num_bytes` for every regular/prealloc
+  extent (where `disk_bytenr > 0`) plus the inline payload length for
+  any inline extent. For non-compressed extents `num_bytes` is the
+  sector-aligned logical size, NOT the on-disk byte count. For
+  compressed extents `num_bytes` is still the sector-aligned logical
+  size — the smaller `disk_num_bytes` is not what gets summed.
+- **`INODE.size`**: the file's logical size in bytes. May be smaller
+  than the sum of `num_bytes` (the unwritten tail in the last extent
+  reads as zero up to `size`).
+
+### LZO regular framing
+
+For non-inline LZO extents, the on-disk bytes use a per-sector framed
+format:
+
+```
+[4B total_len LE] { [4B seg_len LE] [lzo1x compressed bytes] [zero pad] }*
+```
+
+- Each input sector is compressed independently.
+- `seg_len` is the size of that sector's compressed segment.
+- `total_len` is the total framed buffer size, including the 4-byte
+  header.
+- After each segment, if fewer than 4 bytes remain in the current
+  sector (i.e. the next 4-byte length header would cross a sector
+  boundary), zero-pad to the next sector boundary so the next segment's
+  length header is sector-aligned.
+
+This per-sector independence lets the kernel decompress individual
+sectors without reading neighbours.
+
+### Holes
+
+With the `NO_HOLES` incompat flag (default on modern filesystems), gaps
+in the `file_offset` sequence indicate holes — no `EXTENT_DATA` item is
+written for the unmapped range. Without `NO_HOLES`, hole regions are
+recorded as regular extents with `disk_bytenr == 0` and
+`disk_num_bytes == 0`.
+
 ## Checksum computation
 
 ### Tree block checksums
@@ -842,10 +936,35 @@ bytes 32..4095.
 Data checksums are stored in the csum tree (tree ID 7) with key
 `(EXTENT_CSUM_OBJECTID=-10, EXTENT_CSUM=128, logical_bytenr)`.
 
-The item data is a packed array of checksums, one per sector. For `CRC32C`,
-each checksum is 4 bytes. The number of sectors covered is
-`item_size / csum_size_for_type`. Sectors are consecutive starting at the
-key's offset (logical_bytenr).
+The item data is a packed array of checksums, one per sector. For
+`CRC32C`, each checksum is 4 bytes. The number of sectors covered is
+`item_size / csum_size_for_type`. Sectors are consecutive starting at
+the key's offset (`logical_bytenr`).
+
+Computation: standard ISO 3309 `CRC32C` (the same algorithm as for tree
+blocks; initial seed `0xFFFFFFFF`, final XOR with `0xFFFFFFFF`). The
+csum input is the on-disk bytes of the data extent — for compressed
+extents, that is the compressed+sector-padded payload, NOT the
+uncompressed original.
+
+Note this is distinct from the `raw_crc32c` (no final invert) used by
+`EXTENT_DATA_REF_KEY` hashes and by the send-stream protocol. On-disk
+csum-tree entries always use the standard variant.
+
+A single csum item may cover multiple consecutive sectors. The
+practical upper bound for a single item's payload is roughly
+`leaf_data_size - 2 * item_header_size - csum_size` bytes, leaving
+room for a future split. Adjacent items at sector-contiguous logical
+addresses may be merged into one larger item, but `btrfs check`
+accepts either layout.
+
+Inline extents have no csum entries — the data lives in the leaf and
+is covered by the leaf's own header checksum.
+
+`NODATASUM` extents (inode flag `BTRFS_INODE_NODATASUM`) skip csum
+computation entirely. `btrfs check` rejects csum entries for
+`NODATASUM` extents, and rejects missing csum entries for non-`NODATASUM`
+regular extents.
 
 ### Extent data ref hash
 
