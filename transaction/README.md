@@ -171,6 +171,14 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## What's not yet implemented
 
+- **RAID0 / RAID5 / RAID6 striped writes**: `BlockReader::write_block`
+  fans out to every stripe's device for replication profiles
+  (SINGLE / DUP / RAID1 / RAID1C3 / RAID1C4 / RAID10 mirror pairs)
+  via `Filesystem::open_multi`, but for RAID0 / RAID5 / RAID6 a
+  single buffer that spans more than one `stripe_len` would need
+  per-stripe slicing. Tree blocks (always nodesize ≤ stripe_len)
+  fit in one stripe slot; data extents larger than `stripe_len`
+  do not. Defer until there's a concrete consumer.
 - **New SYSTEM chunk allocation**: if no existing SYSTEM block
   group has free space, `ensure_in_sys_chunk_array` cannot carve
   out a new one. Bails cleanly.

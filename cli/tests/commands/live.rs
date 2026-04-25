@@ -2861,7 +2861,7 @@ fn rescue_fix_data_checksum_repair() {
             }
         }
         let logical = found.expect("no EXTENT_CSUM items in csum tree");
-        let physical = open
+        let (_devid, physical) = open
             .reader
             .chunk_cache()
             .resolve(logical)

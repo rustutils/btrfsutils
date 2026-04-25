@@ -285,7 +285,7 @@ fn run_offline(path: &Path, amount: &str, ctx: &RunContext) -> Result<()> {
     // Block devices are sized by the underlying partition, so we
     // leave them alone.
     if is_regular_file {
-        let f = fs.reader_mut().inner_mut();
+        let f = fs.reader_mut().single_device_mut();
         f.set_len(new_device_bytes).with_context(|| {
             format!(
                 "failed to resize backing file '{}' to {new_device_bytes}",

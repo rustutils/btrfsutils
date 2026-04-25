@@ -47,6 +47,33 @@ All notable changes to this project will be documented in this file.
   body) and `FileExtentItem::to_bytes_inline` (21-byte header + raw payload)
   serializers, plus `HEADER_SIZE` and `REGULAR_SIZE` constants.
 
+- `btrfs-disk` + `btrfs-transaction`: multi-device write support
+  (transaction PLAN J.5). `BlockReader<R>` now stores a
+  `BTreeMap<u64, R>` keyed by device id; `read_block` / `read_data`
+  route by devid via the chunk cache, and `write_block` fans out to
+  every stripe's correct device. New `filesystem_open_multi(devices)`
+  and `Filesystem::open_multi(devices)` constructors take a
+  `devid -> handle` map; the existing single-handle entry points are
+  thin wrappers that read the superblock to learn the primary devid.
+  Per-device `dev_item` snapshots are captured at open time and
+  spliced into the appropriate device's superblock at commit so a
+  multi-device filesystem doesn't get clobbered with the primary's
+  identity. Bootstrap validates every chunk-tree-referenced devid is
+  in the handle map. End-to-end coverage on a 2-device RAID1 image:
+  open, COW transaction, data extent via `write_file_data`, and a
+  missing-handle error case all pass `btrfs check`.
+
+  API changes (pre-1.0):
+
+  - `ChunkTreeCache::resolve` and `resolve_all` now return
+    `(devid, physical)` instead of just `physical`.
+  - `BlockReader::new` takes a `devid` argument; `BlockReader::new_multi`
+    takes a `BTreeMap<u64, R>`.
+  - `BlockReader::inner_mut` and `into_inner` removed in favour of
+    `devices()` / `devices_mut()` (and `single_device_mut()` for
+    offline tools that operate on one device at a time).
+  - `OpenFilesystem` gained a `per_device_dev_items` field.
+
 - `btrfs-transaction`: high-level data write helpers.
   `Transaction::update_inode_nbytes` patches an inode's `nbytes` field
   in place at the fixed struct offset, preserving all other fields

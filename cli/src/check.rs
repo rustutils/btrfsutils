@@ -305,15 +305,22 @@ fn open_with_overrides(
         &sb.sys_chunk_array,
         sb.sys_chunk_array_size,
     );
-    let mut block_reader =
-        btrfs_disk::reader::BlockReader::new(reader, sb.nodesize, chunk_cache);
+    let mut block_reader = btrfs_disk::reader::BlockReader::new(
+        reader,
+        sb.dev_item.devid,
+        sb.nodesize,
+        chunk_cache,
+    );
 
     reader::read_chunk_tree(&mut block_reader, sb.chunk_root)?;
     let tree_roots = reader::read_root_tree(&mut block_reader, sb.root)?;
 
+    let mut per_device_dev_items = std::collections::BTreeMap::new();
+    per_device_dev_items.insert(sb.dev_item.devid, sb.dev_item.clone());
     Ok(reader::OpenFilesystem {
         reader: block_reader,
         superblock: sb,
         tree_roots,
+        per_device_dev_items,
     })
 }

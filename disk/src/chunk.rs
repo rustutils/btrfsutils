@@ -74,32 +74,38 @@ impl ChunkTreeCache {
             .filter(|mapping| logical < mapping.logical + mapping.length)
     }
 
-    /// Resolve a logical address to a physical byte offset on the first stripe.
+    /// Resolve a logical address to `(devid, physical)` for the first stripe.
     ///
-    /// For read-only access (like dump-tree), the first stripe is sufficient
-    /// for single, DUP, and RAID1 profiles. RAID0/5/6/10 would need stripe
-    /// index calculation, but for the common case this works.
+    /// For read-only access the first stripe is sufficient on SINGLE, DUP,
+    /// and any mirroring profile. RAID0/5/6/10 striping would need stripe
+    /// index calculation, but for tree blocks (always nodesize ≤ stripe_len)
+    /// the whole block lives in one stripe slot, so this works for the
+    /// common case.
+    ///
+    /// Callers using a multi-device `BlockReader` look up the device handle
+    /// by `devid`; single-device callers ignore it.
     #[must_use]
-    pub fn resolve(&self, logical: u64) -> Option<u64> {
+    pub fn resolve(&self, logical: u64) -> Option<(u64, u64)> {
         let mapping = self.lookup(logical)?;
         let offset_within_chunk = logical - mapping.logical;
-        Some(mapping.stripes[0].offset + offset_within_chunk)
+        let stripe = &mapping.stripes[0];
+        Some((stripe.devid, stripe.offset + offset_within_chunk))
     }
 
-    /// Resolve a logical address to physical byte offsets on ALL stripes.
+    /// Resolve a logical address to `(devid, physical)` for every stripe.
     ///
-    /// For DUP and RAID1 profiles, a single logical address maps to multiple
-    /// physical copies. Write operations must update all copies to maintain
-    /// consistency.
+    /// For DUP, RAID1, RAID1C3, and RAID1C4, a single logical address maps
+    /// to multiple physical copies. Write operations must update all copies
+    /// to maintain consistency.
     #[must_use]
-    pub fn resolve_all(&self, logical: u64) -> Option<Vec<u64>> {
+    pub fn resolve_all(&self, logical: u64) -> Option<Vec<(u64, u64)>> {
         let mapping = self.lookup(logical)?;
         let offset_within_chunk = logical - mapping.logical;
         Some(
             mapping
                 .stripes
                 .iter()
-                .map(|s| s.offset + offset_within_chunk)
+                .map(|s| (s.devid, s.offset + offset_within_chunk))
                 .collect(),
         )
     }
@@ -366,9 +372,9 @@ mod tests {
         cache.insert(make_mapping(1000, 500, 2000));
         assert_eq!(cache.len(), 1);
 
-        assert_eq!(cache.resolve(1000), Some(2000));
-        assert_eq!(cache.resolve(1100), Some(2100));
-        assert_eq!(cache.resolve(1499), Some(2499));
+        assert_eq!(cache.resolve(1000), Some((1, 2000)));
+        assert_eq!(cache.resolve(1100), Some((1, 2100)));
+        assert_eq!(cache.resolve(1499), Some((1, 2499)));
         assert_eq!(cache.resolve(1500), None); // past end
         assert_eq!(cache.resolve(999), None); // before start
     }
@@ -380,13 +386,13 @@ mod tests {
         cache.insert(make_mapping(1000, 1000, 6000));
         cache.insert(make_mapping(5000, 2000, 10000));
 
-        assert_eq!(cache.resolve(0), Some(5000));
-        assert_eq!(cache.resolve(500), Some(5500));
-        assert_eq!(cache.resolve(1000), Some(6000));
-        assert_eq!(cache.resolve(1999), Some(6999));
+        assert_eq!(cache.resolve(0), Some((1, 5000)));
+        assert_eq!(cache.resolve(500), Some((1, 5500)));
+        assert_eq!(cache.resolve(1000), Some((1, 6000)));
+        assert_eq!(cache.resolve(1999), Some((1, 6999)));
         assert_eq!(cache.resolve(2000), None); // gap
-        assert_eq!(cache.resolve(5000), Some(10000));
-        assert_eq!(cache.resolve(6999), Some(11999));
+        assert_eq!(cache.resolve(5000), Some((1, 10000)));
+        assert_eq!(cache.resolve(6999), Some((1, 11999)));
         assert_eq!(cache.resolve(7000), None);
     }
 

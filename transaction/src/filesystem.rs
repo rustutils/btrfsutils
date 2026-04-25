@@ -11,8 +11,9 @@
 use crate::buffer::ExtentBuffer;
 use btrfs_disk::{
     chunk::ChunkTreeCache,
+    items::DeviceItem,
     reader::{self, BlockReader, OpenFilesystem},
-    superblock::Superblock,
+    superblock::{self, Superblock},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -66,6 +67,14 @@ pub struct Filesystem<R> {
     /// rather than written directly, so panics or early returns
     /// cannot leak the override into normal operation.
     bg_tree_override: Option<u64>,
+    /// Per-device superblock `dev_item` snapshots taken at open time.
+    /// The key is `devid`; the value is that device's local `dev_item`
+    /// (which encodes the device's identity: `devid`, `dev_uuid`,
+    /// per-device `bytes_used`, etc.). On commit, each device's
+    /// superblock is rewritten with these per-device fields preserved
+    /// so a multi-device filesystem doesn't get clobbered with the
+    /// primary device's identity.
+    per_device_dev_items: BTreeMap<u64, DeviceItem>,
 }
 
 impl<R: Read + Write + Seek> Filesystem<R> {
@@ -82,6 +91,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
             reader,
             superblock,
             tree_roots,
+            per_device_dev_items,
         } = reader::filesystem_open(handle)?;
 
         let generation = superblock.generation;
@@ -113,6 +123,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
             block_cache: BTreeMap::new(),
             written: BTreeSet::new(),
             bg_tree_override: None,
+            per_device_dev_items,
         })
     }
 
@@ -126,6 +137,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
             reader,
             superblock,
             tree_roots,
+            per_device_dev_items,
         } = reader::filesystem_open_mirror(handle, mirror)?;
 
         let generation = superblock.generation;
@@ -154,6 +166,58 @@ impl<R: Read + Write + Seek> Filesystem<R> {
             block_cache: BTreeMap::new(),
             written: BTreeSet::new(),
             bg_tree_override: None,
+            per_device_dev_items,
+        })
+    }
+
+    /// Open a multi-device btrfs filesystem from a `devid -> handle` map.
+    ///
+    /// Every device referenced by the filesystem's chunk tree must be
+    /// present in `devices`. Each device's superblock is read and
+    /// validated against the map key; all devices must share the same
+    /// `fsid`. The bootstrap fails with a clear error if any of these
+    /// invariants is violated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the device map is empty, any device's
+    /// superblock disagrees with its key or the primary's `fsid`, the
+    /// chunk tree references a devid not in the map, or any I/O fails.
+    pub fn open_multi(devices: BTreeMap<u64, R>) -> io::Result<Self> {
+        let OpenFilesystem {
+            reader,
+            superblock,
+            tree_roots,
+            per_device_dev_items,
+        } = reader::filesystem_open_multi(devices)?;
+
+        let generation = superblock.generation;
+        let nodesize = superblock.nodesize;
+        let sectorsize = superblock.sectorsize;
+
+        let mut roots: BTreeMap<u64, u64> = tree_roots
+            .into_iter()
+            .map(|(id, (bytenr, _offset))| (id, bytenr))
+            .collect();
+
+        roots.insert(1, superblock.root);
+        roots.insert(3, superblock.chunk_root);
+
+        let original_roots = roots.clone();
+
+        Ok(Self {
+            reader,
+            superblock,
+            roots,
+            original_roots,
+            dirty: BTreeSet::new(),
+            generation,
+            nodesize,
+            sectorsize,
+            block_cache: BTreeMap::new(),
+            written: BTreeSet::new(),
+            bg_tree_override: None,
+            per_device_dev_items,
         })
     }
 
@@ -177,6 +241,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
             reader,
             superblock,
             tree_roots,
+            per_device_dev_items,
         } = reader::filesystem_open_with_cache(handle, mirror, chunk_cache)?;
 
         let generation = superblock.generation;
@@ -205,6 +270,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
             block_cache: BTreeMap::new(),
             written: BTreeSet::new(),
             bg_tree_override: None,
+            per_device_dev_items,
         })
     }
 
@@ -416,12 +482,51 @@ impl<R: Read + Write + Seek> Filesystem<R> {
         self.roots = self.original_roots.clone();
     }
 
-    /// Flush pending writes via `Write::flush()`.
+    /// Write the in-memory superblock to all 3 mirrors of every open
+    /// device, with each device's per-device `dev_item` spliced in.
     ///
-    /// Flushes any userspace write buffers. For file-backed storage,
-    /// use [`Filesystem<File>::sync`] instead, which also calls fsync.
+    /// On a multi-device filesystem each device's superblock has its
+    /// own `dev_item` (devid, dev_uuid, per-device bytes_used, etc.).
+    /// Writing the primary device's superblock verbatim to a secondary
+    /// would corrupt the secondary's identity. This helper preserves
+    /// that per-device state by splicing the matching `dev_item` from
+    /// the snapshot taken at open time before serializing each
+    /// device's variant.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any device referenced by the dev-item
+    /// snapshot is not open, or if any underlying write fails.
+    pub fn write_superblock_all_devices(&mut self) -> io::Result<()> {
+        // Collect the devids first so we don't hold a borrow on
+        // `self.reader` while iterating per-device serializations.
+        let devids: Vec<u64> = self.reader.devices().keys().copied().collect();
+        for devid in devids {
+            let mut sb_for_dev = self.superblock.clone();
+            if let Some(dev_item) = self.per_device_dev_items.get(&devid) {
+                sb_for_dev.dev_item = dev_item.clone();
+            }
+            let bytes = sb_for_dev.to_bytes();
+            let dev = self
+                .reader
+                .devices_mut()
+                .get_mut(&devid)
+                .expect("devid present in iteration but missing from map");
+            superblock::write_superblock_all_mirrors(dev, &bytes)?;
+        }
+        Ok(())
+    }
+
+    /// Flush pending writes via `Write::flush()` on every device.
+    ///
+    /// Flushes userspace write buffers on every open device. For
+    /// file-backed storage, use [`Filesystem<File>::sync`] instead,
+    /// which also calls fsync per device.
     pub fn flush_writes(&mut self) -> io::Result<()> {
-        self.reader.inner_mut().flush()
+        for dev in self.reader.devices_mut().values_mut() {
+            dev.flush()?;
+        }
+        Ok(())
     }
 
     /// Return tree IDs whose root block changed since the last snapshot.
@@ -524,13 +629,16 @@ impl<R> Drop for BgTreeOverrideGuard<'_, R> {
 }
 
 impl Filesystem<File> {
-    /// Sync all data to stable storage (fsync).
+    /// Sync all data to stable storage on every device (fsync).
     ///
-    /// Calls `File::sync_all()` on the underlying file handle, ensuring
+    /// Calls `File::sync_all()` on every open device handle, ensuring
     /// all written data reaches stable storage. This should be called
     /// after commit to guarantee durability.
     pub fn sync(&mut self) -> io::Result<()> {
-        self.reader.inner_mut().sync_all()
+        for dev in self.reader.devices_mut().values_mut() {
+            dev.sync_all()?;
+        }
+        Ok(())
     }
 }
 

@@ -22,7 +22,6 @@ use btrfs_disk::{
         sys_chunk_array_contains,
     },
     items::{BlockGroupFlags, ExtentItem, RootItem},
-    superblock,
     tree::{DiskKey, KeyType},
 };
 use std::{
@@ -1236,18 +1235,23 @@ impl<R: Read + Write + Seek> Transaction<R> {
         let backup_idx = (self.transid % 4) as usize;
         update_backup_root(fs_info, backup_idx);
 
-        // Step 6: Write superblock to all mirrors
-        let sb_bytes = fs_info.superblock.to_bytes();
-        superblock::write_superblock_all_mirrors(
-            fs_info.reader_mut().inner_mut(),
-            &sb_bytes,
-        )?;
+        // Step 6: Write superblock to all mirrors of every open device.
+        //
+        // For multi-device filesystems each device has its own
+        // `dev_item.devid` / `dev_item.dev_uuid` embedded in the
+        // superblock; preserving those across writes is handled by
+        // `Filesystem::write_superblock_all_devices`, which splices
+        // the per-device dev_item into the in-memory superblock
+        // before serializing.
+        fs_info.write_superblock_all_devices()?;
 
         // Step 7: Flush writes to stable storage. `Write::flush()`
         // flushes any userspace buffers. For file-backed storage, the
         // caller should also call `sync()` on the Filesystem (which
-        // calls `File::sync_all()`) for full durability.
-        fs_info.reader_mut().inner_mut().flush()?;
+        // calls `File::sync_all()` per device) for full durability.
+        for dev in fs_info.reader_mut().devices_mut().values_mut() {
+            dev.flush()?;
+        }
 
         // Step 8: Clean up
         self.bg_range_deltas.clear();

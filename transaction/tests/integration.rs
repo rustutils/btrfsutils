@@ -273,6 +273,58 @@ fn create_test_image() -> (tempfile::TempDir, PathBuf) {
     (dir, img_path)
 }
 
+/// Create a `count`-device btrfs image with the given metadata and
+/// data profiles (e.g. `"raid1"`, `"single"`). Returns the temp dir
+/// and the per-device image paths.
+fn create_multi_device_test_image(
+    count: usize,
+    metadata_profile: &str,
+    data_profile: &str,
+) -> (tempfile::TempDir, Vec<PathBuf>) {
+    assert!(count >= 1, "need at least one device");
+    let dir = tempfile::TempDir::new().expect("failed to create temp dir");
+    let mut paths = Vec::with_capacity(count);
+    for i in 0..count {
+        let path = dir.path().join(format!("dev{i}.img"));
+        let file = File::create(&path).expect("create image file");
+        file.set_len(256 * 1024 * 1024).expect("set image size");
+        drop(file);
+        paths.push(path);
+    }
+
+    let mkfs = find_our_mkfs();
+    let mut cmd = Command::new(&mkfs);
+    cmd.args(["-f", "-q", "-m", metadata_profile, "-d", data_profile]);
+    for p in &paths {
+        cmd.arg(p);
+    }
+    let status = cmd.status().unwrap_or_else(|e| {
+        panic!("btrfs-mkfs at {} failed to run: {e}", mkfs.display())
+    });
+    assert!(status.success(), "btrfs-mkfs failed with {status}");
+
+    (dir, paths)
+}
+
+/// Open every image path as a R/W file and zip into a `devid -> File`
+/// map by reading each device's superblock to learn its devid.
+fn open_devices_by_devid(
+    paths: &[PathBuf],
+) -> std::collections::BTreeMap<u64, File> {
+    let mut map = std::collections::BTreeMap::new();
+    for path in paths {
+        let mut file =
+            File::options().read(true).write(true).open(path).unwrap();
+        let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+        let devid = sb.dev_item.devid;
+        assert!(
+            map.insert(devid, file).is_none(),
+            "duplicate devid {devid} across images"
+        );
+    }
+    map
+}
+
 fn find_our_mkfs() -> PathBuf {
     let exe =
         std::env::current_exe().expect("cannot determine test binary path");
@@ -4072,5 +4124,359 @@ fn write_file_data_inline_lzo_compressed_passes_btrfs_check() {
     run_compressed_inline_test(
         b"inline-lzo.txt",
         btrfs_disk::items::CompressionType::Lzo,
+    );
+}
+
+// --- Multi-device tests (J.5) ---
+
+/// Open a 2-device RAID1 image with `Filesystem::open_multi`, verify
+/// the bootstrap completes and basic reads succeed.
+#[test]
+fn multi_device_raid1_open_round_trip() {
+    let (_dir, paths) = create_multi_device_test_image(2, "raid1", "raid1");
+    let devices = open_devices_by_devid(&paths);
+    assert_eq!(devices.len(), 2);
+    assert!(devices.contains_key(&1));
+    assert!(devices.contains_key(&2));
+
+    let mut fs = Filesystem::open_multi(devices).expect("open_multi");
+    // The fsid should match what mkfs wrote, and bootstrap should
+    // have populated the root tree (at least FS tree, dev tree, csum
+    // tree, etc.).
+    assert!(fs.superblock.magic_is_valid());
+    assert!(fs.root_bytenr(5).is_some(), "FS tree root resolved");
+    assert!(fs.root_bytenr(7).is_some(), "csum tree root resolved");
+
+    // A read of the root tree's root block should round-trip. This
+    // exercises the devid-aware read path.
+    let root_tree_bytenr = fs.superblock.root;
+    let _ = fs
+        .read_block(root_tree_bytenr)
+        .expect("read root tree block");
+}
+
+/// Open a 2-device RAID1 image, run a small COW transaction (insert
+/// one item into the FS tree), commit, and verify with `btrfs check`.
+#[test]
+fn multi_device_raid1_metadata_cow_passes_btrfs_check() {
+    let (_dir, paths) = create_multi_device_test_image(2, "raid1", "raid1");
+
+    let test_objectid = 100_000u64;
+    let test_key = DiskKey {
+        objectid: test_objectid,
+        key_type: KeyType::TemporaryItem,
+        offset: 42,
+    };
+    let test_data = b"hello multi-device";
+
+    {
+        let devices = open_devices_by_devid(&paths);
+        let mut fs = Filesystem::open_multi(devices).expect("open_multi");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+
+        // Insert into the root tree (id 1) — TemporaryItem is the
+        // canonical home for ad-hoc test items there. Inserting into
+        // the FS tree would trigger btrfs check's "unknown key in fs
+        // root" complaint.
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &test_key,
+            &mut path,
+            SearchIntent::Insert((25 + test_data.len()) as u32),
+            true,
+        )
+        .expect("search");
+        assert!(!found);
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &test_key, test_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Reopen with multi-device path and verify the item exists.
+    {
+        let devices = open_devices_by_devid(&paths);
+        let mut fs = Filesystem::open_multi(devices).expect("reopen multi");
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            1,
+            &test_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search");
+        assert!(found, "inserted item not found after multi-device reopen");
+        path.release();
+    }
+
+    // btrfs check on each device path: the system btrfs tool only
+    // accepts one path on the command line but follows DEV_ITEMs to
+    // reach the others. Pass the first device.
+    assert_btrfs_check(&paths[0]);
+}
+
+/// Open a 2-device RAID1 image, write a real file via `write_file_data`,
+/// commit, and verify with `btrfs check`.
+#[test]
+fn multi_device_raid1_data_extent_passes_btrfs_check() {
+    use btrfs_disk::items::{DirItem, InodeItemArgs, InodeRef, Timespec};
+
+    let (_dir, paths) = create_multi_device_test_image(2, "raid1", "raid1");
+
+    let file_name = b"raid1.bin";
+    let file_inode = 257u64;
+    let dir_index = 100u64;
+    let payload: Vec<u8> = (0..6000u32).map(|i| (i & 0xFF) as u8).collect();
+
+    {
+        let devices = open_devices_by_devid(&paths);
+        let mut fs = Filesystem::open_multi(devices).expect("open_multi");
+        let transid = fs.superblock.generation + 1;
+        let ts = Timespec {
+            sec: 1_700_000_000,
+            nsec: 0,
+        };
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+
+        // Inline the dir machinery directly here to avoid pulling the
+        // helper into multi-device territory it wasn't designed for.
+        let inode_data = InodeItemArgs {
+            generation: transid,
+            size: payload.len() as u64,
+            nbytes: 0,
+            nlink: 1,
+            uid: 0,
+            gid: 0,
+            mode: 0o100644,
+            time: ts,
+        }
+        .to_bytes();
+        let inode_key = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &inode_key,
+            &mut path,
+            SearchIntent::Insert((25 + inode_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &inode_key, &inode_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        let iref_data = InodeRef::serialize(dir_index, file_name);
+        let iref_key = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeRef,
+            offset: 256,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &iref_key,
+            &mut path,
+            SearchIntent::Insert((25 + iref_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &iref_key, &iref_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        let location = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let dir_data = DirItem::serialize(
+            &location,
+            transid,
+            btrfs_disk::raw::BTRFS_FT_REG_FILE as u8,
+            file_name,
+        );
+        let dir_item_key = DiskKey {
+            objectid: 256,
+            key_type: KeyType::DirItem,
+            offset: u64::from(btrfs_disk::util::btrfs_name_hash(file_name)),
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_item_key,
+            &mut path,
+            SearchIntent::Insert((25 + dir_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &dir_item_key, &dir_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        let dir_index_key = DiskKey {
+            objectid: 256,
+            key_type: KeyType::DirIndex,
+            offset: dir_index,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_index_key,
+            &mut path,
+            SearchIntent::Insert((25 + dir_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &dir_index_key, &dir_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // Bump parent dir size and ROOT_ITEM embedded inode.
+        let dir_inode_key = DiskKey {
+            objectid: 256,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_inode_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )
+        .unwrap();
+        assert!(found);
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        let old_data = leaf.item_data(slot).to_vec();
+        let mut inode = btrfs_disk::items::InodeItem::parse(&old_data).unwrap();
+        inode.size += file_name.len() as u64 * 2;
+        inode.transid = transid;
+        let new_data = InodeItemArgs {
+            generation: inode.generation,
+            size: inode.size,
+            nbytes: inode.nbytes,
+            nlink: inode.nlink,
+            uid: inode.uid,
+            gid: inode.gid,
+            mode: inode.mode,
+            time: ts,
+        }
+        .to_bytes();
+        items::update_item(leaf, slot, &new_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        let root_key = DiskKey {
+            objectid: 5,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &root_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )
+        .unwrap();
+        assert!(found);
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        let ri_data = leaf.item_data(slot).to_vec();
+        let mut root_item = RootItem::parse(&ri_data).unwrap();
+        let mut embedded =
+            btrfs_disk::items::InodeItem::parse(&root_item.inode_data).unwrap();
+        embedded.size += file_name.len() as u64 * 2;
+        let new_inode = InodeItemArgs {
+            generation: embedded.generation,
+            size: embedded.size,
+            nbytes: embedded.nbytes,
+            nlink: embedded.nlink,
+            uid: embedded.uid,
+            gid: embedded.gid,
+            mode: embedded.mode,
+            time: ts,
+        }
+        .to_bytes();
+        root_item.inode_data = new_inode;
+        let new_ri = root_item.to_bytes();
+        assert_eq!(new_ri.len(), ri_data.len());
+        items::update_item(leaf, slot, &new_ri).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // The actual write — exercises alloc_data_extent + write_block
+        // which fan out to all stripe copies.
+        trans
+            .write_file_data(&mut fs, 5, file_inode, 0, &payload, false, None)
+            .expect("write_file_data");
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    assert_btrfs_check(&paths[0]);
+}
+
+/// Opening a multi-device filesystem with only one device handle when
+/// the chunk tree references two should fail at bootstrap with a
+/// clear error.
+#[test]
+fn multi_device_missing_handle_errors() {
+    let (_dir, paths) = create_multi_device_test_image(2, "raid1", "raid1");
+
+    // Only open the first device.
+    let mut devices = std::collections::BTreeMap::new();
+    let mut file = File::options()
+        .read(true)
+        .write(true)
+        .open(&paths[0])
+        .unwrap();
+    let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+    devices.insert(sb.dev_item.devid, file);
+
+    let err = match Filesystem::open_multi(devices) {
+        Ok(_) => panic!("expected error from missing-handle open"),
+        Err(e) => e,
+    };
+    let msg = err.to_string();
+    assert!(
+        msg.contains("chunk tree references devid") || msg.contains("not open"),
+        "expected missing-handle error, got: {msg}"
     );
 }

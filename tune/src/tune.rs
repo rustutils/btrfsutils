@@ -289,7 +289,7 @@ pub fn change_uuid<R: Read + Write + Seek>(
     println!("new fsid:     {new_fsid}");
 
     // Step 1: set CHANGING_FSID flag and write new fsid to superblock.
-    read_validate_mutate_write(reader.inner_mut(), |sb_buf| {
+    read_validate_mutate_write(reader.single_device_mut(), |sb_buf| {
         let flags_off = mem::offset_of!(raw::btrfs_super_block, flags);
         let fsid_off = mem::offset_of!(raw::btrfs_super_block, fsid);
         let changing = raw::BTRFS_SUPER_FLAG_CHANGING_FSID;
@@ -374,7 +374,7 @@ pub fn change_uuid<R: Read + Write + Seek>(
     .context("failed to patch chunk tree DEV_ITEMs")?;
 
     // Step 4: patch superblock dev_item fsid and clear CHANGING_FSID.
-    read_validate_mutate_write(reader.inner_mut(), |sb_buf| {
+    read_validate_mutate_write(reader.single_device_mut(), |sb_buf| {
         let dev_item_fsid_off =
             mem::offset_of!(raw::btrfs_super_block, dev_item)
                 + mem::offset_of!(raw::btrfs_dev_item, fsid);

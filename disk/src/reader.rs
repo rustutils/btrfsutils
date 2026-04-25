@@ -18,24 +18,90 @@ use std::{
 };
 
 /// A block reader that resolves logical addresses through a chunk cache.
+///
+/// Holds one I/O handle per device, keyed by `devid`. For single-device
+/// filesystems the map has a single entry. For RAID1 / RAID1C3 / RAID1C4
+/// / RAID10 / DUP, each stripe's `devid` (from the chunk cache) is used
+/// to look up the handle. SINGLE and DUP work with a one-entry map.
 pub struct BlockReader<R> {
-    reader: R,
+    devices: BTreeMap<u64, R>,
     nodesize: u32,
     chunk_cache: ChunkTreeCache,
 }
 
 impl<R> BlockReader<R> {
-    /// Create a new block reader with a pre-built chunk cache.
+    /// Create a single-device block reader.
     ///
-    /// This is useful when the on-disk chunk tree is damaged and the
-    /// cache has been reconstructed from other sources (e.g. raw device
-    /// scan in `rescue chunk-recover`).
-    pub fn new(reader: R, nodesize: u32, chunk_cache: ChunkTreeCache) -> Self {
+    /// `devid` is the device id (`superblock.dev_item.devid`) under which
+    /// this handle is registered. Stripe lookups for this device must
+    /// resolve to this devid.
+    pub fn new(
+        handle: R,
+        devid: u64,
+        nodesize: u32,
+        chunk_cache: ChunkTreeCache,
+    ) -> Self {
+        let mut devices = BTreeMap::new();
+        devices.insert(devid, handle);
         Self {
-            reader,
+            devices,
             nodesize,
             chunk_cache,
         }
+    }
+
+    /// Create a multi-device block reader.
+    ///
+    /// `devices` maps each device id to its I/O handle. Every devid
+    /// referenced by the chunk cache must be present.
+    pub fn new_multi(
+        devices: BTreeMap<u64, R>,
+        nodesize: u32,
+        chunk_cache: ChunkTreeCache,
+    ) -> Self {
+        Self {
+            devices,
+            nodesize,
+            chunk_cache,
+        }
+    }
+
+    /// Return the per-devid handle map.
+    pub fn devices(&self) -> &BTreeMap<u64, R> {
+        &self.devices
+    }
+
+    /// Return the per-devid handle map mutably.
+    ///
+    /// Used by transaction commit / sync / flush paths that need to
+    /// flush every device. For ordinary reads/writes prefer
+    /// [`read_block`](Self::read_block), [`read_data`](Self::read_data),
+    /// or [`write_block`](Self::write_block) which route by devid via
+    /// the chunk cache.
+    pub fn devices_mut(&mut self) -> &mut BTreeMap<u64, R> {
+        &mut self.devices
+    }
+
+    /// Return the underlying handle for a single-device filesystem.
+    ///
+    /// Convenience for offline tools (`btrfs-tune`,
+    /// `btrfs filesystem resize` on a regular file) that operate on
+    /// one device at a time and need raw file access (e.g. `set_len`
+    /// or full-file scans).
+    ///
+    /// # Panics
+    ///
+    /// Panics if more than one device is open. Multi-device callers
+    /// must use [`devices_mut`](Self::devices_mut) and route by
+    /// devid explicitly.
+    pub fn single_device_mut(&mut self) -> &mut R {
+        assert_eq!(
+            self.devices.len(),
+            1,
+            "single_device_mut: filesystem has {} devices, not 1",
+            self.devices.len(),
+        );
+        self.devices.values_mut().next().unwrap()
     }
 }
 
@@ -44,17 +110,23 @@ impl<R: Read + Seek> BlockReader<R> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the logical address is unmapped or the underlying read fails.
+    /// Returns an error if the logical address is unmapped, the resolved
+    /// device id is not in the handle map, or the underlying read fails.
     pub fn read_block(&mut self, logical: u64) -> io::Result<Vec<u8>> {
-        let physical = self.chunk_cache.resolve(logical).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("logical address {logical} not mapped in chunk cache"),
-            )
-        })?;
-        let mut buf = vec![0u8; self.nodesize as usize];
-        self.reader.seek(SeekFrom::Start(physical))?;
-        self.reader.read_exact(&mut buf)?;
+        let (devid, physical) =
+            self.chunk_cache.resolve(logical).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "logical address {logical} not mapped in chunk cache"
+                    ),
+                )
+            })?;
+        let nodesize = self.nodesize as usize;
+        let dev = self.device_handle_mut(devid)?;
+        let mut buf = vec![0u8; nodesize];
+        dev.seek(SeekFrom::Start(physical))?;
+        dev.read_exact(&mut buf)?;
         Ok(buf)
     }
 
@@ -96,37 +168,51 @@ impl<R: Read + Seek> BlockReader<R> {
         logical: u64,
         len: usize,
     ) -> io::Result<Vec<u8>> {
-        let physical = self.chunk_cache.resolve(logical).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("logical address {logical} not mapped in chunk cache"),
-            )
-        })?;
+        let (devid, physical) =
+            self.chunk_cache.resolve(logical).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "logical address {logical} not mapped in chunk cache"
+                    ),
+                )
+            })?;
+        let dev = self.device_handle_mut(devid)?;
         let mut buf = vec![0u8; len];
-        self.reader.seek(SeekFrom::Start(physical))?;
-        self.reader.read_exact(&mut buf)?;
+        dev.seek(SeekFrom::Start(physical))?;
+        dev.read_exact(&mut buf)?;
         Ok(buf)
     }
 
-    /// Return a mutable reference to the underlying I/O handle.
-    pub fn inner_mut(&mut self) -> &mut R {
-        &mut self.reader
-    }
-
-    /// Consume the reader and return the underlying I/O handle.
-    pub fn into_inner(self) -> R {
-        self.reader
+    /// Look up a device handle by `devid`. Returns a clear error if the
+    /// chunk cache references a device that was not opened.
+    fn device_handle_mut(&mut self, devid: u64) -> io::Result<&mut R> {
+        self.devices.get_mut(&devid).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "device {devid} not open (referenced by the chunk cache)"
+                ),
+            )
+        })
     }
 }
 
 impl<R: Read + Write + Seek> BlockReader<R> {
     /// Write raw bytes to a logical address, resolving to physical via the chunk cache.
     ///
+    /// Writes to every stripe copy returned by `resolve_all` — for DUP
+    /// (one device, two copies) and RAID1 / RAID1C3 / RAID1C4 (two-,
+    /// three-, four-way mirroring across devices), all replicas are
+    /// updated. RAID0 / RAID5 / RAID6 striping is not yet handled here
+    /// for buffers larger than `stripe_len`.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the logical address is unmapped or the underlying write fails.
+    /// Returns an error if the logical address is unmapped, any
+    /// referenced device is not open, or any underlying write fails.
     pub fn write_block(&mut self, logical: u64, buf: &[u8]) -> io::Result<()> {
-        let physicals =
+        let placements =
             self.chunk_cache.resolve_all(logical).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::NotFound,
@@ -135,10 +221,10 @@ impl<R: Read + Write + Seek> BlockReader<R> {
                     ),
                 )
             })?;
-        // Write to all stripe copies (DUP, RAID1, etc.)
-        for physical in physicals {
-            self.reader.seek(SeekFrom::Start(physical))?;
-            self.reader.write_all(buf)?;
+        for (devid, physical) in placements {
+            let dev = self.device_handle_mut(devid)?;
+            dev.seek(SeekFrom::Start(physical))?;
+            dev.write_all(buf)?;
         }
         Ok(())
     }
@@ -148,10 +234,17 @@ impl<R: Read + Write + Seek> BlockReader<R> {
 pub struct OpenFilesystem<R> {
     /// Block reader with fully populated chunk cache.
     pub reader: BlockReader<R>,
-    /// Parsed superblock.
+    /// Parsed primary-device superblock.
     pub superblock: Superblock,
     /// Map of tree ID -> (root block logical address, key offset), from the root tree.
     pub tree_roots: BTreeMap<u64, (u64, u64)>,
+    /// Per-device `dev_item` snapshots taken at open time. One entry
+    /// per opened device (always at least the primary). The transaction
+    /// crate uses these to splice the correct per-device identity into
+    /// the superblock when writing it back during commit, so a
+    /// multi-device filesystem doesn't get clobbered with the primary
+    /// device's `dev_item`.
+    pub per_device_dev_items: BTreeMap<u64, crate::items::DeviceItem>,
 }
 
 /// Open a btrfs filesystem by bootstrapping from the superblock.
@@ -184,6 +277,9 @@ pub fn filesystem_open_mirror<R: Read + Seek>(
 
     // Step 1: read the superblock
     let sb = superblock::read_superblock(&mut reader, mirror)?;
+    let primary_devid = sb.dev_item.devid;
+    let mut per_device_dev_items = BTreeMap::new();
+    per_device_dev_items.insert(primary_devid, sb.dev_item.clone());
 
     // Step 2: seed chunk cache from sys_chunk_array
     let chunk_cache = chunk::seed_from_sys_chunk_array(
@@ -191,11 +287,8 @@ pub fn filesystem_open_mirror<R: Read + Seek>(
         sb.sys_chunk_array_size,
     );
 
-    let mut block_reader = BlockReader {
-        reader,
-        nodesize: sb.nodesize,
-        chunk_cache,
-    };
+    let mut block_reader =
+        BlockReader::new(reader, primary_devid, sb.nodesize, chunk_cache);
 
     // Step 3: read the full chunk tree to complete the cache
     read_chunk_tree(&mut block_reader, sb.chunk_root)?;
@@ -207,6 +300,100 @@ pub fn filesystem_open_mirror<R: Read + Seek>(
         reader: block_reader,
         superblock: sb,
         tree_roots,
+        per_device_dev_items,
+    })
+}
+
+/// Open a multi-device btrfs filesystem from a map of `devid -> handle`.
+///
+/// All devices in the filesystem must be present in the map; the
+/// bootstrap fails with a clear error if the chunk tree references a
+/// devid that is not in the map. Each device's superblock is read and
+/// its `dev_item.devid` is verified against the map key, and all
+/// devices' `fsid` must match.
+///
+/// The "primary" superblock used for filesystem-wide fields (root,
+/// chunk_root, generation, etc.) is the one with the lowest devid.
+///
+/// # Errors
+///
+/// Returns an error if any superblock cannot be read, any device's
+/// superblock disagrees with its map key or with the primary's fsid,
+/// or the chunk tree references a devid not in the map.
+pub fn filesystem_open_multi<R: Read + Seek>(
+    devices: BTreeMap<u64, R>,
+) -> io::Result<OpenFilesystem<R>> {
+    if devices.is_empty() {
+        return Err(io::Error::other(
+            "filesystem_open_multi: device map is empty",
+        ));
+    }
+    let mut devices = devices;
+
+    // Step 1: read each device's superblock and validate identity.
+    let mut per_device_dev_items: BTreeMap<u64, crate::items::DeviceItem> =
+        BTreeMap::new();
+    let mut superblocks: BTreeMap<u64, Superblock> = BTreeMap::new();
+    for (&devid, dev) in &mut devices {
+        let sb = superblock::read_superblock(dev, 0)?;
+        if sb.dev_item.devid != devid {
+            return Err(io::Error::other(format!(
+                "device map key {devid} doesn't match superblock dev_item.devid {}",
+                sb.dev_item.devid,
+            )));
+        }
+        per_device_dev_items.insert(devid, sb.dev_item.clone());
+        superblocks.insert(devid, sb);
+    }
+
+    // Step 2: pick the lowest-devid superblock as authoritative for
+    // filesystem-wide fields, and validate fsid consistency.
+    let primary_sb = superblocks.values().next().unwrap().clone();
+    for (devid, sb) in &superblocks {
+        if sb.fsid != primary_sb.fsid {
+            return Err(io::Error::other(format!(
+                "device {devid} fsid {} differs from primary fsid {}",
+                sb.fsid, primary_sb.fsid,
+            )));
+        }
+    }
+
+    // Step 3: seed chunk cache from primary's sys_chunk_array.
+    let chunk_cache = chunk::seed_from_sys_chunk_array(
+        &primary_sb.sys_chunk_array,
+        primary_sb.sys_chunk_array_size,
+    );
+
+    let mut block_reader =
+        BlockReader::new_multi(devices, primary_sb.nodesize, chunk_cache);
+
+    // Step 4: read the full chunk tree to complete the cache.
+    read_chunk_tree(&mut block_reader, primary_sb.chunk_root)?;
+
+    // Step 5: validate every devid the chunk cache references is open.
+    let mut referenced: std::collections::BTreeSet<u64> =
+        std::collections::BTreeSet::new();
+    for mapping in block_reader.chunk_cache().iter() {
+        for stripe in &mapping.stripes {
+            referenced.insert(stripe.devid);
+        }
+    }
+    for devid in &referenced {
+        if !block_reader.devices().contains_key(devid) {
+            return Err(io::Error::other(format!(
+                "chunk tree references devid {devid} but no handle was provided"
+            )));
+        }
+    }
+
+    // Step 6: read the root tree.
+    let tree_roots = read_root_tree(&mut block_reader, primary_sb.root)?;
+
+    Ok(OpenFilesystem {
+        reader: block_reader,
+        superblock: primary_sb,
+        tree_roots,
+        per_device_dev_items,
     })
 }
 
@@ -230,13 +417,18 @@ pub fn filesystem_open_with_cache<R: Read + Seek>(
 ) -> io::Result<OpenFilesystem<R>> {
     let mut reader = reader;
     let sb = superblock::read_superblock(&mut reader, mirror)?;
-    let mut block_reader = BlockReader::new(reader, sb.nodesize, chunk_cache);
+    let primary_devid = sb.dev_item.devid;
+    let mut per_device_dev_items = BTreeMap::new();
+    per_device_dev_items.insert(primary_devid, sb.dev_item.clone());
+    let mut block_reader =
+        BlockReader::new(reader, primary_devid, sb.nodesize, chunk_cache);
     let tree_roots = read_root_tree(&mut block_reader, sb.root)?;
 
     Ok(OpenFilesystem {
         reader: block_reader,
         superblock: sb,
         tree_roots,
+        per_device_dev_items,
     })
 }
 
