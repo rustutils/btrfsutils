@@ -822,6 +822,9 @@ pub fn write_file_data(
 
         while bytes_left > 0 {
             let extent_size = bytes_left.min(MAX_EXTENT_SIZE);
+            // num_bytes / ram_bytes in EXTENT_DATA must be sectorsize-
+            // aligned for regular extents (btrfs check enforces this).
+            let aligned_logical = align_up(extent_size, u64::from(sectorsize));
 
             let mut raw_data = vec![0u8; extent_size as usize];
             file.read_exact(&mut raw_data).with_context(|| {
@@ -906,8 +909,8 @@ pub fn write_file_data(
                     disk_bytenr,
                     aligned_disk,
                     0,
-                    extent_size,
-                    extent_size,
+                    aligned_logical,
+                    aligned_logical,
                     comp_type,
                 ),
             ));
@@ -929,7 +932,9 @@ pub fn write_file_data(
             ));
 
             offset += aligned_disk;
-            disk_allocated += aligned_disk;
+            // INODE.nbytes is the sum of EXTENT_DATA num_bytes values
+            // (sector-aligned logical size), not the on-disk size.
+            disk_allocated += aligned_logical;
             file_offset += extent_size;
             bytes_left -= extent_size;
         }

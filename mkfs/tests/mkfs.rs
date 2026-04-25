@@ -1908,3 +1908,66 @@ fn rootdir_lzo_compression_produces_valid_image() {
     assert!(sb.magic_is_valid());
     assert_eq!(sb.fsid, cfg.fs_uuid);
 }
+
+/// Regression: a file whose size is not sectorsize-aligned must still
+/// produce an image that passes `btrfs check`. Until 2026-04-25, mkfs
+/// passed the unaligned `extent_size` for `num_bytes` and `ram_bytes`,
+/// which violates btrfs check's "num_bytes must be sectorsize-aligned"
+/// invariant for regular extents. The fix uses `align_up(extent_size,
+/// sectorsize)` for those fields and accumulates the same value into
+/// the inode's `nbytes`.
+#[test]
+fn rootdir_unaligned_size_passes_btrfs_check() {
+    let rootdir = tempdir().unwrap();
+    // 5000 bytes — larger than max_inline (~4095) so a regular extent
+    // is used, smaller than two sectors so the tail is unaligned.
+    let payload = vec![0x42u8; 5000];
+    write(rootdir.path().join("unaligned.bin"), &payload).unwrap();
+
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.devices[0].path = image.path().to_path_buf();
+
+    make_btrfs_with_rootdir(
+        &cfg,
+        rootdir.path(),
+        CompressConfig::default(),
+        &[],
+        &[],
+        RootdirOptions::default(),
+    )
+    .unwrap();
+
+    btrfs_check(image.path());
+}
+
+/// Same regression but with zstd compression: this also exercises the
+/// `aligned_disk != aligned_logical` case where the on-disk extent is
+/// smaller than the logical num_bytes.
+#[test]
+fn rootdir_unaligned_size_compressed_passes_btrfs_check() {
+    let rootdir = tempdir().unwrap();
+    let payload = vec![0x42u8; 5000];
+    write(rootdir.path().join("unaligned.bin"), &payload).unwrap();
+
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.devices[0].path = image.path().to_path_buf();
+
+    let compress = CompressConfig {
+        algorithm: CompressAlgorithm::Zstd,
+        level: None,
+    };
+
+    make_btrfs_with_rootdir(
+        &cfg,
+        rootdir.path(),
+        compress,
+        &[],
+        &[],
+        RootdirOptions::default(),
+    )
+    .unwrap();
+
+    btrfs_check(image.path());
+}

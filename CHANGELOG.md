@@ -49,6 +49,14 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `mkfs --rootdir`: `EXTENT_DATA` items for files whose size is not a
+  sectorsize multiple now use `align_up(extent_size, sectorsize)` for
+  `num_bytes` and `ram_bytes`, and accumulate the same value into the
+  inode's `nbytes`. Previously the unaligned `extent_size` was passed
+  directly, producing images that fail `btrfs check` with
+  `bad file extent, nbytes wrong`. The bug also affected compressed
+  extents where `aligned_disk != aligned_logical`.
+
 - `btrfs-transaction`: fix fall-through bug in `flush_delayed_refs`
   where the data ref drop path executed unconditionally after the
   add path. Previously masked by `todo!()` in the add branch.
