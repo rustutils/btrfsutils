@@ -73,8 +73,18 @@ All notable changes to this project will be documented in this file.
   each chunk is compressed independently with per-chunk fallback to
   raw; `disk_num_bytes` shrinks while `num_bytes`/`ram_bytes`/
   `INODE.nbytes` track the logical (sector-aligned) size. Csums always
-  cover the on-disk (compressed) bytes. LZO is recognised but
-  short-circuits to raw (per-sector framing pending).
+  cover the on-disk (compressed) bytes.
+
+- `btrfs-transaction`: LZO compression. `try_compress` now produces the
+  inline LZO framing format (`[4B total_len LE] [4B seg_len LE] [lzo
+  bytes]`). New `try_compress_regular(data, algorithm, sectorsize)`
+  applies the per-sector regular framing (`[4B total_len LE] { [4B
+  seg_len LE] [lzo bytes] [zero pad] }*`) with sector-boundary padding
+  and the standard early-exit heuristic (abandon after 4 sectors if the
+  framed buffer exceeds 3 sectors). `write_file_data` routes its
+  per-chunk compression through `try_compress_regular` so LZO regular
+  extents work end-to-end. Both inline and regular LZO files pass
+  `btrfs check`.
 
 ### Fixed
 

@@ -123,15 +123,22 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
   vs regular based on `data.len()` and the per-filesystem inline
   threshold (`max_inline_data_size`). For regular extents, splits
   `data` into ≤1 MiB chunks, optionally compresses each chunk
-  (zlib or zstd; per-chunk fallback to raw when compression
+  (zlib, zstd, or LZO; per-chunk fallback to raw when compression
   doesn't shrink), allocates each, inserts the `EXTENT_DATA`
   item, computes csums (unless `nodatasum`), and bumps the
-  inode's `nbytes` by the logical sector-aligned size. LZO is
-  recognised but currently short-circuits to raw.
+  inode's `nbytes` by the logical sector-aligned size.
 - **`try_compress(data, algorithm)`**: free function that returns
-  the compressed bytes only when they shrink. Used internally by
-  the write path; also exported for callers that want to make
-  their own compression decisions before allocating.
+  the inline-framed compressed bytes only when they shrink. For
+  LZO this produces the inline framing format
+  `[4B total_len LE] [4B seg_len LE] [lzo bytes]`; for zlib and
+  zstd the raw compressor output is returned.
+- **`try_compress_regular(data, algorithm, sectorsize)`**: variant
+  for the regular-extent write path. For LZO produces the
+  per-sector framing format
+  `[4B total_len LE] { [4B seg_len LE] [lzo bytes] [zero pad] }*`
+  with sector-boundary padding and an early-exit heuristic that
+  abandons after 4 sectors if the framed buffer is already past
+  3 sectors. For zlib and zstd delegates to `try_compress`.
 
 ### Free space tree
 
@@ -164,11 +171,6 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## What's not yet implemented
 
-- **LZO compression**: `try_compress` recognises
-  `CompressionType::Lzo` but returns `None` because the per-sector
-  framing format (`[4B total_len] { [4B seg_len] [lzo data]
-  [padding] }*`) and inline-extent framing are not yet
-  implemented. Callers that pass `Some(Lzo)` see raw writes.
 - **New SYSTEM chunk allocation**: if no existing SYSTEM block
   group has free space, `ensure_in_sys_chunk_array` cannot carve
   out a new one. Bails cleanly.

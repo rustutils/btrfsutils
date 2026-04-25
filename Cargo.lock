@@ -276,6 +276,7 @@ dependencies = [
  "bytes",
  "crc32c",
  "flate2",
+ "lzokay",
  "proptest",
  "tempfile",
  "test-strategy",

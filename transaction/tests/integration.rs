@@ -3947,20 +3947,30 @@ fn write_file_data_zstd_compressed_passes_btrfs_check() {
     );
 }
 
-/// Inline + compression: a small compressible payload should be inlined
-/// with the requested algorithm reflected in `EXTENT_DATA.compression`.
 #[test]
-fn write_file_data_inline_zlib_compressed_passes_btrfs_check() {
+fn write_file_data_lzo_compressed_passes_btrfs_check() {
+    run_compressed_regular_test(
+        b"lzo.bin",
+        btrfs_disk::items::CompressionType::Lzo,
+    );
+}
+
+/// Run write_file_data with a small compressible payload (1 KiB of
+/// repeated bytes, well under the 4095-byte inline threshold) and
+/// verify the inline EXTENT_DATA carries the requested compression
+/// byte, has `ram_bytes == payload.len()`, embeds a smaller payload
+/// than the original, and `btrfs check` accepts it.
+fn run_compressed_inline_test(
+    file_name: &[u8],
+    algorithm: btrfs_disk::items::CompressionType,
+) {
     use btrfs_disk::items::{
-        CompressionType, FileExtentBody, FileExtentItem, FileExtentType,
-        Timespec,
+        FileExtentBody, FileExtentItem, FileExtentType, Timespec,
     };
 
     let (_dir, img_path) = create_test_image();
-    let file_name = b"inline-zlib.txt";
     let file_inode = 257u64;
     let dir_index = 100u64;
-    // Highly compressible, well below the 4095-byte inline threshold.
     let payload = vec![0x42u8; 1024];
 
     {
@@ -3994,7 +4004,7 @@ fn write_file_data_inline_zlib_compressed_passes_btrfs_check() {
                 0,
                 &payload,
                 false,
-                Some(CompressionType::Zlib),
+                Some(algorithm),
             )
             .expect("write_file_data");
         trans.commit(&mut fs).expect("commit");
@@ -4030,15 +4040,14 @@ fn write_file_data_inline_zlib_compressed_passes_btrfs_check() {
         let data = leaf.item_data(path.slots[0]).to_vec();
         let fei = FileExtentItem::parse(&data).expect("parse");
         assert_eq!(fei.extent_type, FileExtentType::Inline);
-        assert_eq!(fei.compression, CompressionType::Zlib);
+        assert_eq!(fei.compression, algorithm);
         assert_eq!(fei.ram_bytes, payload.len() as u64);
         match fei.body {
             FileExtentBody::Inline { inline_size } => {
-                // Compressed payload is much smaller than 1024 raw bytes.
                 assert!(
                     inline_size < payload.len(),
-                    "inline payload should compress: {inline_size} \
-                     vs uncompressed {}",
+                    "inline payload should compress: {inline_size} vs \
+                     uncompressed {}",
                     payload.len()
                 );
             }
@@ -4048,4 +4057,20 @@ fn write_file_data_inline_zlib_compressed_passes_btrfs_check() {
     }
 
     assert_btrfs_check(&img_path);
+}
+
+#[test]
+fn write_file_data_inline_zlib_compressed_passes_btrfs_check() {
+    run_compressed_inline_test(
+        b"inline-zlib.txt",
+        btrfs_disk::items::CompressionType::Zlib,
+    );
+}
+
+#[test]
+fn write_file_data_inline_lzo_compressed_passes_btrfs_check() {
+    run_compressed_inline_test(
+        b"inline-lzo.txt",
+        btrfs_disk::items::CompressionType::Lzo,
+    );
 }

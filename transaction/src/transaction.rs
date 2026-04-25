@@ -773,11 +773,14 @@ impl<R: Read + Write + Seek> Transaction<R> {
 
             // Per-chunk compression attempt. If the result doesn't
             // shrink the bytes, fall back to raw (compression byte = 0).
+            // For LZO this routes through the per-sector framing format.
             let (disk_bytes, comp_byte) = match compression {
-                Some(ct) => match try_compress(chunk, ct) {
-                    Some(c) => (c, ct),
-                    None => (chunk.to_vec(), CompressionType::None),
-                },
+                Some(ct) => {
+                    match try_compress_regular(chunk, ct, fs_info.sectorsize) {
+                        Some(c) => (c, ct),
+                        None => (chunk.to_vec(), CompressionType::None),
+                    }
+                }
                 None => (chunk.to_vec(), CompressionType::None),
             };
             let aligned_disk = align_up(disk_bytes.len() as u64, sectorsize);
@@ -3325,13 +3328,18 @@ const fn align_up(value: u64, align: u64) -> u64 {
     (value + align - 1) & !(align - 1)
 }
 
-/// Attempt to compress `data` with the requested algorithm.
+/// Attempt to compress `data` with the requested algorithm in the
+/// inline `EXTENT_DATA` format.
 ///
-/// Returns `Some(compressed)` only if the result is strictly smaller
-/// than the input — callers should fall back to writing the raw bytes
+/// Returns `Some(payload)` only if the result is strictly smaller than
+/// the input — callers should fall back to writing the raw bytes
 /// otherwise. Returns `None` for `CompressionType::None`,
-/// `CompressionType::Lzo` (per-sector framing not yet implemented),
 /// `CompressionType::Unknown(_)`, or empty input.
+///
+/// For zlib and zstd the payload is the raw compressor output. For LZO
+/// the payload is the inline framing format
+/// `[4B total_len LE] [4B seg_len LE] [lzo1x compressed bytes]` where
+/// `total_len` includes the 8-byte header itself.
 ///
 /// Default levels: zlib level 3, zstd level 3.
 #[must_use]
@@ -3345,9 +3353,7 @@ pub fn try_compress(
         return None;
     }
     let compressed = match algorithm {
-        CompressionType::None
-        | CompressionType::Lzo
-        | CompressionType::Unknown(_) => return None,
+        CompressionType::None | CompressionType::Unknown(_) => return None,
         CompressionType::Zlib => {
             use flate2::{Compression, write::ZlibEncoder};
             use std::io::Write;
@@ -3356,9 +3362,94 @@ pub fn try_compress(
             enc.finish().ok()?
         }
         CompressionType::Zstd => zstd::bulk::compress(data, 3).ok()?,
+        CompressionType::Lzo => {
+            let seg = lzokay::compress::compress(data).ok()?;
+            let total_len: u32 = (4 + 4 + seg.len()).try_into().ok()?;
+            let seg_len: u32 = seg.len().try_into().ok()?;
+            let mut buf = Vec::with_capacity(total_len as usize);
+            buf.extend_from_slice(&total_len.to_le_bytes());
+            buf.extend_from_slice(&seg_len.to_le_bytes());
+            buf.extend_from_slice(&seg);
+            buf
+        }
     };
     if compressed.len() < data.len() {
         Some(compressed)
+    } else {
+        None
+    }
+}
+
+/// Attempt to compress `data` for storage in a regular (non-inline)
+/// `EXTENT_DATA`.
+///
+/// For zlib and zstd this delegates to [`try_compress`]: the same
+/// compressor output is used inline or out-of-line. For LZO this
+/// applies the per-sector framing format
+/// `[4B total_len LE] { [4B seg_len LE] [lzo1x bytes] [zero pad] }*`
+/// where each input sector is compressed independently and zero-pad
+/// is inserted whenever the next 4-byte segment header would cross a
+/// sector boundary.
+///
+/// An early-exit heuristic abandons LZO compression after the first
+/// 4 sectors if the framed buffer has already grown past 3 sectors —
+/// incompressible inputs lose to the per-sector header overhead, so
+/// it is cheaper to bail and let the caller write raw bytes.
+///
+/// Returns `Some(payload)` only if the result strictly shrinks `data`.
+#[must_use]
+pub fn try_compress_regular(
+    data: &[u8],
+    algorithm: btrfs_disk::items::CompressionType,
+    sectorsize: u32,
+) -> Option<Vec<u8>> {
+    use btrfs_disk::items::CompressionType;
+
+    if data.is_empty() {
+        return None;
+    }
+    if !matches!(algorithm, CompressionType::Lzo) {
+        return try_compress(data, algorithm);
+    }
+
+    let ss = sectorsize as usize;
+    let sectors = data.len().div_ceil(ss);
+
+    // Reserve space for the leading 4-byte total_len header; we'll
+    // patch it in once we know the final length.
+    let mut buf = Vec::with_capacity(data.len());
+    buf.extend_from_slice(&[0u8; 4]);
+
+    for i in 0..sectors {
+        let start = i * ss;
+        let end = (start + ss).min(data.len());
+        let seg = lzokay::compress::compress(&data[start..end]).ok()?;
+        let seg_len: u32 = seg.len().try_into().ok()?;
+        buf.extend_from_slice(&seg_len.to_le_bytes());
+        buf.extend_from_slice(&seg);
+
+        // Pad if the next segment's 4-byte header would cross a sector
+        // boundary. `pos % ss == 0` means we're already aligned and have
+        // a full sector ahead, so no padding.
+        let pos = buf.len();
+        let sector_rem = ss - (pos % ss);
+        if sector_rem < 4 && sector_rem < ss {
+            buf.resize(pos + sector_rem, 0);
+        }
+
+        // Early-exit heuristic: incompressible data would otherwise grow
+        // because of the per-sector overhead. After 4 sectors, if we're
+        // already past 3 sectors of output, abandon.
+        if i >= 3 && buf.len() > 3 * ss {
+            return None;
+        }
+    }
+
+    let total_len: u32 = buf.len().try_into().ok()?;
+    buf[0..4].copy_from_slice(&total_len.to_le_bytes());
+
+    if buf.len() < data.len() {
+        Some(buf)
     } else {
         None
     }
@@ -3457,11 +3548,69 @@ mod tests {
     }
 
     #[test]
-    fn try_compress_none_lzo_unknown_return_none() {
+    fn try_compress_none_unknown_return_none() {
         use btrfs_disk::items::CompressionType;
         let data = vec![0x42u8; 4096];
         assert!(try_compress(&data, CompressionType::None).is_none());
-        assert!(try_compress(&data, CompressionType::Lzo).is_none());
         assert!(try_compress(&data, CompressionType::Unknown(99)).is_none());
+    }
+
+    #[test]
+    fn try_compress_lzo_inline_compressible() {
+        use btrfs_disk::items::CompressionType;
+        let data = vec![0x42u8; 4096];
+        let buf = try_compress(&data, CompressionType::Lzo).unwrap();
+        assert!(buf.len() < data.len());
+        // Inline format: [4B total_len LE][4B seg_len LE][lzo bytes]
+        let total_len =
+            u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
+        let seg_len =
+            u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize;
+        assert_eq!(total_len, buf.len(), "total_len matches buffer size");
+        assert_eq!(seg_len + 8, buf.len(), "seg_len + 8B header == total");
+    }
+
+    #[test]
+    fn try_compress_regular_lzo_compressible() {
+        use btrfs_disk::items::CompressionType;
+        // Multi-sector compressible payload triggers per-sector framing.
+        let data = vec![0x42u8; 8192];
+        let buf =
+            try_compress_regular(&data, CompressionType::Lzo, 4096).unwrap();
+        assert!(buf.len() < data.len());
+        let total_len =
+            u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;
+        assert_eq!(total_len, buf.len());
+    }
+
+    #[test]
+    fn try_compress_regular_lzo_incompressible_short_circuits() {
+        use btrfs_disk::items::CompressionType;
+        let mut state: u64 = 0xDEAD_BEEF_CAFE_F00D;
+        // 8 sectors of high-entropy data — should trigger early-exit.
+        let data: Vec<u8> = (0..32 * 1024)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state as u8
+            })
+            .collect();
+        assert!(
+            try_compress_regular(&data, CompressionType::Lzo, 4096).is_none()
+        );
+    }
+
+    #[test]
+    fn try_compress_regular_zlib_zstd_match_inline() {
+        // Non-LZO algorithms produce identical output for inline and
+        // regular paths.
+        use btrfs_disk::items::CompressionType;
+        let data = vec![0x42u8; 4096];
+        for ct in [CompressionType::Zlib, CompressionType::Zstd] {
+            let inline_buf = try_compress(&data, ct).unwrap();
+            let regular_buf = try_compress_regular(&data, ct, 4096).unwrap();
+            assert_eq!(inline_buf, regular_buf, "{ct:?}");
+        }
     }
 }
