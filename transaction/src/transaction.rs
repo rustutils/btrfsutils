@@ -41,7 +41,8 @@ use std::{
 /// Metadata block groups hold all tree blocks except the chunk tree;
 /// SYSTEM block groups hold the chunk tree itself, so its blocks can be
 /// resolved by the early-mount bootstrap via the superblock's
-/// `sys_chunk_array`.
+/// `sys_chunk_array`. DATA block groups hold file data extents, which
+/// are written directly (not COW'd through the tree-block pipeline).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum BlockGroupKind {
     /// A metadata block group (tree blocks for trees other than the
@@ -49,6 +50,8 @@ pub enum BlockGroupKind {
     Metadata,
     /// A SYSTEM block group (used exclusively for chunk tree blocks).
     System,
+    /// A DATA block group (used for file data extents).
+    Data,
 }
 
 /// Bump allocator state for one [`BlockGroupKind`].
@@ -111,8 +114,14 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // least one metadata block, so failing here is the same as
         // failing on the first alloc. The SYSTEM cursor is created on
         // demand the first time the chunk tree is COWed.
-        let (cursor, end) =
-            find_alloc_region_after(fs_info, BlockGroupKind::Metadata, 0)?;
+        let nodesize = u64::from(fs_info.nodesize);
+        let (cursor, end) = find_alloc_region_after(
+            fs_info,
+            BlockGroupKind::Metadata,
+            0,
+            nodesize,
+            nodesize,
+        )?;
         let mut alloc = BTreeMap::new();
         alloc.insert(BlockGroupKind::Metadata, AllocCursor { cursor, end });
 
@@ -149,7 +158,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // Lazily seed a cursor for this kind on first use.
         #[allow(clippy::map_entry)]
         if !self.alloc.contains_key(&kind) {
-            let (cursor, end) = find_alloc_region_after(fs_info, kind, 0)?;
+            let (cursor, end) =
+                find_alloc_region_after(fs_info, kind, 0, nodesize, nodesize)?;
             self.alloc.insert(kind, AllocCursor { cursor, end });
         }
 
@@ -160,8 +170,13 @@ impl<R: Read + Write + Seek> Transaction<R> {
 
             if state.cursor + nodesize > state.end {
                 // Current region exhausted — find another free extent.
-                let (cursor, end) =
-                    find_alloc_region_after(fs_info, kind, state.cursor)?;
+                let (cursor, end) = find_alloc_region_after(
+                    fs_info,
+                    kind,
+                    state.cursor,
+                    nodesize,
+                    nodesize,
+                )?;
                 state = AllocCursor { cursor, end };
                 if state.cursor + nodesize > state.end {
                     return Err(io::Error::other(format!(
@@ -230,6 +245,279 @@ impl<R: Read + Write + Seek> Transaction<R> {
             self.ensure_in_sys_chunk_array(fs_info, logical)?;
         }
         Ok(logical)
+    }
+
+    /// Allocate a data extent: find space in a DATA block group, write
+    /// `data` to disk immediately, queue a `+1` `EXTENT_DATA_REF` delayed
+    /// ref, and return the allocated logical address.
+    ///
+    /// `data` is zero-padded up to the next sectorsize boundary before
+    /// being written. The returned address is sectorsize-aligned and the
+    /// queued ref's `num_bytes` is the padded size.
+    ///
+    /// Unlike tree-block allocations, data extents are written to disk
+    /// at allocation time (`BlockReader::write_block` routes to all
+    /// stripe copies). Only the metadata (`EXTENT_ITEM`, `EXTENT_DATA`,
+    /// `EXTENT_CSUM`) goes through the commit pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no DATA block group has enough free space,
+    /// or if the disk write fails.
+    pub fn alloc_data_extent(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        data: &[u8],
+        owner_root: u64,
+        owner_ino: u64,
+        owner_offset: u64,
+    ) -> io::Result<u64> {
+        let sectorsize = u64::from(fs_info.sectorsize);
+        let raw_len = data.len() as u64;
+        let aligned_size = align_up(raw_len, sectorsize);
+        if aligned_size == 0 {
+            return Err(io::Error::other(
+                "alloc_data_extent: empty data not supported",
+            ));
+        }
+
+        // Find a region with enough contiguous free space. The cursor
+        // for `Data` is shared with metadata/system in `self.alloc`,
+        // but advanced here by the variable extent size rather than
+        // the fixed nodesize used by `alloc_block`.
+        let kind = BlockGroupKind::Data;
+        #[allow(clippy::map_entry)]
+        if !self.alloc.contains_key(&kind) {
+            let (cursor, end) = find_alloc_region_after(
+                fs_info,
+                kind,
+                0,
+                sectorsize,
+                aligned_size,
+            )?;
+            self.alloc.insert(kind, AllocCursor { cursor, end });
+        }
+
+        let mut state = *self.alloc.get(&kind).unwrap();
+        if state.cursor + aligned_size > state.end {
+            let (cursor, end) = find_alloc_region_after(
+                fs_info,
+                kind,
+                state.cursor,
+                sectorsize,
+                aligned_size,
+            )?;
+            state = AllocCursor { cursor, end };
+            if state.cursor + aligned_size > state.end {
+                return Err(io::Error::other(
+                    "no DATA block group with enough free space",
+                ));
+            }
+        }
+
+        let logical = state.cursor;
+        state.cursor += aligned_size;
+        self.alloc.insert(kind, state);
+
+        debug_assert_eq!(
+            logical % sectorsize,
+            0,
+            "alloc_data_extent: address {logical:#x} not aligned to sectorsize {sectorsize}",
+        );
+
+        // Write the data to disk now (zero-padded to sector alignment).
+        // BlockReader::write_block fans out to all stripe copies.
+        if raw_len == aligned_size {
+            fs_info.reader_mut().write_block(logical, data)?;
+        } else {
+            let mut padded = Vec::with_capacity(aligned_size as usize);
+            padded.extend_from_slice(data);
+            padded.resize(aligned_size as usize, 0);
+            fs_info.reader_mut().write_block(logical, &padded)?;
+        }
+
+        // Queue the +1 EXTENT_DATA_REF. flush_delayed_refs will create
+        // the EXTENT_ITEM, update bytes_used, and record the range in
+        // bg_range_deltas for the FST.
+        self.delayed_refs.add_data_ref(
+            logical,
+            aligned_size,
+            owner_root,
+            owner_ino,
+            owner_offset,
+            1,
+        );
+
+        self.allocated_blocks.push(logical);
+        Ok(logical)
+    }
+
+    /// Insert an `EXTENT_DATA` item into an FS tree.
+    ///
+    /// `extent_data` is the already-serialized payload (use
+    /// [`FileExtentItem::to_bytes_regular`](btrfs_disk::items::FileExtentItem::to_bytes_regular)
+    /// or
+    /// [`FileExtentItem::to_bytes_inline`](btrfs_disk::items::FileExtentItem::to_bytes_inline)).
+    ///
+    /// The key is `(inode, EXTENT_DATA, file_offset)`. For inline extents
+    /// the caller passes `file_offset = 0` per the on-disk convention.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an `EXTENT_DATA` item already exists at the
+    /// target key, or if any tree operation fails. Updating an existing
+    /// extent (the COW write path) is the caller's responsibility: drop
+    /// the old extent first, then insert the new one.
+    pub fn insert_file_extent(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        inode: u64,
+        file_offset: u64,
+        extent_data: &[u8],
+    ) -> io::Result<()> {
+        let key = DiskKey {
+            objectid: inode,
+            key_type: KeyType::ExtentData,
+            offset: file_offset,
+        };
+
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            tree_id,
+            &key,
+            &mut path,
+            SearchIntent::Insert((ITEM_SIZE + extent_data.len()) as u32),
+            true,
+        )?;
+        if found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "insert_file_extent: EXTENT_DATA already exists at \
+                 (ino={inode}, offset={file_offset}) in tree {tree_id}"
+            )));
+        }
+
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("insert_file_extent: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        items::insert_item(leaf, slot, &key, extent_data)?;
+        fs_info.mark_dirty(leaf);
+        path.release();
+        Ok(())
+    }
+
+    /// Compute per-sector CRC32C checksums of `on_disk_data` and insert
+    /// them into the csum tree (tree id 7).
+    ///
+    /// `on_disk_data` is the data as it lands on disk — for compressed
+    /// extents that means the compressed/framed payload, not the
+    /// uncompressed original. Length must be a multiple of `sectorsize`.
+    ///
+    /// Each sector contributes a 4-byte CRC32C (standard ISO 3309) to a
+    /// `EXTENT_CSUM` item keyed `(EXTENT_CSUM_OBJECTID, EXTENT_CSUM,
+    /// logical_bytenr)`. Large extents are split into multiple csum
+    /// items so each fits in a single leaf.
+    ///
+    /// This call does not merge with adjacent existing csum items;
+    /// callers that write contiguous extents in the same transaction
+    /// will produce one item per call. `btrfs check` accepts either
+    /// shape.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the filesystem's csum_type is not CRC32C,
+    /// if `on_disk_data.len()` is not sectorsize-aligned, or if any
+    /// tree operation fails.
+    pub fn insert_csums(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        logical_bytenr: u64,
+        on_disk_data: &[u8],
+    ) -> io::Result<()> {
+        use btrfs_disk::superblock::ChecksumType;
+
+        if fs_info.superblock.csum_type != ChecksumType::Crc32 {
+            return Err(io::Error::other(format!(
+                "insert_csums: only CRC32C is supported (csum_type = {:?})",
+                fs_info.superblock.csum_type,
+            )));
+        }
+
+        let sectorsize = u64::from(fs_info.sectorsize);
+        let total = on_disk_data.len() as u64;
+        if total == 0 || total % sectorsize != 0 {
+            return Err(io::Error::other(format!(
+                "insert_csums: on_disk_data length {total} not a multiple of \
+                 sectorsize {sectorsize}",
+            )));
+        }
+        let csum_size: usize = 4;
+
+        // Compute per-sector csums up front.
+        let num_sectors = (total / sectorsize) as usize;
+        let mut all_csums = Vec::with_capacity(num_sectors * csum_size);
+        for sector in on_disk_data.chunks_exact(sectorsize as usize) {
+            let csum = crc32c::crc32c(sector);
+            all_csums.extend_from_slice(&csum.to_le_bytes());
+        }
+
+        // Cap each csum item so it (plus a second item header to leave
+        // room for a future split) fits comfortably in a leaf.
+        let leaf_data_size = (fs_info.nodesize as usize) - HEADER_SIZE;
+        let max_payload =
+            leaf_data_size.saturating_sub(2 * ITEM_SIZE) - csum_size;
+        let max_csums_per_item = (max_payload / csum_size).max(1);
+
+        let csum_objectid =
+            i64::from(btrfs_disk::raw::BTRFS_EXTENT_CSUM_OBJECTID) as u64;
+
+        let mut sector_idx = 0usize;
+        while sector_idx < num_sectors {
+            let take = (num_sectors - sector_idx).min(max_csums_per_item);
+            let payload_start = sector_idx * csum_size;
+            let payload_end = payload_start + take * csum_size;
+            let payload = &all_csums[payload_start..payload_end];
+
+            let chunk_logical =
+                logical_bytenr + (sector_idx as u64) * sectorsize;
+            let key = DiskKey {
+                objectid: csum_objectid,
+                key_type: KeyType::ExtentCsum,
+                offset: chunk_logical,
+            };
+
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                Some(&mut *self),
+                fs_info,
+                7, // csum tree
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + payload.len()) as u32),
+                true,
+            )?;
+            if found {
+                path.release();
+                return Err(io::Error::other(format!(
+                    "insert_csums: csum item already exists at {chunk_logical}"
+                )));
+            }
+            let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+                io::Error::other("insert_csums: no leaf in path")
+            })?;
+            let slot = path.slots[0];
+            items::insert_item(leaf, slot, &key, payload)?;
+            fs_info.mark_dirty(leaf);
+            path.release();
+
+            sector_idx += take;
+        }
+
+        Ok(())
     }
 
     /// Mark a block as pinned (freed but not yet committed).
@@ -2591,39 +2879,46 @@ fn decrement_inline_data_ref(
 /// Find a free region inside a block group of the requested kind,
 /// starting at or after `min_addr`.
 ///
+/// `alignment` constrains the start address; `min_size` is the minimum
+/// contiguous span of free space required. For metadata both are
+/// `nodesize`; for data, `alignment` is `sectorsize` and `min_size` is
+/// the requested data extent length.
+///
 /// Uses extent-tree free space scanning to find actual gaps between
 /// allocated extents. Returns `(first_free_logical, region_end)`.
 fn find_alloc_region_after<R: Read + Write + Seek>(
     fs_info: &mut Filesystem<R>,
     kind: BlockGroupKind,
     min_addr: u64,
+    alignment: u64,
+    min_size: u64,
 ) -> io::Result<(u64, u64)> {
     use crate::allocation;
 
-    let nodesize = u64::from(fs_info.nodesize);
     let groups = allocation::load_block_groups(fs_info)?;
 
     let kind_matches = |bg: &&allocation::BlockGroup| match kind {
         BlockGroupKind::Metadata => bg.is_metadata(),
         BlockGroupKind::System => bg.is_system(),
+        BlockGroupKind::Data => bg.is_data(),
     };
 
     let mut candidates: Vec<&allocation::BlockGroup> = groups
         .iter()
         .filter(kind_matches)
-        .filter(|bg| bg.free() >= nodesize)
+        .filter(|bg| bg.free() >= min_size)
         .collect();
     candidates.sort_by_key(|bg| std::cmp::Reverse(bg.free()));
 
     for bg in candidates {
         let free_extents = allocation::find_free_extents(
-            fs_info, bg.start, bg.length, nodesize,
+            fs_info, bg.start, bg.length, min_size,
         )?;
 
         for &(start, len) in &free_extents {
-            let cursor = align_up(start.max(min_addr), nodesize);
+            let cursor = align_up(start.max(min_addr), alignment);
             let end = start + len;
-            if cursor + nodesize <= end {
+            if cursor + min_size <= end {
                 return Ok((cursor, end));
             }
         }

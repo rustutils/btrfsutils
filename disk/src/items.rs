@@ -1057,6 +1057,74 @@ impl FileExtentItem {
             body,
         })
     }
+
+    /// Size of the fixed `btrfs_file_extent_item` header (the bytes before
+    /// `disk_bytenr` / inline data).
+    pub const HEADER_SIZE: usize = 21;
+
+    /// Size of a regular or prealloc `EXTENT_DATA` item: 21-byte header plus
+    /// 32-byte body (`disk_bytenr`, `disk_num_bytes`, `offset`, `num_bytes`).
+    pub const REGULAR_SIZE: usize = 53;
+
+    /// Serialize a regular or prealloc `EXTENT_DATA` item (53 bytes).
+    ///
+    /// `prealloc` selects `BTRFS_FILE_EXTENT_PREALLOC` instead of the default
+    /// `BTRFS_FILE_EXTENT_REG`. `disk_bytenr` of 0 represents a hole.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub fn to_bytes_regular(
+        generation: u64,
+        ram_bytes: u64,
+        compression: CompressionType,
+        prealloc: bool,
+        disk_bytenr: u64,
+        disk_num_bytes: u64,
+        offset: u64,
+        num_bytes: u64,
+    ) -> Vec<u8> {
+        let extent_type = if prealloc {
+            FileExtentType::Prealloc
+        } else {
+            FileExtentType::Regular
+        };
+        let mut buf = Vec::with_capacity(Self::REGULAR_SIZE);
+        buf.put_u64_le(generation);
+        buf.put_u64_le(ram_bytes);
+        buf.put_u8(compression.to_raw());
+        buf.put_u8(0); // encryption
+        buf.put_u16_le(0); // other_encoding
+        buf.put_u8(extent_type.to_raw());
+        buf.put_u64_le(disk_bytenr);
+        buf.put_u64_le(disk_num_bytes);
+        buf.put_u64_le(offset);
+        buf.put_u64_le(num_bytes);
+        debug_assert_eq!(buf.len(), Self::REGULAR_SIZE);
+        buf
+    }
+
+    /// Serialize an inline `EXTENT_DATA` item: 21-byte header followed by
+    /// `data` bytes (raw or already-compressed/framed payload).
+    ///
+    /// `ram_bytes` is the uncompressed file size covered by this inline
+    /// extent. `compression` indicates whether `data` is compressed.
+    #[must_use]
+    pub fn to_bytes_inline(
+        generation: u64,
+        ram_bytes: u64,
+        compression: CompressionType,
+        data: &[u8],
+    ) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(Self::HEADER_SIZE + data.len());
+        buf.put_u64_le(generation);
+        buf.put_u64_le(ram_bytes);
+        buf.put_u8(compression.to_raw());
+        buf.put_u8(0); // encryption
+        buf.put_u16_le(0); // other_encoding
+        buf.put_u8(FileExtentType::Inline.to_raw());
+        debug_assert_eq!(buf.len(), Self::HEADER_SIZE);
+        buf.extend_from_slice(data);
+        buf
+    }
 }
 
 /// Compute the hash used for `EXTENT_DATA_REF` keys, matching the kernel's
@@ -2839,6 +2907,81 @@ mod tests {
         let mut buf = vec![0u8; 21];
         buf[20] = 1; // extent_type = regular
         assert!(FileExtentItem::parse(&buf).is_none());
+    }
+
+    #[test]
+    fn file_extent_item_to_bytes_regular_round_trip() {
+        let bytes = FileExtentItem::to_bytes_regular(
+            42,
+            65536,
+            CompressionType::Zstd,
+            false,
+            0x200000,
+            4096,
+            0,
+            65536,
+        );
+        assert_eq!(bytes.len(), FileExtentItem::REGULAR_SIZE);
+        let parsed = FileExtentItem::parse(&bytes).unwrap();
+        assert_eq!(parsed.generation, 42);
+        assert_eq!(parsed.ram_bytes, 65536);
+        assert_eq!(parsed.compression, CompressionType::Zstd);
+        assert_eq!(parsed.extent_type, FileExtentType::Regular);
+        match parsed.body {
+            FileExtentBody::Regular {
+                disk_bytenr,
+                disk_num_bytes,
+                offset,
+                num_bytes,
+            } => {
+                assert_eq!(disk_bytenr, 0x200000);
+                assert_eq!(disk_num_bytes, 4096);
+                assert_eq!(offset, 0);
+                assert_eq!(num_bytes, 65536);
+            }
+            _ => panic!("expected regular body"),
+        }
+    }
+
+    #[test]
+    fn file_extent_item_to_bytes_regular_prealloc_flag() {
+        let bytes = FileExtentItem::to_bytes_regular(
+            1,
+            4096,
+            CompressionType::None,
+            true,
+            0x10000,
+            4096,
+            0,
+            4096,
+        );
+        let parsed = FileExtentItem::parse(&bytes).unwrap();
+        assert_eq!(parsed.extent_type, FileExtentType::Prealloc);
+    }
+
+    #[test]
+    fn file_extent_item_to_bytes_inline_round_trip() {
+        let payload = b"hello inline";
+        let bytes = FileExtentItem::to_bytes_inline(
+            7,
+            payload.len() as u64,
+            CompressionType::None,
+            payload,
+        );
+        assert_eq!(bytes.len(), FileExtentItem::HEADER_SIZE + payload.len());
+        let parsed = FileExtentItem::parse(&bytes).unwrap();
+        assert_eq!(parsed.generation, 7);
+        assert_eq!(parsed.ram_bytes, payload.len() as u64);
+        assert_eq!(parsed.compression, CompressionType::None);
+        assert_eq!(parsed.extent_type, FileExtentType::Inline);
+        match parsed.body {
+            FileExtentBody::Inline { inline_size } => {
+                assert_eq!(inline_size, payload.len());
+            }
+            _ => panic!("expected inline body"),
+        }
+        // Inline payload bytes must be preserved verbatim.
+        assert_eq!(&bytes[FileExtentItem::HEADER_SIZE..], payload);
     }
 
     // ── Helper functions ──────────────────────────────────────────────

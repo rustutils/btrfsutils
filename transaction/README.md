@@ -54,11 +54,12 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
   block group tree (id 11) when present, otherwise from the
   extent tree (id 2).
 - **Per-kind bump allocator**: `Transaction::alloc_block(kind)`
-  with separate cursors for `BlockGroupKind::Metadata` and
-  `BlockGroupKind::System`. Cursors are seeded by scanning the
-  extent tree for free gaps inside block groups of the requested
-  kind. Pinned blocks (freed earlier in the same transaction) are
-  skipped to preserve crash consistency.
+  with separate cursors for `BlockGroupKind::Metadata`,
+  `BlockGroupKind::System`, and `BlockGroupKind::Data`. Cursors
+  are seeded by scanning the extent tree for free gaps inside
+  block groups of the requested kind. Pinned blocks (freed
+  earlier in the same transaction) are skipped to preserve
+  crash consistency.
 - **`alloc_tree_block(tree_id, level)`**: routes the chunk tree
   (id 3) to a SYSTEM block group and every other tree to a
   metadata block group, registers a delayed `add_ref`, and for
@@ -86,6 +87,29 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
   walks the csum tree once to collect every overlapping
   `EXTENT_CSUM` item, then in a second pass deletes whole-coverage
   items and re-inserts trimmed head/tail fragments under new keys.
+- **Data flush** (add side): on a positive data delta, inserts a
+  `EXTENT_ITEM` (24-byte header + inline 29-byte `EXTENT_DATA_REF`
+  = 53 bytes) and updates the per-block-group `bytes_used`
+  delta plus the FST's allocated-range record.
+
+### Data extent write path
+
+- **`Transaction::alloc_data_extent(data, root, ino, file_offset)`**:
+  finds free space in a `BlockGroupKind::Data` block group with
+  sectorsize alignment, zero-pads `data` to sectorsize, writes it
+  via `BlockReader::write_block` (fanning out to every stripe
+  copy), queues a `+1` `EXTENT_DATA_REF` delayed ref, and returns
+  the allocated logical address.
+- **`Transaction::insert_file_extent(tree, ino, offset, payload)`**:
+  inserts an `EXTENT_DATA` item at `(ino, EXTENT_DATA, offset)`.
+  `payload` is a serialized `FileExtentItem` (use
+  `to_bytes_regular` for non-inline extents or `to_bytes_inline`
+  for inline-tail extents).
+- **`Transaction::insert_csums(logical, on_disk_data)`**: computes
+  per-sector standard CRC32C of the on-disk bytes and inserts
+  `EXTENT_CSUM` items into the csum tree, splitting payloads that
+  would exceed leaf capacity into multiple keyed items. Errors on
+  non-CRC32C filesystems.
 
 ### Free space tree
 
@@ -118,9 +142,14 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## What's not yet implemented
 
-- **Data extent ref additions**: `flush_delayed_refs` only handles
-  the drop side for data refs (`todo!` on positive deltas). No
-  current caller produces data ref additions.
+- **Compression for data extents**: `alloc_data_extent` writes the
+  raw bytes only; zlib/zstd/LZO and the high-level
+  `write_file_data` helper that selects compression and updates
+  inode `nbytes` are not yet present.
+- **Inline extent helper**: `FileExtentItem::to_bytes_inline` exists
+  in `btrfs-disk` but `Transaction` has no `insert_inline_extent`
+  helper that picks inline vs regular based on size and updates the
+  inode appropriately.
 - **New SYSTEM chunk allocation**: if no existing SYSTEM block
   group has free space, `ensure_in_sys_chunk_array` cannot carve
   out a new one. Bails cleanly.

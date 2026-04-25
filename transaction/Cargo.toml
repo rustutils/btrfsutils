@@ -13,6 +13,7 @@ keywords = ["btrfs", "filesystem", "transaction", "userspace"]
 [dependencies]
 btrfs-disk = { workspace = true }
 bytes = { workspace = true }
+crc32c = { workspace = true }
 tempfile = { workspace = true }
 uuid = { workspace = true }
 

@@ -33,6 +33,20 @@ All notable changes to this project will be documented in this file.
   delayed ref pipeline, with proper data block group accounting and free space
   tree updates. `ExtentItem::to_bytes_data()` serializer in btrfs-disk.
 
+- `btrfs-transaction`: data extent write path foundation.
+  `BlockGroupKind::Data` and `Transaction::alloc_data_extent` find space in
+  a DATA block group, write the bytes immediately to all stripe copies, and
+  queue a `+1` `EXTENT_DATA_REF` delayed ref. `Transaction::insert_file_extent`
+  inserts an `EXTENT_DATA` item into an FS tree pointing at the allocated
+  extent. `Transaction::insert_csums` computes per-sector standard CRC32C
+  checksums and inserts `EXTENT_CSUM` items into the csum tree, splitting
+  large payloads across multiple items so each fits in one leaf. Verified
+  end-to-end against `btrfs check`.
+
+- `btrfs-disk`: `FileExtentItem::to_bytes_regular` (53-byte regular/prealloc
+  body) and `FileExtentItem::to_bytes_inline` (21-byte header + raw payload)
+  serializers, plus `HEADER_SIZE` and `REGULAR_SIZE` constants.
+
 ### Fixed
 
 - `btrfs-transaction`: fix fall-through bug in `flush_delayed_refs`

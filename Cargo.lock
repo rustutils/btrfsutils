@@ -274,6 +274,7 @@ version = "0.11.0"
 dependencies = [
  "btrfs-disk",
  "bytes",
+ "crc32c",
  "flate2",
  "proptest",
  "tempfile",

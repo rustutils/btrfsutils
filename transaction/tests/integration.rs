@@ -1923,6 +1923,597 @@ fn create_data_extent_multiple() {
 }
 
 #[test]
+fn alloc_data_extent_writes_data_and_creates_extent_item() {
+    use btrfs_disk::items::{ExtentFlags, ExtentItem, InlineRef};
+
+    let (_dir, img_path) = create_test_image();
+    let payload = b"hello data extent allocator: this should land on disk";
+
+    let logical;
+    let data_bg_start;
+
+    // Phase 1: open, allocate one data extent, commit.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let data_bg = find_data_block_group(&mut fs);
+        data_bg_start = data_bg.start;
+
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        logical = trans
+            .alloc_data_extent(&mut fs, payload, 5, 257, 0)
+            .expect("alloc_data_extent");
+
+        // Sanity: address falls inside a data block group and is
+        // sectorsize-aligned.
+        assert!(
+            logical >= data_bg.start
+                && logical < data_bg.start + data_bg.length,
+            "logical {logical} outside data BG [{}, {})",
+            data_bg.start,
+            data_bg.start + data_bg.length
+        );
+        assert_eq!(
+            logical % u64::from(fs.sectorsize),
+            0,
+            "logical {logical} not sectorsize-aligned"
+        );
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Phase 2: reopen, verify the extent item exists and the data on
+    // disk matches the payload (zero-padded to sectorsize).
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+
+        let sectorsize = u64::from(fs.sectorsize);
+        let aligned = (payload.len() as u64).div_ceil(sectorsize) * sectorsize;
+
+        // Verify EXTENT_ITEM in the extent tree.
+        let key = DiskKey {
+            objectid: logical,
+            key_type: KeyType::ExtentItem,
+            offset: aligned,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            2,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search extent tree");
+        assert!(found, "EXTENT_ITEM not found at {logical}");
+        let leaf = path.leaf().unwrap();
+        let data = leaf.item_data(path.slots[0]).to_vec();
+        let item = ExtentItem::parse(&data, &key).expect("parse EXTENT_ITEM");
+        assert_eq!(item.refs, 1);
+        assert!(item.flags.contains(ExtentFlags::DATA));
+        match &item.inline_refs[0] {
+            InlineRef::ExtentDataBackref {
+                root,
+                objectid,
+                offset,
+                count,
+                ..
+            } => {
+                assert_eq!(*root, 5);
+                assert_eq!(*objectid, 257);
+                assert_eq!(*offset, 0);
+                assert_eq!(*count, 1);
+            }
+            other => panic!("expected ExtentDataBackref, got {other:?}"),
+        }
+        path.release();
+
+        // Verify the bytes hit the disk: read raw bytes via the chunk
+        // cache and check the payload prefix matches and the tail is
+        // zero-padded.
+        let on_disk = fs
+            .reader_mut()
+            .read_data(logical, aligned as usize)
+            .unwrap();
+        assert_eq!(
+            &on_disk[..payload.len()],
+            payload,
+            "payload bytes mismatch"
+        );
+        assert!(
+            on_disk[payload.len()..].iter().all(|&b| b == 0),
+            "tail of data extent is not zero-padded"
+        );
+
+        // Block group `used` should have grown by aligned bytes.
+        let groups =
+            btrfs_transaction::allocation::load_block_groups(&mut fs).unwrap();
+        let bg = groups
+            .iter()
+            .find(|bg| bg.start == data_bg_start)
+            .expect("data BG by start address");
+        assert!(
+            bg.used >= aligned,
+            "data BG used ({}) did not grow by at least {aligned}",
+            bg.used
+        );
+    }
+
+    // No btrfs check — there's no FILE_EXTENT_DATA in the FS tree
+    // pointing at this extent yet, so the backref check would fail.
+    // End-to-end coverage with btrfs check arrives once
+    // insert_file_extent + insert_csums land.
+}
+
+#[test]
+fn insert_file_extent_regular_round_trips() {
+    use btrfs_disk::items::{
+        CompressionType, FileExtentBody, FileExtentItem, FileExtentType,
+    };
+
+    let (_dir, img_path) = create_test_image();
+    let payload = b"insert_file_extent regular extent body";
+    let test_ino = 999u64;
+    let test_offset = 0u64;
+
+    let logical;
+    let aligned;
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let sectorsize = u64::from(fs.sectorsize);
+        aligned = (payload.len() as u64).div_ceil(sectorsize) * sectorsize;
+
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        logical = trans
+            .alloc_data_extent(&mut fs, payload, 5, test_ino, test_offset)
+            .expect("alloc_data_extent");
+
+        let extent_data = FileExtentItem::to_bytes_regular(
+            trans.transid,
+            payload.len() as u64,
+            CompressionType::None,
+            false,
+            logical,
+            aligned,
+            0,
+            payload.len() as u64,
+        );
+        trans
+            .insert_file_extent(
+                &mut fs,
+                5, // FS tree
+                test_ino,
+                test_offset,
+                &extent_data,
+            )
+            .expect("insert_file_extent");
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Reopen and verify the EXTENT_DATA item exists with the right
+    // shape pointing at the allocated extent.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+
+        let key = DiskKey {
+            objectid: test_ino,
+            key_type: KeyType::ExtentData,
+            offset: test_offset,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            5, // FS tree
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search FS tree");
+        assert!(found, "EXTENT_DATA item not found");
+
+        let leaf = path.leaf().unwrap();
+        let data = leaf.item_data(path.slots[0]).to_vec();
+        let fei = FileExtentItem::parse(&data).expect("parse FileExtentItem");
+        assert_eq!(fei.extent_type, FileExtentType::Regular);
+        assert_eq!(fei.compression, CompressionType::None);
+        assert_eq!(fei.ram_bytes, payload.len() as u64);
+        match fei.body {
+            FileExtentBody::Regular {
+                disk_bytenr,
+                disk_num_bytes,
+                offset,
+                num_bytes,
+            } => {
+                assert_eq!(disk_bytenr, logical, "disk_bytenr");
+                assert_eq!(disk_num_bytes, aligned, "disk_num_bytes");
+                assert_eq!(offset, 0, "offset");
+                assert_eq!(num_bytes, payload.len() as u64, "num_bytes");
+            }
+            _ => panic!("expected regular body"),
+        }
+        path.release();
+    }
+
+    // No btrfs check — inode 999 has no INODE_ITEM and there are no
+    // csum entries for the extent yet; both would be flagged.
+    // End-to-end coverage with btrfs check arrives once insert_csums
+    // and a complete write_file_data path land.
+}
+
+#[test]
+fn insert_csums_round_trips_per_sector_crc32c() {
+    let (_dir, img_path) = create_test_image();
+    let csum_objectid =
+        i64::from(btrfs_disk::raw::BTRFS_EXTENT_CSUM_OBJECTID) as u64;
+
+    // Construct three sectors of distinct content so each gets a
+    // different CRC32C.
+    let sector = 4096usize;
+    let mut data = Vec::with_capacity(3 * sector);
+    data.extend(std::iter::repeat_n(0xAAu8, sector));
+    data.extend(std::iter::repeat_n(0xBBu8, sector));
+    data.extend(std::iter::repeat_n(0xCCu8, sector));
+
+    let logical = 128 * 1024 * 1024u64; // arbitrary sectorsize-aligned
+
+    let expected: Vec<u8> = data
+        .chunks_exact(sector)
+        .flat_map(|s| crc32c::crc32c(s).to_le_bytes())
+        .collect();
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        trans
+            .insert_csums(&mut fs, logical, &data)
+            .expect("insert_csums");
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Reopen, find the csum item, verify the payload byte-for-byte.
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+        let key = DiskKey {
+            objectid: csum_objectid,
+            key_type: KeyType::ExtentCsum,
+            offset: logical,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            7,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search");
+        assert!(found, "csum item not found at {logical}");
+        let leaf = path.leaf().unwrap();
+        let payload = leaf.item_data(path.slots[0]).to_vec();
+        assert_eq!(payload, expected, "per-sector CRC32C mismatch");
+        path.release();
+    }
+}
+
+/// End-to-end: create a regular file with real content using
+/// `alloc_data_extent` + `insert_file_extent` + `insert_csums`, plus the
+/// surrounding INODE_ITEM/REF and parent dir entries, and verify the
+/// result with `btrfs check`.
+#[test]
+fn write_file_data_passes_btrfs_check() {
+    use btrfs_disk::items::{
+        CompressionType, DirItem, FileExtentItem, InodeItemArgs, InodeRef,
+        Timespec,
+    };
+
+    let (_dir, img_path) = create_test_image();
+
+    let file_name = b"data.txt";
+    let file_inode = 257u64;
+    let dir_index = 100u64;
+    let root_dir_inode = 256u64;
+    // Payload spans more than one sector so the extent is naturally
+    // regular (mkfs would inline anything < ~4095 bytes).
+    let payload: Vec<u8> = (0..6000u32).map(|i| (i & 0xFF) as u8).collect();
+    let payload = payload.as_slice();
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let sectorsize = u64::from(fs.sectorsize);
+        let aligned = (payload.len() as u64).div_ceil(sectorsize) * sectorsize;
+        let transid = fs.superblock.generation + 1;
+        let ts = Timespec {
+            sec: 1_700_000_000,
+            nsec: 0,
+        };
+
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+
+        // 1. Allocate the data extent and write the bytes to disk.
+        let logical = trans
+            .alloc_data_extent(&mut fs, payload, 5, file_inode, 0)
+            .expect("alloc_data_extent");
+
+        // 2. INODE_ITEM for the new file. For a non-compressed regular
+        //    extent btrfs accounts `nbytes` as the on-disk
+        //    `disk_num_bytes` (sector-aligned).
+        let inode_data = InodeItemArgs {
+            generation: transid,
+            size: payload.len() as u64,
+            nbytes: aligned,
+            nlink: 1,
+            uid: 0,
+            gid: 0,
+            mode: 0o100644,
+            time: ts,
+        }
+        .to_bytes();
+        let inode_key = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &inode_key,
+            &mut path,
+            SearchIntent::Insert((25 + inode_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &inode_key, &inode_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // 3. INODE_REF (file -> parent).
+        let iref_data = InodeRef::serialize(dir_index, file_name);
+        let iref_key = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeRef,
+            offset: root_dir_inode,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &iref_key,
+            &mut path,
+            SearchIntent::Insert((25 + iref_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &iref_key, &iref_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // 4. DIR_ITEM in the parent.
+        let location = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let dir_data = DirItem::serialize(
+            &location,
+            transid,
+            btrfs_disk::raw::BTRFS_FT_REG_FILE as u8,
+            file_name,
+        );
+        let dir_item_key = DiskKey {
+            objectid: root_dir_inode,
+            key_type: KeyType::DirItem,
+            offset: u64::from(btrfs_disk::util::btrfs_name_hash(file_name)),
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_item_key,
+            &mut path,
+            SearchIntent::Insert((25 + dir_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &dir_item_key, &dir_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // 5. DIR_INDEX in the parent.
+        let dir_index_key = DiskKey {
+            objectid: root_dir_inode,
+            key_type: KeyType::DirIndex,
+            offset: dir_index,
+        };
+        let mut path = BtrfsPath::new();
+        search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_index_key,
+            &mut path,
+            SearchIntent::Insert((25 + dir_data.len()) as u32),
+            true,
+        )
+        .unwrap();
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &dir_index_key, &dir_data)
+            .unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // 6. Bump the parent dir's INODE_ITEM size by 2*name_len
+        //    (one DIR_ITEM + one DIR_INDEX).
+        let dir_inode_key = DiskKey {
+            objectid: root_dir_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            5,
+            &dir_inode_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )
+        .unwrap();
+        assert!(found);
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        let old_data = leaf.item_data(slot).to_vec();
+        let mut inode = btrfs_disk::items::InodeItem::parse(&old_data).unwrap();
+        inode.size += file_name.len() as u64 * 2;
+        inode.transid = transid;
+        let new_data = InodeItemArgs {
+            generation: inode.generation,
+            size: inode.size,
+            nbytes: inode.nbytes,
+            nlink: inode.nlink,
+            uid: inode.uid,
+            gid: inode.gid,
+            mode: inode.mode,
+            time: ts,
+        }
+        .to_bytes();
+        items::update_item(leaf, slot, &new_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // 7. Mirror the size update into ROOT_ITEM's embedded inode.
+        let root_key = DiskKey {
+            objectid: 5,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &root_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )
+        .unwrap();
+        assert!(found);
+        let leaf = path.nodes[0].as_mut().unwrap();
+        let slot = path.slots[0];
+        let ri_data = leaf.item_data(slot).to_vec();
+        let mut root_item = RootItem::parse(&ri_data).unwrap();
+        let mut embedded =
+            btrfs_disk::items::InodeItem::parse(&root_item.inode_data).unwrap();
+        embedded.size += file_name.len() as u64 * 2;
+        let new_inode = InodeItemArgs {
+            generation: embedded.generation,
+            size: embedded.size,
+            nbytes: embedded.nbytes,
+            nlink: embedded.nlink,
+            uid: embedded.uid,
+            gid: embedded.gid,
+            mode: embedded.mode,
+            time: ts,
+        }
+        .to_bytes();
+        root_item.inode_data = new_inode;
+        let new_ri = root_item.to_bytes();
+        assert_eq!(new_ri.len(), ri_data.len());
+        items::update_item(leaf, slot, &new_ri).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        // 8. EXTENT_DATA item pointing at the data extent.
+        //    For a non-compressed regular extent btrfs check requires
+        //    `num_bytes` (and therefore `ram_bytes`) to be sectorsize-
+        //    aligned and to equal `disk_num_bytes`. The on-disk file
+        //    size (smaller than the extent) is recorded only in the
+        //    INODE_ITEM, not in the extent.
+        let extent_data = FileExtentItem::to_bytes_regular(
+            transid,
+            aligned,
+            CompressionType::None,
+            false,
+            logical,
+            aligned,
+            0,
+            aligned,
+        );
+        trans
+            .insert_file_extent(&mut fs, 5, file_inode, 0, &extent_data)
+            .expect("insert_file_extent");
+
+        // 9. Csums for the on-disk (zero-padded) bytes.
+        let mut padded = Vec::with_capacity(aligned as usize);
+        padded.extend_from_slice(payload);
+        padded.resize(aligned as usize, 0);
+        trans
+            .insert_csums(&mut fs, logical, &padded)
+            .expect("insert_csums");
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // The acid test: btrfs check must accept the resulting filesystem.
+    assert_btrfs_check(&img_path);
+}
+
+#[test]
 fn create_then_drop_data_extent() {
     let (_dir, img_path) = create_test_image();
     let num_bytes = 4096u64;
