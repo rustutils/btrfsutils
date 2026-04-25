@@ -5,7 +5,7 @@
 //! would cause excessive extent tree modifications. Instead, reference updates
 //! are queued and batched, then flushed at commit time.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Identity of a queued reference change.
 ///
@@ -15,7 +15,12 @@ use std::collections::HashMap;
 /// because a single data extent can carry multiple distinct
 /// `EXTENT_DATA_REF` backrefs of shape `(root, ino, offset)`, each with
 /// its own count.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+// `Ord` is required so the queue iterates in deterministic key order
+// at flush time. With `HashMap` the flush sequence depended on
+// per-process hash randomization, which made successive mkfs runs
+// produce byte-different output for the same config (snapshot tests
+// flagged this).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DelayedRefKey {
     /// A reference to a metadata (tree block) extent.
     Metadata {
@@ -84,7 +89,9 @@ struct Entry {
 /// applied to the extent tree.
 #[derive(Debug, Default)]
 pub struct DelayedRefQueue {
-    refs: HashMap<DelayedRefKey, Entry>,
+    // BTreeMap (not HashMap) so `drain` iterates in deterministic
+    // key order — see the comment on `DelayedRefKey`.
+    refs: BTreeMap<DelayedRefKey, Entry>,
 }
 
 impl DelayedRefQueue {
@@ -181,9 +188,13 @@ impl DelayedRefQueue {
     }
 
     /// Drain all queued refs with non-zero deltas.
+    ///
+    /// Iterates in `DelayedRefKey` sort order (deterministic). The
+    /// caller observes refs in `(Metadata before Data)` order, then by
+    /// `(bytenr, owner_root, level | owner_ino, owner_offset)`.
     pub fn drain(&mut self) -> Vec<DelayedRef> {
-        self.refs
-            .drain()
+        std::mem::take(&mut self.refs)
+            .into_iter()
             .filter(|(_, e)| e.delta != 0)
             .map(|(key, e)| DelayedRef {
                 key,

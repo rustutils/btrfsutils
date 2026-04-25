@@ -131,6 +131,14 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- `btrfs-transaction`: `DelayedRefQueue` now uses `BTreeMap` (was
+  `HashMap`), so `flush_delayed_refs` iterates queued refs in
+  deterministic key order. Without this, successive transaction
+  commits over the same input could produce byte-different output
+  due to hash randomization, surfacing as flaky snapshot tests once
+  the mkfs migration started piping commit output through snapshot
+  comparison. `DelayedRefKey` gained `PartialOrd, Ord` derives.
+
 - `mkfs --rootdir`: `EXTENT_DATA` items for files whose size is not a
   sectorsize multiple now use `align_up(extent_size, sectorsize)` for
   `num_bytes` and `ram_bytes`, and accumulate the same value into the

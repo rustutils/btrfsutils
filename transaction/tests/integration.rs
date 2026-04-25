@@ -470,20 +470,8 @@ fn write_insert_item_and_verify() {
 fn write_delete_item_and_verify() {
     let (dir, img_path) = create_test_image();
 
-    // Our mkfs doesn't create a UUID tree (tree 9), so create one first.
-    {
-        let file = File::options()
-            .read(true)
-            .write(true)
-            .open(&img_path)
-            .unwrap();
-        let mut fs = Filesystem::open(file).expect("open failed");
-        let mut trans = Transaction::start(&mut fs).expect("start failed");
-        trans
-            .create_empty_tree(&mut fs, 9)
-            .expect("create UUID tree failed");
-        trans.commit(&mut fs).expect("commit failed");
-    }
+    // mkfs's post-bootstrap step creates the UUID tree (tree 9), so
+    // we can delete its ROOT_ITEM directly without setting it up here.
 
     // Find the UUID tree ROOT_ITEM (tree ID 9) and delete it
     let uuid_key = DiskKey {
