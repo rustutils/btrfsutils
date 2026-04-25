@@ -132,6 +132,30 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
   LZO this produces the inline framing format
   `[4B total_len LE] [4B seg_len LE] [lzo bytes]`; for zlib and
   zstd the raw compressor output is returned.
+
+### Inode and directory entry helpers
+
+- **`InodeArgs`** (`crate::inode`): full-fields counterpart to
+  `btrfs_disk::items::InodeItemArgs` carrying every on-disk inode
+  field (`flags`, `rdev`, `sequence`, four distinct timestamps).
+  `InodeArgs::new(transid, mode)` provides sensible defaults;
+  `with_uniform_time(ts)` sets all four stamps for tests.
+- **`Transaction::create_inode(tree, ino, args)`**: insert an
+  `INODE_ITEM` at `(ino, INODE_ITEM, 0)` from an `InodeArgs`.
+- **`Transaction::link_dir_entry(tree, parent, child, name,
+  file_type, dir_index, time)`**: insert the three records that
+  make a directory entry visible — `INODE_REF`, `DIR_ITEM`,
+  `DIR_INDEX` — bump the parent dir's `size` by `2 * name.len()`
+  per the directory-isize convention, refresh `transid`, and
+  update `ctime`/`mtime`. When `parent` is the canonical
+  subvolume root dir (`BTRFS_FIRST_FREE_OBJECTID` = 256), also
+  mirror the `size` update into the matching `ROOT_ITEM`'s
+  embedded inode so `btrfs check`'s root-tree consistency check
+  passes.
+- **`Transaction::set_xattr(tree, ino, name, value)`**: insert an
+  `XATTR_ITEM` at `(ino, XATTR_ITEM, name_hash(name))` carrying
+  `(name, value)`. Same on-disk format as `DIR_ITEM` but with
+  `FT_XATTR` and a non-empty value.
 - **`try_compress_regular(data, algorithm, sectorsize)`**: variant
   for the regular-extent write path. For LZO produces the
   per-sector framing format

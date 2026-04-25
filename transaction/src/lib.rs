@@ -38,6 +38,7 @@ pub mod delayed_ref;
 pub mod extent_walk;
 pub mod filesystem;
 pub mod free_space;
+pub mod inode;
 pub mod items;
 pub mod path;
 pub mod search;

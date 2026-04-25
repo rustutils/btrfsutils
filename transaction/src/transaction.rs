@@ -834,6 +834,364 @@ impl<R: Read + Write + Seek> Transaction<R> {
         Ok(())
     }
 
+    /// Insert an `INODE_ITEM` for `inode` in `tree_id`.
+    ///
+    /// The key is `(inode, INODE_ITEM, 0)`. `args` carries every
+    /// on-disk field; see [`crate::inode::InodeArgs`].
+    ///
+    /// Errors if an `INODE_ITEM` already exists at this key, or if any
+    /// tree operation fails.
+    pub fn create_inode(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        inode: u64,
+        args: &crate::inode::InodeArgs,
+    ) -> io::Result<()> {
+        let key = DiskKey {
+            objectid: inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let data = args.to_bytes();
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            tree_id,
+            &key,
+            &mut path,
+            SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+            true,
+        )?;
+        if found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "create_inode: INODE_ITEM already exists for inode {inode} \
+                 in tree {tree_id}"
+            )));
+        }
+        let leaf = path.nodes[0]
+            .as_mut()
+            .ok_or_else(|| io::Error::other("create_inode: no leaf in path"))?;
+        let slot = path.slots[0];
+        items::insert_item(leaf, slot, &key, &data)?;
+        fs_info.mark_dirty(leaf);
+        path.release();
+        Ok(())
+    }
+
+    /// Link a child inode under `name` into `parent_inode`'s directory.
+    ///
+    /// Inserts the three on-disk records that together make a directory
+    /// entry visible to the kernel:
+    ///
+    /// 1. `DIR_ITEM` at `(parent_inode, DIR_ITEM, name_hash(name))` —
+    ///    the name-hash-keyed entry walked on lookup.
+    /// 2. `DIR_INDEX` at `(parent_inode, DIR_INDEX, dir_index)` — the
+    ///    monotonically-increasing entry walked on `readdir`.
+    /// 3. `INODE_REF` at `(child_inode, INODE_REF, parent_inode)` —
+    ///    the back-pointer used by `..` resolution and orphan recovery.
+    ///
+    /// Bumps `parent_inode`'s on-disk `size` by `2 * name.len()` (one
+    /// `name_len` per `DIR_ITEM`/`DIR_INDEX` entry) per modern btrfs's
+    /// directory-isize convention. If `parent_inode` is the canonical
+    /// subvolume root directory inode (`BTRFS_FIRST_FREE_OBJECTID` =
+    /// 256), also mirrors the size into the matching `ROOT_ITEM`'s
+    /// embedded `inode_data` so `btrfs check`'s root-item consistency
+    /// check passes.
+    ///
+    /// `dir_index` is the caller-supplied per-directory monotonic
+    /// counter. mkfs starts at 2 (entries 0 and 1 are reserved for
+    /// `.` and `..`) and increments per child.
+    ///
+    /// `file_type` is the `BTRFS_FT_*` byte (regular file, directory,
+    /// symlink, etc.).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any of the inserted items already exist, if
+    /// the parent inode is missing, or if any tree operation fails.
+    #[allow(clippy::too_many_arguments)]
+    pub fn link_dir_entry(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        parent_inode: u64,
+        child_inode: u64,
+        name: &[u8],
+        file_type: u8,
+        dir_index: u64,
+        time: btrfs_disk::items::Timespec,
+    ) -> io::Result<()> {
+        use btrfs_disk::{
+            items::{DirItem, InodeRef, RootItem},
+            util::btrfs_name_hash,
+        };
+
+        let transid = self.transid;
+
+        // 1. INODE_REF: child -> parent.
+        let iref_data = InodeRef::serialize(dir_index, name);
+        let iref_key = DiskKey {
+            objectid: child_inode,
+            key_type: KeyType::InodeRef,
+            offset: parent_inode,
+        };
+        self.insert_item_helper(fs_info, tree_id, &iref_key, &iref_data)?;
+
+        // 2. DIR_ITEM: parent -> child, keyed by name hash.
+        let location = DiskKey {
+            objectid: child_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let dir_data = DirItem::serialize(&location, transid, file_type, name);
+        let dir_item_key = DiskKey {
+            objectid: parent_inode,
+            key_type: KeyType::DirItem,
+            offset: u64::from(btrfs_name_hash(name)),
+        };
+        self.insert_item_helper(fs_info, tree_id, &dir_item_key, &dir_data)?;
+
+        // 3. DIR_INDEX: parent -> child, keyed by readdir index.
+        let dir_index_key = DiskKey {
+            objectid: parent_inode,
+            key_type: KeyType::DirIndex,
+            offset: dir_index,
+        };
+        self.insert_item_helper(fs_info, tree_id, &dir_index_key, &dir_data)?;
+
+        // 4. Bump parent dir's size by 2 * name_len (one per DIR_ITEM /
+        //    DIR_INDEX). Patch in place to preserve flags / rdev / etc.
+        self.bump_dir_size(
+            fs_info,
+            tree_id,
+            parent_inode,
+            (name.len() as u64) * 2,
+            transid,
+            time,
+        )?;
+
+        // 5. If the parent is the canonical subvolume root dir
+        //    (inode 256), mirror the size update into the matching
+        //    ROOT_ITEM's embedded inode so the root-tree consistency
+        //    check passes.
+        if parent_inode == u64::from(btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID)
+        {
+            let root_key = DiskKey {
+                objectid: tree_id,
+                key_type: KeyType::RootItem,
+                offset: 0,
+            };
+            let mut path = BtrfsPath::new();
+            let found = search::search_slot(
+                Some(&mut *self),
+                fs_info,
+                1, // root tree
+                &root_key,
+                &mut path,
+                SearchIntent::ReadOnly,
+                true,
+            )?;
+            if !found {
+                path.release();
+                return Err(io::Error::other(format!(
+                    "link_dir_entry: ROOT_ITEM for tree {tree_id} not found"
+                )));
+            }
+            let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+                io::Error::other("link_dir_entry: no leaf in path")
+            })?;
+            let slot = path.slots[0];
+            let ri_data = leaf.item_data(slot).to_vec();
+            let mut root_item = RootItem::parse(&ri_data).ok_or_else(|| {
+                io::Error::other("link_dir_entry: malformed ROOT_ITEM")
+            })?;
+            // Patch the embedded inode's size in place at the same
+            // offset used in the standalone INODE_ITEM.
+            let size_off =
+                std::mem::offset_of!(btrfs_disk::raw::btrfs_inode_item, size);
+            if root_item.inode_data.len() < size_off + 8 {
+                path.release();
+                return Err(io::Error::other(
+                    "link_dir_entry: ROOT_ITEM inode_data shorter than \
+                     btrfs_inode_item",
+                ));
+            }
+            let mut size = u64::from_le_bytes(
+                root_item.inode_data[size_off..size_off + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            size += (name.len() as u64) * 2;
+            root_item.inode_data[size_off..size_off + 8]
+                .copy_from_slice(&size.to_le_bytes());
+            let new_ri = root_item.to_bytes();
+            // Same-size in-place update — RootItem::to_bytes is fixed length.
+            items::update_item(leaf, slot, &new_ri)?;
+            fs_info.mark_dirty(leaf);
+            path.release();
+        }
+
+        Ok(())
+    }
+
+    /// Insert a single item via the standard search-and-insert pipeline.
+    /// Internal helper for the high-level dir/inode/xattr APIs.
+    fn insert_item_helper(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        key: &DiskKey,
+        data: &[u8],
+    ) -> io::Result<()> {
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            tree_id,
+            key,
+            &mut path,
+            SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+            true,
+        )?;
+        if found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "insert_item_helper: item already exists at {key:?} in tree {tree_id}"
+            )));
+        }
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("insert_item_helper: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        items::insert_item(leaf, slot, key, data)?;
+        fs_info.mark_dirty(leaf);
+        path.release();
+        Ok(())
+    }
+
+    /// Bump a directory inode's `size` by `delta`, refresh `transid`,
+    /// and update `ctime`/`mtime`. Patches in place at fixed offsets to
+    /// preserve flags / rdev / sequence and other fields not modeled by
+    /// `InodeArgs` round-tripping.
+    fn bump_dir_size(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        inode: u64,
+        delta: u64,
+        transid: u64,
+        time: btrfs_disk::items::Timespec,
+    ) -> io::Result<()> {
+        let key = DiskKey {
+            objectid: inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            tree_id,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )?;
+        if !found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "bump_dir_size: INODE_ITEM missing for inode {inode}"
+            )));
+        }
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("bump_dir_size: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+
+        let transid_off =
+            std::mem::offset_of!(btrfs_disk::raw::btrfs_inode_item, transid);
+        let size_off =
+            std::mem::offset_of!(btrfs_disk::raw::btrfs_inode_item, size);
+        let ctime_off =
+            std::mem::offset_of!(btrfs_disk::raw::btrfs_inode_item, ctime);
+        let mtime_off =
+            std::mem::offset_of!(btrfs_disk::raw::btrfs_inode_item, mtime);
+
+        let payload = leaf.item_data_mut(slot);
+        // size += delta
+        let mut size = u64::from_le_bytes(
+            payload[size_off..size_off + 8].try_into().unwrap(),
+        );
+        size += delta;
+        payload[size_off..size_off + 8].copy_from_slice(&size.to_le_bytes());
+        // transid
+        payload[transid_off..transid_off + 8]
+            .copy_from_slice(&transid.to_le_bytes());
+        // ctime
+        payload[ctime_off..ctime_off + 8]
+            .copy_from_slice(&time.sec.to_le_bytes());
+        payload[ctime_off + 8..ctime_off + 12]
+            .copy_from_slice(&time.nsec.to_le_bytes());
+        // mtime
+        payload[mtime_off..mtime_off + 8]
+            .copy_from_slice(&time.sec.to_le_bytes());
+        payload[mtime_off + 8..mtime_off + 12]
+            .copy_from_slice(&time.nsec.to_le_bytes());
+
+        fs_info.mark_dirty(leaf);
+        path.release();
+        Ok(())
+    }
+
+    /// Insert an `XATTR_ITEM` carrying `(name, value)` for `inode`.
+    ///
+    /// XATTR items share the on-disk format with `DIR_ITEM`: the
+    /// "directory entry" is a `(name, value)` pair where the value
+    /// fills the data area instead of being zero-length. The key is
+    /// `(inode, XATTR_ITEM, name_hash(name))`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an XATTR with the same name hash already
+    /// exists (no chain-walk-and-append for collisions in v1), or if
+    /// any tree operation fails.
+    pub fn set_xattr(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        inode: u64,
+        name: &[u8],
+        value: &[u8],
+    ) -> io::Result<()> {
+        use btrfs_disk::util::btrfs_name_hash;
+        use bytes::BufMut;
+
+        // XATTR_ITEM payload: 17-byte location key (zeroed) + 8B transid
+        // + 2B data_len + 2B name_len + 1B type + name + value.
+        let total = 17 + 8 + 2 + 2 + 1 + name.len() + value.len();
+        let mut data = Vec::with_capacity(total);
+        // location key — for xattrs the location is unused; mkfs writes
+        // it as the all-zero "Untyped" key.
+        data.extend_from_slice(&[0u8; 17]);
+        data.put_u64_le(self.transid);
+        data.put_u16_le(value.len() as u16);
+        data.put_u16_le(name.len() as u16);
+        data.put_u8(btrfs_disk::raw::BTRFS_FT_XATTR as u8);
+        data.put_slice(name);
+        data.put_slice(value);
+        debug_assert_eq!(data.len(), total);
+
+        let key = DiskKey {
+            objectid: inode,
+            key_type: KeyType::XattrItem,
+            offset: u64::from(btrfs_name_hash(name)),
+        };
+        self.insert_item_helper(fs_info, tree_id, &key, &data)
+    }
+
     /// Mark a block as pinned (freed but not yet committed).
     ///
     /// Pinned blocks must not be reallocated during this transaction.

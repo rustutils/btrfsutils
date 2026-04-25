@@ -47,6 +47,22 @@ All notable changes to this project will be documented in this file.
   body) and `FileExtentItem::to_bytes_inline` (21-byte header + raw payload)
   serializers, plus `HEADER_SIZE` and `REGULAR_SIZE` constants.
 
+- `btrfs-transaction`: high-level inode and directory-entry helpers
+  to dedupe the boilerplate that mkfs migration would otherwise
+  repeat per file. New `inode` module owns `InodeArgs` (full-fields
+  counterpart to `btrfs_disk::items::InodeItemArgs` with `flags`,
+  `rdev`, `sequence`, and four distinct timestamps).
+  `Transaction::create_inode(tree, ino, args)` inserts an `INODE_ITEM`.
+  `Transaction::link_dir_entry(tree, parent, child, name, ft,
+  dir_index, time)` inserts `INODE_REF` + `DIR_ITEM` + `DIR_INDEX`,
+  bumps the parent dir's `size`/`transid`/`ctime`/`mtime` in place,
+  and (when the parent is the canonical subvolume root dir) mirrors
+  the size into the `ROOT_ITEM`'s embedded inode.
+  `Transaction::set_xattr(tree, ino, name, value)` inserts an
+  `XATTR_ITEM`. The 6 existing end-to-end tests that built dir
+  entries by hand collapsed from ~200 lines of boilerplate per test
+  to ~15.
+
 - `btrfs-disk` + `btrfs-transaction`: multi-device write support
   (transaction PLAN J.5). `BlockReader<R>` now stores a
   `BTreeMap<u64, R>` keyed by device id; `read_block` / `read_data`
