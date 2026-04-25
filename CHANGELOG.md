@@ -54,8 +54,17 @@ All notable changes to this project will be documented in this file.
   is the single entry point for writing file content: splits the input
   into ≤1 MiB chunks, allocates each as a regular data extent, inserts
   the `EXTENT_DATA` items, computes per-sector CRC32C csums (unless
-  `nodatasum`), and bumps the inode's `nbytes`. The MVP does not yet
-  handle inline extents or compression.
+  `nodatasum`), and bumps the inode's `nbytes`.
+
+- `btrfs-transaction`: inline extent support.
+  `Transaction::insert_inline_extent` embeds small payloads directly in
+  the FS tree leaf as an inline `EXTENT_DATA` item with no extent-tree
+  entry and no csum entries; `INODE.nbytes` is bumped by the unaligned
+  payload length per the on-disk convention. `write_file_data` now
+  picks inline automatically when `file_offset == 0` and
+  `data.len() <= max_inline_data_size(sectorsize, nodesize)` (4095
+  bytes on a default 16K nodesize / 4K sectorsize filesystem).
+  Compression is still pending.
 
 ### Fixed
 

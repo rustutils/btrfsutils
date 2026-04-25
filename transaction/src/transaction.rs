@@ -609,6 +609,64 @@ impl<R: Read + Write + Seek> Transaction<R> {
         Ok(())
     }
 
+    /// Insert an inline `EXTENT_DATA` item that embeds `data` directly
+    /// in the FS tree leaf, and bump the inode's `nbytes` by
+    /// `data.len()`.
+    ///
+    /// Inline extents have no separate data extent, no extent-tree
+    /// entry, and no csum entries. They are the canonical
+    /// representation for small files (size below
+    /// [`max_inline_data_size`]).
+    ///
+    /// Per the on-disk format the key offset for an inline extent is
+    /// always 0; this function rejects any other `file_offset`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `file_offset != 0`, if `data` is empty or
+    /// larger than `max_inline_data_size(sectorsize, nodesize)`, or if
+    /// any tree operation fails.
+    pub fn insert_inline_extent(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        inode: u64,
+        file_offset: u64,
+        data: &[u8],
+    ) -> io::Result<()> {
+        use btrfs_disk::items::{CompressionType, FileExtentItem};
+
+        if file_offset != 0 {
+            return Err(io::Error::other(format!(
+                "insert_inline_extent: file_offset must be 0, got {file_offset}"
+            )));
+        }
+        if data.is_empty() {
+            return Err(io::Error::other(
+                "insert_inline_extent: empty data not supported",
+            ));
+        }
+        let max = max_inline_data_size(fs_info.sectorsize, fs_info.nodesize);
+        if data.len() > max {
+            return Err(io::Error::other(format!(
+                "insert_inline_extent: data length {} exceeds inline limit {max}",
+                data.len(),
+            )));
+        }
+
+        let extent_data = FileExtentItem::to_bytes_inline(
+            self.transid,
+            data.len() as u64,
+            CompressionType::None,
+            data,
+        );
+        self.insert_file_extent(fs_info, tree_id, inode, 0, &extent_data)?;
+        // For inline extents, INODE.nbytes accounts for the actual
+        // inline byte count (no sectorsize alignment).
+        self.update_inode_nbytes(fs_info, tree_id, inode, data.len() as i64)?;
+        Ok(())
+    }
+
     /// Write `data` as the file content of `inode` in `tree_id` starting
     /// at `file_offset`. The inode's `INODE_ITEM` must already exist.
     ///
@@ -650,6 +708,15 @@ impl<R: Read + Write + Seek> Transaction<R> {
             return Err(io::Error::other(
                 "write_file_data: empty data not supported",
             ));
+        }
+
+        // Small files starting at offset 0 go into an inline extent
+        // embedded directly in the FS tree leaf. No allocation, no csums.
+        if file_offset == 0
+            && data.len()
+                <= max_inline_data_size(fs_info.sectorsize, fs_info.nodesize)
+        {
+            return self.insert_inline_extent(fs_info, tree_id, inode, 0, data);
         }
 
         const MAX_EXTENT_SIZE: usize = 1024 * 1024;
@@ -3199,6 +3266,26 @@ const fn align_up(value: u64, align: u64) -> u64 {
     (value + align - 1) & !(align - 1)
 }
 
+/// Maximum payload bytes that fit in an inline `EXTENT_DATA` item.
+///
+/// Derived as `min(nodesize - 147, sectorsize - 1)`. The 147 accounts
+/// for the leaf header (`HEADER_SIZE` = 101), the per-item descriptor
+/// (`ITEM_SIZE` = 25), and the `FileExtentItem` header (21 bytes). The
+/// `sectorsize - 1` cap is btrfs's convention: sector-or-larger files
+/// must use a regular extent.
+///
+/// For default 16K nodesize / 4K sectorsize: 4095 bytes.
+#[must_use]
+pub const fn max_inline_data_size(sectorsize: u32, nodesize: u32) -> usize {
+    let max_item_inline = (nodesize as usize) - HEADER_SIZE - ITEM_SIZE - 21;
+    let sector_cap = (sectorsize as usize) - 1;
+    if max_item_inline < sector_cap {
+        max_item_inline
+    } else {
+        sector_cap
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3216,5 +3303,17 @@ mod tests {
     #[test]
     fn align_up_zero() {
         assert_eq!(align_up(0, 4096), 0);
+    }
+
+    #[test]
+    fn max_inline_default_nodesize_sectorsize() {
+        // 16K nodesize / 4K sectorsize: capped by sectorsize - 1.
+        assert_eq!(max_inline_data_size(4096, 16384), 4095);
+    }
+
+    #[test]
+    fn max_inline_large_sectorsize_capped_by_nodesize() {
+        // 4K nodesize / 64K sectorsize: capped by nodesize budget.
+        assert_eq!(max_inline_data_size(65536, 4096), 4096 - 147);
     }
 }

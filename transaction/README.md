@@ -114,12 +114,17 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
   in-place patch of the inode's `nbytes` field at the fixed struct
   offset. Preserves all other fields (including `flags`, `rdev`,
   `sequence`) that round-tripping via `InodeItemArgs` would lose.
+- **`Transaction::insert_inline_extent(tree, ino, file_offset,
+  data)`**: embeds `data` directly in the FS tree leaf as an inline
+  `EXTENT_DATA` item. No extent-tree entry, no csum entries.
+  `INODE.nbytes` is bumped by the unaligned payload length.
 - **`Transaction::write_file_data(tree, ino, file_offset, data,
-  nodatasum)`**: high-level helper that splits `data` into ≤1 MiB
-  chunks, allocates each as a regular extent, inserts the
-  `EXTENT_DATA` item, computes csums (unless `nodatasum`), and
-  bumps the inode's `nbytes`. Inline extents and compression are
-  not yet handled and must be done with the lower-level helpers.
+  nodatasum)`**: high-level helper that picks inline vs regular
+  based on `data.len()` and the per-filesystem inline threshold
+  (`max_inline_data_size`). For regular extents, splits `data`
+  into ≤1 MiB chunks, allocates each, inserts the `EXTENT_DATA`
+  item, computes csums (unless `nodatasum`), and bumps the
+  inode's `nbytes`. Compression is not yet handled.
 
 ### Free space tree
 
@@ -152,14 +157,10 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## What's not yet implemented
 
-- **Compression for data extents**: `alloc_data_extent` writes the
-  raw bytes only; zlib/zstd/LZO and the high-level
-  `write_file_data` helper that selects compression and updates
-  inode `nbytes` are not yet present.
-- **Inline extent helper**: `FileExtentItem::to_bytes_inline` exists
-  in `btrfs-disk` but `Transaction` has no `insert_inline_extent`
-  helper that picks inline vs regular based on size and updates the
-  inode appropriately.
+- **Compression for data extents**: `alloc_data_extent` and
+  `write_file_data` write raw bytes only; zlib/zstd/LZO selection
+  and the matching `EXTENT_DATA.compression` field are not yet
+  present.
 - **New SYSTEM chunk allocation**: if no existing SYSTEM block
   group has free space, `ensure_in_sys_chunk_array` cannot carve
   out a new one. Bails cleanly.
