@@ -64,7 +64,17 @@ All notable changes to this project will be documented in this file.
   picks inline automatically when `file_offset == 0` and
   `data.len() <= max_inline_data_size(sectorsize, nodesize)` (4095
   bytes on a default 16K nodesize / 4K sectorsize filesystem).
-  Compression is still pending.
+
+- `btrfs-transaction`: zlib + zstd compression for the data write path.
+  New `try_compress(data, algorithm)` function returns the compressed
+  bytes only when they shrink (callers fall back to raw otherwise).
+  `Transaction::write_file_data` and `insert_inline_extent` gain a
+  `compression: Option<CompressionType>` parameter. For regular extents
+  each chunk is compressed independently with per-chunk fallback to
+  raw; `disk_num_bytes` shrinks while `num_bytes`/`ram_bytes`/
+  `INODE.nbytes` track the logical (sector-aligned) size. Csums always
+  cover the on-disk (compressed) bytes. LZO is recognised but
+  short-circuits to raw (per-sector framing pending).
 
 ### Fixed
 

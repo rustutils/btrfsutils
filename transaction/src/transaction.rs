@@ -613,6 +613,14 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// in the FS tree leaf, and bump the inode's `nbytes` by
     /// `data.len()`.
     ///
+    /// `data` is the *uncompressed* file content. When `compression` is
+    /// `Some(algorithm)`, the function attempts to compress `data` and
+    /// embeds the compressed bytes if they shrink (the on-disk
+    /// `compression` byte reflects the actual algorithm used; if
+    /// compression doesn't shrink, the raw bytes are embedded with
+    /// `compression = None`). LZO inline framing is not yet supported
+    /// and falls back to raw.
+    ///
     /// Inline extents have no separate data extent, no extent-tree
     /// entry, and no csum entries. They are the canonical
     /// representation for small files (size below
@@ -624,8 +632,9 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// # Errors
     ///
     /// Returns an error if `file_offset != 0`, if `data` is empty or
-    /// larger than `max_inline_data_size(sectorsize, nodesize)`, or if
-    /// any tree operation fails.
+    /// the bytes that would be embedded exceed
+    /// `max_inline_data_size(sectorsize, nodesize)`, or if any tree
+    /// operation fails.
     pub fn insert_inline_extent(
         &mut self,
         fs_info: &mut Filesystem<R>,
@@ -633,6 +642,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         inode: u64,
         file_offset: u64,
         data: &[u8],
+        compression: Option<btrfs_disk::items::CompressionType>,
     ) -> io::Result<()> {
         use btrfs_disk::items::{CompressionType, FileExtentItem};
 
@@ -646,23 +656,36 @@ impl<R: Read + Write + Seek> Transaction<R> {
                 "insert_inline_extent: empty data not supported",
             ));
         }
+
+        // Try compression if requested. Fall back to raw if it doesn't
+        // shrink (or for unsupported algorithms like LZO, which uses a
+        // distinct inline framing format).
+        let (embed, comp_byte) = match compression {
+            Some(ct) => match try_compress(data, ct) {
+                Some(c) => (c, ct),
+                None => (data.to_vec(), CompressionType::None),
+            },
+            None => (data.to_vec(), CompressionType::None),
+        };
+
         let max = max_inline_data_size(fs_info.sectorsize, fs_info.nodesize);
-        if data.len() > max {
+        if embed.len() > max {
             return Err(io::Error::other(format!(
-                "insert_inline_extent: data length {} exceeds inline limit {max}",
-                data.len(),
+                "insert_inline_extent: payload {} bytes exceeds inline limit {max}",
+                embed.len(),
             )));
         }
 
         let extent_data = FileExtentItem::to_bytes_inline(
             self.transid,
             data.len() as u64,
-            CompressionType::None,
-            data,
+            comp_byte,
+            &embed,
         );
         self.insert_file_extent(fs_info, tree_id, inode, 0, &extent_data)?;
-        // For inline extents, INODE.nbytes accounts for the actual
-        // inline byte count (no sectorsize alignment).
+        // For inline extents, INODE.nbytes accounts for the
+        // *uncompressed* inline byte count (the bytes the file logically
+        // contains, not what's stored in the leaf).
         self.update_inode_nbytes(fs_info, tree_id, inode, data.len() as i64)?;
         Ok(())
     }
@@ -672,19 +695,30 @@ impl<R: Read + Write + Seek> Transaction<R> {
     ///
     /// Splits `data` into extents of at most 1 MiB each. For each chunk:
     ///
-    /// 1. Allocate a data extent via [`alloc_data_extent`](Self::alloc_data_extent)
-    ///    (writes the bytes, queues a `+1` `EXTENT_DATA_REF`).
-    /// 2. Insert an `EXTENT_DATA` item via
-    ///    [`insert_file_extent`](Self::insert_file_extent), with `num_bytes`,
-    ///    `ram_bytes`, and `disk_num_bytes` all set to the chunk's
-    ///    sectorsize-aligned size.
-    /// 3. If `nodatasum == false`, insert per-sector CRC32C csums via
+    /// 1. Optionally compress the chunk with the algorithm in
+    ///    `compression` (per-chunk fallback to raw if compression
+    ///    doesn't shrink the bytes).
+    /// 2. Allocate a data extent via [`alloc_data_extent`](Self::alloc_data_extent)
+    ///    for the bytes that will land on disk (compressed or raw,
+    ///    zero-padded to sectorsize).
+    /// 3. Insert an `EXTENT_DATA` item via
+    ///    [`insert_file_extent`](Self::insert_file_extent). For
+    ///    compressed chunks `disk_num_bytes` is the aligned compressed
+    ///    size; `num_bytes`/`ram_bytes` are the aligned logical size.
+    /// 4. If `nodatasum == false`, insert per-sector CRC32C csums over
+    ///    the on-disk (compressed+padded) bytes via
     ///    [`insert_csums`](Self::insert_csums).
-    /// 4. Bump the inode's `nbytes` by the chunk's aligned size.
+    /// 5. Bump the inode's `nbytes` by the chunk's aligned logical size
+    ///    (not the on-disk size — `INODE.nbytes` is logical).
     ///
-    /// This is the MVP write path: it does not handle inline extents
-    /// (small-file tail packing) or compression. Callers wanting either
-    /// must use the lower-level helpers directly.
+    /// Files at `file_offset == 0` whose `data.len()` fits in
+    /// [`max_inline_data_size`] are stored inline via
+    /// [`insert_inline_extent`](Self::insert_inline_extent).
+    ///
+    /// `compression` selects the algorithm to attempt:
+    /// `Some(Zlib | Zstd)` are supported. `Some(Lzo)` falls through to
+    /// raw (per-sector framing not yet implemented). `None` skips the
+    /// compression attempt entirely.
     ///
     /// The file's logical size (`INODE_ITEM.size`) is the caller's
     /// responsibility — `write_file_data` only adjusts `nbytes`.
@@ -701,6 +735,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         file_offset: u64,
         data: &[u8],
         nodatasum: bool,
+        compression: Option<btrfs_disk::items::CompressionType>,
     ) -> io::Result<()> {
         use btrfs_disk::items::{CompressionType, FileExtentItem};
 
@@ -716,7 +751,14 @@ impl<R: Read + Write + Seek> Transaction<R> {
             && data.len()
                 <= max_inline_data_size(fs_info.sectorsize, fs_info.nodesize)
         {
-            return self.insert_inline_extent(fs_info, tree_id, inode, 0, data);
+            return self.insert_inline_extent(
+                fs_info,
+                tree_id,
+                inode,
+                0,
+                data,
+                compression,
+            );
         }
 
         const MAX_EXTENT_SIZE: usize = 1024 * 1024;
@@ -727,11 +769,22 @@ impl<R: Read + Write + Seek> Transaction<R> {
             let chunk_end = (chunk_offset + MAX_EXTENT_SIZE).min(data.len());
             let chunk = &data[chunk_offset..chunk_end];
             let chunk_logical_offset = file_offset + chunk_offset as u64;
-            let aligned = align_up(chunk.len() as u64, sectorsize);
+            let aligned_logical = align_up(chunk.len() as u64, sectorsize);
+
+            // Per-chunk compression attempt. If the result doesn't
+            // shrink the bytes, fall back to raw (compression byte = 0).
+            let (disk_bytes, comp_byte) = match compression {
+                Some(ct) => match try_compress(chunk, ct) {
+                    Some(c) => (c, ct),
+                    None => (chunk.to_vec(), CompressionType::None),
+                },
+                None => (chunk.to_vec(), CompressionType::None),
+            };
+            let aligned_disk = align_up(disk_bytes.len() as u64, sectorsize);
 
             let logical = self.alloc_data_extent(
                 fs_info,
-                chunk,
+                &disk_bytes,
                 tree_id,
                 inode,
                 chunk_logical_offset,
@@ -739,13 +792,13 @@ impl<R: Read + Write + Seek> Transaction<R> {
 
             let extent_data = FileExtentItem::to_bytes_regular(
                 self.transid,
-                aligned,
-                CompressionType::None,
+                aligned_logical,
+                comp_byte,
                 false,
                 logical,
-                aligned,
+                aligned_disk,
                 0,
-                aligned,
+                aligned_logical,
             );
             self.insert_file_extent(
                 fs_info,
@@ -756,16 +809,22 @@ impl<R: Read + Write + Seek> Transaction<R> {
             )?;
 
             if !nodatasum {
-                // Read back the on-disk bytes (already zero-padded by
-                // alloc_data_extent) so csums match exactly what landed
-                // on the platter.
+                // Csums cover the on-disk (compressed+padded) bytes.
                 let on_disk = fs_info
                     .reader_mut()
-                    .read_data(logical, aligned as usize)?;
+                    .read_data(logical, aligned_disk as usize)?;
                 self.insert_csums(fs_info, logical, &on_disk)?;
             }
 
-            self.update_inode_nbytes(fs_info, tree_id, inode, aligned as i64)?;
+            // INODE.nbytes accounts for the *logical* sector-aligned
+            // size, not the (potentially smaller) compressed on-disk
+            // size. btrfs check sums num_bytes for found_size.
+            self.update_inode_nbytes(
+                fs_info,
+                tree_id,
+                inode,
+                aligned_logical as i64,
+            )?;
 
             chunk_offset = chunk_end;
         }
@@ -3266,6 +3325,45 @@ const fn align_up(value: u64, align: u64) -> u64 {
     (value + align - 1) & !(align - 1)
 }
 
+/// Attempt to compress `data` with the requested algorithm.
+///
+/// Returns `Some(compressed)` only if the result is strictly smaller
+/// than the input — callers should fall back to writing the raw bytes
+/// otherwise. Returns `None` for `CompressionType::None`,
+/// `CompressionType::Lzo` (per-sector framing not yet implemented),
+/// `CompressionType::Unknown(_)`, or empty input.
+///
+/// Default levels: zlib level 3, zstd level 3.
+#[must_use]
+pub fn try_compress(
+    data: &[u8],
+    algorithm: btrfs_disk::items::CompressionType,
+) -> Option<Vec<u8>> {
+    use btrfs_disk::items::CompressionType;
+
+    if data.is_empty() {
+        return None;
+    }
+    let compressed = match algorithm {
+        CompressionType::None
+        | CompressionType::Lzo
+        | CompressionType::Unknown(_) => return None,
+        CompressionType::Zlib => {
+            use flate2::{Compression, write::ZlibEncoder};
+            use std::io::Write;
+            let mut enc = ZlibEncoder::new(Vec::new(), Compression::new(3));
+            enc.write_all(data).ok()?;
+            enc.finish().ok()?
+        }
+        CompressionType::Zstd => zstd::bulk::compress(data, 3).ok()?,
+    };
+    if compressed.len() < data.len() {
+        Some(compressed)
+    } else {
+        None
+    }
+}
+
 /// Maximum payload bytes that fit in an inline `EXTENT_DATA` item.
 ///
 /// Derived as `min(nodesize - 147, sectorsize - 1)`. The 147 accounts
@@ -3315,5 +3413,55 @@ mod tests {
     fn max_inline_large_sectorsize_capped_by_nodesize() {
         // 4K nodesize / 64K sectorsize: capped by nodesize budget.
         assert_eq!(max_inline_data_size(65536, 4096), 4096 - 147);
+    }
+
+    #[test]
+    fn try_compress_zlib_compressible() {
+        use btrfs_disk::items::CompressionType;
+        let data = vec![0x42u8; 4096];
+        let compressed = try_compress(&data, CompressionType::Zlib).unwrap();
+        assert!(compressed.len() < data.len());
+    }
+
+    #[test]
+    fn try_compress_zstd_compressible() {
+        use btrfs_disk::items::CompressionType;
+        let data = vec![0x42u8; 4096];
+        let compressed = try_compress(&data, CompressionType::Zstd).unwrap();
+        assert!(compressed.len() < data.len());
+    }
+
+    #[test]
+    fn try_compress_incompressible_returns_none() {
+        use btrfs_disk::items::CompressionType;
+        // xorshift64 PRNG produces high-entropy bytes that neither
+        // zlib nor zstd can shrink.
+        let mut state: u64 = 0xDEAD_BEEF_CAFE_F00D;
+        let data: Vec<u8> = (0..4096)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state as u8
+            })
+            .collect();
+        assert!(try_compress(&data, CompressionType::Zlib).is_none());
+        assert!(try_compress(&data, CompressionType::Zstd).is_none());
+    }
+
+    #[test]
+    fn try_compress_empty_returns_none() {
+        use btrfs_disk::items::CompressionType;
+        assert!(try_compress(&[], CompressionType::Zlib).is_none());
+        assert!(try_compress(&[], CompressionType::Zstd).is_none());
+    }
+
+    #[test]
+    fn try_compress_none_lzo_unknown_return_none() {
+        use btrfs_disk::items::CompressionType;
+        let data = vec![0x42u8; 4096];
+        assert!(try_compress(&data, CompressionType::None).is_none());
+        assert!(try_compress(&data, CompressionType::Lzo).is_none());
+        assert!(try_compress(&data, CompressionType::Unknown(99)).is_none());
     }
 }

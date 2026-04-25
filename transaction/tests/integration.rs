@@ -2470,7 +2470,7 @@ fn write_file_data_passes_btrfs_check() {
         //    the bytes to disk, inserts the EXTENT_DATA item, computes
         //    per-sector csums, and bumps INODE.nbytes — all in one call.
         trans
-            .write_file_data(&mut fs, 5, file_inode, 0, payload, false)
+            .write_file_data(&mut fs, 5, file_inode, 0, payload, false, None)
             .expect("write_file_data");
 
         trans.commit(&mut fs).expect("commit");
@@ -2709,7 +2709,7 @@ fn write_file_data_inline_passes_btrfs_check() {
 
         // Small payload — write_file_data should pick inline.
         trans
-            .write_file_data(&mut fs, 5, file_inode, 0, payload, false)
+            .write_file_data(&mut fs, 5, file_inode, 0, payload, false, None)
             .expect("write_file_data");
 
         trans.commit(&mut fs).expect("commit");
@@ -3020,7 +3020,7 @@ fn write_file_data_multi_chunk_passes_btrfs_check() {
 
         // The actual write — three chunks.
         trans
-            .write_file_data(&mut fs, 5, file_inode, 0, &payload, false)
+            .write_file_data(&mut fs, 5, file_inode, 0, &payload, false, None)
             .expect("write_file_data");
 
         trans.commit(&mut fs).expect("commit");
@@ -3579,4 +3579,473 @@ fn allocator_finds_free_space_in_mkfs_image() {
 
     // Transaction::start succeeds (which internally runs the allocator).
     let _trans = Transaction::start(&mut fs).expect("start txn");
+}
+
+/// Wire up the FS-tree dir machinery (INODE_ITEM, INODE_REF, DIR_ITEM,
+/// DIR_INDEX, parent dir size bump, ROOT_ITEM embedded inode mirror)
+/// for a single regular file in the FS root. Only used by the
+/// compressed-extent tests; the older tests inlined the same boilerplate.
+#[allow(clippy::too_many_arguments)]
+fn create_file_dir_machinery(
+    fs: &mut Filesystem<File>,
+    trans: &mut Transaction<File>,
+    file_inode: u64,
+    file_name: &[u8],
+    file_size: u64,
+    dir_index: u64,
+    transid: u64,
+    ts: btrfs_disk::items::Timespec,
+) {
+    use btrfs_disk::items::{DirItem, InodeItemArgs, InodeRef};
+
+    let root_dir_inode = 256u64;
+
+    let inode_data = InodeItemArgs {
+        generation: transid,
+        size: file_size,
+        nbytes: 0,
+        nlink: 1,
+        uid: 0,
+        gid: 0,
+        mode: 0o100644,
+        time: ts,
+    }
+    .to_bytes();
+    let inode_key = DiskKey {
+        objectid: file_inode,
+        key_type: KeyType::InodeItem,
+        offset: 0,
+    };
+    let mut path = BtrfsPath::new();
+    search::search_slot(
+        Some(trans),
+        fs,
+        5,
+        &inode_key,
+        &mut path,
+        SearchIntent::Insert((25 + inode_data.len()) as u32),
+        true,
+    )
+    .unwrap();
+    let leaf = path.nodes[0].as_mut().unwrap();
+    items::insert_item(leaf, path.slots[0], &inode_key, &inode_data).unwrap();
+    fs.mark_dirty(leaf);
+    path.release();
+
+    let iref_data = InodeRef::serialize(dir_index, file_name);
+    let iref_key = DiskKey {
+        objectid: file_inode,
+        key_type: KeyType::InodeRef,
+        offset: root_dir_inode,
+    };
+    let mut path = BtrfsPath::new();
+    search::search_slot(
+        Some(trans),
+        fs,
+        5,
+        &iref_key,
+        &mut path,
+        SearchIntent::Insert((25 + iref_data.len()) as u32),
+        true,
+    )
+    .unwrap();
+    let leaf = path.nodes[0].as_mut().unwrap();
+    items::insert_item(leaf, path.slots[0], &iref_key, &iref_data).unwrap();
+    fs.mark_dirty(leaf);
+    path.release();
+
+    let location = DiskKey {
+        objectid: file_inode,
+        key_type: KeyType::InodeItem,
+        offset: 0,
+    };
+    let dir_data = DirItem::serialize(
+        &location,
+        transid,
+        btrfs_disk::raw::BTRFS_FT_REG_FILE as u8,
+        file_name,
+    );
+    let dir_item_key = DiskKey {
+        objectid: root_dir_inode,
+        key_type: KeyType::DirItem,
+        offset: u64::from(btrfs_disk::util::btrfs_name_hash(file_name)),
+    };
+    let mut path = BtrfsPath::new();
+    search::search_slot(
+        Some(trans),
+        fs,
+        5,
+        &dir_item_key,
+        &mut path,
+        SearchIntent::Insert((25 + dir_data.len()) as u32),
+        true,
+    )
+    .unwrap();
+    let leaf = path.nodes[0].as_mut().unwrap();
+    items::insert_item(leaf, path.slots[0], &dir_item_key, &dir_data).unwrap();
+    fs.mark_dirty(leaf);
+    path.release();
+
+    let dir_index_key = DiskKey {
+        objectid: root_dir_inode,
+        key_type: KeyType::DirIndex,
+        offset: dir_index,
+    };
+    let mut path = BtrfsPath::new();
+    search::search_slot(
+        Some(trans),
+        fs,
+        5,
+        &dir_index_key,
+        &mut path,
+        SearchIntent::Insert((25 + dir_data.len()) as u32),
+        true,
+    )
+    .unwrap();
+    let leaf = path.nodes[0].as_mut().unwrap();
+    items::insert_item(leaf, path.slots[0], &dir_index_key, &dir_data).unwrap();
+    fs.mark_dirty(leaf);
+    path.release();
+
+    let dir_inode_key = DiskKey {
+        objectid: root_dir_inode,
+        key_type: KeyType::InodeItem,
+        offset: 0,
+    };
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        Some(trans),
+        fs,
+        5,
+        &dir_inode_key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        true,
+    )
+    .unwrap();
+    assert!(found);
+    let leaf = path.nodes[0].as_mut().unwrap();
+    let slot = path.slots[0];
+    let old_data = leaf.item_data(slot).to_vec();
+    let mut inode = btrfs_disk::items::InodeItem::parse(&old_data).unwrap();
+    inode.size += file_name.len() as u64 * 2;
+    inode.transid = transid;
+    let new_data = InodeItemArgs {
+        generation: inode.generation,
+        size: inode.size,
+        nbytes: inode.nbytes,
+        nlink: inode.nlink,
+        uid: inode.uid,
+        gid: inode.gid,
+        mode: inode.mode,
+        time: ts,
+    }
+    .to_bytes();
+    items::update_item(leaf, slot, &new_data).unwrap();
+    fs.mark_dirty(leaf);
+    path.release();
+
+    let root_key = DiskKey {
+        objectid: 5,
+        key_type: KeyType::RootItem,
+        offset: 0,
+    };
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        Some(trans),
+        fs,
+        1,
+        &root_key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        true,
+    )
+    .unwrap();
+    assert!(found);
+    let leaf = path.nodes[0].as_mut().unwrap();
+    let slot = path.slots[0];
+    let ri_data = leaf.item_data(slot).to_vec();
+    let mut root_item = RootItem::parse(&ri_data).unwrap();
+    let mut embedded =
+        btrfs_disk::items::InodeItem::parse(&root_item.inode_data).unwrap();
+    embedded.size += file_name.len() as u64 * 2;
+    let new_inode = InodeItemArgs {
+        generation: embedded.generation,
+        size: embedded.size,
+        nbytes: embedded.nbytes,
+        nlink: embedded.nlink,
+        uid: embedded.uid,
+        gid: embedded.gid,
+        mode: embedded.mode,
+        time: ts,
+    }
+    .to_bytes();
+    root_item.inode_data = new_inode;
+    let new_ri = root_item.to_bytes();
+    assert_eq!(new_ri.len(), ri_data.len());
+    items::update_item(leaf, slot, &new_ri).unwrap();
+    fs.mark_dirty(leaf);
+    path.release();
+}
+
+/// Run write_file_data with a compressible 8 KiB payload and verify that
+/// (1) `EXTENT_DATA.compression` is set to the requested algorithm,
+/// (2) `disk_num_bytes < num_bytes` (the on-disk extent shrunk),
+/// (3) `INODE.nbytes` matches the logical (sector-aligned) size, and
+/// (4) `btrfs check` accepts the filesystem.
+fn run_compressed_regular_test(
+    file_name: &[u8],
+    algorithm: btrfs_disk::items::CompressionType,
+) {
+    use btrfs_disk::items::{
+        CompressionType, FileExtentBody, FileExtentItem, FileExtentType,
+        Timespec,
+    };
+
+    let (_dir, img_path) = create_test_image();
+
+    let file_inode = 257u64;
+    let dir_index = 100u64;
+    // 8 KiB of repeated bytes — highly compressible.
+    let payload = vec![0x42u8; 8192];
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let transid = fs.superblock.generation + 1;
+        let ts = Timespec {
+            sec: 1_700_000_000,
+            nsec: 0,
+        };
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        create_file_dir_machinery(
+            &mut fs,
+            &mut trans,
+            file_inode,
+            file_name,
+            payload.len() as u64,
+            dir_index,
+            transid,
+            ts,
+        );
+        trans
+            .write_file_data(
+                &mut fs,
+                5,
+                file_inode,
+                0,
+                &payload,
+                false,
+                Some(algorithm),
+            )
+            .expect("write_file_data");
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+
+        let key = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::ExtentData,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            5,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .unwrap();
+        assert!(found, "EXTENT_DATA not found");
+        let leaf = path.leaf().unwrap();
+        let data = leaf.item_data(path.slots[0]).to_vec();
+        let fei = FileExtentItem::parse(&data).expect("parse");
+        assert_eq!(fei.extent_type, FileExtentType::Regular);
+        assert_eq!(
+            fei.compression, algorithm,
+            "EXTENT_DATA.compression should reflect the requested algorithm"
+        );
+        match fei.body {
+            FileExtentBody::Regular {
+                disk_num_bytes,
+                num_bytes,
+                ..
+            } => {
+                assert!(
+                    disk_num_bytes < num_bytes,
+                    "compressed extent should shrink: disk {disk_num_bytes} \
+                     vs logical {num_bytes}"
+                );
+                assert_eq!(num_bytes, 8192, "logical num_bytes");
+            }
+            _ => panic!("expected regular body"),
+        }
+        path.release();
+
+        // INODE.nbytes accounts for logical size (sector-aligned).
+        let inode_key = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            5,
+            &inode_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .unwrap();
+        assert!(found);
+        let leaf = path.leaf().unwrap();
+        let inode_data = leaf.item_data(path.slots[0]).to_vec();
+        let inode =
+            btrfs_disk::items::InodeItem::parse(&inode_data).expect("inode");
+        assert_eq!(
+            inode.nbytes, 8192,
+            "compressed regular: nbytes is logical, not compressed"
+        );
+        // Silence unused-import in builds without compression failure.
+        let _ = CompressionType::None;
+        path.release();
+    }
+
+    assert_btrfs_check(&img_path);
+}
+
+#[test]
+fn write_file_data_zlib_compressed_passes_btrfs_check() {
+    run_compressed_regular_test(
+        b"zlib.bin",
+        btrfs_disk::items::CompressionType::Zlib,
+    );
+}
+
+#[test]
+fn write_file_data_zstd_compressed_passes_btrfs_check() {
+    run_compressed_regular_test(
+        b"zstd.bin",
+        btrfs_disk::items::CompressionType::Zstd,
+    );
+}
+
+/// Inline + compression: a small compressible payload should be inlined
+/// with the requested algorithm reflected in `EXTENT_DATA.compression`.
+#[test]
+fn write_file_data_inline_zlib_compressed_passes_btrfs_check() {
+    use btrfs_disk::items::{
+        CompressionType, FileExtentBody, FileExtentItem, FileExtentType,
+        Timespec,
+    };
+
+    let (_dir, img_path) = create_test_image();
+    let file_name = b"inline-zlib.txt";
+    let file_inode = 257u64;
+    let dir_index = 100u64;
+    // Highly compressible, well below the 4095-byte inline threshold.
+    let payload = vec![0x42u8; 1024];
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let transid = fs.superblock.generation + 1;
+        let ts = Timespec {
+            sec: 1_700_000_000,
+            nsec: 0,
+        };
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        create_file_dir_machinery(
+            &mut fs,
+            &mut trans,
+            file_inode,
+            file_name,
+            payload.len() as u64,
+            dir_index,
+            transid,
+            ts,
+        );
+        trans
+            .write_file_data(
+                &mut fs,
+                5,
+                file_inode,
+                0,
+                &payload,
+                false,
+                Some(CompressionType::Zlib),
+            )
+            .expect("write_file_data");
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("reopen");
+
+        let key = DiskKey {
+            objectid: file_inode,
+            key_type: KeyType::ExtentData,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            5,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .unwrap();
+        assert!(found);
+        let leaf = path.leaf().unwrap();
+        let data = leaf.item_data(path.slots[0]).to_vec();
+        let fei = FileExtentItem::parse(&data).expect("parse");
+        assert_eq!(fei.extent_type, FileExtentType::Inline);
+        assert_eq!(fei.compression, CompressionType::Zlib);
+        assert_eq!(fei.ram_bytes, payload.len() as u64);
+        match fei.body {
+            FileExtentBody::Inline { inline_size } => {
+                // Compressed payload is much smaller than 1024 raw bytes.
+                assert!(
+                    inline_size < payload.len(),
+                    "inline payload should compress: {inline_size} \
+                     vs uncompressed {}",
+                    payload.len()
+                );
+            }
+            _ => panic!("expected inline body"),
+        }
+        path.release();
+    }
+
+    assert_btrfs_check(&img_path);
 }

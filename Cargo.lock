@@ -280,6 +280,7 @@ dependencies = [
  "tempfile",
  "test-strategy",
  "uuid",
+ "zstd",
 ]
 
 [[package]]
