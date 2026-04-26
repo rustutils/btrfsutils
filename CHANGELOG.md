@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `btrfs-transaction`: `convert::seed_free_space_tree(trans, fs_info)`
+  helper. Walks every block group, derives free ranges from the
+  extent tree, and inserts one `FREE_SPACE_INFO` plus one
+  `FREE_SPACE_EXTENT` per range into tree id 10. Idempotent at the
+  per-block-group level (skips block groups whose `FREE_SPACE_INFO`
+  is already present), rejects pre-existing bitmap-layout entries.
+  Extracted from `convert_to_free_space_tree` so mkfs's
+  `post_bootstrap` can call it after creating the FST mid-transaction.
+  `read_free_space_info` lifted to `pub(crate)` for the helper's
+  idempotency probe.
+
 ### Changed
 
 - `btrfs-mkfs`: quota tree creation (`-O quota` / `-O squota`) moves

@@ -94,17 +94,91 @@ pub fn convert_to_free_space_tree<R: Read + Write + Seek>(
     // Step 1: create the new FST root.
     trans.create_empty_tree(fs_info, FREE_SPACE_TREE_ID)?;
 
-    // Step 2: per-block-group population. Snapshot the BG list now
-    // because we will be modifying the FST tree (allocating
-    // metadata blocks for its leaves) which does not affect the
-    // block-group set itself.
+    // Step 2: walk every block group, derive free ranges, insert
+    // FREE_SPACE_INFO + FREE_SPACE_EXTENT items.
+    seed_free_space_tree(trans, fs_info)?;
+
+    // Step 3: flip superblock bits. The in-memory superblock is the
+    // single source of truth; the commit path serialises it.
+    fs_info.superblock.compat_ro_flags |= fst_bit | fst_valid_bit;
+    // Zero cache_generation so the kernel does not try to load a
+    // stale v1 cache on the next mount.
+    fs_info.superblock.cache_generation = 0;
+
+    Ok(())
+}
+
+/// Walk every block group, derive its free ranges from the extent
+/// tree, and insert one `FREE_SPACE_INFO` plus one `FREE_SPACE_EXTENT`
+/// per range into the free space tree (objectid 10).
+///
+/// Idempotent at the per-block-group level: any block group whose
+/// `FREE_SPACE_INFO` is already present is skipped, so this can be
+/// called against a partially-seeded FST without producing duplicate
+/// entries. A pre-existing entry that uses the bitmap layout (the
+/// `USING_BITMAPS` flag) is rejected — same restriction as the rest of
+/// the v1 FST machinery.
+///
+/// Preconditions:
+/// * The FST root must already be registered
+///   (`fs_info.root_bytenr(10).is_some()`). Typically this means the
+///   caller has called [`Transaction::create_empty_tree`] for tree id
+///   10 in the same transaction (or mkfs's bootstrap put it there).
+/// * No `USING_BITMAPS` block groups (only the extent layout is
+///   supported in v1).
+///
+/// Intended for two callers:
+/// * [`convert_to_free_space_tree`] uses it as the populate step
+///   right after `create_empty_tree(10)`.
+/// * mkfs's `post_bootstrap` will use it to seed an FST it just
+///   created mid-transaction, so the immediately-following commit's
+///   FST update step has entries to apply deltas to.
+///
+/// # Errors
+///
+/// Returns an error if the FST root is missing, if any block group
+/// uses bitmap layout, if `extent_walk::walk_block_group_extents` or
+/// `derive_free_ranges` fails, or if any tree read/write fails.
+pub fn seed_free_space_tree<R: Read + Write + Seek>(
+    trans: &mut Transaction<R>,
+    fs_info: &mut Filesystem<R>,
+) -> io::Result<()> {
+    use btrfs_disk::items::FreeSpaceInfoFlags;
+
+    if fs_info.root_bytenr(FREE_SPACE_TREE_ID).is_none() {
+        return Err(io::Error::other(
+            "seed_free_space_tree: FST root not registered (call create_empty_tree(10) first)",
+        ));
+    }
+
+    // Snapshot the BG list now: subsequent inserts COW FST leaves
+    // (allocating new metadata blocks) but do not change which block
+    // groups exist.
     let block_groups = allocation::load_block_groups(fs_info)?;
     debug_assert!(
         !block_groups.is_empty(),
-        "convert_to_free_space_tree: no block groups found",
+        "seed_free_space_tree: no block groups found",
     );
 
     for bg in &block_groups {
+        // Per-BG idempotency: if a FREE_SPACE_INFO already exists,
+        // skip this BG. Reject if it uses bitmap layout (consistent
+        // with the FST update path which also can't handle bitmaps).
+        if let Some(existing) = trans.read_free_space_info(
+            fs_info,
+            FREE_SPACE_TREE_ID,
+            bg.start,
+            bg.length,
+        )? {
+            if existing.flags.contains(FreeSpaceInfoFlags::USING_BITMAPS) {
+                return Err(io::Error::other(format!(
+                    "seed_free_space_tree: BG {} uses bitmap layout (unsupported in v1)",
+                    bg.start,
+                )));
+            }
+            continue;
+        }
+
         let mut allocated: Vec<AllocatedExtent> = Vec::new();
         extent_walk::walk_block_group_extents(
             fs_info,
@@ -121,16 +195,15 @@ pub fn convert_to_free_space_tree<R: Read + Write + Seek>(
 
         let extent_count = u32::try_from(free_ranges.len()).map_err(|_| {
             io::Error::other(format!(
-                "convert_to_free_space_tree: BG {} has too many free extents to fit in u32",
+                "seed_free_space_tree: BG {} has too many free extents to fit in u32",
                 bg.start,
             ))
         })?;
 
-        // 2a. Insert FREE_SPACE_INFO with non-bitmap layout. The
-        // payload is 8 bytes: u32 extent_count, u32 flags=0.
+        // FREE_SPACE_INFO payload is 8 bytes: u32 extent_count, u32
+        // flags. flags = 0 selects the extent (non-bitmap) layout.
         let mut info_data = [0u8; 8];
         info_data[0..4].copy_from_slice(&extent_count.to_le_bytes());
-        // flags = 0 (extent layout, not USING_BITMAPS)
         let info_key = DiskKey {
             objectid: bg.start,
             key_type: KeyType::FreeSpaceInfo,
@@ -144,8 +217,6 @@ pub fn convert_to_free_space_tree<R: Read + Write + Seek>(
             &info_data,
         )?;
 
-        // 2b. Insert one zero-payload FREE_SPACE_EXTENT per derived
-        // free range.
         for r in &free_ranges {
             debug_assert!(r.length > 0);
             let key = DiskKey {
@@ -156,13 +227,6 @@ pub fn convert_to_free_space_tree<R: Read + Write + Seek>(
             insert_in_tree(trans, fs_info, FREE_SPACE_TREE_ID, &key, &[])?;
         }
     }
-
-    // Step 3: flip superblock bits. The in-memory superblock is the
-    // single source of truth; the commit path serialises it.
-    fs_info.superblock.compat_ro_flags |= fst_bit | fst_valid_bit;
-    // Zero cache_generation so the kernel does not try to load a
-    // stale v1 cache on the next mount.
-    fs_info.superblock.cache_generation = 0;
 
     Ok(())
 }

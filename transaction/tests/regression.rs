@@ -2063,6 +2063,305 @@ fn convert_to_free_space_tree_idempotent_after_one_run() {
     drop(dir);
 }
 
+// ----- seed_free_space_tree (extracted helper) -----
+
+/// Insert one item directly into the given tree via search_slot +
+/// insert_item, mirroring `convert::insert_in_tree`. Used by the
+/// seed/create helper tests to plant pre-existing FST entries before
+/// invoking the helper.
+fn raw_insert_in_tree(
+    trans: &mut Transaction<File>,
+    fs: &mut Filesystem<File>,
+    tree_id: u64,
+    key: &DiskKey,
+    data: &[u8],
+) {
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        Some(trans),
+        fs,
+        tree_id,
+        key,
+        &mut path,
+        SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+        true,
+    )
+    .unwrap();
+    assert!(!found, "raw_insert_in_tree: duplicate key {key:?}");
+    let leaf = path.nodes[0].as_mut().unwrap();
+    items::insert_item(leaf, path.slots[0], key, data).unwrap();
+    fs.mark_dirty(leaf);
+    path.release();
+}
+
+#[test]
+fn seed_free_space_tree_empty_fst_populates_every_bg() {
+    // Open a no-FST mkfs image, manually create an empty FST, call
+    // seed, commit. Every BG should have one FREE_SPACE_INFO and a
+    // matching set of FREE_SPACE_EXTENT items derived from the
+    // extent walker.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^free-space-tree"]);
+
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        trans.create_empty_tree(&mut fs, 10).unwrap();
+        convert::seed_free_space_tree(&mut trans, &mut fs).unwrap();
+        // The FST update step in commit needs the FREE_SPACE_TREE
+        // compat_ro flag to be set; otherwise it skips and our
+        // newly-seeded entries never get touched again, but the
+        // commit still works.
+        fs.superblock.compat_ro_flags |=
+            COMPAT_RO_FREE_SPACE_TREE | COMPAT_RO_FREE_SPACE_TREE_VALID;
+        fs.superblock.cache_generation = 0;
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let mut fs = open_rw(&img_path);
+    for bg in allocation::load_block_groups(&mut fs).unwrap() {
+        let mut walked = Vec::new();
+        extent_walk::walk_block_group_extents(
+            &mut fs,
+            bg.start,
+            bg.length,
+            |e| {
+                walked.push(e);
+                Ok(())
+            },
+        )
+        .unwrap();
+        let derived =
+            extent_walk::derive_free_ranges(bg.start, bg.length, &walked)
+                .unwrap();
+        let derived_pairs: Vec<(u64, u64)> =
+            derived.iter().map(|r| (r.start, r.length)).collect();
+        let fst = read_fst_extents(&mut fs, bg.start, bg.length);
+        assert_eq!(
+            derived_pairs, fst,
+            "seed: walker disagrees with FST in BG {}",
+            bg.start
+        );
+    }
+    drop(fs);
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn seed_free_space_tree_idempotent() {
+    // Calling seed twice in two different transactions over the
+    // same filesystem must not produce duplicate items. The second
+    // call sees existing FREE_SPACE_INFO entries and skips every BG.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^free-space-tree"]);
+
+    // First pass: create + seed + commit.
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        trans.create_empty_tree(&mut fs, 10).unwrap();
+        convert::seed_free_space_tree(&mut trans, &mut fs).unwrap();
+        fs.superblock.compat_ro_flags |=
+            COMPAT_RO_FREE_SPACE_TREE | COMPAT_RO_FREE_SPACE_TREE_VALID;
+        fs.superblock.cache_generation = 0;
+        trans.commit(&mut fs).unwrap();
+    }
+
+    // Snapshot the FST entry counts for every BG.
+    let before: Vec<(u64, usize)> = {
+        let mut fs = open_rw(&img_path);
+        let bgs = allocation::load_block_groups(&mut fs).unwrap();
+        bgs.iter()
+            .map(|bg| {
+                let n = read_fst_extents(&mut fs, bg.start, bg.length).len();
+                (bg.start, n)
+            })
+            .collect()
+    };
+
+    // Second pass: seed again (no create_empty_tree this time —
+    // the tree already exists). Should be a no-op per BG.
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::seed_free_space_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let after: Vec<(u64, usize)> = {
+        let mut fs = open_rw(&img_path);
+        let bgs = allocation::load_block_groups(&mut fs).unwrap();
+        bgs.iter()
+            .map(|bg| {
+                let n = read_fst_extents(&mut fs, bg.start, bg.length).len();
+                (bg.start, n)
+            })
+            .collect()
+    };
+    assert_eq!(
+        before, after,
+        "seed_free_space_tree must be idempotent: per-BG extent counts changed"
+    );
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn seed_free_space_tree_partially_seeded_skips_existing_bg() {
+    // Pre-insert a FREE_SPACE_INFO for one BG (with deliberately
+    // wrong extent_count = 0xDEADBEEF), call seed, verify the
+    // pre-seeded BG is left alone and the others get correctly
+    // populated.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^free-space-tree"]);
+
+    let target_bg_start = {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        trans.create_empty_tree(&mut fs, 10).unwrap();
+        // Pre-seed: put a sentinel FREE_SPACE_INFO into the first
+        // BG's slot.
+        let bgs = allocation::load_block_groups(&mut fs).unwrap();
+        let target = bgs[0].clone();
+        let mut payload = [0u8; 8];
+        payload[0..4].copy_from_slice(&0xDEAD_BEEFu32.to_le_bytes());
+        let key = DiskKey {
+            objectid: target.start,
+            key_type: KeyType::FreeSpaceInfo,
+            offset: target.length,
+        };
+        raw_insert_in_tree(&mut trans, &mut fs, 10, &key, &payload);
+
+        convert::seed_free_space_tree(&mut trans, &mut fs).unwrap();
+        fs.superblock.compat_ro_flags |=
+            COMPAT_RO_FREE_SPACE_TREE | COMPAT_RO_FREE_SPACE_TREE_VALID;
+        fs.superblock.cache_generation = 0;
+        trans.commit(&mut fs).unwrap();
+        target.start
+    };
+
+    let mut fs = open_rw(&img_path);
+    // Pre-seeded BG keeps its sentinel and has zero FREE_SPACE_EXTENT
+    // entries (we only inserted INFO, no extents).
+    let info_key = DiskKey {
+        objectid: target_bg_start,
+        key_type: KeyType::FreeSpaceInfo,
+        offset: allocation::load_block_groups(&mut fs)
+            .unwrap()
+            .iter()
+            .find(|bg| bg.start == target_bg_start)
+            .unwrap()
+            .length,
+    };
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        None,
+        &mut fs,
+        10,
+        &info_key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .unwrap();
+    assert!(found, "pre-seeded FREE_SPACE_INFO should still be present");
+    let leaf = path.nodes[0].as_ref().unwrap();
+    let data = leaf.item_data(path.slots[0]).to_vec();
+    let count = u32::from_le_bytes(data[0..4].try_into().unwrap());
+    assert_eq!(
+        count, 0xDEAD_BEEF,
+        "pre-seeded info untouched (sentinel preserved)"
+    );
+    path.release();
+
+    // Other BGs were correctly populated.
+    for bg in allocation::load_block_groups(&mut fs).unwrap() {
+        if bg.start == target_bg_start {
+            continue;
+        }
+        let mut walked = Vec::new();
+        extent_walk::walk_block_group_extents(
+            &mut fs,
+            bg.start,
+            bg.length,
+            |e| {
+                walked.push(e);
+                Ok(())
+            },
+        )
+        .unwrap();
+        let derived =
+            extent_walk::derive_free_ranges(bg.start, bg.length, &walked)
+                .unwrap();
+        let derived_pairs: Vec<(u64, u64)> =
+            derived.iter().map(|r| (r.start, r.length)).collect();
+        let fst = read_fst_extents(&mut fs, bg.start, bg.length);
+        assert_eq!(
+            derived_pairs, fst,
+            "non-pre-seeded BG {} should be fully populated",
+            bg.start
+        );
+    }
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn seed_free_space_tree_no_root_errors() {
+    // Without create_empty_tree(10) the seed call must surface a
+    // clear error rather than panicking or silently succeeding.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^free-space-tree"]);
+    let mut fs = open_rw(&img_path);
+    assert!(fs.root_bytenr(10).is_none());
+    let mut trans = Transaction::start(&mut fs).unwrap();
+    let err = convert::seed_free_space_tree(&mut trans, &mut fs).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("FST root not registered"),
+        "expected 'FST root not registered' error, got: {msg}"
+    );
+    trans.abort(&mut fs);
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn seed_free_space_tree_bitmap_layout_errors() {
+    // Pre-insert a FREE_SPACE_INFO with the USING_BITMAPS flag set;
+    // the helper must reject it (consistent with the FST update
+    // path's bitmap-layout rejection).
+    let (dir, img_path) =
+        create_test_image_with_features(&["^free-space-tree"]);
+    let mut fs = open_rw(&img_path);
+    let mut trans = Transaction::start(&mut fs).unwrap();
+    trans.create_empty_tree(&mut fs, 10).unwrap();
+
+    let target = allocation::load_block_groups(&mut fs).unwrap()[0].clone();
+    // FREE_SPACE_INFO payload: u32 extent_count, u32 flags. flags=1
+    // = USING_BITMAPS.
+    let mut payload = [0u8; 8];
+    payload[0..4].copy_from_slice(&0u32.to_le_bytes());
+    payload[4..8].copy_from_slice(&1u32.to_le_bytes());
+    let key = DiskKey {
+        objectid: target.start,
+        key_type: KeyType::FreeSpaceInfo,
+        offset: target.length,
+    };
+    raw_insert_in_tree(&mut trans, &mut fs, 10, &key, &payload);
+
+    let err = convert::seed_free_space_tree(&mut trans, &mut fs).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("bitmap layout"),
+        "expected bitmap-layout error, got: {msg}"
+    );
+    trans.abort(&mut fs);
+    drop(fs);
+    drop(dir);
+}
+
 // ----- Stage I.4: convert_to_block_group_tree -----
 
 const COMPAT_RO_BLOCK_GROUP_TREE: u64 = 1 << 3;

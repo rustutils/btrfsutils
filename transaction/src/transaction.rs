@@ -2048,7 +2048,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     }
 
     /// Read the `FREE_SPACE_INFO` item for a block group, if present.
-    fn read_free_space_info(
+    pub(crate) fn read_free_space_info(
         &mut self,
         fs_info: &mut Filesystem<R>,
         fst_id: u64,
