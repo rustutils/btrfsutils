@@ -254,6 +254,15 @@ impl MkfsConfig {
                     self.compat_ro_flags &= !bit;
                 }
             }
+
+            // The kernel requires FST to be enabled for BGT. If the
+            // user disables FST, also clear BGT to keep the
+            // filesystem consistent (matches what btrfs-progs does
+            // when the user passes `^free-space-tree`).
+            if !f.enabled && f.feature == Feature::FreeSpaceTree {
+                self.compat_ro_flags &=
+                    !u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE);
+            }
         }
         Ok(())
     }
@@ -419,8 +428,8 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
     let normal_used = UsedBytes {
         system: layout.system_used(),
         metadata: layout.metadata_used(
-            cfg.has_block_group_tree(),
-            cfg.has_free_space_tree(),
+            cfg.has_block_group_tree() && bootstrap_creates_post_trees,
+            cfg.has_free_space_tree() && bootstrap_creates_post_trees,
             bootstrap_creates_post_trees,
             bootstrap_creates_post_trees,
             bootstrap_creates_post_trees,
@@ -443,8 +452,15 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
 
     // Optional trees follow the base trees in this slot order:
     // BlockGroup, FreeSpace, Fs, Csum, DataReloc, Quota.
+    //
+    // BG tree and FST creation are gated on
+    // `bootstrap_creates_post_trees` like the other migrated trees:
+    // when post_bootstrap will run it materialises them itself
+    // (BGT via `create_block_group_tree`, FST via
+    // `seed_free_space_tree`); for RAID5/RAID6 mkfs builds them
+    // directly as the legacy fallback.
     let mut optional_slot: u64 = 0;
-    if cfg.has_block_group_tree() {
+    if cfg.has_block_group_tree() && bootstrap_creates_post_trees {
         let addr =
             layout.block_addr_with_offset(TreeId::BlockGroup, optional_slot);
         let bg_header = LeafHeader {
@@ -463,7 +479,7 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         trees.push((TreeId::BlockGroup, bg_tree, addr));
         optional_slot += 1;
     }
-    if cfg.has_free_space_tree() {
+    if cfg.has_free_space_tree() && bootstrap_creates_post_trees {
         let addr =
             layout.block_addr_with_offset(TreeId::FreeSpace, optional_slot);
         let fst_header = LeafHeader {
@@ -1747,7 +1763,7 @@ fn build_root_tree(
     // Optional trees in the same slot order as `make_btrfs`:
     // BlockGroup, FreeSpace, Fs, Csum, DataReloc, Quota.
     let mut optional_slot: u64 = 0;
-    if cfg.has_block_group_tree() {
+    if cfg.has_block_group_tree() && bootstrap_creates_post_trees {
         entries.push(RootEntry {
             objectid: TreeId::BlockGroup.objectid(),
             bytenr: layout
@@ -1756,7 +1772,7 @@ fn build_root_tree(
         });
         optional_slot += 1;
     }
-    if cfg.has_free_space_tree() {
+    if cfg.has_free_space_tree() && bootstrap_creates_post_trees {
         entries.push(RootEntry {
             objectid: TreeId::FreeSpace.objectid(),
             bytenr: layout
@@ -1852,7 +1868,15 @@ fn build_extent_tree(
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Extent));
     let generation = 1u64;
     let skinny = cfg.skinny_metadata();
-    let add_block_group = !cfg.has_block_group_tree();
+    // BG items live in the extent tree by default. When BGT is
+    // enabled and post_bootstrap will materialise it, mkfs still
+    // writes the items here — post_bootstrap's
+    // `create_block_group_tree` migrates them to BGT in the same
+    // transaction. The unsupported-by-post-bootstrap fallback path
+    // (RAID5/RAID6 with BGT) keeps the original behaviour: BG items
+    // go to BGT directly, not the extent tree.
+    let add_block_group =
+        !cfg.has_block_group_tree() || !bootstrap_creates_post_trees;
 
     // Collect all items into a Vec, then sort by key before pushing.
     // Tree blocks now span two different chunks (system and metadata),
@@ -1869,14 +1893,14 @@ fn build_extent_tree(
         .collect();
     {
         let mut opt_slot: u64 = 0;
-        if cfg.has_block_group_tree() {
+        if cfg.has_block_group_tree() && bootstrap_creates_post_trees {
             all_trees.push((
                 TreeId::BlockGroup,
                 layout.block_addr_with_offset(TreeId::BlockGroup, opt_slot),
             ));
             opt_slot += 1;
         }
-        if cfg.has_free_space_tree() {
+        if cfg.has_free_space_tree() && bootstrap_creates_post_trees {
             all_trees.push((
                 TreeId::FreeSpace,
                 layout.block_addr_with_offset(TreeId::FreeSpace, opt_slot),
@@ -1945,8 +1969,8 @@ fn build_extent_tree(
             ),
             items::block_group_item(
                 layout.metadata_used(
-                    cfg.has_block_group_tree(),
-                    cfg.has_free_space_tree(),
+                    cfg.has_block_group_tree() && bootstrap_creates_post_trees,
+                    cfg.has_free_space_tree() && bootstrap_creates_post_trees,
                     bootstrap_creates_post_trees,
                     bootstrap_creates_post_trees,
                     bootstrap_creates_post_trees,

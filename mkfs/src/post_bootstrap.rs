@@ -200,6 +200,16 @@ fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
 ) -> Result<()> {
     let now = cfg.now_secs();
 
+    // The block-group tree (objectid 11) MUST come first. mkfs's
+    // bootstrap (when post_bootstrap will run) leaves all
+    // BLOCK_GROUP_ITEM rows in the extent tree. Materialising BGT
+    // and migrating the items must happen before any other
+    // allocation in this transaction so subsequent BG-update calls
+    // route to BGT, not the extent tree.
+    if cfg.has_block_group_tree() {
+        ensure_block_group_tree(fs, trans)?;
+    }
+
     // The FS tree (objectid 5) is the main user-visible tree:
     // subvolume root, root dir inode 256, dir entries, file inodes.
     // For the no-rootdir path it's just the empty subvolume shape
@@ -227,11 +237,63 @@ fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
         ensure_quota_tree(fs, trans, cfg)?;
     }
 
+    // The free-space tree (objectid 10) is created when the
+    // `free-space-tree` feature is enabled (default). Created
+    // empty, then seeded with FREE_SPACE_INFO + FREE_SPACE_EXTENT
+    // items derived from the current extent tree state. Subsequent
+    // commit's update_free_space_tree pass will apply any deltas
+    // accumulated during this transaction.
+    if cfg.has_free_space_tree() {
+        ensure_free_space_tree(fs, trans)?;
+    }
+
     // btrfs-progs creates a UUID tree by default; mkfs's hand-built
     // bootstrap doesn't. The kernel populates entries lazily on
     // snapshot/send.
     ensure_empty_tree(fs, trans, u64::from(BTRFS_UUID_TREE_OBJECTID), "UUID")?;
 
+    Ok(())
+}
+
+/// Idempotently materialise the block-group tree (objectid 11) by
+/// migrating every `BLOCK_GROUP_ITEM` from the extent tree to BGT.
+/// Wraps [`btrfs_transaction::convert::create_block_group_tree`],
+/// which handles the BG-tree-id routing override during the
+/// migration so the helper itself can allocate without splitting BG
+/// state across both trees.
+fn ensure_block_group_tree<
+    R: std::io::Read + std::io::Write + std::io::Seek,
+>(
+    fs: &mut Filesystem<R>,
+    trans: &mut Transaction<R>,
+) -> Result<()> {
+    let bgt_id = u64::from(btrfs_disk::raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID);
+    if fs.root_bytenr(bgt_id).is_some() {
+        return Ok(());
+    }
+    btrfs_transaction::convert::create_block_group_tree(trans, fs)
+        .context("post_bootstrap: create_block_group_tree")?;
+    Ok(())
+}
+
+/// Idempotently create the free-space tree (objectid 10) and seed
+/// it with `FREE_SPACE_INFO` + `FREE_SPACE_EXTENT` items for every
+/// block group. Wraps
+/// [`btrfs_transaction::convert::seed_free_space_tree`], which is
+/// per-BG idempotent (so this can run after a partial seed without
+/// duplicating items).
+fn ensure_free_space_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
+    fs: &mut Filesystem<R>,
+    trans: &mut Transaction<R>,
+) -> Result<()> {
+    let fst_id = u64::from(btrfs_disk::raw::BTRFS_FREE_SPACE_TREE_OBJECTID);
+    if fs.root_bytenr(fst_id).is_none() {
+        trans
+            .create_empty_tree(fs, fst_id)
+            .context("post_bootstrap: create_empty_tree(free space tree)")?;
+    }
+    btrfs_transaction::convert::seed_free_space_tree(trans, fs)
+        .context("post_bootstrap: seed_free_space_tree")?;
     Ok(())
 }
 

@@ -30,6 +30,21 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `btrfs-mkfs`: free-space-tree and block-group-tree creation move
+  into the post-bootstrap transaction for supported profiles
+  (SINGLE / DUP / RAID0 / RAID1* / RAID10), closing Phase 2 of the
+  mkfs migration plan. mkfs's bootstrap leaves all `BLOCK_GROUP_ITEM`
+  rows in the extent tree and skips creating the FST/BG-tree leaves
+  themselves; post-bootstrap calls `convert::create_block_group_tree`
+  (which migrates the items into BGT under the routing-override
+  guard) and `convert::seed_free_space_tree` (which derives initial
+  `FREE_SPACE_INFO` + `FREE_SPACE_EXTENT` items from the extent tree
+  state). RAID5/RAID6 keeps mkfs's hand-built versions of both trees
+  as the legacy fallback.
+- `btrfs-mkfs`: `--features ^free-space-tree` now also clears the
+  `BLOCK_GROUP_TREE` `compat_ro` bit (kernel requires FST for BGT).
+  Previously these two flags could disagree if the user disabled
+  only FST, producing an image that the kernel rejects.
 - `btrfs-mkfs`: quota tree creation (`-O quota` / `-O squota`) moves
   into the post-bootstrap transaction for supported profiles. Uses a
   new `insert_raw_item` helper to write the three qgroup items

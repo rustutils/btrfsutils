@@ -374,6 +374,46 @@ fn default_profile_fs_tree_created_by_post_bootstrap() {
     assert!(ri.otime.sec > 0, "FS ROOT_ITEM.otime should be set");
 }
 
+/// Default-profile image: BG tree is migrated by post-bootstrap from
+/// the extent tree. The ROOT_ITEM should be at generation 2.
+#[test]
+fn default_profile_block_group_tree_created_by_post_bootstrap() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
+
+    let bgt_oid = u64::from(btrfs_disk::raw::BTRFS_BLOCK_GROUP_TREE_OBJECTID);
+    let entries = walk_root_tree_items(image.path(), |oid, kt, _, _| {
+        oid == bgt_oid && kt == KeyType::RootItem
+    });
+    assert_eq!(entries.len(), 1, "expected exactly one BG tree ROOT_ITEM");
+    let ri = RootItem::parse(&entries[0].3).unwrap();
+    assert_eq!(
+        ri.generation, 2,
+        "BG tree should be created by post_bootstrap (gen 2)",
+    );
+}
+
+/// Default-profile image: FST is created and seeded by post-bootstrap.
+/// The ROOT_ITEM should be at generation 2.
+#[test]
+fn default_profile_free_space_tree_created_by_post_bootstrap() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
+
+    let fst_oid = u64::from(btrfs_disk::raw::BTRFS_FREE_SPACE_TREE_OBJECTID);
+    let entries = walk_root_tree_items(image.path(), |oid, kt, _, _| {
+        oid == fst_oid && kt == KeyType::RootItem
+    });
+    assert_eq!(entries.len(), 1, "expected exactly one FST ROOT_ITEM");
+    let ri = RootItem::parse(&entries[0].3).unwrap();
+    assert_eq!(
+        ri.generation, 2,
+        "FST should be created by post_bootstrap (gen 2)",
+    );
+}
+
 /// `mkfs -O quota` with a default profile produces a quota tree
 /// created by post-bootstrap, with all three items (STATUS, INFO,
 /// LIMIT) and the ON+INCONSISTENT status flags.

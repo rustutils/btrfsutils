@@ -392,7 +392,7 @@ pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
 ///    already gone). This makes the function idempotent at the
 ///    per-item level — a partial conversion (e.g. interrupted commit)
 ///    can be resumed by re-calling.
-/// 6. Set the `BLOCK_GROUP_TREE` compat_ro flag if it isn't set yet.
+/// 6. Set the `BLOCK_GROUP_TREE` `compat_ro` flag if it isn't set yet.
 ///    Callers that already set the flag (mkfs's bootstrap) get
 ///    a no-op here.
 /// 7. Drop the routing override; subsequent allocator /
