@@ -46,12 +46,11 @@ use uuid::Uuid;
 /// works end-to-end (transaction crate opens the image cleanly, the
 /// commit lands, and `btrfs check` passes).
 ///
-/// RAID5 / RAID6 are still excluded: the transaction crate doesn't yet
-/// route writes through their parity-aware placement (no `plan_write`
-/// implementation for RAID5/RAID6 — needs its own clean-room plan).
-/// All other profiles (SINGLE / DUP / RAID0 / RAID1* / RAID10) go
-/// through the stripe-aware `BlockReader::write_block`, which routes
-/// per the chunk's profile via `ChunkTreeCache::plan_write`.
+/// All seven RAID profiles are now supported. `BlockReader::write_block`
+/// routes per the chunk's profile via `ChunkTreeCache::plan_write`,
+/// which covers SINGLE / DUP / RAID0 / RAID1* / RAID10 directly and
+/// RAID5 / RAID6 via the parity-aware executor (`compute_p` /
+/// `compute_p_q` in the `disk` crate's `raid56` module).
 fn profile_supported(profile: Profile) -> bool {
     matches!(
         profile,
@@ -62,23 +61,19 @@ fn profile_supported(profile: Profile) -> bool {
             | Profile::Raid1c3
             | Profile::Raid1c4
             | Profile::Raid10
+            | Profile::Raid5
+            | Profile::Raid6
     )
 }
 
 /// Decide whether to run the post-bootstrap transaction for `cfg`.
 ///
-/// Skips for any profile we haven't verified (see [`profile_supported`]).
-///
-/// `^free-space-tree` (PLAN B.2) used to be on this skip list too, but
-/// the transaction crate's `update_free_space_tree` now respects the
-/// `FREE_SPACE_TREE` `compat_ro` flag and treats a cleared flag as "no
-/// FST", so it's safe to run post-bootstrap on those images. mkfs
-/// still leaves a stale FST tree leaf around in that case (a separate
-/// fix); the kernel ignores it.
-///
-/// `pub(crate)` so `mkfs.rs` can decide which trees to create itself
-/// vs. leave for post-bootstrap to create.
-pub(crate) fn should_run(cfg: &MkfsConfig) -> bool {
+/// Returns `false` only if a profile lands outside the support matrix
+/// of [`profile_supported`] — currently impossible since every defined
+/// `Profile` variant is supported. Kept as a hook so future profiles
+/// (e.g. `raid-stripe-tree`) can be gated here without changing
+/// callers.
+fn should_run(cfg: &MkfsConfig) -> bool {
     if !profile_supported(cfg.metadata_profile) {
         return false;
     }

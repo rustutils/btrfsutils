@@ -403,43 +403,20 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         bytenr: layout.block_addr(tree),
     };
 
-    // mkfs creates the FS, csum, and data-reloc trees only when
-    // post_bootstrap won't run (e.g. RAID5/RAID6 where the transaction
-    // crate doesn't yet have stripe-aware writes). For supported
-    // profiles, post_bootstrap creates these trees itself.
-    let bootstrap_creates_post_trees = !crate::post_bootstrap::should_run(cfg);
-
-    // Build tree blocks.
-    let root_tree = build_root_tree(
-        cfg,
-        &layout,
-        &leaf_header,
-        bootstrap_creates_post_trees,
-    )?;
-    let extent_tree = build_extent_tree(
-        cfg,
-        &layout,
-        &chunks,
-        &leaf_header,
-        bootstrap_creates_post_trees,
-    )?;
+    // Build the bootstrap tree blocks. mkfs writes only the four
+    // always-present trees here (Root, Extent, Chunk, Dev); every
+    // other tree (FS, csum, data-reloc, UUID, plus the optional
+    // FST / BG-tree / quota when their features are enabled) is
+    // created by `post_bootstrap` over the resulting image. The BG
+    // items live in the extent tree at this stage and get migrated
+    // to BGT inside post-bootstrap when the feature is on.
+    let root_tree = build_root_tree(cfg, &layout, &leaf_header)?;
+    let extent_tree = build_extent_tree(cfg, &layout, &chunks, &leaf_header)?;
     let chunk_tree = build_chunk_tree(cfg, &layout, &chunks, &leaf_header)?;
     let dev_tree = build_dev_tree(cfg, &chunks, &leaf_header)?;
-    let normal_used = UsedBytes {
-        system: layout.system_used(),
-        metadata: layout.metadata_used(
-            cfg.has_block_group_tree() && bootstrap_creates_post_trees,
-            cfg.has_free_space_tree() && bootstrap_creates_post_trees,
-            bootstrap_creates_post_trees,
-            bootstrap_creates_post_trees,
-            bootstrap_creates_post_trees,
-            cfg.has_quota_tree() && bootstrap_creates_post_trees,
-        ),
-        data: 0,
-    };
 
     // (tree_id, block_data, logical_address)
-    let mut trees: Vec<(TreeId, Vec<u8>, u64)> = vec![
+    let trees: Vec<(TreeId, Vec<u8>, u64)> = vec![
         (TreeId::Root, root_tree, layout.block_addr(TreeId::Root)),
         (
             TreeId::Extent,
@@ -450,108 +427,12 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         (TreeId::Dev, dev_tree, layout.block_addr(TreeId::Dev)),
     ];
 
-    // Optional trees follow the base trees in this slot order:
-    // BlockGroup, FreeSpace, Fs, Csum, DataReloc, Quota.
-    //
-    // BG tree and FST creation are gated on
-    // `bootstrap_creates_post_trees` like the other migrated trees:
-    // when post_bootstrap will run it materialises them itself
-    // (BGT via `create_block_group_tree`, FST via
-    // `seed_free_space_tree`); for RAID5/RAID6 mkfs builds them
-    // directly as the legacy fallback.
-    let mut optional_slot: u64 = 0;
-    if cfg.has_block_group_tree() && bootstrap_creates_post_trees {
-        let addr =
-            layout.block_addr_with_offset(TreeId::BlockGroup, optional_slot);
-        let bg_header = LeafHeader {
-            fsid: cfg.fs_uuid,
-            chunk_tree_uuid: cfg.chunk_tree_uuid,
-            generation,
-            owner: TreeId::BlockGroup.objectid(),
-            bytenr: addr,
-        };
-        let bg_tree = build_block_group_tree_with_used(
-            cfg,
-            &chunks,
-            &bg_header,
-            &normal_used,
-        )?;
-        trees.push((TreeId::BlockGroup, bg_tree, addr));
-        optional_slot += 1;
-    }
-    if cfg.has_free_space_tree() && bootstrap_creates_post_trees {
-        let addr =
-            layout.block_addr_with_offset(TreeId::FreeSpace, optional_slot);
-        let fst_header = LeafHeader {
-            fsid: cfg.fs_uuid,
-            chunk_tree_uuid: cfg.chunk_tree_uuid,
-            generation,
-            owner: TreeId::FreeSpace.objectid(),
-            bytenr: addr,
-        };
-        let fst = build_free_space_tree_with_used(
-            cfg,
-            &chunks,
-            &fst_header,
-            &normal_used,
-        )?;
-        trees.push((TreeId::FreeSpace, fst, addr));
-        optional_slot += 1;
-    }
-    if bootstrap_creates_post_trees {
-        let fs_addr = layout.block_addr_with_offset(TreeId::Fs, optional_slot);
-        let fs_header = LeafHeader {
-            fsid: cfg.fs_uuid,
-            chunk_tree_uuid: cfg.chunk_tree_uuid,
-            generation,
-            owner: TreeId::Fs.objectid(),
-            bytenr: fs_addr,
-        };
-        let fs_tree = build_root_dir_tree(cfg, &fs_header)?;
-        trees.push((TreeId::Fs, fs_tree, fs_addr));
-        optional_slot += 1;
-
-        let csum_addr =
-            layout.block_addr_with_offset(TreeId::Csum, optional_slot);
-        let csum_header = LeafHeader {
-            fsid: cfg.fs_uuid,
-            chunk_tree_uuid: cfg.chunk_tree_uuid,
-            generation,
-            owner: TreeId::Csum.objectid(),
-            bytenr: csum_addr,
-        };
-        let csum_tree = build_empty_tree(cfg.nodesize, &csum_header);
-        trees.push((TreeId::Csum, csum_tree, csum_addr));
-        optional_slot += 1;
-
-        let dr_addr =
-            layout.block_addr_with_offset(TreeId::DataReloc, optional_slot);
-        let dr_header = LeafHeader {
-            fsid: cfg.fs_uuid,
-            chunk_tree_uuid: cfg.chunk_tree_uuid,
-            generation,
-            owner: TreeId::DataReloc.objectid(),
-            bytenr: dr_addr,
-        };
-        let data_reloc_tree = build_root_dir_tree(cfg, &dr_header)?;
-        trees.push((TreeId::DataReloc, data_reloc_tree, dr_addr));
-        optional_slot += 1;
-    }
-    // Quota tree: when post_bootstrap will run, it creates the quota
-    // tree itself (with the same items mkfs would have produced).
-    // For unsupported profiles (RAID5/RAID6), mkfs writes it directly.
-    if cfg.has_quota_tree() && bootstrap_creates_post_trees {
-        let addr = layout.block_addr_with_offset(TreeId::Quota, optional_slot);
-        let quota_header = LeafHeader {
-            fsid: cfg.fs_uuid,
-            chunk_tree_uuid: cfg.chunk_tree_uuid,
-            generation,
-            owner: TreeId::Quota.objectid(),
-            bytenr: addr,
-        };
-        let quota_tree = build_quota_tree(cfg, &quota_header, generation)?;
-        trees.push((TreeId::Quota, quota_tree, addr));
-    }
+    // Initial bytes_used for the superblock: only the 4 bootstrap
+    // trees mkfs wrote above. Post-bootstrap's commit will rewrite
+    // the superblock with the final value once it allocates the
+    // remaining trees.
+    let bootstrap_bytes_used = layout.system_used()
+        + layout.metadata_used(false, false, false, false, false, false);
 
     // Write tree blocks to disk, routing each stripe to the correct device.
     for (tree_id, mut block, logical) in trees {
@@ -572,7 +453,7 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         root_addr: layout.block_addr(TreeId::Root),
         chunk_root_addr: layout.block_addr(TreeId::Chunk),
         root_level: 0,
-        bytes_used: normal_used.system + normal_used.metadata,
+        bytes_used: bootstrap_bytes_used,
     };
     for dev in &cfg.devices {
         let superblock =
@@ -1736,14 +1617,7 @@ fn build_root_tree(
     cfg: &MkfsConfig,
     layout: &BlockLayout,
     leaf_header: &dyn Fn(TreeId) -> LeafHeader,
-    bootstrap_creates_post_trees: bool,
 ) -> Result<Vec<u8>> {
-    struct RootEntry {
-        objectid: u64,
-        bytenr: u64,
-        is_fs_tree: bool,
-    }
-
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Root));
     let generation = 1u64;
     let now = cfg.now_secs();
@@ -1751,89 +1625,17 @@ fn build_root_tree(
     // Collect all root tree items, then sort by key and push.
     let mut root_items: Vec<(Key, Vec<u8>)> = Vec::new();
 
-    let mut entries: Vec<RootEntry> = TreeId::ROOT_ITEM_TREES
-        .iter()
-        .map(|&tree| RootEntry {
-            objectid: tree.objectid(),
-            bytenr: layout.block_addr(tree),
-            is_fs_tree: false,
-        })
-        .collect();
-
-    // Optional trees in the same slot order as `make_btrfs`:
-    // BlockGroup, FreeSpace, Fs, Csum, DataReloc, Quota.
-    let mut optional_slot: u64 = 0;
-    if cfg.has_block_group_tree() && bootstrap_creates_post_trees {
-        entries.push(RootEntry {
-            objectid: TreeId::BlockGroup.objectid(),
-            bytenr: layout
-                .block_addr_with_offset(TreeId::BlockGroup, optional_slot),
-            is_fs_tree: false,
-        });
-        optional_slot += 1;
-    }
-    if cfg.has_free_space_tree() && bootstrap_creates_post_trees {
-        entries.push(RootEntry {
-            objectid: TreeId::FreeSpace.objectid(),
-            bytenr: layout
-                .block_addr_with_offset(TreeId::FreeSpace, optional_slot),
-            is_fs_tree: false,
-        });
-        optional_slot += 1;
-    }
-    if bootstrap_creates_post_trees {
-        entries.push(RootEntry {
-            objectid: TreeId::Fs.objectid(),
-            bytenr: layout.block_addr_with_offset(TreeId::Fs, optional_slot),
-            is_fs_tree: true,
-        });
-        optional_slot += 1;
-        entries.push(RootEntry {
-            objectid: TreeId::Csum.objectid(),
-            bytenr: layout.block_addr_with_offset(TreeId::Csum, optional_slot),
-            is_fs_tree: false,
-        });
-        optional_slot += 1;
-        entries.push(RootEntry {
-            objectid: TreeId::DataReloc.objectid(),
-            bytenr: layout
-                .block_addr_with_offset(TreeId::DataReloc, optional_slot),
-            is_fs_tree: false,
-        });
-        optional_slot += 1;
-    }
-    if cfg.has_quota_tree() && bootstrap_creates_post_trees {
-        entries.push(RootEntry {
-            objectid: TreeId::Quota.objectid(),
-            bytenr: layout.block_addr_with_offset(TreeId::Quota, optional_slot),
-            is_fs_tree: false,
-        });
-    }
-
-    for entry in &entries {
-        let key = Key::new(entry.objectid, raw::BTRFS_ROOT_ITEM_KEY as u8, 0);
-
-        let mut data = items::root_item(
+    // mkfs writes only the always-present non-bootstrap trees here
+    // (Extent, Dev). Every other ROOT_ITEM is inserted by
+    // post-bootstrap.
+    for &tree in &TreeId::ROOT_ITEM_TREES {
+        let key = Key::new(tree.objectid(), raw::BTRFS_ROOT_ITEM_KEY as u8, 0);
+        let data = items::root_item(
             generation,
-            entry.bytenr,
+            layout.block_addr(tree),
             u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
             cfg.nodesize,
         );
-
-        if entry.is_fs_tree {
-            let mut uuid_bytes = *cfg.fs_uuid.as_bytes();
-            for b in &mut uuid_bytes {
-                *b ^= 0xFF;
-            }
-            patch_root_item_fs(
-                &mut data,
-                &Uuid::from_bytes(uuid_bytes),
-                0,
-                cfg.nodesize,
-                now,
-            );
-        }
-
         root_items.push((key, data));
     }
 
@@ -1863,74 +1665,25 @@ fn build_extent_tree(
     layout: &BlockLayout,
     chunks: &ChunkLayout,
     leaf_header: &dyn Fn(TreeId) -> LeafHeader,
-    bootstrap_creates_post_trees: bool,
 ) -> Result<Vec<u8>> {
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Extent));
     let generation = 1u64;
     let skinny = cfg.skinny_metadata();
-    // BG items live in the extent tree by default. When BGT is
-    // enabled and post_bootstrap will materialise it, mkfs still
-    // writes the items here — post_bootstrap's
-    // `create_block_group_tree` migrates them to BGT in the same
-    // transaction. The unsupported-by-post-bootstrap fallback path
-    // (RAID5/RAID6 with BGT) keeps the original behaviour: BG items
-    // go to BGT directly, not the extent tree.
-    let add_block_group =
-        !cfg.has_block_group_tree() || !bootstrap_creates_post_trees;
 
     // Collect all items into a Vec, then sort by key before pushing.
-    // Tree blocks now span two different chunks (system and metadata),
+    // Tree blocks span two different chunks (system and metadata),
     // so addresses are not monotonically increasing — we must sort.
     let mut extent_items: Vec<(Key, Vec<u8>)> = Vec::new();
 
-    // For each tree block: METADATA_ITEM with inline TREE_BLOCK_REF.
-    // TreeId::ALL covers the always-present trees; optional trees
-    // (BlockGroup, FreeSpace, Fs, Csum, DataReloc, Quota) are
-    // appended in the same slot order as `make_btrfs`.
-    let mut all_trees: Vec<(TreeId, u64)> = TreeId::ALL
+    // mkfs's bootstrap writes METADATA_ITEM entries for the four
+    // always-present trees only. post_bootstrap's commit inserts the
+    // METADATA_ITEMs for any trees it creates (FS, csum, data-reloc,
+    // UUID, plus optional FST / BGT / quota) via the standard
+    // delayed-ref pipeline.
+    let all_trees: Vec<(TreeId, u64)> = TreeId::ALL
         .iter()
         .map(|&t| (t, layout.block_addr(t)))
         .collect();
-    {
-        let mut opt_slot: u64 = 0;
-        if cfg.has_block_group_tree() && bootstrap_creates_post_trees {
-            all_trees.push((
-                TreeId::BlockGroup,
-                layout.block_addr_with_offset(TreeId::BlockGroup, opt_slot),
-            ));
-            opt_slot += 1;
-        }
-        if cfg.has_free_space_tree() && bootstrap_creates_post_trees {
-            all_trees.push((
-                TreeId::FreeSpace,
-                layout.block_addr_with_offset(TreeId::FreeSpace, opt_slot),
-            ));
-            opt_slot += 1;
-        }
-        if bootstrap_creates_post_trees {
-            all_trees.push((
-                TreeId::Fs,
-                layout.block_addr_with_offset(TreeId::Fs, opt_slot),
-            ));
-            opt_slot += 1;
-            all_trees.push((
-                TreeId::Csum,
-                layout.block_addr_with_offset(TreeId::Csum, opt_slot),
-            ));
-            opt_slot += 1;
-            all_trees.push((
-                TreeId::DataReloc,
-                layout.block_addr_with_offset(TreeId::DataReloc, opt_slot),
-            ));
-            opt_slot += 1;
-        }
-        if cfg.has_quota_tree() && bootstrap_creates_post_trees {
-            all_trees.push((
-                TreeId::Quota,
-                layout.block_addr_with_offset(TreeId::Quota, opt_slot),
-            ));
-        }
-    }
 
     for &(tree, addr) in &all_trees {
         let item_type = if skinny {
@@ -1944,59 +1697,49 @@ fn build_extent_tree(
         extent_items.push((key, data));
     }
 
-    // BLOCK_GROUP_ITEMs for system, metadata, and data chunks
-    if add_block_group {
-        // System block group
-        extent_items.push((
-            Key::new(
-                SYSTEM_GROUP_OFFSET,
-                raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
-                SYSTEM_GROUP_SIZE,
-            ),
-            items::block_group_item(
-                layout.system_used(),
-                u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
-                u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
-            ),
-        ));
-
-        // Metadata block group
-        extent_items.push((
-            Key::new(
-                chunks.meta_logical,
-                raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
-                chunks.meta_logical_size(),
-            ),
-            items::block_group_item(
-                layout.metadata_used(
-                    cfg.has_block_group_tree() && bootstrap_creates_post_trees,
-                    cfg.has_free_space_tree() && bootstrap_creates_post_trees,
-                    bootstrap_creates_post_trees,
-                    bootstrap_creates_post_trees,
-                    bootstrap_creates_post_trees,
-                    cfg.has_quota_tree() && bootstrap_creates_post_trees,
-                ),
-                u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
-                u64::from(raw::BTRFS_BLOCK_GROUP_METADATA)
-                    | cfg.metadata_profile.block_group_flag(),
-            ),
-        ));
-
-        // Data block group
-        extent_items.push((
-            Key::new(
-                chunks.data_logical,
-                raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
-                chunks.data_logical_size(),
-            ),
-            items::block_group_item(
-                0,
-                u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
-                u64::from(raw::BTRFS_BLOCK_GROUP_DATA)
-                    | cfg.data_profile.block_group_flag(),
-            ),
-        ));
-    }
+    // BLOCK_GROUP_ITEMs for system, metadata, and data chunks. Live
+    // in the extent tree at this stage; post-bootstrap migrates them
+    // to the BG tree when that feature is enabled. The metadata
+    // block group's `bytes_used` reflects only the four bootstrap
+    // tree blocks; post-bootstrap rewrites it as it allocates more.
+    extent_items.push((
+        Key::new(
+            SYSTEM_GROUP_OFFSET,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            SYSTEM_GROUP_SIZE,
+        ),
+        items::block_group_item(
+            layout.system_used(),
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_SYSTEM),
+        ),
+    ));
+    extent_items.push((
+        Key::new(
+            chunks.meta_logical,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            chunks.meta_logical_size(),
+        ),
+        items::block_group_item(
+            layout.metadata_used(false, false, false, false, false, false),
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_METADATA)
+                | cfg.metadata_profile.block_group_flag(),
+        ),
+    ));
+    extent_items.push((
+        Key::new(
+            chunks.data_logical,
+            raw::BTRFS_BLOCK_GROUP_ITEM_KEY as u8,
+            chunks.data_logical_size(),
+        ),
+        items::block_group_item(
+            0,
+            u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
+            u64::from(raw::BTRFS_BLOCK_GROUP_DATA)
+                | cfg.data_profile.block_group_flag(),
+        ),
+    ));
 
     // Sort by key and push in order.
     extent_items.sort_by_key(|(k, _)| *k);
@@ -2183,48 +1926,6 @@ fn build_dev_tree(
         leaf.push(*key, data)
             .map_err(|e| anyhow::anyhow!("dev tree: {e}"))?;
     }
-
-    Ok(leaf.finish())
-}
-
-fn build_empty_tree(nodesize: u32, header: &LeafHeader) -> Vec<u8> {
-    LeafBuilder::new(nodesize, header).finish()
-}
-
-/// Build a tree with a root directory inode (objectid 256).
-///
-/// Used for `FS_TREE` and `DATA_RELOC_TREE` -- the kernel requires both to
-/// have at least an inode item for the root directory.
-#[allow(clippy::cast_possible_truncation)] // key type fits in u8
-fn build_root_dir_tree(
-    cfg: &MkfsConfig,
-    header: &LeafHeader,
-) -> Result<Vec<u8>> {
-    let mut leaf = LeafBuilder::new(cfg.nodesize, header);
-    let generation = 1u64;
-
-    let now = cfg.now_secs();
-
-    // INODE_ITEM for objectid 256 (BTRFS_FIRST_FREE_OBJECTID)
-    let inode_key = Key::new(
-        u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
-        raw::BTRFS_INODE_ITEM_KEY as u8,
-        0,
-    );
-    let inode_data =
-        items::inode_item_dir(generation, u64::from(cfg.nodesize), now);
-    leaf.push(inode_key, &inode_data)
-        .map_err(|e| anyhow::anyhow!("root dir tree: {e}"))?;
-
-    // INODE_REF for objectid 256, parent 256, name ".."
-    let ref_key = Key::new(
-        u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
-        raw::BTRFS_INODE_REF_KEY as u8,
-        u64::from(raw::BTRFS_FIRST_FREE_OBJECTID),
-    );
-    let ref_data = items::inode_ref(0, b"..");
-    leaf.push(ref_key, &ref_data)
-        .map_err(|e| anyhow::anyhow!("root dir tree: {e}"))?;
 
     Ok(leaf.finish())
 }
@@ -2528,60 +2229,6 @@ pub fn discard_device(path: &Path, size: u64) -> Result<()> {
     }
     .with_context(|| format!("BLKDISCARD failed on {}", path.display()))?;
     Ok(())
-}
-
-/// Minimum filesystem size.
-///
-#[allow(clippy::cast_possible_truncation)] // key type fits in u8
-fn build_quota_tree(
-    cfg: &MkfsConfig,
-    header: &LeafHeader,
-    generation: u64,
-) -> Result<Vec<u8>> {
-    let mut leaf = LeafBuilder::new(cfg.nodesize, header);
-
-    // Qgroup status item.
-    let flags = if cfg.squota {
-        u64::from(raw::BTRFS_QGROUP_STATUS_FLAG_ON)
-            | u64::from(raw::BTRFS_QGROUP_STATUS_FLAG_SIMPLE_MODE)
-    } else {
-        u64::from(raw::BTRFS_QGROUP_STATUS_FLAG_ON)
-            | u64::from(raw::BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT)
-    };
-    let enable_gen = if cfg.squota { Some(generation) } else { None };
-    leaf.push(
-        Key::new(0, raw::BTRFS_QGROUP_STATUS_KEY as u8, 0),
-        &items::qgroup_status(1, generation, flags, enable_gen),
-    )
-    .map_err(|e| anyhow::anyhow!("quota tree: {e}"))?;
-
-    // Qgroup info for the filesystem tree (level 0, subvolid 5).
-    // For simple quota (squota), populate with the actual FS tree usage
-    // (one nodesize block) since squota expects accurate counts from the start.
-    let fs_tree_qgroupid = u64::from(raw::BTRFS_FS_TREE_OBJECTID);
-    let info_data = if cfg.squota {
-        items::qgroup_info(
-            generation,
-            u64::from(cfg.nodesize),
-            u64::from(cfg.nodesize),
-        )
-    } else {
-        items::qgroup_info_zeroed()
-    };
-    leaf.push(
-        Key::new(0, raw::BTRFS_QGROUP_INFO_KEY as u8, fs_tree_qgroupid),
-        &info_data,
-    )
-    .map_err(|e| anyhow::anyhow!("quota tree: {e}"))?;
-
-    // Qgroup limit for the filesystem tree.
-    leaf.push(
-        Key::new(0, raw::BTRFS_QGROUP_LIMIT_KEY as u8, fs_tree_qgroupid),
-        &items::qgroup_limit_zeroed(),
-    )
-    .map_err(|e| anyhow::anyhow!("quota tree: {e}"))?;
-
-    Ok(leaf.finish())
 }
 
 /// Minimum device size for the default single-device layout (DUP

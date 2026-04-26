@@ -474,6 +474,58 @@ fn default_profile_data_reloc_tree_created_by_post_bootstrap() {
     );
 }
 
+/// RAID5 metadata images now go through `post_bootstrap`. Most trees
+/// were already built by mkfs's fallback (idempotent ensures), but
+/// the UUID tree is the one that proves the parity-aware
+/// `plan_write` actually round-trips: it didn't exist before
+/// post_bootstrap ran, and creating it requires allocating a tree
+/// block on a RAID5 chunk, which exercises read-modify-write parity.
+#[test]
+fn raid5_metadata_uuid_tree_created_by_post_bootstrap() {
+    let images: Vec<_> = (0..3).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid5;
+    cfg.data_profile = Profile::Raid5;
+    cfg.apply_profile_flags();
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let paths: Vec<&Path> = images.iter().map(|i| i.path()).collect();
+    let uuid_oid = u64::from(btrfs_disk::raw::BTRFS_UUID_TREE_OBJECTID);
+    let entries = walk_root_tree_items_multi(&paths, |oid, kt, _, _| {
+        oid == uuid_oid && kt == KeyType::RootItem
+    });
+    assert_eq!(entries.len(), 1, "expected exactly one UUID tree ROOT_ITEM");
+    let ri = RootItem::parse(&entries[0].3).unwrap();
+    assert_eq!(
+        ri.generation, 2,
+        "UUID tree should be created by post_bootstrap (gen 2) on RAID5",
+    );
+}
+
+/// Same as the RAID5 UUID-tree test but for RAID6 (uses both P and
+/// Q parity).
+#[test]
+fn raid6_metadata_uuid_tree_created_by_post_bootstrap() {
+    let images: Vec<_> = (0..4).map(|_| create_image(MIN_SIZE)).collect();
+    let mut cfg = test_config_n_devices(4, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid6;
+    cfg.data_profile = Profile::Raid6;
+    cfg.apply_profile_flags();
+    make_btrfs_n_devices(&images, &mut cfg);
+
+    let paths: Vec<&Path> = images.iter().map(|i| i.path()).collect();
+    let uuid_oid = u64::from(btrfs_disk::raw::BTRFS_UUID_TREE_OBJECTID);
+    let entries = walk_root_tree_items_multi(&paths, |oid, kt, _, _| {
+        oid == uuid_oid && kt == KeyType::RootItem
+    });
+    assert_eq!(entries.len(), 1, "expected exactly one UUID tree ROOT_ITEM");
+    let ri = RootItem::parse(&entries[0].3).unwrap();
+    assert_eq!(
+        ri.generation, 2,
+        "UUID tree should be created by post_bootstrap (gen 2) on RAID6",
+    );
+}
+
 #[test]
 fn mkfs_with_different_nodesize() {
     // 64 KiB nodesize: still needs 133 MiB minimum for chunks.
@@ -1822,10 +1874,26 @@ fn make_rootdir_image_with_subvols(
 /// Helper: walk the root tree and collect items matching a predicate.
 fn walk_root_tree_items(
     image_path: &Path,
+    predicate: impl FnMut(u64, KeyType, u64, &[u8]) -> bool,
+) -> Vec<(u64, KeyType, u64, Vec<u8>)> {
+    walk_root_tree_items_multi(&[image_path], predicate)
+}
+
+/// Multi-device variant of [`walk_root_tree_items`]. Required for
+/// non-mirror metadata profiles (RAID0 / RAID10 / RAID5 / RAID6)
+/// where the root tree's chunks span multiple devices.
+fn walk_root_tree_items_multi(
+    image_paths: &[&Path],
     mut predicate: impl FnMut(u64, KeyType, u64, &[u8]) -> bool,
 ) -> Vec<(u64, KeyType, u64, Vec<u8>)> {
-    let file = File::open(image_path).unwrap();
-    let fs = reader::filesystem_open(file).unwrap();
+    let mut devices: std::collections::BTreeMap<u64, File> =
+        std::collections::BTreeMap::new();
+    for path in image_paths {
+        let mut file = File::open(path).unwrap();
+        let sb = btrfs_disk::superblock::read_superblock(&mut file, 0).unwrap();
+        devices.insert(sb.dev_item.devid, file);
+    }
+    let fs = reader::filesystem_open_multi(devices).unwrap();
     let root_logical = fs.superblock.root;
     let header_size = size_of::<btrfs_header>();
 

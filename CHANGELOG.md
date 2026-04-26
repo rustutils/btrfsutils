@@ -50,6 +50,24 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `btrfs-mkfs`: RAID5 and RAID6 now go through `post_bootstrap`. The
+  `profile_supported` allowlist accepts every defined RAID profile,
+  and the `bootstrap_creates_post_trees` fallback path in
+  `make_btrfs` / `build_root_tree` / `build_extent_tree` is gone.
+  mkfs's bootstrap now writes only the four always-present trees
+  (Root, Extent, Chunk, Dev) for every profile and feature
+  combination — every other tree (FS, csum, data-reloc, UUID, plus
+  optional FST / BG tree / quota) is created by the post-bootstrap
+  transaction. Three `build_*` helpers that only the fallback called
+  (`build_empty_tree`, `build_root_dir_tree`, `build_quota_tree`)
+  are deleted; the rest stay because the rootdir path still uses
+  them. New regression tests
+  `raid5_metadata_uuid_tree_created_by_post_bootstrap` and
+  `raid6_metadata_uuid_tree_created_by_post_bootstrap` assert the
+  UUID tree is at gen 2 (post-bootstrap) for both profiles, with a
+  new `walk_root_tree_items_multi` helper for non-mirror metadata
+  layouts.
+
 - `btrfs-mkfs`: free-space-tree and block-group-tree creation move
   into the post-bootstrap transaction for supported profiles
   (SINGLE / DUP / RAID0 / RAID1* / RAID10), closing Phase 2 of the
