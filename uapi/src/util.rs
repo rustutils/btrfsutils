@@ -35,7 +35,7 @@ macro_rules! field_size {
         // SAFETY: field_ptr and field_ptr.add(1) are both within (or one
         // past) the same allocation represented by `uninit`.
         unsafe {
-            (field_ptr.add(1) as *const u8).offset_from(field_ptr as *const u8)
+            (field_ptr.add(1).cast::<u8>()).offset_from(field_ptr.cast::<u8>())
                 as usize
         }
     }};

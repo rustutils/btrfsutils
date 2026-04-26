@@ -428,7 +428,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the filesystem's csum_type is not CRC32C,
+    /// Returns an error if the filesystem's `csum_type` is not CRC32C,
     /// if `on_disk_data.len()` is not sectorsize-aligned, or if any
     /// tree operation fails.
     pub fn insert_csums(
@@ -448,7 +448,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
 
         let sectorsize = u64::from(fs_info.sectorsize);
         let total = on_disk_data.len() as u64;
-        if total == 0 || total % sectorsize != 0 {
+        if total == 0 || !total.is_multiple_of(sectorsize) {
             return Err(io::Error::other(format!(
                 "insert_csums: on_disk_data length {total} not a multiple of \
                  sectorsize {sectorsize}",
@@ -726,6 +726,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     ///
     /// Returns an error if `data` is empty, if any allocation/insert
     /// fails, or if the inode's `INODE_ITEM` is missing.
+    #[allow(clippy::too_many_arguments)]
     pub fn write_file_data(
         &mut self,
         fs_info: &mut Filesystem<R>,
@@ -737,6 +738,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
         compression: Option<btrfs_disk::items::CompressionType>,
     ) -> io::Result<()> {
         use btrfs_disk::items::{CompressionType, FileExtentItem};
+
+        const MAX_EXTENT_SIZE: usize = 1024 * 1024;
 
         if data.is_empty() {
             return Err(io::Error::other(
@@ -760,7 +763,6 @@ impl<R: Read + Write + Seek> Transaction<R> {
             );
         }
 
-        const MAX_EXTENT_SIZE: usize = 1024 * 1024;
         let sectorsize = u64::from(fs_info.sectorsize);
 
         let mut chunk_offset = 0usize;

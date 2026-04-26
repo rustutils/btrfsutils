@@ -54,6 +54,7 @@ impl<R> BlockReader<R> {
     ///
     /// `devices` maps each device id to its I/O handle. Every devid
     /// referenced by the chunk cache must be present.
+    #[must_use]
     pub fn new_multi(
         devices: BTreeMap<u64, R>,
         nodesize: u32,
@@ -67,6 +68,7 @@ impl<R> BlockReader<R> {
     }
 
     /// Return the per-devid handle map.
+    #[must_use]
     pub fn devices(&self) -> &BTreeMap<u64, R> {
         &self.devices
     }
@@ -141,6 +143,7 @@ impl<R: Read + Seek> BlockReader<R> {
     }
 
     /// Return a reference to the chunk cache.
+    #[must_use]
     pub fn chunk_cache(&self) -> &ChunkTreeCache {
         &self.chunk_cache
     }
@@ -151,6 +154,7 @@ impl<R: Read + Seek> BlockReader<R> {
     }
 
     /// Return the nodesize.
+    #[must_use]
     pub fn nodesize(&self) -> u32 {
         self.nodesize
     }
@@ -313,13 +317,19 @@ pub fn filesystem_open_mirror<R: Read + Seek>(
 /// devices' `fsid` must match.
 ///
 /// The "primary" superblock used for filesystem-wide fields (root,
-/// chunk_root, generation, etc.) is the one with the lowest devid.
+/// `chunk_root`, generation, etc.) is the one with the lowest devid.
 ///
 /// # Errors
 ///
 /// Returns an error if any superblock cannot be read, any device's
 /// superblock disagrees with its map key or with the primary's fsid,
 /// or the chunk tree references a devid not in the map.
+///
+/// # Panics
+///
+/// Panics if the in-memory device map is empty after the initial
+/// non-empty check (an internal invariant violation, not a runtime
+/// possibility).
 pub fn filesystem_open_multi<R: Read + Seek>(
     devices: BTreeMap<u64, R>,
 ) -> io::Result<OpenFilesystem<R>> {

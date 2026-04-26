@@ -78,7 +78,7 @@ impl ChunkTreeCache {
     ///
     /// For read-only access the first stripe is sufficient on SINGLE, DUP,
     /// and any mirroring profile. RAID0/5/6/10 striping would need stripe
-    /// index calculation, but for tree blocks (always nodesize ≤ stripe_len)
+    /// index calculation, but for tree blocks (always `nodesize <= stripe_len`)
     /// the whole block lives in one stripe slot, so this works for the
     /// common case.
     ///

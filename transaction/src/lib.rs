@@ -28,6 +28,18 @@
 #![allow(clippy::missing_errors_doc)] // error conditions obvious from Result<T>
 #![allow(clippy::missing_panics_doc)] // path.nodes[].unwrap() always valid in context
 #![allow(clippy::module_name_repetitions)]
+// Test code uses literal byte buffers and small cast conversions that
+// pedantic clippy flags but that are intentional in unit tests.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::cast_lossless,
+        clippy::identity_op,
+        clippy::match_wildcard_for_single_variants,
+        clippy::semicolon_if_nothing_returned,
+        clippy::unreadable_literal,
+    )
+)]
 
 pub mod allocation;
 pub mod balance;

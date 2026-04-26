@@ -486,7 +486,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
     /// device, with each device's per-device `dev_item` spliced in.
     ///
     /// On a multi-device filesystem each device's superblock has its
-    /// own `dev_item` (devid, dev_uuid, per-device bytes_used, etc.).
+    /// own `dev_item` (`devid`, `dev_uuid`, per-device `bytes_used`, etc.).
     /// Writing the primary device's superblock verbatim to a secondary
     /// would corrupt the secondary's identity. This helper preserves
     /// that per-device state by splicing the matching `dev_item` from

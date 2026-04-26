@@ -6,6 +6,21 @@
 //! To run:
 //!   just test-privileged
 
+// Test code uses C-string literals, byte casts, and small idioms that
+// pedantic clippy flags but that are intentional here.
+#![allow(
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::identity_op,
+    clippy::manual_c_str_literals,
+    clippy::needless_borrows_for_generic_args,
+    clippy::redundant_guards,
+    clippy::unnecessary_cast,
+    clippy::unreadable_literal
+)]
+
 mod common;
 
 mod balance;

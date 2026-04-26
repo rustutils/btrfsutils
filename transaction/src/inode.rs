@@ -14,8 +14,8 @@ use bytes::BufMut;
 
 /// All fields of an on-disk `btrfs_inode_item`, ready to serialize.
 ///
-/// Construct via field-init (every field is `pub`) or with [`new`] for
-/// sensible defaults plus a custom `mode`. `with_uniform_time` is a
+/// Construct via field-init (every field is `pub`) or with [`Self::new`]
+/// for sensible defaults plus a custom `mode`. `with_uniform_time` is a
 /// convenience for tests where atime / ctime / mtime / otime are all
 /// the same instant.
 #[derive(Debug, Clone)]

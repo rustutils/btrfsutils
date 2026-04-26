@@ -63,6 +63,21 @@
 
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+// Test code uses literal byte buffers and small cast conversions that
+// pedantic clippy flags but that are intentional in unit tests.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::cast_lossless,
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        clippy::cast_sign_loss,
+        clippy::identity_op,
+        clippy::match_wildcard_for_single_variants,
+        clippy::semicolon_if_nothing_returned,
+        clippy::unreadable_literal,
+    )
+)]
 
 // Note: missing_docs is not enabled as a warning because bitflags! generates
 // undocumentable `const _ = !0` associated constants. All public items are

@@ -57,7 +57,7 @@ fn profile_supported(profile: Profile) -> bool {
 ///
 /// `^free-space-tree` (PLAN B.2) used to be on this skip list too, but
 /// the transaction crate's `update_free_space_tree` now respects the
-/// `FREE_SPACE_TREE` compat_ro flag and treats a cleared flag as "no
+/// `FREE_SPACE_TREE` `compat_ro` flag and treats a cleared flag as "no
 /// FST", so it's safe to run post-bootstrap on those images. mkfs
 /// still leaves a stale FST tree leaf around in that case (a separate
 /// fix); the kernel ignores it.
@@ -75,9 +75,8 @@ fn should_run(cfg: &MkfsConfig) -> bool {
 /// image.
 ///
 /// Opens the device(s), starts a transaction, applies the post-bootstrap
-/// additions ([`apply_in_transaction`]), commits, and syncs. Returns
-/// `Ok(())` without doing anything for unsupported profile/feature
-/// combinations (see [`should_run`]).
+/// additions, commits, and syncs. Returns `Ok(())` without doing anything
+/// for unsupported profile/feature combinations.
 ///
 /// # Errors
 ///

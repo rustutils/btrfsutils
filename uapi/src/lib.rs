@@ -39,6 +39,26 @@
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+// Test code uses literal byte buffers, raw pointer casts (for crafting
+// kernel-shaped data structures by hand), and small cast conversions
+// that pedantic clippy flags but that are intentional in unit tests.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::cast_lossless,
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        clippy::cast_sign_loss,
+        clippy::decimal_bitwise_operands,
+        clippy::identity_op,
+        clippy::items_after_test_module,
+        clippy::match_wildcard_for_single_variants,
+        clippy::ptr_cast_constness,
+        clippy::semicolon_if_nothing_returned,
+        clippy::uninlined_format_args,
+        clippy::unreadable_literal,
+    )
+)]
 
 pub mod balance;
 pub mod blkdev;
