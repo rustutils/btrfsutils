@@ -43,7 +43,12 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ### Shared
 
-- **CRC32C**: used for extent data ref hash computation
+- **Checksum dispatch**: `ChecksumType::compute` and `csum_tree_block` /
+  `csum_superblock` cover all four btrfs algorithms (CRC32C, xxhash64,
+  SHA-256, BLAKE2b). The transaction crate uses these from its commit
+  pipeline and mkfs uses them when sealing tree blocks and superblocks.
+- **CRC32C**: also exposed as `raw_crc32c` for hash-only callers (e.g.
+  the extent data ref hash in dump-tree, btrfs name hash).
 
 ## What's not yet implemented
 

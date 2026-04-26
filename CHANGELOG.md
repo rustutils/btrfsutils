@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- `btrfs-disk`: `csum_tree_block` and `csum_superblock` now dispatch on
+  `ChecksumType` (CRC32C, xxhash64, SHA-256, BLAKE2b). The transaction
+  crate's `ExtentBuffer::update_checksum` and the per-commit flush path
+  pull the algorithm from `Filesystem::superblock.csum_type`, so commits
+  on non-CRC32C filesystems now write the correct hash. `xxhash-rust`,
+  `sha2`, and `blake2` move from `btrfs-mkfs` into `btrfs-disk`.
+- `btrfs-mkfs`: `ChecksumType` is now a re-export of the disk-crate
+  enum; `write::fill_csum` is gone (callers use
+  `btrfs_disk::util::csum_tree_block` and
+  `btrfs_disk::superblock::csum_superblock` directly). The
+  post-bootstrap transaction is no longer gated on CRC32C, so xxhash /
+  SHA-256 / BLAKE2b images now get a UUID tree like CRC32C ones do.
+
 ### Added
 
 - `btrfs-mkfs`: post-bootstrap transaction step. After the in-memory

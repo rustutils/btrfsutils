@@ -228,9 +228,9 @@ entries (system, metadata, data).
 
 ### Step 5: checksum computation
 
-After each tree block is fully constructed, `write::fill_csum` computes the
-checksum of bytes `CSUM_SIZE..nodesize` and writes the result into the first
-bytes of the block:
+After each tree block is fully constructed,
+`btrfs_disk::util::csum_tree_block` computes the checksum of bytes
+`CSUM_SIZE..nodesize` and writes the result into the first bytes of the block:
 
 - **CRC32C:** 4 bytes (standard CRC32C via `crc32c::crc32c`).
 - **xxHash64:** 8 bytes.
@@ -612,8 +612,8 @@ portion (bytes 32..end) of tree blocks and superblocks:
 | SHA-256 | 2 | 32 bytes | `sha2` crate |
 | BLAKE2b-256 | 3 | 32 bytes | `blake2` crate |
 
-`fill_csum` writes the computed hash into the first N bytes of the block's
-checksum field (32 bytes total), leaving remaining bytes zero.
+`csum_tree_block` writes the computed hash into the first N bytes of the
+block's checksum field (32 bytes total), zero-filling the remaining bytes.
 
 Data block checksums (in the csum tree) use the same algorithm but are computed
 per-sector.

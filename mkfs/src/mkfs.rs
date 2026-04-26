@@ -470,7 +470,7 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
 
     // Write tree blocks to disk, routing each stripe to the correct device.
     for (tree_id, mut block, logical) in trees {
-        write::fill_csum(&mut block, cfg.csum_type);
+        btrfs_disk::util::csum_tree_block(&mut block, cfg.csum_type);
         for (devid, phys) in chunks.logical_to_physical(logical) {
             let file_idx = (devid - 1) as usize;
             write::pwrite_all(&files[file_idx], &block, phys)
@@ -1315,7 +1315,7 @@ fn write_rootdir_trees(
     block_group_addr: Option<u64>,
 ) -> Result<()> {
     let write_block = |buf: &mut Vec<u8>, logical: u64| -> Result<()> {
-        write::fill_csum(buf, csum_type);
+        btrfs_disk::util::csum_tree_block(buf, csum_type);
         for (devid, phys) in chunks.logical_to_physical(logical) {
             write::pwrite_all(&files[(devid - 1) as usize], buf, phys)?;
         }
@@ -1325,7 +1325,7 @@ fn write_rootdir_trees(
         for block in &mut tree.blocks {
             let addr =
                 u64::from_le_bytes(block.buf[48..56].try_into().unwrap());
-            write::fill_csum(&mut block.buf, csum_type);
+            btrfs_disk::util::csum_tree_block(&mut block.buf, csum_type);
             for (devid, phys) in chunks.logical_to_physical(addr) {
                 write::pwrite_all(
                     &files[(devid - 1) as usize],
@@ -2262,9 +2262,7 @@ fn build_superblock_with_params(
         compat_flags: 0,
         compat_ro_flags: cfg.compat_ro_flags,
         incompat_flags: cfg.incompat_flags,
-        csum_type: btrfs_disk::superblock::ChecksumType::from_raw(
-            cfg.csum_type.to_raw(),
-        ),
+        csum_type: cfg.csum_type,
         root_level: params.root_level,
         chunk_root_level: 0,
         log_root_level: 0,
@@ -2296,7 +2294,8 @@ fn build_superblock_with_params(
     };
 
     let mut buf = sb.to_bytes();
-    write::fill_csum(&mut buf, cfg.csum_type);
+    btrfs_disk::superblock::csum_superblock(&mut buf)
+        .context("failed to checksum superblock")?;
     Ok(buf.to_vec())
 }
 

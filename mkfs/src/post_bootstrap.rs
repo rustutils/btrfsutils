@@ -21,7 +21,7 @@
 //! file makes the licensing boundary obvious and gives us one place to
 //! grow as more migration work lands.
 
-use crate::{args::Profile, mkfs::MkfsConfig, write::ChecksumType};
+use crate::{args::Profile, mkfs::MkfsConfig};
 use anyhow::{Context, Result};
 use btrfs_disk::raw::BTRFS_UUID_TREE_OBJECTID;
 use btrfs_transaction::{Filesystem, Transaction};
@@ -53,10 +53,7 @@ fn profile_supported(profile: Profile) -> bool {
 
 /// Decide whether to run the post-bootstrap transaction for `cfg`.
 ///
-/// Skips for any profile we haven't verified (see [`profile_supported`])
-/// and for filesystems whose checksum type isn't CRC32C (transaction
-/// crate's commit pipeline doesn't yet dispatch on csum type — needs
-/// its own clean-room step).
+/// Skips for any profile we haven't verified (see [`profile_supported`]).
 ///
 /// `^free-space-tree` (PLAN B.2) used to be on this skip list too, but
 /// the transaction crate's `update_free_space_tree` now respects the
@@ -69,9 +66,6 @@ fn should_run(cfg: &MkfsConfig) -> bool {
         return false;
     }
     if !profile_supported(cfg.data_profile) {
-        return false;
-    }
-    if !matches!(cfg.csum_type, ChecksumType::Crc32c) {
         return false;
     }
     true

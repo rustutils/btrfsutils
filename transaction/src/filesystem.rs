@@ -302,7 +302,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
     ///
     /// Returns an error if the write fails.
     pub fn write_block(&mut self, eb: &mut ExtentBuffer) -> io::Result<()> {
-        eb.update_checksum();
+        eb.update_checksum(self.superblock.csum_type);
         self.reader.write_block(eb.logical(), eb.as_bytes())?;
         self.dirty.insert(eb.logical());
         self.written.insert(eb.logical());
@@ -438,7 +438,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
                     eb.check().unwrap_err(),
                 );
                 eb.set_flags(eb.flags() | HEADER_FLAG_WRITTEN);
-                eb.update_checksum();
+                eb.update_checksum(self.superblock.csum_type);
                 self.reader.write_block(eb.logical(), eb.as_bytes())?;
                 self.written.insert(eb.logical());
             }

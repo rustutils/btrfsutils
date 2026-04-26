@@ -37,10 +37,10 @@ pub fn run(args: &Arguments) -> Result<()> {
     }
 
     let csum_type = match args.checksum {
-        None | Some(ChecksumArg::Crc32c) => ChecksumType::Crc32c,
-        Some(ChecksumArg::Xxhash) => ChecksumType::Xxhash64,
+        None | Some(ChecksumArg::Crc32c) => ChecksumType::Crc32,
+        Some(ChecksumArg::Xxhash) => ChecksumType::Xxhash,
         Some(ChecksumArg::Sha256) => ChecksumType::Sha256,
-        Some(ChecksumArg::Blake2) => ChecksumType::Blake2b,
+        Some(ChecksumArg::Blake2) => ChecksumType::Blake2,
     };
 
     if let Some(ref label) = args.label

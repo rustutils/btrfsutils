@@ -5,7 +5,7 @@
 //! the root pointers and metadata needed to bootstrap access to the rest
 //! of the filesystem.
 
-use crate::{items::DeviceItem, raw, util::btrfs_csum_data};
+use crate::{items::DeviceItem, raw};
 use bytes::BufMut;
 use std::{
     fmt,
@@ -83,6 +83,34 @@ impl ChecksumType {
             ChecksumType::Xxhash => 8,
             ChecksumType::Sha256 | ChecksumType::Blake2 => 32,
             ChecksumType::Unknown(_) => 32, // BTRFS_CSUM_SIZE
+        }
+    }
+
+    /// Compute the checksum of `data`. The returned vector has length
+    /// [`Self::size`]. Panics on [`ChecksumType::Unknown`] because there's
+    /// no algorithm to dispatch to.
+    ///
+    /// # Panics
+    ///
+    /// Panics if invoked on [`ChecksumType::Unknown`].
+    #[must_use]
+    pub fn compute(self, data: &[u8]) -> Vec<u8> {
+        match self {
+            ChecksumType::Crc32 => crc32c::crc32c(data).to_le_bytes().to_vec(),
+            ChecksumType::Xxhash => {
+                xxhash_rust::xxh64::xxh64(data, 0).to_le_bytes().to_vec()
+            }
+            ChecksumType::Sha256 => {
+                use sha2::Digest;
+                sha2::Sha256::digest(data).to_vec()
+            }
+            ChecksumType::Blake2 => {
+                use blake2::{Blake2b, Digest, digest::consts::U32};
+                <Blake2b<U32>>::digest(data).to_vec()
+            }
+            ChecksumType::Unknown(v) => {
+                panic!("ChecksumType::Unknown({v}): no algorithm to dispatch")
+            }
         }
     }
 }
@@ -587,9 +615,11 @@ pub fn read_superblock_bytes_at(
     Ok(buf)
 }
 
-/// Return `true` if the superblock buffer has valid magic and a matching CRC32C checksum.
+/// Return `true` if the superblock buffer has valid magic and a matching
+/// checksum for whatever algorithm its `csum_type` field declares.
 ///
-/// Only CRC32C (`csum_type` == 0) is validated; other checksum types always return `false`.
+/// Returns `false` for [`ChecksumType::Unknown`] (no algorithm to verify
+/// against).
 #[must_use]
 #[allow(clippy::missing_panics_doc)] // Slices are bounded by SUPER_INFO_SIZE; try_into always succeeds
 pub fn superblock_is_valid(buf: &[u8; SUPER_INFO_SIZE]) -> bool {
@@ -600,15 +630,16 @@ pub fn superblock_is_valid(buf: &[u8; SUPER_INFO_SIZE]) -> bool {
         return false;
     }
     let csum_type_off = mem::offset_of!(raw::btrfs_super_block, csum_type);
-    let csum_type = u16::from_le_bytes(
+    let csum_type = ChecksumType::from_raw(u16::from_le_bytes(
         buf[csum_type_off..csum_type_off + 2].try_into().unwrap(),
-    );
-    if u32::from(csum_type) != raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 {
+    ));
+    if matches!(csum_type, ChecksumType::Unknown(_)) {
         return false;
     }
-    let expected = u32::from_le_bytes(buf[0..4].try_into().unwrap());
-    let actual = btrfs_csum_data(&buf[32..]);
-    expected == actual
+    let n = csum_type.size();
+    let expected = &buf[0..n];
+    let actual = csum_type.compute(&buf[32..]);
+    expected == &actual[..n]
 }
 
 /// Extract the generation field from a raw superblock byte buffer.
@@ -619,30 +650,34 @@ pub fn superblock_generation(buf: &[u8; SUPER_INFO_SIZE]) -> u64 {
     u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
 }
 
-/// Recompute the CRC32C checksum of a superblock byte buffer in place.
+/// Recompute the checksum of a superblock byte buffer in place.
 ///
-/// Stores the 4-byte LE checksum at bytes 0..4, computed over bytes 32..4096.
-/// Only CRC32C (`csum_type` == 0) is supported; returns an error for other
-/// checksum types.
+/// Reads the algorithm from the buffer's `csum_type` field, computes the
+/// hash over bytes 32..4096, writes it into the first
+/// `csum_type.size()` bytes, and zero-fills the remainder of the 32-byte
+/// csum field.
 ///
 /// # Errors
 ///
-/// Returns an error if the superblock uses a checksum type other than CRC32C.
+/// Returns an error if the superblock's `csum_type` field is unrecognized
+/// (i.e. parses as [`ChecksumType::Unknown`]).
 #[allow(clippy::missing_panics_doc)] // Slice is bounded by SUPER_INFO_SIZE; try_into always succeeds
 pub fn csum_superblock(buf: &mut [u8; SUPER_INFO_SIZE]) -> io::Result<()> {
     let csum_type_off = mem::offset_of!(raw::btrfs_super_block, csum_type);
-    let csum_type = u16::from_le_bytes(
+    let raw_csum_type = u16::from_le_bytes(
         buf[csum_type_off..csum_type_off + 2].try_into().unwrap(),
     );
-    if u32::from(csum_type) != raw::btrfs_csum_type_BTRFS_CSUM_TYPE_CRC32 {
+    let csum_type = ChecksumType::from_raw(raw_csum_type);
+    if matches!(csum_type, ChecksumType::Unknown(_)) {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            format!("unsupported checksum type {csum_type}"),
+            format!("unsupported checksum type {raw_csum_type}"),
         ));
     }
-    let csum = btrfs_csum_data(&buf[32..]);
-    buf[0..4].copy_from_slice(&csum.to_le_bytes());
-    buf[4..32].fill(0);
+    let hash = csum_type.compute(&buf[32..]);
+    let n = csum_type.size();
+    buf[0..n].copy_from_slice(&hash[..n]);
+    buf[n..32].fill(0);
     Ok(())
 }
 

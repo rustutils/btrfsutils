@@ -46,7 +46,7 @@ fn test_config(total_bytes: u64) -> MkfsConfig {
         compat_ro_flags: MkfsConfig::default_compat_ro_flags(),
         data_profile: Profile::Single,
         metadata_profile: Profile::Dup,
-        csum_type: ChecksumType::Crc32c,
+        csum_type: ChecksumType::Crc32,
         creation_time: None,
         quota: false,
         squota: false,
@@ -80,7 +80,7 @@ fn test_config_n_devices(n: usize, per_device_bytes: u64) -> MkfsConfig {
         compat_ro_flags: MkfsConfig::default_compat_ro_flags(),
         data_profile: Profile::Single,
         metadata_profile: Profile::Raid1,
-        csum_type: ChecksumType::Crc32c,
+        csum_type: ChecksumType::Crc32,
         creation_time: None,
         quota: false,
         squota: false,
@@ -932,7 +932,7 @@ fn deterministic_config(total_bytes: u64) -> MkfsConfig {
         compat_ro_flags: MkfsConfig::default_compat_ro_flags(),
         data_profile: Profile::Single,
         metadata_profile: Profile::Dup,
-        csum_type: ChecksumType::Crc32c,
+        csum_type: ChecksumType::Crc32,
         creation_time: Some(1700000000), // fixed timestamp
         quota: false,
         squota: false,
@@ -968,7 +968,7 @@ fn snapshot_default_single_device() {
 #[test]
 fn snapshot_xxhash() {
     let mut cfg = deterministic_config(MIN_SIZE);
-    cfg.csum_type = ChecksumType::Xxhash64;
+    cfg.csum_type = ChecksumType::Xxhash;
     let compressed = make_image_compressed(&mut cfg);
     insta::assert_binary_snapshot!(".img.gz", compressed);
 }
@@ -1144,7 +1144,7 @@ fn mount_single_device_crc32c() {
 #[ignore = "requires elevated privileges"]
 fn mount_single_device_xxhash() {
     let mut cfg = test_config(MIN_SIZE);
-    cfg.csum_type = ChecksumType::Xxhash64;
+    cfg.csum_type = ChecksumType::Xxhash;
     make_check_mount_verify(&mut cfg);
 }
 
@@ -1160,7 +1160,7 @@ fn mount_single_device_sha256() {
 #[ignore = "requires elevated privileges"]
 fn mount_single_device_blake2() {
     let mut cfg = test_config(MIN_SIZE);
-    cfg.csum_type = ChecksumType::Blake2b;
+    cfg.csum_type = ChecksumType::Blake2;
     make_check_mount_verify(&mut cfg);
 }
 

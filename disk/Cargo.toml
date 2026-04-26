@@ -12,9 +12,12 @@ keywords = ["btrfs", "filesystem", "parser", "userspace"]
 
 [dependencies]
 bitflags = { workspace = true }
+blake2 = { workspace = true }
 bytes = { workspace = true }
 crc32c = { workspace = true }
+sha2 = { workspace = true }
 uuid = { workspace = true }
+xxhash-rust = { workspace = true }
 
 [build-dependencies]
 bindgen = { workspace = true }

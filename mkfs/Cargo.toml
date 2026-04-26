@@ -32,9 +32,6 @@ btrfs-disk = { workspace = true }
 btrfs-transaction = { workspace = true }
 btrfs-uapi = { workspace = true }
 crc32c = { workspace = true }
-xxhash-rust = { workspace = true }
-sha2 = { workspace = true }
-blake2 = { workspace = true }
 libc = { workspace = true }
 nix = { workspace = true }
 flate2 = { workspace = true }

@@ -10,6 +10,7 @@
 //! the write path needs for COW and item manipulation.
 
 use btrfs_disk::{
+    superblock::ChecksumType,
     tree::{DiskKey, KeyType, TreeBlock},
     util::{csum_tree_block, write_disk_key},
 };
@@ -365,9 +366,9 @@ impl ExtentBuffer {
 
     // --- Checksum ---
 
-    /// Recompute the CRC32C checksum and write it into the header.
-    pub fn update_checksum(&mut self) {
-        csum_tree_block(&mut self.data);
+    /// Recompute the checksum using `csum_type` and write it into the header.
+    pub fn update_checksum(&mut self, csum_type: ChecksumType) {
+        csum_tree_block(&mut self.data, csum_type);
     }
 
     // --- Bulk data operations ---
@@ -875,14 +876,39 @@ mod tests {
     fn checksum_round_trip() {
         let mut eb = make_leaf(4096, 0, 1, 5);
         eb.set_bytenr(65536);
-        eb.update_checksum();
+        eb.update_checksum(ChecksumType::Crc32);
         // Verify that the checksum region is non-zero
         assert_ne!(&eb.as_bytes()[0..4], &[0, 0, 0, 0]);
         // Re-checksum should be idempotent
         let csum1: [u8; 4] = eb.as_bytes()[0..4].try_into().unwrap();
-        eb.update_checksum();
+        eb.update_checksum(ChecksumType::Crc32);
         let csum2: [u8; 4] = eb.as_bytes()[0..4].try_into().unwrap();
         assert_eq!(csum1, csum2);
+    }
+
+    #[test]
+    fn checksum_dispatches_per_algorithm() {
+        // For each non-CRC32C algorithm, the checksum bytes should fill
+        // the algorithm's `size()` and the rest of the 32-byte field
+        // must be zero.
+        for csum_type in [
+            ChecksumType::Xxhash,
+            ChecksumType::Sha256,
+            ChecksumType::Blake2,
+        ] {
+            let mut eb = make_leaf(4096, 0, 1, 5);
+            eb.set_bytenr(65536);
+            eb.update_checksum(csum_type);
+            let n = csum_type.size();
+            assert!(
+                eb.as_bytes()[..n].iter().any(|&b| b != 0),
+                "{csum_type:?}: hash bytes are all zero",
+            );
+            assert!(
+                eb.as_bytes()[n..32].iter().all(|&b| b == 0),
+                "{csum_type:?}: tail of csum field is not zero",
+            );
+        }
     }
 
     #[test]

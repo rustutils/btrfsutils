@@ -3,7 +3,7 @@
 //! Little-endian writer functions for placing typed values into raw byte
 //! buffers at known offsets, and a raw CRC32C matching the kernel's format.
 
-use crate::tree::DiskKey;
+use crate::{superblock::ChecksumType, tree::DiskKey};
 use bytes::{Buf, BufMut};
 use uuid::Uuid;
 
@@ -82,21 +82,23 @@ pub fn btrfs_csum_data(data: &[u8]) -> u32 {
     crc32c::crc32c(data)
 }
 
-/// Recompute the CRC32C checksum of a tree block and write it into the header.
+/// Recompute the checksum of a tree block and write it into the header.
 ///
-/// The checksum covers `buf[32..]` (everything after the csum field).
-/// The 4-byte LE result is written to `buf[0..4]` and `buf[4..32]` is zeroed.
-/// This is the same algorithm as `superblock::csum_superblock` but for
-/// arbitrary-length tree blocks (nodesize bytes).
+/// The checksum covers `buf[32..]` (everything after the csum field) and is
+/// computed using `csum_type`. The result fills the first
+/// `csum_type.size()` bytes of `buf` and the remainder of the 32-byte
+/// csum field is zeroed.
 ///
 /// # Panics
 ///
-/// Panics if `buf` is 32 bytes or smaller.
-pub fn csum_tree_block(buf: &mut [u8]) {
+/// Panics if `buf` is 32 bytes or smaller, or if `csum_type` is
+/// [`ChecksumType::Unknown`].
+pub fn csum_tree_block(buf: &mut [u8], csum_type: ChecksumType) {
     assert!(buf.len() > 32, "buffer too small for tree block checksum");
-    let csum = btrfs_csum_data(&buf[32..]);
-    buf[0..4].copy_from_slice(&csum.to_le_bytes());
-    buf[4..32].fill(0);
+    let hash = csum_type.compute(&buf[32..]);
+    let n = csum_type.size();
+    buf[0..n].copy_from_slice(&hash[..n]);
+    buf[n..32].fill(0);
 }
 
 #[cfg(test)]

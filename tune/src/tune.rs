@@ -346,7 +346,7 @@ pub fn change_uuid<R: Read + Write + Seek>(
         })?;
         disk_write_uuid(&mut buf, header_fsid_off, &new_fsid);
         disk_write_uuid(&mut buf, header_chunk_uuid_off, &new_chunk_tree_uuid);
-        csum_tree_block(&mut buf);
+        csum_tree_block(&mut buf, sb.csum_type);
         reader.write_block(bytenr, &buf).with_context(|| {
             format!("failed to write tree block at {bytenr}")
         })?;
@@ -354,23 +354,28 @@ pub fn change_uuid<R: Read + Write + Seek>(
 
     // Step 3: patch device fsid in chunk tree DEV_ITEM entries.
     let dev_fsid_off = mem::offset_of!(raw::btrfs_dev_item, fsid);
-    reader::tree_walk_mut(&mut reader, sb.chunk_root, &mut |buf, block| {
-        let TreeBlock::Leaf { items, .. } = block else {
-            return false;
-        };
-        let mut modified = false;
-        for item in items {
-            if item.key.key_type != KeyType::DeviceItem {
-                continue;
+    reader::tree_walk_mut(
+        &mut reader,
+        sb.chunk_root,
+        sb.csum_type,
+        &mut |buf, block| {
+            let TreeBlock::Leaf { items, .. } = block else {
+                return false;
+            };
+            let mut modified = false;
+            for item in items {
+                if item.key.key_type != KeyType::DeviceItem {
+                    continue;
+                }
+                let start = header_size + item.offset as usize + dev_fsid_off;
+                if start + 16 <= buf.len() {
+                    disk_write_uuid(buf, start, &new_fsid);
+                    modified = true;
+                }
             }
-            let start = header_size + item.offset as usize + dev_fsid_off;
-            if start + 16 <= buf.len() {
-                disk_write_uuid(buf, start, &new_fsid);
-                modified = true;
-            }
-        }
-        modified
-    })
+            modified
+        },
+    )
     .context("failed to patch chunk tree DEV_ITEMs")?;
 
     // Step 4: patch superblock dev_item fsid and clear CHANGING_FSID.
@@ -805,7 +810,7 @@ mod tests {
             compat_ro_flags: MkfsConfig::default_compat_ro_flags(),
             data_profile: Profile::Single,
             metadata_profile: Profile::Dup,
-            csum_type: ChecksumType::Crc32c,
+            csum_type: ChecksumType::Crc32,
             creation_time: Some(1000000),
             quota: false,
             squota: false,

@@ -623,9 +623,9 @@ fn tree_walk_tolerant_dfs<R: Read + Seek>(
 /// Walk a tree (DFS), allowing the visitor to modify each block in place.
 ///
 /// The visitor receives the raw block buffer and the parsed `TreeBlock`. If it
-/// returns `true`, the block is re-checksummed and written back to disk.
-/// This is used by operations that need to patch tree block headers or items
-/// (e.g. fsid rewrite, repair).
+/// returns `true`, the block is re-checksummed using `csum_type` and written
+/// back to disk. This is used by operations that need to patch tree block
+/// headers or items (e.g. fsid rewrite, repair).
 ///
 /// # Errors
 ///
@@ -633,6 +633,7 @@ fn tree_walk_tolerant_dfs<R: Read + Seek>(
 pub fn tree_walk_mut<R: Read + Write + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
+    csum_type: superblock::ChecksumType,
     visitor: &mut dyn FnMut(&mut Vec<u8>, &TreeBlock) -> bool,
 ) -> io::Result<()> {
     let mut buf = reader.read_block(root_logical)?;
@@ -645,12 +646,12 @@ pub fn tree_walk_mut<R: Read + Write + Seek>(
     };
 
     if visitor(&mut buf, &block) {
-        crate::util::csum_tree_block(&mut buf);
+        crate::util::csum_tree_block(&mut buf, csum_type);
         reader.write_block(root_logical, &buf)?;
     }
 
     for ptr in child_ptrs {
-        tree_walk_mut(reader, ptr, visitor)?;
+        tree_walk_mut(reader, ptr, csum_type, visitor)?;
     }
 
     Ok(())
