@@ -115,21 +115,12 @@ impl<R: Read + Seek> BlockReader<R> {
     /// Returns an error if the logical address is unmapped, the resolved
     /// device id is not in the handle map, or the underlying read fails.
     pub fn read_block(&mut self, logical: u64) -> io::Result<Vec<u8>> {
-        let (devid, physical) =
-            self.chunk_cache.resolve(logical).ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!(
-                        "logical address {logical} not mapped in chunk cache"
-                    ),
-                )
-            })?;
-        let nodesize = self.nodesize as usize;
-        let dev = self.device_handle_mut(devid)?;
-        let mut buf = vec![0u8; nodesize];
-        dev.seek(SeekFrom::Start(physical))?;
-        dev.read_exact(&mut buf)?;
-        Ok(buf)
+        // Tree blocks are always nodesize <= stripe_len, so a single
+        // block lives entirely in one row. Use plan_read so striped
+        // profiles (RAID0, RAID10) route to the correct device column;
+        // mirrored/SINGLE chunks return one placement on stripes[0]
+        // either way.
+        self.read_data(logical, self.nodesize as usize)
     }
 
     /// Read and parse a tree block at a logical address.
@@ -164,27 +155,36 @@ impl<R: Read + Seek> BlockReader<R> {
     /// Unlike `read_block` which always reads `nodesize` bytes, this reads
     /// exactly `len` bytes. Used for reading file data extents.
     ///
+    /// Uses [`ChunkTreeCache::plan_read`](crate::chunk::ChunkTreeCache::plan_read)
+    /// internally so reads on striped profiles (RAID0 / RAID10) that span
+    /// multiple rows assemble the bytes from the correct devices in
+    /// order.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the logical address is unmapped or the underlying read fails.
+    /// Returns an error if the logical address is unmapped, the request
+    /// extends past the chunk, the chunk uses RAID5/RAID6 (not yet
+    /// implemented), or the underlying read fails.
     pub fn read_data(
         &mut self,
         logical: u64,
         len: usize,
     ) -> io::Result<Vec<u8>> {
-        let (devid, physical) =
-            self.chunk_cache.resolve(logical).ok_or_else(|| {
+        let placements =
+            self.chunk_cache.plan_read(logical, len).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::NotFound,
                     format!(
-                        "logical address {logical} not mapped in chunk cache"
+                        "logical address {logical} not mapped or unsupported profile"
                     ),
                 )
             })?;
-        let dev = self.device_handle_mut(devid)?;
         let mut buf = vec![0u8; len];
-        dev.seek(SeekFrom::Start(physical))?;
-        dev.read_exact(&mut buf)?;
+        for p in placements {
+            let dev = self.device_handle_mut(p.devid)?;
+            dev.seek(SeekFrom::Start(p.physical))?;
+            dev.read_exact(&mut buf[p.buf_offset..p.buf_offset + p.len])?;
+        }
         Ok(buf)
     }
 
@@ -203,32 +203,38 @@ impl<R: Read + Seek> BlockReader<R> {
 }
 
 impl<R: Read + Write + Seek> BlockReader<R> {
-    /// Write raw bytes to a logical address, resolving to physical via the chunk cache.
+    /// Write raw bytes to a logical address, routing to the correct
+    /// per-device locations based on the chunk's RAID profile.
     ///
-    /// Writes to every stripe copy returned by `resolve_all` — for DUP
-    /// (one device, two copies) and RAID1 / RAID1C3 / RAID1C4 (two-,
-    /// three-, four-way mirroring across devices), all replicas are
-    /// updated. RAID0 / RAID5 / RAID6 striping is not yet handled here
-    /// for buffers larger than `stripe_len`.
+    /// Uses [`ChunkTreeCache::plan_write`](crate::chunk::ChunkTreeCache::plan_write)
+    /// internally. For DUP / RAID1 / RAID1C3 / RAID1C4 every mirror
+    /// receives the same bytes; for RAID0 each row goes to exactly one
+    /// device; for RAID10 each row goes to one mirror pair. Writes
+    /// larger than `stripe_len` on a striped profile are split into
+    /// per-row segments automatically.
     ///
     /// # Errors
     ///
-    /// Returns an error if the logical address is unmapped, any
-    /// referenced device is not open, or any underlying write fails.
+    /// Returns an error if the logical address is unmapped, the request
+    /// extends past the chunk, any referenced device is not open, the
+    /// chunk uses RAID5/RAID6 (not yet implemented), or any underlying
+    /// write fails.
     pub fn write_block(&mut self, logical: u64, buf: &[u8]) -> io::Result<()> {
         let placements =
-            self.chunk_cache.resolve_all(logical).ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!(
-                        "logical address {logical} not mapped in chunk cache"
-                    ),
-                )
-            })?;
-        for (devid, physical) in placements {
-            let dev = self.device_handle_mut(devid)?;
-            dev.seek(SeekFrom::Start(physical))?;
-            dev.write_all(buf)?;
+            self.chunk_cache.plan_write(logical, buf.len()).ok_or_else(
+                || {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!(
+                            "logical address {logical} not mapped or unsupported profile"
+                        ),
+                    )
+                },
+            )?;
+        for p in placements {
+            let dev = self.device_handle_mut(p.devid)?;
+            dev.seek(SeekFrom::Start(p.physical))?;
+            dev.write_all(&buf[p.buf_offset..p.buf_offset + p.len])?;
         }
         Ok(())
     }
@@ -916,17 +922,38 @@ mod tests {
     }
 
     /// Build a chunk mapping with arbitrary stripes. Each entry is
-    /// `(devid, physical_offset)`.
+    /// `(devid, physical_offset)`. The profile defaults to SINGLE for
+    /// one-stripe mappings and RAID1 for multi-stripe (matches what
+    /// the old `resolve_all`-based tests assumed).
     fn make_mapping(
         logical: u64,
         length: u64,
         stripes: &[(u64, u64)],
     ) -> ChunkMapping {
+        let chunk_type = if stripes.len() == 1 {
+            0 // SINGLE
+        } else {
+            // Pick a profile that fans out to all stripes regardless of
+            // count: DUP when stripes share a devid, otherwise
+            // RAID1 / RAID1C3 / RAID1C4 by mirror count.
+            let same_devid = stripes.iter().all(|s| s.0 == stripes[0].0);
+            if same_devid {
+                u64::from(raw::BTRFS_BLOCK_GROUP_DUP)
+            } else {
+                u64::from(match stripes.len() {
+                    3 => raw::BTRFS_BLOCK_GROUP_RAID1C3,
+                    4 => raw::BTRFS_BLOCK_GROUP_RAID1C4,
+                    // Default: RAID1 (covers 2 stripes and any
+                    // unexpected count — every stripe gets the bytes).
+                    _ => raw::BTRFS_BLOCK_GROUP_RAID1,
+                })
+            }
+        };
         ChunkMapping {
             logical,
             length,
             stripe_len: 65536,
-            chunk_type: 0,
+            chunk_type,
             num_stripes: stripes.len() as u16,
             sub_stripes: 0,
             stripes: stripes

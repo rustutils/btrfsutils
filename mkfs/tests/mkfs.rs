@@ -582,6 +582,24 @@ fn mount_raid0_data() {
     make_check_mount_verify(&mut cfg);
 }
 
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_raid0_metadata_two_devices() {
+    let mut cfg = test_config_n_devices(2, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid0;
+    cfg.data_profile = Profile::Raid0;
+    make_check_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_raid0_metadata_three_devices() {
+    let mut cfg = test_config_n_devices(3, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid0;
+    cfg.data_profile = Profile::Raid0;
+    make_check_mount_verify(&mut cfg);
+}
+
 // --- RAID10 tests ---
 
 #[test]
@@ -617,6 +635,15 @@ fn mkfs_raid10_two_devices() {
 fn mount_raid10_data_four_devices() {
     let mut cfg = test_config_n_devices(4, MIN_SIZE);
     cfg.metadata_profile = Profile::Raid1;
+    cfg.data_profile = Profile::Raid10;
+    make_check_mount_verify(&mut cfg);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mount_raid10_metadata_four_devices() {
+    let mut cfg = test_config_n_devices(4, MIN_SIZE);
+    cfg.metadata_profile = Profile::Raid10;
     cfg.data_profile = Profile::Raid10;
     make_check_mount_verify(&mut cfg);
 }
@@ -1018,6 +1045,10 @@ impl LoopDev {
             ),
         }
     }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 impl Drop for LoopDev {
@@ -1112,14 +1143,18 @@ fn make_check_mount_verify(cfg: &mut MkfsConfig) {
 
     make_btrfs(cfg).unwrap();
 
-    // Verify with btrfs check before mounting.
-    btrfs_check(images[0].path());
-
-    // Attach loopback devices for all images.
+    // Attach loopback devices for all images. We do this *before*
+    // btrfs check so that for non-mirror metadata profiles
+    // (RAID0, RAID10) btrfs check can find tree blocks on the other
+    // devices via blkid scan.
     let loop_devs: Vec<_> = images
         .iter()
         .map(|img| LoopDev::attach(img.path()))
         .collect();
+
+    // Verify with btrfs check before mounting.
+    btrfs_check(loop_devs[0].path());
+
     let mount = MountPoint::mount_multi(loop_devs);
 
     // Verify we can list the root directory.

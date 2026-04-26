@@ -3517,6 +3517,128 @@ fn multi_device_raid1_data_extent_passes_btrfs_check() {
     assert_btrfs_check(&paths[0]);
 }
 
+/// Open a 3-device RAID0 image (metadata + data both RAID0), commit a
+/// small COW transaction in the root tree, reopen, and verify the item
+/// is reachable. This exercises the stripe-aware `plan_write` /
+/// `plan_read` routing — every row of every striped tree write must
+/// land on the column the chunk's profile says owns it, and reads must
+/// follow the same routing.
+#[test]
+fn multi_device_raid0_metadata_cow_round_trip() {
+    let (_dir, paths) = create_multi_device_test_image(3, "raid0", "raid0");
+
+    let test_objectid = 100_001u64;
+    let test_key = DiskKey {
+        objectid: test_objectid,
+        key_type: KeyType::TemporaryItem,
+        offset: 7,
+    };
+    let test_data = b"raid0 cow round trip";
+
+    {
+        let devices = open_devices_by_devid(&paths);
+        let mut fs = Filesystem::open_multi(devices).expect("open_multi");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &test_key,
+            &mut path,
+            SearchIntent::Insert((25 + test_data.len()) as u32),
+            true,
+        )
+        .expect("search");
+        assert!(!found);
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &test_key, test_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    // Reopen and verify.
+    {
+        let devices = open_devices_by_devid(&paths);
+        let mut fs = Filesystem::open_multi(devices).expect("reopen multi");
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            1,
+            &test_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search");
+        assert!(found, "RAID0 round-trip lost the inserted item");
+        path.release();
+    }
+}
+
+/// Same as [`multi_device_raid0_metadata_cow_round_trip`] but with a
+/// 4-device RAID10 layout (mirror pairs across stripes). Catches the
+/// `sub_stripes` mirror-pair routing.
+#[test]
+fn multi_device_raid10_metadata_cow_round_trip() {
+    let (_dir, paths) = create_multi_device_test_image(4, "raid10", "raid10");
+
+    let test_objectid = 100_002u64;
+    let test_key = DiskKey {
+        objectid: test_objectid,
+        key_type: KeyType::TemporaryItem,
+        offset: 11,
+    };
+    let test_data = b"raid10 cow round trip";
+
+    {
+        let devices = open_devices_by_devid(&paths);
+        let mut fs = Filesystem::open_multi(devices).expect("open_multi");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &test_key,
+            &mut path,
+            SearchIntent::Insert((25 + test_data.len()) as u32),
+            true,
+        )
+        .expect("search");
+        assert!(!found);
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &test_key, test_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    {
+        let devices = open_devices_by_devid(&paths);
+        let mut fs = Filesystem::open_multi(devices).expect("reopen multi");
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            1,
+            &test_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search");
+        assert!(found, "RAID10 round-trip lost the inserted item");
+        path.release();
+    }
+}
+
 /// Opening a multi-device filesystem with only one device handle when
 /// the chunk tree references two should fail at bootstrap with a
 /// clear error.

@@ -31,23 +31,22 @@ use std::{collections::BTreeMap, fs::OpenOptions, path::Path};
 /// works end-to-end (transaction crate opens the image cleanly, the
 /// commit lands, and `btrfs check` passes).
 ///
-/// RAID0 / RAID5 / RAID6 metadata images produced by our mkfs today
-/// fail `btrfs check` (latent striping bugs that pre-date this
-/// integration). RAID10 hits the same striping limitation as RAID0
-/// for tree blocks larger than `stripe_len` and the transaction
-/// crate's `resolve_all` doesn't yet pick the correct sub-stripe pair
-/// for tree-block writes. These cases need their own clean-room plan
-/// and are skipped here; the resulting filesystem is unchanged from
-/// what mkfs's bootstrap produces (no UUID tree, missing other future
-/// post-bootstrap additions) but at least we don't make it worse.
+/// RAID5 / RAID6 are still excluded: the transaction crate doesn't yet
+/// route writes through their parity-aware placement (no `plan_write`
+/// implementation for RAID5/RAID6 — needs its own clean-room plan).
+/// All other profiles (SINGLE / DUP / RAID0 / RAID1* / RAID10) go
+/// through the stripe-aware `BlockReader::write_block`, which routes
+/// per the chunk's profile via `ChunkTreeCache::plan_write`.
 fn profile_supported(profile: Profile) -> bool {
     matches!(
         profile,
         Profile::Single
             | Profile::Dup
+            | Profile::Raid0
             | Profile::Raid1
             | Profile::Raid1c3
             | Profile::Raid1c4
+            | Profile::Raid10
     )
 }
 

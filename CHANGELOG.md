@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `btrfs-disk`: `ChunkProfile` enum and `ChunkTreeCache::plan_write` /
+  `plan_read` for stripe-aware per-device routing across all RAID
+  profiles except RAID5/RAID6. Multi-row writes (buffers larger than
+  `stripe_len`) split into per-row segments automatically. Replaces
+  `resolve_all` for the routing decision in `BlockReader::write_block`,
+  `read_block`, and `read_data`.
+
+### Fixed
+
+- `btrfs-transaction` write path now routes correctly on RAID0 / RAID10
+  filesystems. Previously every commit went through `resolve_all` which
+  fans out to all stripes — correct for DUP/RAID1*, but for RAID0 it
+  duplicated the same row to every device (corruption) and for RAID10
+  it wrote to every mirror pair instead of just the row's pair. Surfaces
+  in mkfs's `post_bootstrap` UUID-tree creation: RAID0/RAID10 images are
+  no longer skipped by the profile allowlist.
+
 ### Changed
 
 - `btrfs-disk`: `csum_tree_block` and `csum_superblock` now dispatch on
