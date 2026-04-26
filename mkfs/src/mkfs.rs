@@ -424,7 +424,7 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
             bootstrap_creates_post_trees,
             bootstrap_creates_post_trees,
             bootstrap_creates_post_trees,
-            cfg.has_quota_tree(),
+            cfg.has_quota_tree() && bootstrap_creates_post_trees,
         ),
         data: 0,
     };
@@ -521,7 +521,10 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         trees.push((TreeId::DataReloc, data_reloc_tree, dr_addr));
         optional_slot += 1;
     }
-    if cfg.has_quota_tree() {
+    // Quota tree: when post_bootstrap will run, it creates the quota
+    // tree itself (with the same items mkfs would have produced).
+    // For unsupported profiles (RAID5/RAID6), mkfs writes it directly.
+    if cfg.has_quota_tree() && bootstrap_creates_post_trees {
         let addr = layout.block_addr_with_offset(TreeId::Quota, optional_slot);
         let quota_header = LeafHeader {
             fsid: cfg.fs_uuid,
@@ -1783,7 +1786,7 @@ fn build_root_tree(
         });
         optional_slot += 1;
     }
-    if cfg.has_quota_tree() {
+    if cfg.has_quota_tree() && bootstrap_creates_post_trees {
         entries.push(RootEntry {
             objectid: TreeId::Quota.objectid(),
             bytenr: layout.block_addr_with_offset(TreeId::Quota, optional_slot),
@@ -1897,7 +1900,7 @@ fn build_extent_tree(
             ));
             opt_slot += 1;
         }
-        if cfg.has_quota_tree() {
+        if cfg.has_quota_tree() && bootstrap_creates_post_trees {
             all_trees.push((
                 TreeId::Quota,
                 layout.block_addr_with_offset(TreeId::Quota, opt_slot),
@@ -1947,7 +1950,7 @@ fn build_extent_tree(
                     bootstrap_creates_post_trees,
                     bootstrap_creates_post_trees,
                     bootstrap_creates_post_trees,
-                    cfg.has_quota_tree(),
+                    cfg.has_quota_tree() && bootstrap_creates_post_trees,
                 ),
                 u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
                 u64::from(raw::BTRFS_BLOCK_GROUP_METADATA)

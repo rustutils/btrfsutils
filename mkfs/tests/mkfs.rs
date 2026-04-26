@@ -374,6 +374,32 @@ fn default_profile_fs_tree_created_by_post_bootstrap() {
     assert!(ri.otime.sec > 0, "FS ROOT_ITEM.otime should be set");
 }
 
+/// `mkfs -O quota` with a default profile produces a quota tree
+/// created by post-bootstrap, with all three items (STATUS, INFO,
+/// LIMIT) and the ON+INCONSISTENT status flags.
+#[test]
+fn default_profile_quota_tree_created_by_post_bootstrap() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    cfg.quota = true;
+    make_btrfs_on(&image, &mut cfg);
+
+    let quota_oid = u64::from(btrfs_disk::raw::BTRFS_QUOTA_TREE_OBJECTID);
+    let entries = walk_root_tree_items(image.path(), |oid, kt, _, _| {
+        oid == quota_oid && kt == KeyType::RootItem
+    });
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected exactly one quota tree ROOT_ITEM"
+    );
+    let ri = RootItem::parse(&entries[0].3).unwrap();
+    assert_eq!(
+        ri.generation, 2,
+        "quota tree should be created by post_bootstrap (gen 2)",
+    );
+}
+
 /// Same as [`default_profile_csum_tree_created_by_post_bootstrap`] but
 /// for the data-reloc tree. Additionally checks that the ROOT_ITEM's
 /// `root_dirid` is set to 256 (the canonical subvolume root inode) —

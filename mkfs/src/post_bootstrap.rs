@@ -113,8 +113,6 @@ pub fn run(cfg: &MkfsConfig) -> Result<()> {
     let paths: Vec<&Path> =
         cfg.devices.iter().map(|d| d.path.as_path()).collect();
 
-    let now = cfg.now_secs();
-
     if paths.len() == 1 {
         let file = OpenOptions::new()
             .read(true)
@@ -125,7 +123,7 @@ pub fn run(cfg: &MkfsConfig) -> Result<()> {
             })?;
         let mut fs = Filesystem::open(file)
             .context("post_bootstrap: Filesystem::open")?;
-        run_transaction(&mut fs, now)?;
+        run_transaction(&mut fs, cfg)?;
         fs.sync().context("post_bootstrap: fsync")?;
     } else {
         // Multi-device: build {devid -> handle} keyed by each device's
@@ -156,7 +154,7 @@ pub fn run(cfg: &MkfsConfig) -> Result<()> {
         }
         let mut fs = Filesystem::open_multi(handles)
             .context("post_bootstrap: Filesystem::open_multi")?;
-        run_transaction(&mut fs, now)?;
+        run_transaction(&mut fs, cfg)?;
         fs.sync().context("post_bootstrap: fsync")?;
     }
     Ok(())
@@ -165,21 +163,17 @@ pub fn run(cfg: &MkfsConfig) -> Result<()> {
 /// Run the transaction body. Separate so callers (e.g. tests) can drive
 /// `Filesystem` themselves.
 ///
-/// `now` is the unix timestamp (seconds) used for `ROOT_ITEM` ctime /
-/// otime; pass `cfg.now_secs()` to keep the fixture-deterministic
-/// override when set.
-///
 /// # Errors
 ///
 /// Returns an error if `Transaction::start`, the per-step additions, or
 /// `commit` fails.
 pub fn run_transaction(
     fs: &mut Filesystem<std::fs::File>,
-    now: u64,
+    cfg: &MkfsConfig,
 ) -> Result<()> {
     let mut trans =
         Transaction::start(fs).context("post_bootstrap: Transaction::start")?;
-    apply_in_transaction(fs, &mut trans, now)?;
+    apply_in_transaction(fs, &mut trans, cfg)?;
     trans
         .commit(fs)
         .context("post_bootstrap: Transaction::commit")?;
@@ -202,8 +196,10 @@ pub fn run_transaction(
 fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
     fs: &mut Filesystem<R>,
     trans: &mut Transaction<R>,
-    now: u64,
+    cfg: &MkfsConfig,
 ) -> Result<()> {
+    let now = cfg.now_secs();
+
     // The FS tree (objectid 5) is the main user-visible tree:
     // subvolume root, root dir inode 256, dir entries, file inodes.
     // For the no-rootdir path it's just the empty subvolume shape
@@ -223,6 +219,13 @@ fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
     // hand-built bootstrap built this tree itself; the no-rootdir path
     // now defers it to here.
     ensure_data_reloc_tree(fs, trans)?;
+
+    // The quota tree (objectid 8) is created when `-O quota` or
+    // `-O squota` is set. Holds STATUS + INFO + LIMIT items for the
+    // FS tree's qgroupid (0/5).
+    if cfg.has_quota_tree() {
+        ensure_quota_tree(fs, trans, cfg)?;
+    }
 
     // btrfs-progs creates a UUID tree by default; mkfs's hand-built
     // bootstrap doesn't. The kernel populates entries lazily on
@@ -468,32 +471,136 @@ fn insert_inode_ref<R: std::io::Read + std::io::Write + std::io::Seek>(
         offset: parent_ino,
     };
     let data = InodeRef::serialize(index, name);
-    let item_room = u32::try_from(ITEM_SIZE + data.len())
-        .expect("INODE_REF item room fits in u32 (small fixed-size record)");
+    insert_raw_item(fs, trans, tree_id, &key, &data, "INODE_REF")
+}
+
+/// Insert a raw byte-slice item at `key` in `tree_id`. Errors on
+/// duplicate. Shared bottom-half of all the `ensure_*` helpers that
+/// need to write items the higher-level transaction APIs don't cover
+/// directly (`INODE_REF`, qgroup items, etc.).
+fn insert_raw_item<R: std::io::Read + std::io::Write + std::io::Seek>(
+    fs: &mut Filesystem<R>,
+    trans: &mut Transaction<R>,
+    tree_id: u64,
+    key: &DiskKey,
+    data: &[u8],
+    what: &str,
+) -> Result<()> {
+    let item_room = u32::try_from(ITEM_SIZE + data.len()).map_err(|_| {
+        anyhow::anyhow!("post_bootstrap: {what} item too large for u32")
+    })?;
     let mut path = BtrfsPath::new();
     let found = search_slot(
         Some(trans),
         fs,
         tree_id,
-        &key,
+        key,
         &mut path,
         SearchIntent::Insert(item_room),
         true,
     )
-    .context("post_bootstrap: search_slot(INODE_REF)")?;
+    .with_context(|| format!("post_bootstrap: search_slot({what})"))?;
     if found {
         path.release();
         return Err(anyhow::anyhow!(
-            "post_bootstrap: INODE_REF for inode {child_ino} \
-             already exists in tree {tree_id}"
+            "post_bootstrap: {what} already exists in tree {tree_id}"
         ));
     }
     let leaf = path.nodes[0]
         .as_mut()
         .ok_or_else(|| anyhow::anyhow!("post_bootstrap: no leaf in path"))?;
-    insert_item(leaf, path.slots[0], &key, &data)
+    insert_item(leaf, path.slots[0], key, data)
         .map_err(|e| anyhow::anyhow!("post_bootstrap: insert_item: {e}"))?;
     fs.mark_dirty(leaf);
     path.release();
+    Ok(())
+}
+
+/// Idempotently create the quota tree (objectid 8) with the items
+/// that mkfs's `build_quota_tree` would produce: a `QGROUP_STATUS`
+/// item plus `QGROUP_INFO` and `QGROUP_LIMIT` for the FS tree's
+/// qgroupid (0/5).
+///
+/// Distinguishes between regular quota (`-O quota`, INCONSISTENT
+/// flag, zeroed info — kernel will rescan) and simple quota
+/// (`-O squota`, `SIMPLE_MODE` flag, info pre-populated with the FS
+/// tree's nodesize usage and `enable_gen` set).
+fn ensure_quota_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
+    fs: &mut Filesystem<R>,
+    trans: &mut Transaction<R>,
+    cfg: &MkfsConfig,
+) -> Result<()> {
+    let quota_id = u64::from(btrfs_disk::raw::BTRFS_QUOTA_TREE_OBJECTID);
+
+    if fs.root_bytenr(quota_id).is_some() {
+        return Ok(());
+    }
+
+    trans
+        .create_empty_tree(fs, quota_id)
+        .context("post_bootstrap: create_empty_tree(quota tree)")?;
+
+    let generation = trans.transid;
+
+    let flags = if cfg.squota {
+        u64::from(btrfs_disk::raw::BTRFS_QGROUP_STATUS_FLAG_ON)
+            | u64::from(btrfs_disk::raw::BTRFS_QGROUP_STATUS_FLAG_SIMPLE_MODE)
+    } else {
+        u64::from(btrfs_disk::raw::BTRFS_QGROUP_STATUS_FLAG_ON)
+            | u64::from(btrfs_disk::raw::BTRFS_QGROUP_STATUS_FLAG_INCONSISTENT)
+    };
+    let enable_gen = if cfg.squota { Some(generation) } else { None };
+
+    // QGROUP_STATUS at (0, STATUS, 0)
+    let status_data =
+        crate::items::qgroup_status(1, generation, flags, enable_gen);
+    let status_key = DiskKey {
+        objectid: 0,
+        key_type: KeyType::QgroupStatus,
+        offset: 0,
+    };
+    insert_raw_item(
+        fs,
+        trans,
+        quota_id,
+        &status_key,
+        &status_data,
+        "QGROUP_STATUS",
+    )?;
+
+    // QGROUP_INFO at (0, INFO, 5) — for the FS tree.
+    let fs_tree_qgroupid = u64::from(btrfs_disk::raw::BTRFS_FS_TREE_OBJECTID);
+    let info_data = if cfg.squota {
+        crate::items::qgroup_info(
+            generation,
+            u64::from(cfg.nodesize),
+            u64::from(cfg.nodesize),
+        )
+    } else {
+        crate::items::qgroup_info_zeroed()
+    };
+    let info_key = DiskKey {
+        objectid: 0,
+        key_type: KeyType::QgroupInfo,
+        offset: fs_tree_qgroupid,
+    };
+    insert_raw_item(fs, trans, quota_id, &info_key, &info_data, "QGROUP_INFO")?;
+
+    // QGROUP_LIMIT at (0, LIMIT, 5)
+    let limit_data = crate::items::qgroup_limit_zeroed();
+    let limit_key = DiskKey {
+        objectid: 0,
+        key_type: KeyType::QgroupLimit,
+        offset: fs_tree_qgroupid,
+    };
+    insert_raw_item(
+        fs,
+        trans,
+        quota_id,
+        &limit_key,
+        &limit_data,
+        "QGROUP_LIMIT",
+    )?;
+
     Ok(())
 }

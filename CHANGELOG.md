@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `btrfs-mkfs`: quota tree creation (`-O quota` / `-O squota`) moves
+  into the post-bootstrap transaction for supported profiles. Uses a
+  new `insert_raw_item` helper to write the three qgroup items
+  (STATUS + INFO + LIMIT) for the FS tree's qgroupid (0/5).
+  Distinguishes regular quota (INCONSISTENT flag, zero info — kernel
+  will rescan) from squota (SIMPLE_MODE flag, info pre-populated
+  with FS tree usage). RAID5/RAID6 falls back to mkfs-built quota.
+  `MkfsConfig::now_secs` is now `pub(crate)` and the post-bootstrap
+  `apply_in_transaction` takes the full `MkfsConfig` so future
+  feature-gated trees can read their settings the same way.
 - `btrfs-mkfs`: FS tree creation moves into the post-bootstrap
   transaction for the no-rootdir path with supported profiles
   (SINGLE / DUP / RAID0 / RAID1* / RAID10). Same pattern as the
