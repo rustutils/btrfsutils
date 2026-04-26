@@ -296,6 +296,20 @@ fn mkfs_with_no_free_space_tree() {
     let fst_bit =
         btrfs_disk::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64;
     assert_eq!(sb.compat_ro_flags & fst_bit, 0);
+
+    // The root tree should not contain a ROOT_ITEM for the FST
+    // objectid (10). Before the FST omit work, mkfs left a stale
+    // ROOT_ITEM + empty FST leaf on disk even when the feature was
+    // disabled.
+    let fst_oid = u64::from(btrfs_disk::raw::BTRFS_FREE_SPACE_TREE_OBJECTID);
+    let fst_root_items = walk_root_tree_items(image.path(), |oid, kt, _, _| {
+        oid == fst_oid && kt == KeyType::RootItem
+    });
+    assert!(
+        fst_root_items.is_empty(),
+        "^free-space-tree image should have no FST ROOT_ITEM, found {} entries",
+        fst_root_items.len()
+    );
 }
 
 #[test]

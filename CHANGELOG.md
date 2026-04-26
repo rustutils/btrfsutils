@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- `btrfs-mkfs`: `--features ^free-space-tree` no longer writes a stale
+  empty FST leaf or its `ROOT_ITEM`. The free-space tree is now an
+  optional slot in `BlockLayout` (alongside block-group and quota
+  trees) — gated on `cfg.has_free_space_tree()` everywhere instead of
+  having a hardcoded slot. Saves one `nodesize`-sized tree block per
+  `^free-space-tree` image and aligns the on-disk layout with what
+  btrfs-progs `mkfs.btrfs` produces.
+
 ### Added
 
 - `btrfs-disk`: `ChunkProfile` enum and `ChunkTreeCache::plan_write` /

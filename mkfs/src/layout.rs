@@ -52,39 +52,42 @@ impl TreeId {
         }
     }
 
-    /// All tree blocks in the order they are laid out on disk.
-    pub const ALL: [TreeId; 8] = [
+    /// Always-present tree blocks in the order they are laid out on disk.
+    /// Excludes optional trees (`FreeSpace`, `BlockGroup`, `Quota`),
+    /// which are appended after the base trees when their corresponding
+    /// feature is enabled.
+    pub const ALL: [TreeId; 7] = [
         TreeId::Root,
         TreeId::Extent,
         TreeId::Chunk,
         TreeId::Dev,
         TreeId::Fs,
         TreeId::Csum,
-        TreeId::FreeSpace,
         TreeId::DataReloc,
     ];
 
-    /// Trees that get a `ROOT_ITEM` in the root tree.
-    /// Excludes Root (can't reference itself) and Chunk (handled specially
-    /// by the superblock's `chunk_root` pointer).
-    pub const ROOT_ITEM_TREES: [TreeId; 6] = [
+    /// Always-present trees that get a `ROOT_ITEM` in the root tree.
+    /// Excludes Root (can't reference itself), Chunk (handled by the
+    /// superblock's `chunk_root` pointer), and the optional trees
+    /// (`FreeSpace`, `BlockGroup`, `Quota`).
+    pub const ROOT_ITEM_TREES: [TreeId; 5] = [
         TreeId::Extent,
         TreeId::Dev,
         TreeId::Fs,
         TreeId::Csum,
-        TreeId::FreeSpace,
         TreeId::DataReloc,
     ];
 }
 
-/// The 7 trees that live in the metadata chunk (everything except Chunk).
-pub const NON_CHUNK_TREES: [TreeId; 7] = [
+/// The 6 always-present trees that live in the metadata chunk
+/// (everything except `Chunk` and the optional `FreeSpace` /
+/// `BlockGroup` / `Quota`).
+pub const NON_CHUNK_TREES: [TreeId; 6] = [
     TreeId::Root,
     TreeId::Extent,
     TreeId::Dev,
     TreeId::Fs,
     TreeId::Csum,
-    TreeId::FreeSpace,
     TreeId::DataReloc,
 ];
 
@@ -110,20 +113,18 @@ impl BlockLayout {
 
     /// Logical byte address of the given tree block.
     ///
-    /// Returns the logical byte address for a tree block.
+    /// Optional trees (`BlockGroup`, `FreeSpace`, `Quota`) are placed
+    /// after the 6 always-present trees. The slot ordering convention
+    /// is `BlockGroup` first, then `FreeSpace`, then `Quota`.
     ///
-    /// Optional trees (`BlockGroup`, `Quota`) are placed after the 7 base
-    /// trees. When both are present, `BlockGroup` gets slot 7 and `Quota`
-    /// gets slot 8. When only `Quota` is present, it gets slot 7.
-    ///
-    /// The `optional_trees_before` parameter specifies how many optional
-    /// tree slots precede this one. For base trees and `Chunk`, it is
-    /// ignored.
+    /// The `optional_trees_before` parameter specifies how many
+    /// optional tree slots precede this one. For base trees and
+    /// `Chunk`, it is ignored.
     ///
     /// # Panics
     ///
     /// Panics if `tree` is not in `NON_CHUNK_TREES` and is not `Chunk`,
-    /// `BlockGroup`, or `Quota`.
+    /// `BlockGroup`, `FreeSpace`, or `Quota`.
     #[must_use]
     pub fn block_addr_with_offset(
         &self,
@@ -132,7 +133,10 @@ impl BlockLayout {
     ) -> u64 {
         if tree == TreeId::Chunk {
             SYSTEM_GROUP_OFFSET
-        } else if matches!(tree, TreeId::BlockGroup | TreeId::Quota) {
+        } else if matches!(
+            tree,
+            TreeId::BlockGroup | TreeId::FreeSpace | TreeId::Quota
+        ) {
             self.meta_logical
                 + (NON_CHUNK_TREES.len() as u64 + optional_trees_before)
                     * u64::from(self.nodesize)
@@ -156,16 +160,21 @@ impl BlockLayout {
         u64::from(self.nodesize)
     }
 
-    /// Bytes used in the metadata chunk by the base trees (7 tree blocks)
-    /// plus any optional trees (block-group-tree, quota tree).
+    /// Bytes used in the metadata chunk by the base trees (6 tree
+    /// blocks) plus any optional trees that are enabled
+    /// (block-group-tree, free-space-tree, quota tree).
     #[must_use]
     pub fn metadata_used(
         &self,
         has_block_group_tree: bool,
+        has_free_space_tree: bool,
         has_quota_tree: bool,
     ) -> u64 {
         let mut count = NON_CHUNK_TREES.len() as u64;
         if has_block_group_tree {
+            count += 1;
+        }
+        if has_free_space_tree {
             count += 1;
         }
         if has_quota_tree {
@@ -683,19 +692,47 @@ mod tests {
         // Chunk tree is in the system chunk at SYSTEM_GROUP_OFFSET
         assert_eq!(layout.block_addr(TreeId::Chunk), SYSTEM_GROUP_OFFSET);
 
-        // Other 7 trees are sequential in the metadata chunk
+        // The 6 always-present trees are sequential in the metadata
+        // chunk (FreeSpace is now optional and lives in the optional
+        // slot region after them).
         assert_eq!(layout.block_addr(TreeId::Root), meta_logical);
         assert_eq!(layout.block_addr(TreeId::Extent), meta_logical + 16384);
         assert_eq!(layout.block_addr(TreeId::Dev), meta_logical + 2 * 16384);
         assert_eq!(layout.block_addr(TreeId::Fs), meta_logical + 3 * 16384);
         assert_eq!(layout.block_addr(TreeId::Csum), meta_logical + 4 * 16384);
         assert_eq!(
-            layout.block_addr(TreeId::FreeSpace),
+            layout.block_addr(TreeId::DataReloc),
             meta_logical + 5 * 16384
         );
+    }
+
+    #[test]
+    fn optional_block_addresses() {
+        // Optional trees (BlockGroup, FreeSpace, Quota) take slots
+        // 6, 7, 8 in the order they're enabled. The base trees end
+        // at slot 5 (DataReloc).
+        let meta_logical = CHUNK_START;
+        let layout = BlockLayout::new(16384, meta_logical);
+
+        // BlockGroup as the first optional slot.
         assert_eq!(
-            layout.block_addr(TreeId::DataReloc),
+            layout.block_addr_with_offset(TreeId::BlockGroup, 0),
             meta_logical + 6 * 16384
+        );
+        // FreeSpace as the second optional slot (e.g. when BGT is on).
+        assert_eq!(
+            layout.block_addr_with_offset(TreeId::FreeSpace, 1),
+            meta_logical + 7 * 16384
+        );
+        // FreeSpace as the only optional slot.
+        assert_eq!(
+            layout.block_addr_with_offset(TreeId::FreeSpace, 0),
+            meta_logical + 6 * 16384
+        );
+        // Quota at the third slot (BGT + FST + Quota).
+        assert_eq!(
+            layout.block_addr_with_offset(TreeId::Quota, 2),
+            meta_logical + 8 * 16384
         );
     }
 
@@ -703,9 +740,16 @@ mod tests {
     fn system_and_metadata_used() {
         let layout = BlockLayout::new(16384, CHUNK_START);
         assert_eq!(layout.system_used(), 16384);
-        assert_eq!(layout.metadata_used(false, false), 7 * 16384);
-        assert_eq!(layout.metadata_used(true, false), 8 * 16384);
-        assert_eq!(layout.metadata_used(true, true), 9 * 16384);
+        // Base trees only.
+        assert_eq!(layout.metadata_used(false, false, false), 6 * 16384);
+        // + BlockGroup.
+        assert_eq!(layout.metadata_used(true, false, false), 7 * 16384);
+        // + FreeSpace.
+        assert_eq!(layout.metadata_used(false, true, false), 7 * 16384);
+        // + Quota.
+        assert_eq!(layout.metadata_used(false, false, true), 7 * 16384);
+        // All three.
+        assert_eq!(layout.metadata_used(true, true, true), 9 * 16384);
     }
 
     fn test_uuid() -> uuid::Uuid {

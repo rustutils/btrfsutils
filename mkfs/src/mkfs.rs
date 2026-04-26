@@ -401,19 +401,12 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
     let csum_tree = build_empty_tree(cfg.nodesize, &leaf_header(TreeId::Csum));
     let normal_used = UsedBytes {
         system: layout.system_used(),
-        metadata: layout
-            .metadata_used(cfg.has_block_group_tree(), cfg.has_quota_tree()),
+        metadata: layout.metadata_used(
+            cfg.has_block_group_tree(),
+            cfg.has_free_space_tree(),
+            cfg.has_quota_tree(),
+        ),
         data: 0,
-    };
-    let free_space_tree = if cfg.has_free_space_tree() {
-        build_free_space_tree_with_used(
-            cfg,
-            &chunks,
-            &leaf_header(TreeId::FreeSpace),
-            &normal_used,
-        )?
-    } else {
-        build_empty_tree(cfg.nodesize, &leaf_header(TreeId::FreeSpace))
     };
     let data_reloc_tree =
         build_root_dir_tree(cfg, &leaf_header(TreeId::DataReloc))?;
@@ -431,28 +424,51 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         (TreeId::Fs, fs_tree, layout.block_addr(TreeId::Fs)),
         (TreeId::Csum, csum_tree, layout.block_addr(TreeId::Csum)),
         (
-            TreeId::FreeSpace,
-            free_space_tree,
-            layout.block_addr(TreeId::FreeSpace),
-        ),
-        (
             TreeId::DataReloc,
             data_reloc_tree,
             layout.block_addr(TreeId::DataReloc),
         ),
     ];
 
+    // Optional trees follow the base trees in this slot order:
+    // BlockGroup, FreeSpace, Quota.
     let mut optional_slot: u64 = 0;
     if cfg.has_block_group_tree() {
+        let addr =
+            layout.block_addr_with_offset(TreeId::BlockGroup, optional_slot);
+        let bg_header = LeafHeader {
+            fsid: cfg.fs_uuid,
+            chunk_tree_uuid: cfg.chunk_tree_uuid,
+            generation,
+            owner: TreeId::BlockGroup.objectid(),
+            bytenr: addr,
+        };
         let bg_tree = build_block_group_tree_with_used(
             cfg,
             &chunks,
-            &leaf_header(TreeId::BlockGroup),
+            &bg_header,
             &normal_used,
         )?;
-        let addr =
-            layout.block_addr_with_offset(TreeId::BlockGroup, optional_slot);
         trees.push((TreeId::BlockGroup, bg_tree, addr));
+        optional_slot += 1;
+    }
+    if cfg.has_free_space_tree() {
+        let addr =
+            layout.block_addr_with_offset(TreeId::FreeSpace, optional_slot);
+        let fst_header = LeafHeader {
+            fsid: cfg.fs_uuid,
+            chunk_tree_uuid: cfg.chunk_tree_uuid,
+            generation,
+            owner: TreeId::FreeSpace.objectid(),
+            bytenr: addr,
+        };
+        let fst = build_free_space_tree_with_used(
+            cfg,
+            &chunks,
+            &fst_header,
+            &normal_used,
+        )?;
+        trees.push((TreeId::FreeSpace, fst, addr));
         optional_slot += 1;
     }
     if cfg.has_quota_tree() {
@@ -1674,12 +1690,23 @@ fn build_root_tree(
         })
         .collect();
 
+    // Optional trees in the same slot order as `make_btrfs`:
+    // BlockGroup, FreeSpace, Quota.
     let mut optional_slot: u64 = 0;
     if cfg.has_block_group_tree() {
         entries.push(RootEntry {
             objectid: TreeId::BlockGroup.objectid(),
             bytenr: layout
                 .block_addr_with_offset(TreeId::BlockGroup, optional_slot),
+            is_fs_tree: false,
+        });
+        optional_slot += 1;
+    }
+    if cfg.has_free_space_tree() {
+        entries.push(RootEntry {
+            objectid: TreeId::FreeSpace.objectid(),
+            bytenr: layout
+                .block_addr_with_offset(TreeId::FreeSpace, optional_slot),
             is_fs_tree: false,
         });
         optional_slot += 1;
@@ -1756,7 +1783,10 @@ fn build_extent_tree(
     // so addresses are not monotonically increasing — we must sort.
     let mut extent_items: Vec<(Key, Vec<u8>)> = Vec::new();
 
-    // For each tree block: METADATA_ITEM with inline TREE_BLOCK_REF
+    // For each tree block: METADATA_ITEM with inline TREE_BLOCK_REF.
+    // TreeId::ALL covers the always-present trees; optional trees
+    // (BlockGroup, FreeSpace, Quota) are appended in the same slot
+    // order as `make_btrfs`.
     let mut all_trees: Vec<(TreeId, u64)> = TreeId::ALL
         .iter()
         .map(|&t| (t, layout.block_addr(t)))
@@ -1767,6 +1797,13 @@ fn build_extent_tree(
             all_trees.push((
                 TreeId::BlockGroup,
                 layout.block_addr_with_offset(TreeId::BlockGroup, opt_slot),
+            ));
+            opt_slot += 1;
+        }
+        if cfg.has_free_space_tree() {
+            all_trees.push((
+                TreeId::FreeSpace,
+                layout.block_addr_with_offset(TreeId::FreeSpace, opt_slot),
             ));
             opt_slot += 1;
         }
@@ -1816,6 +1853,7 @@ fn build_extent_tree(
             items::block_group_item(
                 layout.metadata_used(
                     cfg.has_block_group_tree(),
+                    cfg.has_free_space_tree(),
                     cfg.has_quota_tree(),
                 ),
                 u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),
