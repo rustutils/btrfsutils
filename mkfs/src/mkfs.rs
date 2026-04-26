@@ -119,8 +119,10 @@ impl MkfsConfig {
         &self.devices[0]
     }
 
-    /// Current time in seconds since epoch (uses override if set).
-    fn now_secs(&self) -> u64 {
+    /// Current time in seconds since epoch (uses `creation_time`
+    /// override if set). `pub(crate)` so `post_bootstrap` uses the
+    /// same timestamp as mkfs's bootstrap.
+    pub(crate) fn now_secs(&self) -> u64 {
         self.creation_time.unwrap_or_else(|| {
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -392,7 +394,7 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         bytenr: layout.block_addr(tree),
     };
 
-    // mkfs creates the csum and data-reloc trees only when
+    // mkfs creates the FS, csum, and data-reloc trees only when
     // post_bootstrap won't run (e.g. RAID5/RAID6 where the transaction
     // crate doesn't yet have stripe-aware writes). For supported
     // profiles, post_bootstrap creates these trees itself.
@@ -414,12 +416,12 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
     )?;
     let chunk_tree = build_chunk_tree(cfg, &layout, &chunks, &leaf_header)?;
     let dev_tree = build_dev_tree(cfg, &chunks, &leaf_header)?;
-    let fs_tree = build_root_dir_tree(cfg, &leaf_header(TreeId::Fs))?;
     let normal_used = UsedBytes {
         system: layout.system_used(),
         metadata: layout.metadata_used(
             cfg.has_block_group_tree(),
             cfg.has_free_space_tree(),
+            bootstrap_creates_post_trees,
             bootstrap_creates_post_trees,
             bootstrap_creates_post_trees,
             cfg.has_quota_tree(),
@@ -437,11 +439,10 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         ),
         (TreeId::Chunk, chunk_tree, layout.block_addr(TreeId::Chunk)),
         (TreeId::Dev, dev_tree, layout.block_addr(TreeId::Dev)),
-        (TreeId::Fs, fs_tree, layout.block_addr(TreeId::Fs)),
     ];
 
     // Optional trees follow the base trees in this slot order:
-    // BlockGroup, FreeSpace, Csum, DataReloc, Quota.
+    // BlockGroup, FreeSpace, Fs, Csum, DataReloc, Quota.
     let mut optional_slot: u64 = 0;
     if cfg.has_block_group_tree() {
         let addr =
@@ -482,6 +483,18 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         optional_slot += 1;
     }
     if bootstrap_creates_post_trees {
+        let fs_addr = layout.block_addr_with_offset(TreeId::Fs, optional_slot);
+        let fs_header = LeafHeader {
+            fsid: cfg.fs_uuid,
+            chunk_tree_uuid: cfg.chunk_tree_uuid,
+            generation,
+            owner: TreeId::Fs.objectid(),
+            bytenr: fs_addr,
+        };
+        let fs_tree = build_root_dir_tree(cfg, &fs_header)?;
+        trees.push((TreeId::Fs, fs_tree, fs_addr));
+        optional_slot += 1;
+
         let csum_addr =
             layout.block_addr_with_offset(TreeId::Csum, optional_slot);
         let csum_header = LeafHeader {
@@ -1724,12 +1737,12 @@ fn build_root_tree(
         .map(|&tree| RootEntry {
             objectid: tree.objectid(),
             bytenr: layout.block_addr(tree),
-            is_fs_tree: tree == TreeId::Fs,
+            is_fs_tree: false,
         })
         .collect();
 
     // Optional trees in the same slot order as `make_btrfs`:
-    // BlockGroup, FreeSpace, Csum, DataReloc, Quota.
+    // BlockGroup, FreeSpace, Fs, Csum, DataReloc, Quota.
     let mut optional_slot: u64 = 0;
     if cfg.has_block_group_tree() {
         entries.push(RootEntry {
@@ -1750,6 +1763,12 @@ fn build_root_tree(
         optional_slot += 1;
     }
     if bootstrap_creates_post_trees {
+        entries.push(RootEntry {
+            objectid: TreeId::Fs.objectid(),
+            bytenr: layout.block_addr_with_offset(TreeId::Fs, optional_slot),
+            is_fs_tree: true,
+        });
+        optional_slot += 1;
         entries.push(RootEntry {
             objectid: TreeId::Csum.objectid(),
             bytenr: layout.block_addr_with_offset(TreeId::Csum, optional_slot),
@@ -1839,8 +1858,8 @@ fn build_extent_tree(
 
     // For each tree block: METADATA_ITEM with inline TREE_BLOCK_REF.
     // TreeId::ALL covers the always-present trees; optional trees
-    // (BlockGroup, FreeSpace, Csum, DataReloc, Quota) are appended in
-    // the same slot order as `make_btrfs`.
+    // (BlockGroup, FreeSpace, Fs, Csum, DataReloc, Quota) are
+    // appended in the same slot order as `make_btrfs`.
     let mut all_trees: Vec<(TreeId, u64)> = TreeId::ALL
         .iter()
         .map(|&t| (t, layout.block_addr(t)))
@@ -1862,6 +1881,11 @@ fn build_extent_tree(
             opt_slot += 1;
         }
         if bootstrap_creates_post_trees {
+            all_trees.push((
+                TreeId::Fs,
+                layout.block_addr_with_offset(TreeId::Fs, opt_slot),
+            ));
+            opt_slot += 1;
             all_trees.push((
                 TreeId::Csum,
                 layout.block_addr_with_offset(TreeId::Csum, opt_slot),
@@ -1920,6 +1944,7 @@ fn build_extent_tree(
                 layout.metadata_used(
                     cfg.has_block_group_tree(),
                     cfg.has_free_space_tree(),
+                    bootstrap_creates_post_trees,
                     bootstrap_creates_post_trees,
                     bootstrap_creates_post_trees,
                     cfg.has_quota_tree(),

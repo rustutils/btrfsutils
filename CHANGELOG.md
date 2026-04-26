@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `btrfs-mkfs`: FS tree creation moves into the post-bootstrap
+  transaction for the no-rootdir path with supported profiles
+  (SINGLE / DUP / RAID0 / RAID1* / RAID10). Same pattern as the
+  data-reloc tree, plus FS-tree-specific `ROOT_ITEM` patches: the
+  embedded inode flags get `BTRFS_INODE_ROOT_ITEM_INIT`, the
+  `ROOT_ITEM` `uuid` is derived from the fsid by bit-flipping
+  (matches btrfs-progs convention), and ctime/otime track
+  `cfg.now_secs()`. Verified by mounting a default-profile image,
+  writing a file, and reading it back. RAID5/RAID6 and the rootdir
+  path still build the FS tree directly.
 - `btrfs-mkfs`: data-reloc tree creation moves into the post-bootstrap
   transaction for profile/feature combinations that go through it
   (SINGLE / DUP / RAID0 / RAID1* / RAID10). Same pattern as the csum

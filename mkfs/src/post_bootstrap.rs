@@ -25,7 +25,10 @@ use crate::{args::Profile, mkfs::MkfsConfig};
 use anyhow::{Context, Result};
 use btrfs_disk::{
     items::{InodeRef, RootItem},
-    raw::{BTRFS_CSUM_TREE_OBJECTID, BTRFS_UUID_TREE_OBJECTID},
+    raw::{
+        BTRFS_CSUM_TREE_OBJECTID, BTRFS_FS_TREE_OBJECTID,
+        BTRFS_INODE_ROOT_ITEM_INIT, BTRFS_UUID_TREE_OBJECTID,
+    },
     tree::{DiskKey, KeyType},
 };
 use btrfs_transaction::{
@@ -37,6 +40,7 @@ use btrfs_transaction::{
     search::{SearchIntent, search_slot},
 };
 use std::{collections::BTreeMap, fs::OpenOptions, path::Path};
+use uuid::Uuid;
 
 /// Profiles for which we have verified the post-bootstrap transaction
 /// works end-to-end (transaction crate opens the image cleanly, the
@@ -109,6 +113,8 @@ pub fn run(cfg: &MkfsConfig) -> Result<()> {
     let paths: Vec<&Path> =
         cfg.devices.iter().map(|d| d.path.as_path()).collect();
 
+    let now = cfg.now_secs();
+
     if paths.len() == 1 {
         let file = OpenOptions::new()
             .read(true)
@@ -119,7 +125,7 @@ pub fn run(cfg: &MkfsConfig) -> Result<()> {
             })?;
         let mut fs = Filesystem::open(file)
             .context("post_bootstrap: Filesystem::open")?;
-        run_transaction(&mut fs)?;
+        run_transaction(&mut fs, now)?;
         fs.sync().context("post_bootstrap: fsync")?;
     } else {
         // Multi-device: build {devid -> handle} keyed by each device's
@@ -150,7 +156,7 @@ pub fn run(cfg: &MkfsConfig) -> Result<()> {
         }
         let mut fs = Filesystem::open_multi(handles)
             .context("post_bootstrap: Filesystem::open_multi")?;
-        run_transaction(&mut fs)?;
+        run_transaction(&mut fs, now)?;
         fs.sync().context("post_bootstrap: fsync")?;
     }
     Ok(())
@@ -159,14 +165,21 @@ pub fn run(cfg: &MkfsConfig) -> Result<()> {
 /// Run the transaction body. Separate so callers (e.g. tests) can drive
 /// `Filesystem` themselves.
 ///
+/// `now` is the unix timestamp (seconds) used for `ROOT_ITEM` ctime /
+/// otime; pass `cfg.now_secs()` to keep the fixture-deterministic
+/// override when set.
+///
 /// # Errors
 ///
 /// Returns an error if `Transaction::start`, the per-step additions, or
 /// `commit` fails.
-pub fn run_transaction(fs: &mut Filesystem<std::fs::File>) -> Result<()> {
+pub fn run_transaction(
+    fs: &mut Filesystem<std::fs::File>,
+    now: u64,
+) -> Result<()> {
     let mut trans =
         Transaction::start(fs).context("post_bootstrap: Transaction::start")?;
-    apply_in_transaction(fs, &mut trans)?;
+    apply_in_transaction(fs, &mut trans, now)?;
     trans
         .commit(fs)
         .context("post_bootstrap: Transaction::commit")?;
@@ -180,17 +193,23 @@ pub fn run_transaction(fs: &mut Filesystem<std::fs::File>) -> Result<()> {
 /// for both:
 ///
 /// - the no-rootdir `make_btrfs` path, where mkfs's bootstrap omits
-///   trees that post-bootstrap will create (currently: UUID tree,
-///   csum tree, data-reloc tree)
-/// - the `make_btrfs_with_rootdir` path, where mkfs creates the csum
-///   and data-reloc trees itself (because rootdir needs to insert
-///   csum items into the csum tree at bootstrap time, and uses its
-///   own builders for data-reloc), so the create-if-missing calls
-///   are no-ops
+///   trees that post-bootstrap will create (currently: UUID tree, FS
+///   tree, csum tree, data-reloc tree)
+/// - the `make_btrfs_with_rootdir` path, where mkfs creates the FS,
+///   csum, and data-reloc trees itself (because rootdir populates
+///   them with directory/extent/csum items at bootstrap time), so
+///   the create-if-missing calls are no-ops
 fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
     fs: &mut Filesystem<R>,
     trans: &mut Transaction<R>,
+    now: u64,
 ) -> Result<()> {
+    // The FS tree (objectid 5) is the main user-visible tree:
+    // subvolume root, root dir inode 256, dir entries, file inodes.
+    // For the no-rootdir path it's just the empty subvolume shape
+    // (root dir + ".." INODE_REF).
+    ensure_fs_tree(fs, trans, now)?;
+
     // btrfs-progs creates the csum tree as an empty leaf at mkfs
     // time. mkfs's no-rootdir path now defers that to here so the
     // tree allocation, ROOT_ITEM, and METADATA_ITEM go through the
@@ -209,6 +228,66 @@ fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
     // bootstrap doesn't. The kernel populates entries lazily on
     // snapshot/send.
     ensure_empty_tree(fs, trans, u64::from(BTRFS_UUID_TREE_OBJECTID), "UUID")?;
+
+    Ok(())
+}
+
+/// Idempotently create the FS tree (objectid 5) as an empty
+/// subvolume: `INODE_ITEM` at inode 256, ".." `INODE_REF` self-ref,
+/// and a `ROOT_ITEM` patched with the FS-tree-specific bits
+/// (subvolume UUID derived from fsid, `INODE_ROOT_ITEM_INIT` inode
+/// flag, ctime/otime set to `now`).
+fn ensure_fs_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
+    fs: &mut Filesystem<R>,
+    trans: &mut Transaction<R>,
+    now: u64,
+) -> Result<()> {
+    use btrfs_disk::items::Timespec;
+
+    let fs_id = u64::from(BTRFS_FS_TREE_OBJECTID);
+    let root_ino = u64::from(btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID);
+
+    if fs.root_bytenr(fs_id).is_some() {
+        return Ok(());
+    }
+
+    trans
+        .create_empty_tree(fs, fs_id)
+        .context("post_bootstrap: create_empty_tree(FS tree)")?;
+
+    // FS tree's root dir inode: same shape as data-reloc but with the
+    // BTRFS_INODE_ROOT_ITEM_INIT flag (kernel uses this to
+    // distinguish a subvolume root inode from a regular dir inode).
+    let now_ts = Timespec { sec: now, nsec: 0 };
+    let mut inode_args =
+        InodeArgs::new(trans.transid, 0o040_755).with_uniform_time(now_ts);
+    inode_args.nbytes = u64::from(fs.nodesize);
+    inode_args.flags = btrfs_disk::items::InodeFlags::from_bits_truncate(
+        u64::from(BTRFS_INODE_ROOT_ITEM_INIT),
+    );
+    trans
+        .create_inode(fs, fs_id, root_ino, &inode_args)
+        .context("post_bootstrap: create_inode(FS root dir)")?;
+
+    insert_inode_ref(fs, trans, fs_id, root_ino, root_ino, 0, b"..")?;
+
+    // Subvolume UUID derived from fsid by bit-flipping (matches what
+    // mkfs's `patch_root_item_fs` produces, kept stable so repeat
+    // mkfs runs with the same fsid produce the same subvol UUID).
+    let mut uuid_bytes = *fs.superblock.fsid.as_bytes();
+    for b in &mut uuid_bytes {
+        *b ^= 0xFF;
+    }
+    let subvol_uuid = Uuid::from_bytes(uuid_bytes);
+
+    patch_root_item_subvol_dir(
+        fs,
+        trans,
+        fs_id,
+        &inode_args,
+        Some(subvol_uuid),
+        Some(now_ts),
+    )?;
 
     Ok(())
 }
@@ -286,8 +365,9 @@ fn ensure_data_reloc_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
     //    inode_data mirrors the standalone INODE_ITEM. btrfs check
     //    walks ROOT_ITEM.root_dirid to find the root dir inode, and
     //    cross-checks ROOT_ITEM.inode_data against the standalone
-    //    INODE_ITEM (matching nlink, mode, size).
-    patch_root_item_subvol_dir(fs, trans, dr_id, &inode_args)?;
+    //    INODE_ITEM (matching nlink, mode, size). The data-reloc
+    //    tree's ROOT_ITEM keeps `uuid = nil` (mkfs's convention).
+    patch_root_item_subvol_dir(fs, trans, dr_id, &inode_args, None, None)?;
 
     Ok(())
 }
@@ -298,11 +378,22 @@ fn ensure_data_reloc_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
 /// its embedded `inode_data` matches the standalone `INODE_ITEM`.
 /// This is the consistency check `btrfs check` performs across
 /// `ROOT_ITEM` and `INODE_ITEM` for subvolume-shaped trees.
+///
+/// `uuid` overrides the `ROOT_ITEM`'s `uuid` field when `Some`. The FS
+/// tree uses a UUID derived from the filesystem fsid; the data-reloc
+/// tree leaves it nil.
+///
+/// `time` overrides the `ROOT_ITEM`'s `ctime` and `otime` fields when
+/// `Some`. The FS tree sets these to `cfg.now_secs()` to match
+/// btrfs-progs's convention; the data-reloc tree leaves them zero.
+#[allow(clippy::too_many_arguments)]
 fn patch_root_item_subvol_dir<R>(
     fs: &mut Filesystem<R>,
     trans: &mut Transaction<R>,
     tree_id: u64,
     inode_args: &InodeArgs,
+    uuid: Option<Uuid>,
+    time: Option<btrfs_disk::items::Timespec>,
 ) -> Result<()>
 where
     R: std::io::Read + std::io::Write + std::io::Seek,
@@ -342,6 +433,13 @@ where
     // Mirror the standalone INODE_ITEM into the embedded inode_data
     // (160 bytes). RootItem::to_bytes will splice this back in.
     root_item.inode_data = inode_args.to_bytes();
+    if let Some(u) = uuid {
+        root_item.uuid = u;
+    }
+    if let Some(ts) = time {
+        root_item.ctime = ts;
+        root_item.otime = ts;
+    }
     let new_ri = root_item.to_bytes();
     update_item(leaf, slot, &new_ri)
         .map_err(|e| anyhow::anyhow!("post_bootstrap: update_item: {e}"))?;

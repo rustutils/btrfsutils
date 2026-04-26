@@ -342,6 +342,39 @@ fn default_profile_csum_tree_created_by_post_bootstrap() {
 }
 
 /// Same as [`default_profile_csum_tree_created_by_post_bootstrap`] but
+/// for the FS tree. Additionally checks that the ROOT_ITEM's
+/// `root_dirid` is 256 and `uuid` is non-nil (post-bootstrap mirrors
+/// mkfs's bit-flipped-from-fsid convention).
+#[test]
+fn default_profile_fs_tree_created_by_post_bootstrap() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
+
+    let fs_oid = u64::from(BTRFS_FS_TREE_OBJECTID);
+    let entries = walk_root_tree_items(image.path(), |oid, kt, _, _| {
+        oid == fs_oid && kt == KeyType::RootItem
+    });
+    assert_eq!(entries.len(), 1, "expected exactly one FS tree ROOT_ITEM");
+    let ri = RootItem::parse(&entries[0].3).unwrap();
+    assert_eq!(
+        ri.generation, 2,
+        "FS tree should be created by post_bootstrap (gen 2)",
+    );
+    assert_eq!(
+        ri.root_dirid,
+        u64::from(btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID),
+        "FS ROOT_ITEM.root_dirid must be 256",
+    );
+    assert!(
+        !ri.uuid.is_nil(),
+        "FS ROOT_ITEM.uuid must be non-nil (derived from fsid)",
+    );
+    // ctime/otime mirror cfg.now_secs() — non-zero unless fixed to 0.
+    assert!(ri.otime.sec > 0, "FS ROOT_ITEM.otime should be set");
+}
+
+/// Same as [`default_profile_csum_tree_created_by_post_bootstrap`] but
 /// for the data-reloc tree. Additionally checks that the ROOT_ITEM's
 /// `root_dirid` is set to 256 (the canonical subvolume root inode) —
 /// without that fixup, btrfs check rejects the tree.
