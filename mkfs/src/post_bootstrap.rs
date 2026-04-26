@@ -23,7 +23,7 @@
 
 use crate::{args::Profile, mkfs::MkfsConfig};
 use anyhow::{Context, Result};
-use btrfs_disk::raw::BTRFS_UUID_TREE_OBJECTID;
+use btrfs_disk::raw::{BTRFS_CSUM_TREE_OBJECTID, BTRFS_UUID_TREE_OBJECTID};
 use btrfs_transaction::{Filesystem, Transaction};
 use std::{collections::BTreeMap, fs::OpenOptions, path::Path};
 
@@ -60,7 +60,10 @@ fn profile_supported(profile: Profile) -> bool {
 /// FST", so it's safe to run post-bootstrap on those images. mkfs
 /// still leaves a stale FST tree leaf around in that case (a separate
 /// fix); the kernel ignores it.
-fn should_run(cfg: &MkfsConfig) -> bool {
+///
+/// `pub(crate)` so `mkfs.rs` can decide which trees to create itself
+/// vs. leave for post-bootstrap to create.
+pub(crate) fn should_run(cfg: &MkfsConfig) -> bool {
     if !profile_supported(cfg.metadata_profile) {
         return false;
     }
@@ -161,26 +164,52 @@ pub fn run_transaction(fs: &mut Filesystem<std::fs::File>) -> Result<()> {
 
 /// Apply every post-bootstrap step in the supplied transaction.
 ///
-/// Currently:
+/// Each step is idempotent (creates a tree only if it isn't already
+/// present in the root tree), so the same `apply_in_transaction` works
+/// for both:
 ///
-/// 1. Create the empty UUID tree (objectid 9) if it doesn't already
-///    exist. btrfs-progs creates this by default; our mkfs's bootstrap
-///    doesn't, so we add it here. Kernel populates entries lazily.
+/// - the no-rootdir `make_btrfs` path, where mkfs's bootstrap omits
+///   trees that post-bootstrap will create (currently: UUID tree,
+///   csum tree)
+/// - the `make_btrfs_with_rootdir` path, where mkfs creates the csum
+///   tree itself (because rootdir needs to insert csum items into it)
+///   so the create-if-missing call is a no-op
 fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
     fs: &mut Filesystem<R>,
     trans: &mut Transaction<R>,
 ) -> Result<()> {
-    let uuid_tree_id = u64::from(BTRFS_UUID_TREE_OBJECTID);
+    // btrfs-progs creates the csum tree as an empty leaf at mkfs
+    // time. mkfs's no-rootdir path now defers that to here so the
+    // tree allocation, ROOT_ITEM, and METADATA_ITEM go through the
+    // transaction crate. The rootdir path keeps creating it directly
+    // because it has csum items to insert at bootstrap time.
+    ensure_empty_tree(fs, trans, u64::from(BTRFS_CSUM_TREE_OBJECTID), "csum")?;
 
-    if fs.root_bytenr(uuid_tree_id).is_none() {
-        trans
-            .create_empty_tree(fs, uuid_tree_id)
-            .context("post_bootstrap: create_empty_tree(UUID tree)")?;
-        debug_assert!(
-            fs.root_bytenr(uuid_tree_id).is_some(),
-            "post_bootstrap: UUID tree root not set after create_empty_tree",
-        );
+    // btrfs-progs creates a UUID tree by default; mkfs's hand-built
+    // bootstrap doesn't. The kernel populates entries lazily on
+    // snapshot/send.
+    ensure_empty_tree(fs, trans, u64::from(BTRFS_UUID_TREE_OBJECTID), "UUID")?;
+
+    Ok(())
+}
+
+/// Idempotently create an empty tree at `tree_id` if the root tree
+/// does not already reference one. `name` is used in error messages.
+fn ensure_empty_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
+    fs: &mut Filesystem<R>,
+    trans: &mut Transaction<R>,
+    tree_id: u64,
+    name: &str,
+) -> Result<()> {
+    if fs.root_bytenr(tree_id).is_some() {
+        return Ok(());
     }
-
+    trans.create_empty_tree(fs, tree_id).with_context(|| {
+        format!("post_bootstrap: create_empty_tree({name} tree)")
+    })?;
+    debug_assert!(
+        fs.root_bytenr(tree_id).is_some(),
+        "post_bootstrap: {name} tree root not set after create_empty_tree",
+    );
     Ok(())
 }

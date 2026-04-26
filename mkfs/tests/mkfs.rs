@@ -312,6 +312,35 @@ fn mkfs_with_no_free_space_tree() {
     );
 }
 
+/// The default-profile (Single + Dup) image has its csum tree created
+/// by `post_bootstrap` rather than by mkfs's bootstrap. Verify the
+/// csum tree exists in the root tree and points to a valid (block
+/// reachable, generation-2) leaf — the defining signal that
+/// post_bootstrap created it.
+#[test]
+fn default_profile_csum_tree_created_by_post_bootstrap() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
+
+    let csum_oid = u64::from(btrfs_disk::raw::BTRFS_CSUM_TREE_OBJECTID);
+    let entries = walk_root_tree_items(image.path(), |oid, kt, _, _| {
+        oid == csum_oid && kt == KeyType::RootItem
+    });
+    assert_eq!(entries.len(), 1, "expected exactly one csum tree ROOT_ITEM");
+    let ri = RootItem::parse(&entries[0].3).unwrap();
+    // mkfs's bootstrap is generation 1; post_bootstrap commits
+    // generation 2. A csum tree at generation 2 confirms it came
+    // from the post-bootstrap transaction (and not from a stale
+    // mkfs-generated entry).
+    assert_eq!(
+        ri.generation, 2,
+        "csum tree should be created by post_bootstrap (gen 2), \
+         got gen {}",
+        ri.generation,
+    );
+}
+
 #[test]
 fn mkfs_with_different_nodesize() {
     // 64 KiB nodesize: still needs 133 MiB minimum for chunks.

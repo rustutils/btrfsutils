@@ -392,18 +392,35 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         bytenr: layout.block_addr(tree),
     };
 
+    // mkfs creates the csum tree only when post_bootstrap won't run
+    // (e.g. RAID5/RAID6 where the transaction crate doesn't yet have
+    // stripe-aware writes). For supported profiles, post_bootstrap
+    // creates the empty csum tree itself.
+    let bootstrap_creates_csum_tree = !crate::post_bootstrap::should_run(cfg);
+
     // Build tree blocks.
-    let root_tree = build_root_tree(cfg, &layout, &leaf_header)?;
-    let extent_tree = build_extent_tree(cfg, &layout, &chunks, &leaf_header)?;
+    let root_tree = build_root_tree(
+        cfg,
+        &layout,
+        &leaf_header,
+        bootstrap_creates_csum_tree,
+    )?;
+    let extent_tree = build_extent_tree(
+        cfg,
+        &layout,
+        &chunks,
+        &leaf_header,
+        bootstrap_creates_csum_tree,
+    )?;
     let chunk_tree = build_chunk_tree(cfg, &layout, &chunks, &leaf_header)?;
     let dev_tree = build_dev_tree(cfg, &chunks, &leaf_header)?;
     let fs_tree = build_root_dir_tree(cfg, &leaf_header(TreeId::Fs))?;
-    let csum_tree = build_empty_tree(cfg.nodesize, &leaf_header(TreeId::Csum));
     let normal_used = UsedBytes {
         system: layout.system_used(),
         metadata: layout.metadata_used(
             cfg.has_block_group_tree(),
             cfg.has_free_space_tree(),
+            bootstrap_creates_csum_tree,
             cfg.has_quota_tree(),
         ),
         data: 0,
@@ -422,7 +439,6 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
         (TreeId::Chunk, chunk_tree, layout.block_addr(TreeId::Chunk)),
         (TreeId::Dev, dev_tree, layout.block_addr(TreeId::Dev)),
         (TreeId::Fs, fs_tree, layout.block_addr(TreeId::Fs)),
-        (TreeId::Csum, csum_tree, layout.block_addr(TreeId::Csum)),
         (
             TreeId::DataReloc,
             data_reloc_tree,
@@ -431,7 +447,7 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
     ];
 
     // Optional trees follow the base trees in this slot order:
-    // BlockGroup, FreeSpace, Quota.
+    // BlockGroup, FreeSpace, Csum, Quota.
     let mut optional_slot: u64 = 0;
     if cfg.has_block_group_tree() {
         let addr =
@@ -469,6 +485,19 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
             &normal_used,
         )?;
         trees.push((TreeId::FreeSpace, fst, addr));
+        optional_slot += 1;
+    }
+    if bootstrap_creates_csum_tree {
+        let addr = layout.block_addr_with_offset(TreeId::Csum, optional_slot);
+        let csum_header = LeafHeader {
+            fsid: cfg.fs_uuid,
+            chunk_tree_uuid: cfg.chunk_tree_uuid,
+            generation,
+            owner: TreeId::Csum.objectid(),
+            bytenr: addr,
+        };
+        let csum_tree = build_empty_tree(cfg.nodesize, &csum_header);
+        trees.push((TreeId::Csum, csum_tree, addr));
         optional_slot += 1;
     }
     if cfg.has_quota_tree() {
@@ -1667,6 +1696,7 @@ fn build_root_tree(
     cfg: &MkfsConfig,
     layout: &BlockLayout,
     leaf_header: &dyn Fn(TreeId) -> LeafHeader,
+    bootstrap_creates_csum_tree: bool,
 ) -> Result<Vec<u8>> {
     struct RootEntry {
         objectid: u64,
@@ -1691,7 +1721,7 @@ fn build_root_tree(
         .collect();
 
     // Optional trees in the same slot order as `make_btrfs`:
-    // BlockGroup, FreeSpace, Quota.
+    // BlockGroup, FreeSpace, Csum, Quota.
     let mut optional_slot: u64 = 0;
     if cfg.has_block_group_tree() {
         entries.push(RootEntry {
@@ -1707,6 +1737,14 @@ fn build_root_tree(
             objectid: TreeId::FreeSpace.objectid(),
             bytenr: layout
                 .block_addr_with_offset(TreeId::FreeSpace, optional_slot),
+            is_fs_tree: false,
+        });
+        optional_slot += 1;
+    }
+    if bootstrap_creates_csum_tree {
+        entries.push(RootEntry {
+            objectid: TreeId::Csum.objectid(),
+            bytenr: layout.block_addr_with_offset(TreeId::Csum, optional_slot),
             is_fs_tree: false,
         });
         optional_slot += 1;
@@ -1772,6 +1810,7 @@ fn build_extent_tree(
     layout: &BlockLayout,
     chunks: &ChunkLayout,
     leaf_header: &dyn Fn(TreeId) -> LeafHeader,
+    bootstrap_creates_csum_tree: bool,
 ) -> Result<Vec<u8>> {
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Extent));
     let generation = 1u64;
@@ -1785,8 +1824,8 @@ fn build_extent_tree(
 
     // For each tree block: METADATA_ITEM with inline TREE_BLOCK_REF.
     // TreeId::ALL covers the always-present trees; optional trees
-    // (BlockGroup, FreeSpace, Quota) are appended in the same slot
-    // order as `make_btrfs`.
+    // (BlockGroup, FreeSpace, Csum, Quota) are appended in the same
+    // slot order as `make_btrfs`.
     let mut all_trees: Vec<(TreeId, u64)> = TreeId::ALL
         .iter()
         .map(|&t| (t, layout.block_addr(t)))
@@ -1804,6 +1843,13 @@ fn build_extent_tree(
             all_trees.push((
                 TreeId::FreeSpace,
                 layout.block_addr_with_offset(TreeId::FreeSpace, opt_slot),
+            ));
+            opt_slot += 1;
+        }
+        if bootstrap_creates_csum_tree {
+            all_trees.push((
+                TreeId::Csum,
+                layout.block_addr_with_offset(TreeId::Csum, opt_slot),
             ));
             opt_slot += 1;
         }
@@ -1854,6 +1900,7 @@ fn build_extent_tree(
                 layout.metadata_used(
                     cfg.has_block_group_tree(),
                     cfg.has_free_space_tree(),
+                    bootstrap_creates_csum_tree,
                     cfg.has_quota_tree(),
                 ),
                 u64::from(raw::BTRFS_FIRST_CHUNK_TREE_OBJECTID),

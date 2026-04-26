@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- `btrfs-mkfs`: csum tree creation moves into the post-bootstrap
+  transaction for profile/feature combinations that go through it
+  (SINGLE / DUP / RAID0 / RAID1* / RAID10). The `make_btrfs` no-rootdir
+  path skips the csum tree at bootstrap time; `post_bootstrap`
+  idempotently creates it via `Transaction::create_empty_tree`. The
+  rootdir path keeps creating the csum tree directly because it has
+  csum items to insert at bootstrap time. RAID5/RAID6 (post-bootstrap
+  not supported) keeps mkfs's hand-built csum tree as a fallback.
+  First Phase 2 step from `mkfs/PLAN.md` — establishes the pattern
+  for migrating other always-present trees out of mkfs's bootstrap.
+
 ### Fixed
 
 - `btrfs-mkfs`: `--features ^free-space-tree` no longer writes a stale
