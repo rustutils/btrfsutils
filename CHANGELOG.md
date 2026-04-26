@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `btrfs-mkfs`: data-reloc tree creation moves into the post-bootstrap
+  transaction for profile/feature combinations that go through it
+  (SINGLE / DUP / RAID0 / RAID1* / RAID10). Same pattern as the csum
+  tree migration — `make_btrfs` skips it at bootstrap time, post-
+  bootstrap creates the empty tree, inserts the root dir `INODE_ITEM`
+  via `Transaction::create_inode`, inserts a `(256, INODE_REF, 256)`
+  ".." self-reference, and patches the `ROOT_ITEM` to mark it as a
+  subvolume-shaped tree (`root_dirid = 256`, embedded `inode_data`
+  mirrors the standalone inode). The rootdir path and RAID5/RAID6
+  keep mkfs's hand-built tree as before.
 - `btrfs-mkfs`: csum tree creation moves into the post-bootstrap
   transaction for profile/feature combinations that go through it
   (SINGLE / DUP / RAID0 / RAID1* / RAID10). The `make_btrfs` no-rootdir

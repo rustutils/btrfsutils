@@ -53,39 +53,35 @@ impl TreeId {
     }
 
     /// Always-present tree blocks in the order they are laid out on
-    /// disk. Excludes optional trees (`Csum`, `FreeSpace`, `BlockGroup`,
-    /// `Quota`), which are appended after the base trees when present.
-    /// `Csum` is "optional" only in the sense that mkfs may skip it
-    /// when `post_bootstrap` will run and create it instead — the
-    /// final filesystem always has a csum tree.
-    pub const ALL: [TreeId; 6] = [
+    /// disk. Excludes the trees that may be deferred to post-bootstrap
+    /// (`Csum`, `DataReloc`) and the user-feature trees (`FreeSpace`,
+    /// `BlockGroup`, `Quota`), which are appended after the base trees
+    /// when present in mkfs's bootstrap. `Csum` and `DataReloc` are
+    /// "optional" only in the sense that mkfs may skip them when
+    /// post-bootstrap will run and create them instead — the final
+    /// filesystem always has both.
+    pub const ALL: [TreeId; 5] = [
         TreeId::Root,
         TreeId::Extent,
         TreeId::Chunk,
         TreeId::Dev,
         TreeId::Fs,
-        TreeId::DataReloc,
     ];
 
     /// Always-present trees that get a `ROOT_ITEM` in the root tree.
     /// Excludes Root (can't reference itself), Chunk (handled by the
     /// superblock's `chunk_root` pointer), and the optional trees
-    /// (`Csum`, `FreeSpace`, `BlockGroup`, `Quota`).
-    pub const ROOT_ITEM_TREES: [TreeId; 4] =
-        [TreeId::Extent, TreeId::Dev, TreeId::Fs, TreeId::DataReloc];
+    /// (`Csum`, `DataReloc`, `FreeSpace`, `BlockGroup`, `Quota`).
+    pub const ROOT_ITEM_TREES: [TreeId; 3] =
+        [TreeId::Extent, TreeId::Dev, TreeId::Fs];
 }
 
-/// The 5 always-present trees that live in the metadata chunk.
+/// The 4 always-present trees that live in the metadata chunk.
 /// Excludes `Chunk` (lives in the system chunk) and the trees that
-/// may or may not be present in mkfs's bootstrap (`Csum`, `FreeSpace`,
-/// `BlockGroup`, `Quota`).
-pub const NON_CHUNK_TREES: [TreeId; 5] = [
-    TreeId::Root,
-    TreeId::Extent,
-    TreeId::Dev,
-    TreeId::Fs,
-    TreeId::DataReloc,
-];
+/// may or may not be present in mkfs's bootstrap (`Csum`, `DataReloc`,
+/// `FreeSpace`, `BlockGroup`, `Quota`).
+pub const NON_CHUNK_TREES: [TreeId; 4] =
+    [TreeId::Root, TreeId::Extent, TreeId::Dev, TreeId::Fs];
 
 /// Computed block layout for all mkfs tree blocks.
 ///
@@ -109,9 +105,10 @@ impl BlockLayout {
 
     /// Logical byte address of the given tree block.
     ///
-    /// Optional trees (`BlockGroup`, `FreeSpace`, `Csum`, `Quota`) are
-    /// placed after the 5 always-present trees. The slot ordering
-    /// convention is `BlockGroup`, `FreeSpace`, `Csum`, `Quota`.
+    /// Optional trees (`BlockGroup`, `FreeSpace`, `Csum`, `DataReloc`,
+    /// `Quota`) are placed after the 4 always-present trees. The slot
+    /// ordering convention is `BlockGroup`, `FreeSpace`, `Csum`,
+    /// `DataReloc`, `Quota`.
     ///
     /// The `optional_trees_before` parameter specifies how many
     /// optional tree slots precede this one. For base trees and
@@ -120,7 +117,7 @@ impl BlockLayout {
     /// # Panics
     ///
     /// Panics if `tree` is not in `NON_CHUNK_TREES` and is not `Chunk`,
-    /// `BlockGroup`, `FreeSpace`, `Csum`, or `Quota`.
+    /// `BlockGroup`, `FreeSpace`, `Csum`, `DataReloc`, or `Quota`.
     #[must_use]
     pub fn block_addr_with_offset(
         &self,
@@ -134,6 +131,7 @@ impl BlockLayout {
             TreeId::BlockGroup
                 | TreeId::FreeSpace
                 | TreeId::Csum
+                | TreeId::DataReloc
                 | TreeId::Quota
         ) {
             self.meta_logical
@@ -159,16 +157,16 @@ impl BlockLayout {
         u64::from(self.nodesize)
     }
 
-    /// Bytes used in the metadata chunk by the base trees (5 tree
+    /// Bytes used in the metadata chunk by the base trees (4 tree
     /// blocks) plus any optional trees that are present in mkfs's
-    /// bootstrap (block-group-tree, free-space-tree, csum tree, quota
-    /// tree).
+    /// bootstrap (block-group-tree, free-space-tree, csum tree,
+    /// data-reloc tree, quota tree).
     ///
-    /// `has_csum_tree` reflects whether mkfs's bootstrap creates the
-    /// csum tree (always true today for unsupported-by-post-bootstrap
-    /// profiles like RAID5/RAID6; false when post-bootstrap will
-    /// create it instead).
-    // Four booleans is more than clippy::fn_params_excessive_bools
+    /// `has_csum_tree` and `has_data_reloc_tree` reflect whether
+    /// mkfs's bootstrap creates these (always true today for
+    /// unsupported-by-post-bootstrap profiles like RAID5/RAID6;
+    /// false when post-bootstrap will create them instead).
+    // Five booleans is more than clippy::fn_params_excessive_bools
     // would like, but each bool has a clear meaning and call sites
     // (in `make_btrfs` and `build_extent_tree`) read naturally.
     #[allow(clippy::fn_params_excessive_bools)]
@@ -178,6 +176,7 @@ impl BlockLayout {
         has_block_group_tree: bool,
         has_free_space_tree: bool,
         has_csum_tree: bool,
+        has_data_reloc_tree: bool,
         has_quota_tree: bool,
     ) -> u64 {
         let mut count = NON_CHUNK_TREES.len() as u64;
@@ -188,6 +187,9 @@ impl BlockLayout {
             count += 1;
         }
         if has_csum_tree {
+            count += 1;
+        }
+        if has_data_reloc_tree {
             count += 1;
         }
         if has_quota_tree {
@@ -705,45 +707,46 @@ mod tests {
         // Chunk tree is in the system chunk at SYSTEM_GROUP_OFFSET
         assert_eq!(layout.block_addr(TreeId::Chunk), SYSTEM_GROUP_OFFSET);
 
-        // The 5 always-present trees are sequential in the metadata
-        // chunk (Csum and FreeSpace are now optional and live in the
-        // optional slot region after them).
+        // The 4 always-present trees are sequential in the metadata
+        // chunk. Csum and DataReloc are now optional and live in the
+        // optional slot region after them.
         assert_eq!(layout.block_addr(TreeId::Root), meta_logical);
         assert_eq!(layout.block_addr(TreeId::Extent), meta_logical + 16384);
         assert_eq!(layout.block_addr(TreeId::Dev), meta_logical + 2 * 16384);
         assert_eq!(layout.block_addr(TreeId::Fs), meta_logical + 3 * 16384);
-        assert_eq!(
-            layout.block_addr(TreeId::DataReloc),
-            meta_logical + 4 * 16384
-        );
     }
 
     #[test]
     fn optional_block_addresses() {
-        // Optional trees (BlockGroup, FreeSpace, Csum, Quota) take
-        // slots 5, 6, 7, 8 in the order they're enabled. The base
-        // trees end at slot 4 (DataReloc).
+        // Optional trees (BlockGroup, FreeSpace, Csum, DataReloc,
+        // Quota) take slots 4..9 in the order they're enabled. The
+        // base trees end at slot 3 (Fs).
         let meta_logical = CHUNK_START;
         let layout = BlockLayout::new(16384, meta_logical);
 
         // BlockGroup as the first optional slot.
         assert_eq!(
             layout.block_addr_with_offset(TreeId::BlockGroup, 0),
-            meta_logical + 5 * 16384
+            meta_logical + 4 * 16384
         );
         // FreeSpace as the second optional slot (e.g. when BGT is on).
         assert_eq!(
             layout.block_addr_with_offset(TreeId::FreeSpace, 1),
-            meta_logical + 6 * 16384
+            meta_logical + 5 * 16384
         );
         // Csum as the third optional slot.
         assert_eq!(
             layout.block_addr_with_offset(TreeId::Csum, 2),
+            meta_logical + 6 * 16384
+        );
+        // DataReloc as the fourth optional slot.
+        assert_eq!(
+            layout.block_addr_with_offset(TreeId::DataReloc, 3),
             meta_logical + 7 * 16384
         );
-        // Quota at the fourth slot (BGT + FST + Csum + Quota).
+        // Quota at the fifth slot.
         assert_eq!(
-            layout.block_addr_with_offset(TreeId::Quota, 3),
+            layout.block_addr_with_offset(TreeId::Quota, 4),
             meta_logical + 8 * 16384
         );
     }
@@ -752,18 +755,41 @@ mod tests {
     fn system_and_metadata_used() {
         let layout = BlockLayout::new(16384, CHUNK_START);
         assert_eq!(layout.system_used(), 16384);
-        // Base trees only (5 always-present trees).
-        assert_eq!(layout.metadata_used(false, false, false, false), 5 * 16384);
+        // Base trees only (4 always-present trees).
+        assert_eq!(
+            layout.metadata_used(false, false, false, false, false),
+            4 * 16384
+        );
         // + BlockGroup.
-        assert_eq!(layout.metadata_used(true, false, false, false), 6 * 16384);
+        assert_eq!(
+            layout.metadata_used(true, false, false, false, false),
+            5 * 16384
+        );
         // + FreeSpace.
-        assert_eq!(layout.metadata_used(false, true, false, false), 6 * 16384);
+        assert_eq!(
+            layout.metadata_used(false, true, false, false, false),
+            5 * 16384
+        );
         // + Csum.
-        assert_eq!(layout.metadata_used(false, false, true, false), 6 * 16384);
+        assert_eq!(
+            layout.metadata_used(false, false, true, false, false),
+            5 * 16384
+        );
+        // + DataReloc.
+        assert_eq!(
+            layout.metadata_used(false, false, false, true, false),
+            5 * 16384
+        );
         // + Quota.
-        assert_eq!(layout.metadata_used(false, false, false, true), 6 * 16384);
-        // All four optional trees.
-        assert_eq!(layout.metadata_used(true, true, true, true), 9 * 16384);
+        assert_eq!(
+            layout.metadata_used(false, false, false, false, true),
+            5 * 16384
+        );
+        // All five optional trees.
+        assert_eq!(
+            layout.metadata_used(true, true, true, true, true),
+            9 * 16384
+        );
     }
 
     fn test_uuid() -> uuid::Uuid {

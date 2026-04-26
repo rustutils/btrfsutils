@@ -341,6 +341,40 @@ fn default_profile_csum_tree_created_by_post_bootstrap() {
     );
 }
 
+/// Same as [`default_profile_csum_tree_created_by_post_bootstrap`] but
+/// for the data-reloc tree. Additionally checks that the ROOT_ITEM's
+/// `root_dirid` is set to 256 (the canonical subvolume root inode) —
+/// without that fixup, btrfs check rejects the tree.
+#[test]
+fn default_profile_data_reloc_tree_created_by_post_bootstrap() {
+    let image = create_image(MIN_SIZE);
+    let mut cfg = test_config(MIN_SIZE);
+    make_btrfs_on(&image, &mut cfg);
+
+    // BTRFS_DATA_RELOC_TREE_OBJECTID = -9.
+    #[allow(clippy::cast_sign_loss)]
+    let dr_oid = btrfs_disk::raw::BTRFS_DATA_RELOC_TREE_OBJECTID as u64;
+    let entries = walk_root_tree_items(image.path(), |oid, kt, _, _| {
+        oid == dr_oid && kt == KeyType::RootItem
+    });
+    assert_eq!(
+        entries.len(),
+        1,
+        "expected exactly one data-reloc tree ROOT_ITEM"
+    );
+    let ri = RootItem::parse(&entries[0].3).unwrap();
+    assert_eq!(
+        ri.generation, 2,
+        "data-reloc tree should be created by post_bootstrap (gen 2)",
+    );
+    assert_eq!(
+        ri.root_dirid,
+        u64::from(btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID),
+        "data-reloc ROOT_ITEM.root_dirid must be 256 for the root \
+         dir inode lookup to work",
+    );
+}
+
 #[test]
 fn mkfs_with_different_nodesize() {
     // 64 KiB nodesize: still needs 133 MiB minimum for chunks.
