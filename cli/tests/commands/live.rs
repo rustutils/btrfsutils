@@ -2509,6 +2509,110 @@ fn mkfs_rootdir_lzo_compressed() {
     verify_test_data(mp, "random.bin", 64 * 1024);
 }
 
+/// Test --rootdir hardlink and xattr handling end-to-end.
+///
+/// Hardlinks exercise the post-walk `set_inode_nlink` fixup path; xattrs
+/// exercise the inline `set_xattr` calls. Mount and verify both
+/// inode-number equality (for hardlinks) and the xattr round-trip.
+///
+/// Hardlinks are placed in *different* parent directories — multiple
+/// hardlinks under the same parent need a single appended `INODE_REF`
+/// item (or `INODE_EXTREF` spill), which neither the legacy mkfs walker
+/// nor the new transactional walker supports today. The cross-parent
+/// case is the common one and is what this test covers.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mkfs_rootdir_hardlinks_and_xattrs() {
+    let td = tempdir().unwrap();
+    let rootdir = td.path().join("rootdir");
+    std::fs::create_dir_all(&rootdir).unwrap();
+
+    // Hardlink across directories: original at root, second + third
+    // links in two distinct subdirs. Each link lives under a different
+    // parent inode, so each emits a separate INODE_REF item and the
+    // duplicate-key path is never hit.
+    std::fs::write(rootdir.join("orig.bin"), b"hardlink content").unwrap();
+    let sub1 = rootdir.join("sub1");
+    let sub2 = rootdir.join("sub2");
+    std::fs::create_dir_all(&sub1).unwrap();
+    std::fs::create_dir_all(&sub2).unwrap();
+    std::fs::hard_link(rootdir.join("orig.bin"), sub1.join("second.bin"))
+        .unwrap();
+    std::fs::hard_link(rootdir.join("orig.bin"), sub2.join("third.bin"))
+        .unwrap();
+
+    // A separate file with extended attributes.
+    let xfile = rootdir.join("xattr.bin");
+    std::fs::write(&xfile, b"file with xattrs").unwrap();
+    set_user_xattr(&xfile, "user.note", b"hello xattr value");
+    set_user_xattr(&xfile, "user.color", b"chartreuse");
+
+    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
+    file.mkfs_rootdir(&our_mkfs_bin(), &rootdir, &[]);
+    let lo = LoopbackDevice::new(file);
+    let mnt = Mount::new(lo, td.path());
+    let mp = mnt.path();
+
+    // All three hardlinked paths point at the same inode with nlink=3.
+    let m_orig = std::fs::metadata(mp.join("orig.bin")).unwrap();
+    let m_second = std::fs::metadata(mp.join("sub1/second.bin")).unwrap();
+    let m_third = std::fs::metadata(mp.join("sub2/third.bin")).unwrap();
+    assert_eq!(m_orig.ino(), m_second.ino());
+    assert_eq!(m_orig.ino(), m_third.ino());
+    assert_eq!(m_orig.nlink(), 3);
+
+    // Xattrs round-trip.
+    let note = get_user_xattr(&mp.join("xattr.bin"), "user.note");
+    assert_eq!(note.as_slice(), b"hello xattr value");
+    let color = get_user_xattr(&mp.join("xattr.bin"), "user.color");
+    assert_eq!(color.as_slice(), b"chartreuse");
+}
+
+/// Set a single extended attribute via `setxattr(2)`.
+fn set_user_xattr(path: &Path, name: &str, value: &[u8]) {
+    let c_path =
+        std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+    let c_name = std::ffi::CString::new(name).unwrap();
+    let ret = unsafe {
+        libc::setxattr(
+            c_path.as_ptr(),
+            c_name.as_ptr(),
+            value.as_ptr().cast::<libc::c_void>(),
+            value.len(),
+            0,
+        )
+    };
+    assert_eq!(ret, 0, "setxattr({path:?}, {name:?}) failed");
+}
+
+/// Read a single extended attribute via `getxattr(2)`.
+fn get_user_xattr(path: &Path, name: &str) -> Vec<u8> {
+    let c_path =
+        std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+    let c_name = std::ffi::CString::new(name).unwrap();
+    let size = unsafe {
+        libc::getxattr(
+            c_path.as_ptr(),
+            c_name.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    assert!(size >= 0, "getxattr probe({path:?}, {name:?}) failed");
+    let mut buf = vec![0u8; size as usize];
+    let n = unsafe {
+        libc::getxattr(
+            c_path.as_ptr(),
+            c_name.as_ptr(),
+            buf.as_mut_ptr().cast::<libc::c_void>(),
+            buf.len(),
+        )
+    };
+    assert!(n >= 0, "getxattr({path:?}, {name:?}) failed");
+    buf.truncate(n as usize);
+    buf
+}
+
 // ── rescue ──────────────────────────────────────────────────────────
 
 #[test]

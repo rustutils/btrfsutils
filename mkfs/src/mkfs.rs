@@ -489,6 +489,92 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
     Ok(())
 }
 
+/// Build an empty filesystem with `make_btrfs`, then populate it from
+/// `rootdir` via the transaction crate.
+///
+/// Two atomic commits: `make_btrfs` produces the bootstrap layout +
+/// runs `post_bootstrap` (creates empty FS / csum / data-reloc / UUID
+/// trees, plus FST and BGT when those features are enabled). This
+/// function then opens the resulting filesystem, starts a fresh
+/// transaction, walks `rootdir` via [`rootdir::walk_to_transaction`]
+/// (which emits `INODE_ITEM` / `DIR_ITEM` / `DIR_INDEX` / `INODE_REF`
+/// / `XATTR_ITEM` and inline / regular `EXTENT_DATA` records via the
+/// transaction crate's high-level helpers), and commits.
+///
+/// Only handles the simple case (no `--subvol`, no `--reflink`, no
+/// `--shrink`, no `--inode-flags`); the dispatch in
+/// [`make_btrfs_with_rootdir`] gates this.
+fn make_btrfs_with_rootdir_via_transaction(
+    cfg: &MkfsConfig,
+    rootdir: &Path,
+    compress: rootdir::CompressConfig,
+) -> Result<()> {
+    use btrfs_transaction::{Filesystem, Transaction};
+    use std::collections::BTreeMap;
+
+    let now = cfg.now_secs();
+    make_btrfs(cfg).context("make_btrfs (empty bootstrap)")?;
+
+    if cfg.devices.len() == 1 {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&cfg.devices[0].path)
+            .with_context(|| {
+                format!(
+                    "failed to reopen {} for rootdir population",
+                    cfg.devices[0].path.display()
+                )
+            })?;
+        let mut fs = Filesystem::open(file)
+            .context("transactional rootdir: Filesystem::open")?;
+        let mut trans = Transaction::start(&mut fs)
+            .context("transactional rootdir: Transaction::start")?;
+        rootdir::walk_to_transaction(
+            rootdir, &mut fs, &mut trans, now, compress,
+        )?;
+        trans
+            .commit(&mut fs)
+            .context("transactional rootdir: commit")?;
+        fs.sync().context("transactional rootdir: fsync")?;
+    } else {
+        let mut handles: BTreeMap<u64, File> = BTreeMap::new();
+        for dev in &cfg.devices {
+            let mut file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&dev.path)
+                .with_context(|| {
+                    format!(
+                        "failed to reopen {} for rootdir population",
+                        dev.path.display()
+                    )
+                })?;
+            let sb = btrfs_disk::superblock::read_superblock(&mut file, 0)
+                .with_context(|| {
+                    format!(
+                        "transactional rootdir: read superblock from {}",
+                        dev.path.display()
+                    )
+                })?;
+            handles.insert(sb.dev_item.devid, file);
+        }
+        let mut fs = Filesystem::open_multi(handles)
+            .context("transactional rootdir: Filesystem::open_multi")?;
+        let mut trans = Transaction::start(&mut fs)
+            .context("transactional rootdir: Transaction::start")?;
+        rootdir::walk_to_transaction(
+            rootdir, &mut fs, &mut trans, now, compress,
+        )?;
+        trans
+            .commit(&mut fs)
+            .context("transactional rootdir: commit")?;
+        fs.sync().context("transactional rootdir: fsync")?;
+    }
+
+    Ok(())
+}
+
 /// Create a btrfs filesystem populated from a source directory.
 ///
 /// # Errors
@@ -526,6 +612,21 @@ pub fn make_btrfs_with_rootdir(
             cfg.nodesize,
             cfg.sectorsize
         );
+    }
+
+    // Route the simple case through the new transaction-based path:
+    // empty filesystem from `make_btrfs`, then walk the rootdir
+    // emitting items via the transaction crate. The legacy path
+    // (build everything in memory + raw pwrite) only runs when the
+    // user requests a feature the transactional walker doesn't yet
+    // support: subvolumes, FICLONERANGE reflink, image shrink, or
+    // per-path inode flags.
+    if subvol_args.is_empty()
+        && !opts.reflink
+        && !opts.shrink
+        && inode_flags.is_empty()
+    {
+        return make_btrfs_with_rootdir_via_transaction(cfg, rootdir, compress);
     }
 
     let generation = 1u64;

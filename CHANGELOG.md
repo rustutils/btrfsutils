@@ -6,6 +6,26 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-mkfs`: `--rootdir` for the simple case (no `--subvol`, no
+  `--reflink`, no `--shrink`, no `--inode-flags`) now goes through
+  the transaction crate end-to-end. `make_btrfs_with_rootdir` calls
+  `make_btrfs` for the empty-filesystem bootstrap (which already runs
+  `post_bootstrap` to materialise the FS / csum / data-reloc / UUID
+  trees), then opens the resulting image, starts a transaction, and
+  drives a new `rootdir::walk_to_transaction` that walks the source
+  directory depth-first emitting `INODE_ITEM` / `DIR_ITEM` /
+  `DIR_INDEX` / `INODE_REF` / `XATTR_ITEM` and inline / regular
+  `EXTENT_DATA` records via `Transaction::create_inode` /
+  `link_dir_entry` / `set_xattr` / `insert_inline_extent` /
+  `write_file_data`. Hardlinks (cross-parent) are coalesced and
+  patched with `set_inode_nlink` after the walk completes. The legacy
+  `walk_directory` + `TreeBuilder` + `pwrite` pipeline still runs
+  when any of the four legacy-only features is requested. Single-
+  device and multi-device (`Filesystem::open_multi`) paths both
+  exercise the same walker. Verified by all four existing
+  `mkfs_rootdir_*` integration tests plus a new
+  `mkfs_rootdir_hardlinks_and_xattrs` test that mounts the result
+  and asserts inode-number sharing, `nlink`, and xattr round-trip.
 - `btrfs-transaction`: subvolume-creation helpers groundwork for the
   rootdir → transaction migration (Phase 3, Implementation Phase 1).
   Five new helpers, all built on existing `search_slot` /

@@ -4088,9 +4088,7 @@ fn set_default_subvol_inserts_dir_item() {
         // 256 doesn't actually exist in this image, but the helper
         // writes the DIR_ITEM regardless; this lets us tell the
         // helper-installed item apart from the bootstrap one.
-        trans
-            .set_default_subvol(&mut fs, 256)
-            .expect("set default");
+        trans.set_default_subvol(&mut fs, 256).expect("set default");
         trans.commit(&mut fs).unwrap();
     }
 

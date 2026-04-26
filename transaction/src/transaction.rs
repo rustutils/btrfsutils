@@ -1387,7 +1387,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// the default to `subvol_id`.
     ///
     /// On-disk equivalent of `btrfs subvolume set-default
-    /// <subvol_id>`. Idempotent: if a "default" DIR_ITEM already
+    /// <subvol_id>`. Idempotent: if a "default" `DIR_ITEM` already
     /// exists at this key (e.g. mkfs's default pointing at the FS
     /// tree), it is overwritten in place. The payload size is
     /// independent of `subvol_id`, so in-place update works without
