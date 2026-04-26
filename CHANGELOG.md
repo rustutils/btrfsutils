@@ -25,7 +25,6 @@ All notable changes to this project will be documented in this file.
   `multi_device_raid6_metadata_cow_round_trip` exercise the new
   parity-aware write executor end-to-end (mkfs RAID5/6 image, COW
   insert, commit, reopen, verify item is reachable).
-
 - `btrfs-transaction`: `convert::seed_free_space_tree(trans, fs_info)`
   helper. Walks every block group, derives free ranges from the
   extent tree, and inserts one `FREE_SPACE_INFO` plus one
@@ -36,7 +35,6 @@ All notable changes to this project will be documented in this file.
   `post_bootstrap` can call it after creating the FST mid-transaction.
   `read_free_space_info` lifted to `pub(crate)` for the helper's
   idempotency probe.
-
 - `btrfs-transaction`: `convert::create_block_group_tree(trans, fs_info)`
   helper. Snapshots `BLOCK_GROUP_ITEM` rows from the extent tree,
   pins the BG-tree-id routing override to the extent tree, creates
@@ -47,6 +45,170 @@ All notable changes to this project will be documented in this file.
   call it directly to materialise BGT from a bootstrap that left
   BG items in the extent tree. Per-item idempotent so a partial
   conversion can be resumed.
+- `btrfs-disk`: `ChunkProfile` enum and `ChunkTreeCache::plan_write` /
+  `plan_read` for stripe-aware per-device routing across all RAID
+  profiles except RAID5/RAID6. Multi-row writes (buffers larger than
+  `stripe_len`) split into per-row segments automatically. Replaces
+  `resolve_all` for the routing decision in `BlockReader::write_block`,
+  `read_block`, and `read_data`.
+- `btrfs-mkfs`: post-bootstrap transaction step. After the in-memory
+  bootstrap layout is written to disk, mkfs reopens the image with
+  `btrfs-transaction` and runs a single transaction that fills in
+  the empty UUID tree (objectid 9). btrfs-progs creates this tree
+  by default but our mkfs's hand-built bootstrap omitted it
+  (PLAN B.3). The kernel populates UUID-tree entries lazily on
+  snapshot/send, so an empty tree is the correct initial state.
+
+  This is the first integration of the transaction crate into
+  mkfs's write path. It's gated on a profile + feature allowlist
+  (SINGLE/DUP/RAID1/RAID1C3/RAID1C4 metadata + data, FST enabled,
+  CRC32C csum) — other configurations are skipped silently because
+  the transaction crate doesn't yet handle them or has known
+  compatibility gaps with mkfs's existing output. The skip list
+  shrinks as the migration progresses; see `mkfs/PLAN.md`.
+- `btrfs check`: `--backup`, `--tree-root`, `--chunk-root` flags for
+  recovery from damaged root/chunk tree pointers.
+- `btrfs-transaction`: structural invariant assertions throughout the
+  crate. `debug_assert!` checks validate tree block structure (key
+  ordering, data layout, bytenr consistency) at every modification
+  point. Hard `assert!` checks guard against catastrophic errors
+  (superblock corruption, generation inconsistency) even in release
+  builds. Includes `ExtentBuffer::check_leaf()`, `check_node()`, and
+  `check()` validation methods.
+- `rescue chunk-recover`: raw device scan for surviving chunk-tree
+  leaves, conflict resolution and chunk map reconstruction, and detailed
+  text report. `--apply` writes the reconstructed chunk tree via the
+  transaction crate.
+- `btrfs-disk`: `BlockReader::new` constructor and `filesystem_open_with_cache`
+  for opening filesystems with a pre-built chunk cache (used by chunk-recover).
+- `btrfs-transaction`: `Filesystem::open_with_chunk_cache` and
+  `Transaction::rebuild_chunk_tree` for chunk tree recovery.
+- `btrfs-transaction`: data extent ref creation. `create_data_extent` inserts
+  `EXTENT_ITEM` entries with inline `EXTENT_DATA_REF` backrefs through the
+  delayed ref pipeline, with proper data block group accounting and free space
+  tree updates. `ExtentItem::to_bytes_data()` serializer in btrfs-disk.
+- `btrfs-transaction`: data extent write path foundation.
+  `BlockGroupKind::Data` and `Transaction::alloc_data_extent` find space in
+  a DATA block group, write the bytes immediately to all stripe copies, and
+  queue a `+1` `EXTENT_DATA_REF` delayed ref. `Transaction::insert_file_extent`
+  inserts an `EXTENT_DATA` item into an FS tree pointing at the allocated
+  extent. `Transaction::insert_csums` computes per-sector standard CRC32C
+  checksums and inserts `EXTENT_CSUM` items into the csum tree, splitting
+  large payloads across multiple items so each fits in one leaf. Verified
+  end-to-end against `btrfs check`.
+- `btrfs-disk`: `FileExtentItem::to_bytes_regular` (53-byte regular/prealloc
+  body) and `FileExtentItem::to_bytes_inline` (21-byte header + raw payload)
+  serializers, plus `HEADER_SIZE` and `REGULAR_SIZE` constants.
+- `btrfs-transaction`: high-level inode and directory-entry helpers
+  to dedupe the boilerplate that mkfs migration would otherwise
+  repeat per file. New `inode` module owns `InodeArgs` (full-fields
+  counterpart to `btrfs_disk::items::InodeItemArgs` with `flags`,
+  `rdev`, `sequence`, and four distinct timestamps).
+  `Transaction::create_inode(tree, ino, args)` inserts an `INODE_ITEM`.
+  `Transaction::link_dir_entry(tree, parent, child, name, ft,
+  dir_index, time)` inserts `INODE_REF` + `DIR_ITEM` + `DIR_INDEX`,
+  bumps the parent dir's `size`/`transid`/`ctime`/`mtime` in place,
+  and (when the parent is the canonical subvolume root dir) mirrors
+  the size into the `ROOT_ITEM`'s embedded inode.
+  `Transaction::set_xattr(tree, ino, name, value)` inserts an
+  `XATTR_ITEM`. The 6 existing end-to-end tests that built dir
+  entries by hand collapsed from ~200 lines of boilerplate per test
+  to ~15.
+- `btrfs-disk` + `btrfs-transaction`: multi-device write support
+  (transaction PLAN J.5). `BlockReader<R>` now stores a
+  `BTreeMap<u64, R>` keyed by device id; `read_block` / `read_data`
+  route by devid via the chunk cache, and `write_block` fans out to
+  every stripe's correct device. New `filesystem_open_multi(devices)`
+  and `Filesystem::open_multi(devices)` constructors take a
+  `devid -> handle` map; the existing single-handle entry points are
+  thin wrappers that read the superblock to learn the primary devid.
+  Per-device `dev_item` snapshots are captured at open time and
+  spliced into the appropriate device's superblock at commit so a
+  multi-device filesystem doesn't get clobbered with the primary's
+  identity. Bootstrap validates every chunk-tree-referenced devid is
+  in the handle map. End-to-end coverage on a 2-device RAID1 image:
+  open, COW transaction, data extent via `write_file_data`, and a
+  missing-handle error case all pass `btrfs check`.
+
+  API changes (pre-1.0):
+
+  - `ChunkTreeCache::resolve` and `resolve_all` now return
+    `(devid, physical)` instead of just `physical`.
+  - `BlockReader::new` takes a `devid` argument; `BlockReader::new_multi`
+    takes a `BTreeMap<u64, R>`.
+  - `BlockReader::inner_mut` and `into_inner` removed in favour of
+    `devices()` / `devices_mut()` (and `single_device_mut()` for
+    offline tools that operate on one device at a time).
+  - `OpenFilesystem` gained a `per_device_dev_items` field.
+- `btrfs-transaction`: high-level data write helpers.
+  `Transaction::update_inode_nbytes` patches an inode's `nbytes` field
+  in place at the fixed struct offset, preserving all other fields
+  (including `flags`, `rdev`, `sequence`). `Transaction::write_file_data`
+  is the single entry point for writing file content: splits the input
+  into ≤1 MiB chunks, allocates each as a regular data extent, inserts
+  the `EXTENT_DATA` items, computes per-sector CRC32C csums (unless
+  `nodatasum`), and bumps the inode's `nbytes`.
+- `btrfs-transaction`: inline extent support.
+  `Transaction::insert_inline_extent` embeds small payloads directly in
+  the FS tree leaf as an inline `EXTENT_DATA` item with no extent-tree
+  entry and no csum entries; `INODE.nbytes` is bumped by the unaligned
+  payload length per the on-disk convention. `write_file_data` now
+  picks inline automatically when `file_offset == 0` and
+  `data.len() <= max_inline_data_size(sectorsize, nodesize)` (4095
+  bytes on a default 16K nodesize / 4K sectorsize filesystem).
+- `btrfs-transaction`: zlib + zstd compression for the data write path.
+  New `try_compress(data, algorithm)` function returns the compressed
+  bytes only when they shrink (callers fall back to raw otherwise).
+  `Transaction::write_file_data` and `insert_inline_extent` gain a
+  `compression: Option<CompressionType>` parameter. For regular extents
+  each chunk is compressed independently with per-chunk fallback to
+  raw; `disk_num_bytes` shrinks while `num_bytes`/`ram_bytes`/
+  `INODE.nbytes` track the logical (sector-aligned) size. Csums always
+  cover the on-disk (compressed) bytes.
+- `btrfs-transaction`: LZO compression. `try_compress` now produces the
+  inline LZO framing format (`[4B total_len LE] [4B seg_len LE] [lzo
+  bytes]`). New `try_compress_regular(data, algorithm, sectorsize)`
+  applies the per-sector regular framing (`[4B total_len LE] { [4B
+  seg_len LE] [lzo bytes] [zero pad] }*`) with sector-boundary padding
+  and the standard early-exit heuristic (abandon after 4 sectors if the
+  framed buffer exceeds 3 sectors). `write_file_data` routes its
+  per-chunk compression through `try_compress_regular` so LZO regular
+  extents work end-to-end. Both inline and regular LZO files pass
+  `btrfs check`.
+- `btrfs-disk`: `ChunkItem::to_mapping` conversion method.
+- `btrfs-fuse`: milestone M6 — library split and integration test harness.
+  The crate is now a hybrid lib + bin: `fuse/src/lib.rs` exposes
+  `BtrfsFuse` and its operation layer (`lookup_entry`, `get_attr`,
+  `read_dir`, `read_symlink`, `read_data`, `list_xattrs`, `get_xattr`,
+  `stat_fs`), each of which returns plain `io::Result` / `Option` values
+  and is independent of `fuser`. The `fuser::Filesystem` trait impl is
+  now a narrow adapter that calls these inherent methods and maps their
+  results to `Reply*` calls. Integration tests in `fuse/tests/basic.rs`
+  drive the operation layer directly without a FUSE mount, so they are
+  unprivileged and run under plain `cargo test`. The tests build a fresh
+  btrfs image per test process via `mkfs.btrfs --rootdir` over a known
+  directory tree and cover lookup, getattr, readdir (including
+  pagination and parent resolution for `..`), read_data (inline, empty,
+  multi-extent, offset, past-EOF, nested), symlinks, xattrs, and statfs.
+- `btrfs-fuse`: milestone M5 — `listxattr`, `getxattr`, and `statfs`.
+  Xattrs are read from `XATTR_ITEM` entries (same `DirItem` wire format as
+  directory entries; hash collisions handled by linear name scan). `statfs`
+  reports `total_bytes` / `bytes_used` from the superblock in sectorsize
+  blocks; inode counts are left as 0 for v1.
+- `btrfs-fuse`: milestone M4 — full compression support. `read_file` and
+  `read_symlink` now decompress zlib, zstd, and lzo extents (both inline
+  and regular). LZO uses btrfs per-sector framing (4-byte total-size header
+  + per-sector 4-byte segment headers, padded to `sectorsize` boundaries).
+  Adds `flate2`, `zstd`, and `lzokay` dependencies to `btrfs-fuse`.
+- `btrfs-fuse`: milestones M2 and M3 — `readlink`, `read` for inline and
+  regular uncompressed extents, and correct `..` parent resolution via
+  `INODE_REF`. Prealloc extents and sparse holes return zeros. Symlinks,
+  hardlinks, and large multi-extent files now work end-to-end.
+- New `btrfs-test-utils` crate at `util/testing/` consolidating the RAII
+  test harness (`BackingFile`, `LoopbackDevice`, `Mount`) and shared data
+  helpers (`write_test_data`, `verify_test_data`, `write_compressible_data`)
+  plus `single_mount`, `deterministic_mount`, `cache_gzipped_image`, and
+  `mount_existing_readonly`. Dev-dependency only, not published.
 
 ### Changed
 
@@ -67,7 +229,6 @@ All notable changes to this project will be documented in this file.
   UUID tree is at gen 2 (post-bootstrap) for both profiles, with a
   new `walk_root_tree_items_multi` helper for non-mirror metadata
   layouts.
-
 - `btrfs-mkfs`: free-space-tree and block-group-tree creation move
   into the post-bootstrap transaction for supported profiles
   (SINGLE / DUP / RAID0 / RAID1* / RAID10), closing Phase 2 of the
@@ -123,38 +284,6 @@ All notable changes to this project will be documented in this file.
   not supported) keeps mkfs's hand-built csum tree as a fallback.
   First Phase 2 step from `mkfs/PLAN.md` — establishes the pattern
   for migrating other always-present trees out of mkfs's bootstrap.
-
-### Fixed
-
-- `btrfs-mkfs`: `--features ^free-space-tree` no longer writes a stale
-  empty FST leaf or its `ROOT_ITEM`. The free-space tree is now an
-  optional slot in `BlockLayout` (alongside block-group and quota
-  trees) — gated on `cfg.has_free_space_tree()` everywhere instead of
-  having a hardcoded slot. Saves one `nodesize`-sized tree block per
-  `^free-space-tree` image and aligns the on-disk layout with what
-  btrfs-progs `mkfs.btrfs` produces.
-
-### Added
-
-- `btrfs-disk`: `ChunkProfile` enum and `ChunkTreeCache::plan_write` /
-  `plan_read` for stripe-aware per-device routing across all RAID
-  profiles except RAID5/RAID6. Multi-row writes (buffers larger than
-  `stripe_len`) split into per-row segments automatically. Replaces
-  `resolve_all` for the routing decision in `BlockReader::write_block`,
-  `read_block`, and `read_data`.
-
-### Fixed
-
-- `btrfs-transaction` write path now routes correctly on RAID0 / RAID10
-  filesystems. Previously every commit went through `resolve_all` which
-  fans out to all stripes — correct for DUP/RAID1*, but for RAID0 it
-  duplicated the same row to every device (corruption) and for RAID10
-  it wrote to every mirror pair instead of just the row's pair. Surfaces
-  in mkfs's `post_bootstrap` UUID-tree creation: RAID0/RAID10 images are
-  no longer skipped by the profile allowlist.
-
-### Changed
-
 - `btrfs-disk`: `csum_tree_block` and `csum_superblock` now dispatch on
   `ChecksumType` (CRC32C, xxhash64, SHA-256, BLAKE2b). The transaction
   crate's `ExtentBuffer::update_checksum` and the per-commit flush path
@@ -167,202 +296,6 @@ All notable changes to this project will be documented in this file.
   `btrfs_disk::superblock::csum_superblock` directly). The
   post-bootstrap transaction is no longer gated on CRC32C, so xxhash /
   SHA-256 / BLAKE2b images now get a UUID tree like CRC32C ones do.
-
-### Added
-
-- `btrfs-mkfs`: post-bootstrap transaction step. After the in-memory
-  bootstrap layout is written to disk, mkfs reopens the image with
-  `btrfs-transaction` and runs a single transaction that fills in
-  the empty UUID tree (objectid 9). btrfs-progs creates this tree
-  by default but our mkfs's hand-built bootstrap omitted it
-  (PLAN B.3). The kernel populates UUID-tree entries lazily on
-  snapshot/send, so an empty tree is the correct initial state.
-
-  This is the first integration of the transaction crate into
-  mkfs's write path. It's gated on a profile + feature allowlist
-  (SINGLE/DUP/RAID1/RAID1C3/RAID1C4 metadata + data, FST enabled,
-  CRC32C csum) — other configurations are skipped silently because
-  the transaction crate doesn't yet handle them or has known
-  compatibility gaps with mkfs's existing output. The skip list
-  shrinks as the migration progresses; see `mkfs/PLAN.md`.
-
-- `btrfs check`: `--backup`, `--tree-root`, `--chunk-root` flags for
-  recovery from damaged root/chunk tree pointers.
-
-- `btrfs-transaction`: structural invariant assertions throughout the
-  crate. `debug_assert!` checks validate tree block structure (key
-  ordering, data layout, bytenr consistency) at every modification
-  point. Hard `assert!` checks guard against catastrophic errors
-  (superblock corruption, generation inconsistency) even in release
-  builds. Includes `ExtentBuffer::check_leaf()`, `check_node()`, and
-  `check()` validation methods.
-
-- `rescue chunk-recover`: raw device scan for surviving chunk-tree
-  leaves, conflict resolution and chunk map reconstruction, and detailed
-  text report. `--apply` writes the reconstructed chunk tree via the
-  transaction crate.
-
-- `btrfs-disk`: `BlockReader::new` constructor and `filesystem_open_with_cache`
-  for opening filesystems with a pre-built chunk cache (used by chunk-recover).
-
-- `btrfs-transaction`: `Filesystem::open_with_chunk_cache` and
-  `Transaction::rebuild_chunk_tree` for chunk tree recovery.
-
-- `btrfs-transaction`: data extent ref creation. `create_data_extent` inserts
-  `EXTENT_ITEM` entries with inline `EXTENT_DATA_REF` backrefs through the
-  delayed ref pipeline, with proper data block group accounting and free space
-  tree updates. `ExtentItem::to_bytes_data()` serializer in btrfs-disk.
-
-- `btrfs-transaction`: data extent write path foundation.
-  `BlockGroupKind::Data` and `Transaction::alloc_data_extent` find space in
-  a DATA block group, write the bytes immediately to all stripe copies, and
-  queue a `+1` `EXTENT_DATA_REF` delayed ref. `Transaction::insert_file_extent`
-  inserts an `EXTENT_DATA` item into an FS tree pointing at the allocated
-  extent. `Transaction::insert_csums` computes per-sector standard CRC32C
-  checksums and inserts `EXTENT_CSUM` items into the csum tree, splitting
-  large payloads across multiple items so each fits in one leaf. Verified
-  end-to-end against `btrfs check`.
-
-- `btrfs-disk`: `FileExtentItem::to_bytes_regular` (53-byte regular/prealloc
-  body) and `FileExtentItem::to_bytes_inline` (21-byte header + raw payload)
-  serializers, plus `HEADER_SIZE` and `REGULAR_SIZE` constants.
-
-- `btrfs-transaction`: high-level inode and directory-entry helpers
-  to dedupe the boilerplate that mkfs migration would otherwise
-  repeat per file. New `inode` module owns `InodeArgs` (full-fields
-  counterpart to `btrfs_disk::items::InodeItemArgs` with `flags`,
-  `rdev`, `sequence`, and four distinct timestamps).
-  `Transaction::create_inode(tree, ino, args)` inserts an `INODE_ITEM`.
-  `Transaction::link_dir_entry(tree, parent, child, name, ft,
-  dir_index, time)` inserts `INODE_REF` + `DIR_ITEM` + `DIR_INDEX`,
-  bumps the parent dir's `size`/`transid`/`ctime`/`mtime` in place,
-  and (when the parent is the canonical subvolume root dir) mirrors
-  the size into the `ROOT_ITEM`'s embedded inode.
-  `Transaction::set_xattr(tree, ino, name, value)` inserts an
-  `XATTR_ITEM`. The 6 existing end-to-end tests that built dir
-  entries by hand collapsed from ~200 lines of boilerplate per test
-  to ~15.
-
-- `btrfs-disk` + `btrfs-transaction`: multi-device write support
-  (transaction PLAN J.5). `BlockReader<R>` now stores a
-  `BTreeMap<u64, R>` keyed by device id; `read_block` / `read_data`
-  route by devid via the chunk cache, and `write_block` fans out to
-  every stripe's correct device. New `filesystem_open_multi(devices)`
-  and `Filesystem::open_multi(devices)` constructors take a
-  `devid -> handle` map; the existing single-handle entry points are
-  thin wrappers that read the superblock to learn the primary devid.
-  Per-device `dev_item` snapshots are captured at open time and
-  spliced into the appropriate device's superblock at commit so a
-  multi-device filesystem doesn't get clobbered with the primary's
-  identity. Bootstrap validates every chunk-tree-referenced devid is
-  in the handle map. End-to-end coverage on a 2-device RAID1 image:
-  open, COW transaction, data extent via `write_file_data`, and a
-  missing-handle error case all pass `btrfs check`.
-
-  API changes (pre-1.0):
-
-  - `ChunkTreeCache::resolve` and `resolve_all` now return
-    `(devid, physical)` instead of just `physical`.
-  - `BlockReader::new` takes a `devid` argument; `BlockReader::new_multi`
-    takes a `BTreeMap<u64, R>`.
-  - `BlockReader::inner_mut` and `into_inner` removed in favour of
-    `devices()` / `devices_mut()` (and `single_device_mut()` for
-    offline tools that operate on one device at a time).
-  - `OpenFilesystem` gained a `per_device_dev_items` field.
-
-- `btrfs-transaction`: high-level data write helpers.
-  `Transaction::update_inode_nbytes` patches an inode's `nbytes` field
-  in place at the fixed struct offset, preserving all other fields
-  (including `flags`, `rdev`, `sequence`). `Transaction::write_file_data`
-  is the single entry point for writing file content: splits the input
-  into ≤1 MiB chunks, allocates each as a regular data extent, inserts
-  the `EXTENT_DATA` items, computes per-sector CRC32C csums (unless
-  `nodatasum`), and bumps the inode's `nbytes`.
-
-- `btrfs-transaction`: inline extent support.
-  `Transaction::insert_inline_extent` embeds small payloads directly in
-  the FS tree leaf as an inline `EXTENT_DATA` item with no extent-tree
-  entry and no csum entries; `INODE.nbytes` is bumped by the unaligned
-  payload length per the on-disk convention. `write_file_data` now
-  picks inline automatically when `file_offset == 0` and
-  `data.len() <= max_inline_data_size(sectorsize, nodesize)` (4095
-  bytes on a default 16K nodesize / 4K sectorsize filesystem).
-
-- `btrfs-transaction`: zlib + zstd compression for the data write path.
-  New `try_compress(data, algorithm)` function returns the compressed
-  bytes only when they shrink (callers fall back to raw otherwise).
-  `Transaction::write_file_data` and `insert_inline_extent` gain a
-  `compression: Option<CompressionType>` parameter. For regular extents
-  each chunk is compressed independently with per-chunk fallback to
-  raw; `disk_num_bytes` shrinks while `num_bytes`/`ram_bytes`/
-  `INODE.nbytes` track the logical (sector-aligned) size. Csums always
-  cover the on-disk (compressed) bytes.
-
-- `btrfs-transaction`: LZO compression. `try_compress` now produces the
-  inline LZO framing format (`[4B total_len LE] [4B seg_len LE] [lzo
-  bytes]`). New `try_compress_regular(data, algorithm, sectorsize)`
-  applies the per-sector regular framing (`[4B total_len LE] { [4B
-  seg_len LE] [lzo bytes] [zero pad] }*`) with sector-boundary padding
-  and the standard early-exit heuristic (abandon after 4 sectors if the
-  framed buffer exceeds 3 sectors). `write_file_data` routes its
-  per-chunk compression through `try_compress_regular` so LZO regular
-  extents work end-to-end. Both inline and regular LZO files pass
-  `btrfs check`.
-
-### Fixed
-
-- `btrfs-transaction`: `update_free_space_tree` now respects the
-  `FREE_SPACE_TREE` compat_ro flag — when the flag is cleared, the
-  FST update is skipped even if a tree-id-10 root is present on disk.
-  Lets `btrfs-mkfs --features ^free-space-tree` run through
-  `post_bootstrap` cleanly (mkfs leaves a stale FST leaf around in
-  that case; the kernel ignores it because the flag is cleared).
-
-- `btrfs-transaction`: `DelayedRefQueue` now uses `BTreeMap` (was
-  `HashMap`), so `flush_delayed_refs` iterates queued refs in
-  deterministic key order. Without this, successive transaction
-  commits over the same input could produce byte-different output
-  due to hash randomization, surfacing as flaky snapshot tests once
-  the mkfs migration started piping commit output through snapshot
-  comparison. `DelayedRefKey` gained `PartialOrd, Ord` derives.
-
-- `mkfs --rootdir`: `EXTENT_DATA` items for files whose size is not a
-  sectorsize multiple now use `align_up(extent_size, sectorsize)` for
-  `num_bytes` and `ram_bytes`, and accumulate the same value into the
-  inode's `nbytes`. Previously the unaligned `extent_size` was passed
-  directly, producing images that fail `btrfs check` with
-  `bad file extent, nbytes wrong`. The bug also affected compressed
-  extents where `aligned_disk != aligned_logical`.
-
-- `btrfs-transaction`: fix fall-through bug in `flush_delayed_refs`
-  where the data ref drop path executed unconditionally after the
-  add path. Previously masked by `todo!()` in the add branch.
-
-- `btrfs-disk`: `ChunkItem::to_mapping` conversion method.
-
-- `btrfs-fuse`: milestone M6 — library split and integration test harness.
-  The crate is now a hybrid lib + bin: `fuse/src/lib.rs` exposes
-  `BtrfsFuse` and its operation layer (`lookup_entry`, `get_attr`,
-  `read_dir`, `read_symlink`, `read_data`, `list_xattrs`, `get_xattr`,
-  `stat_fs`), each of which returns plain `io::Result` / `Option` values
-  and is independent of `fuser`. The `fuser::Filesystem` trait impl is
-  now a narrow adapter that calls these inherent methods and maps their
-  results to `Reply*` calls. Integration tests in `fuse/tests/basic.rs`
-  drive the operation layer directly without a FUSE mount, so they are
-  unprivileged and run under plain `cargo test`. The tests build a fresh
-  btrfs image per test process via `mkfs.btrfs --rootdir` over a known
-  directory tree and cover lookup, getattr, readdir (including
-  pagination and parent resolution for `..`), read_data (inline, empty,
-  multi-extent, offset, past-EOF, nested), symlinks, xattrs, and statfs.
-
-- New `btrfs-test-utils` crate at `util/testing/` consolidating the RAII
-  test harness (`BackingFile`, `LoopbackDevice`, `Mount`) and shared data
-  helpers (`write_test_data`, `verify_test_data`, `write_compressible_data`)
-  plus `single_mount`, `deterministic_mount`, `cache_gzipped_image`, and
-  `mount_existing_readonly`. Dev-dependency only, not published.
-
-### Changed
-
 - `cli`, `uapi`, and `stream` integration tests now pull their mount /
   loopback / backing-file helpers from `btrfs-test-utils` instead of
   maintaining per-crate copies. Each crate's `tests/common.rs` is now a
@@ -371,22 +304,45 @@ All notable changes to this project will be documented in this file.
   `env!("CARGO_BIN_EXE_btrfs")` lookup; callers pass the `btrfs-mkfs`
   binary path explicitly.
 
-- `btrfs-fuse`: milestone M5 — `listxattr`, `getxattr`, and `statfs`.
-  Xattrs are read from `XATTR_ITEM` entries (same `DirItem` wire format as
-  directory entries; hash collisions handled by linear name scan). `statfs`
-  reports `total_bytes` / `bytes_used` from the superblock in sectorsize
-  blocks; inode counts are left as 0 for v1.
+### Fixed
 
-- `btrfs-fuse`: milestone M4 — full compression support. `read_file` and
-  `read_symlink` now decompress zlib, zstd, and lzo extents (both inline
-  and regular). LZO uses btrfs per-sector framing (4-byte total-size header
-  + per-sector 4-byte segment headers, padded to `sectorsize` boundaries).
-  Adds `flate2`, `zstd`, and `lzokay` dependencies to `btrfs-fuse`.
-
-- `btrfs-fuse`: milestones M2 and M3 — `readlink`, `read` for inline and
-  regular uncompressed extents, and correct `..` parent resolution via
-  `INODE_REF`. Prealloc extents and sparse holes return zeros. Symlinks,
-  hardlinks, and large multi-extent files now work end-to-end.
+- `btrfs-mkfs`: `--features ^free-space-tree` no longer writes a stale
+  empty FST leaf or its `ROOT_ITEM`. The free-space tree is now an
+  optional slot in `BlockLayout` (alongside block-group and quota
+  trees) — gated on `cfg.has_free_space_tree()` everywhere instead of
+  having a hardcoded slot. Saves one `nodesize`-sized tree block per
+  `^free-space-tree` image and aligns the on-disk layout with what
+  btrfs-progs `mkfs.btrfs` produces.
+- `btrfs-transaction` write path now routes correctly on RAID0 / RAID10
+  filesystems. Previously every commit went through `resolve_all` which
+  fans out to all stripes — correct for DUP/RAID1*, but for RAID0 it
+  duplicated the same row to every device (corruption) and for RAID10
+  it wrote to every mirror pair instead of just the row's pair. Surfaces
+  in mkfs's `post_bootstrap` UUID-tree creation: RAID0/RAID10 images are
+  no longer skipped by the profile allowlist.
+- `btrfs-transaction`: `update_free_space_tree` now respects the
+  `FREE_SPACE_TREE` compat_ro flag — when the flag is cleared, the
+  FST update is skipped even if a tree-id-10 root is present on disk.
+  Lets `btrfs-mkfs --features ^free-space-tree` run through
+  `post_bootstrap` cleanly (mkfs leaves a stale FST leaf around in
+  that case; the kernel ignores it because the flag is cleared).
+- `btrfs-transaction`: `DelayedRefQueue` now uses `BTreeMap` (was
+  `HashMap`), so `flush_delayed_refs` iterates queued refs in
+  deterministic key order. Without this, successive transaction
+  commits over the same input could produce byte-different output
+  due to hash randomization, surfacing as flaky snapshot tests once
+  the mkfs migration started piping commit output through snapshot
+  comparison. `DelayedRefKey` gained `PartialOrd, Ord` derives.
+- `mkfs --rootdir`: `EXTENT_DATA` items for files whose size is not a
+  sectorsize multiple now use `align_up(extent_size, sectorsize)` for
+  `num_bytes` and `ram_bytes`, and accumulate the same value into the
+  inode's `nbytes`. Previously the unaligned `extent_size` was passed
+  directly, producing images that fail `btrfs check` with
+  `bad file extent, nbytes wrong`. The bug also affected compressed
+  extents where `aligned_disk != aligned_logical`.
+- `btrfs-transaction`: fix fall-through bug in `flush_delayed_refs`
+  where the data ref drop path executed unconditionally after the
+  add path. Previously masked by `todo!()` in the add branch.
 
 ## 0.11.0
 
