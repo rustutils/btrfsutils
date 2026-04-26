@@ -608,6 +608,73 @@ impl<R: Read + Write + Seek> Transaction<R> {
         Ok(())
     }
 
+    /// Set an inode's `nlink` field to the absolute value `nlink`.
+    ///
+    /// Reads the inode's `INODE_ITEM` at `(inode, INODE_ITEM, 0)` in
+    /// `tree_id`, patches the 4-byte `nlink` field in place, and marks
+    /// the leaf dirty. All other inode fields are preserved verbatim
+    /// (in-place patching avoids round-tripping `flags`, `rdev`,
+    /// `sequence`, etc.).
+    ///
+    /// Useful when hardlink counts are only known after the directory
+    /// walk completes. The transaction-side equivalent of
+    /// `update_inode_nbytes` for an absolute `u32` value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `INODE_ITEM` is missing, or if its
+    /// payload is shorter than the field offset.
+    pub fn set_inode_nlink(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        inode: u64,
+        nlink: u32,
+    ) -> io::Result<()> {
+        let nlink_off =
+            std::mem::offset_of!(btrfs_disk::raw::btrfs_inode_item, nlink);
+
+        let key = DiskKey {
+            objectid: inode,
+            key_type: KeyType::InodeItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            tree_id,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )?;
+        if !found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "set_inode_nlink: INODE_ITEM missing for inode {inode} in \
+                 tree {tree_id}"
+            )));
+        }
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("set_inode_nlink: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        let item_len = leaf.item_size(slot) as usize;
+        if item_len < nlink_off + 4 {
+            path.release();
+            return Err(io::Error::other(format!(
+                "set_inode_nlink: INODE_ITEM payload {item_len} bytes < {}",
+                nlink_off + 4,
+            )));
+        }
+        let payload = leaf.item_data_mut(slot);
+        payload[nlink_off..nlink_off + 4].copy_from_slice(&nlink.to_le_bytes());
+        fs_info.mark_dirty(leaf);
+        path.release();
+        Ok(())
+    }
+
     /// Insert an inline `EXTENT_DATA` item that embeds `data` directly
     /// in the FS tree leaf, and bump the inode's `nbytes` by
     /// `data.len()`.
@@ -617,8 +684,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// embeds the compressed bytes if they shrink (the on-disk
     /// `compression` byte reflects the actual algorithm used; if
     /// compression doesn't shrink, the raw bytes are embedded with
-    /// `compression = None`). LZO inline framing is not yet supported
-    /// and falls back to raw.
+    /// `compression = None`). LZO uses the inline single-segment
+    /// framing format produced by [`try_compress`].
     ///
     /// Inline extents have no separate data extent, no extent-tree
     /// entry, and no csum entries. They are the canonical
@@ -715,9 +782,9 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// [`insert_inline_extent`](Self::insert_inline_extent).
     ///
     /// `compression` selects the algorithm to attempt:
-    /// `Some(Zlib | Zstd)` are supported. `Some(Lzo)` falls through to
-    /// raw (per-sector framing not yet implemented). `None` skips the
-    /// compression attempt entirely.
+    /// `Some(Zlib | Zstd | Lzo)` are all supported (LZO uses
+    /// [`try_compress_regular`]'s per-sector framing format). `None`
+    /// skips the compression attempt entirely.
     ///
     /// The file's logical size (`INODE_ITEM.size`) is the caller's
     /// responsibility — `write_file_data` only adjusts `nbytes`.
@@ -1192,6 +1259,198 @@ impl<R: Read + Write + Seek> Transaction<R> {
             offset: u64::from(btrfs_name_hash(name)),
         };
         self.insert_item_helper(fs_info, tree_id, &key, &data)
+    }
+
+    /// Insert paired `ROOT_REF` and `ROOT_BACKREF` items into the root
+    /// tree (id 1) recording that subvolume `child_root` is reachable
+    /// under `name` (with directory sequence `dir_index`) inside
+    /// directory inode `dirid` of `parent_root`.
+    ///
+    /// The two records share an on-disk payload (`btrfs_root_ref`) and
+    /// differ only in their key:
+    ///
+    /// - `ROOT_REF` at `(parent_root, ROOT_REF, child_root)` — the
+    ///   parent → child entry walked when listing a parent's
+    ///   subvolume children.
+    /// - `ROOT_BACKREF` at `(child_root, ROOT_BACKREF, parent_root)`
+    ///   — the child → parent backref used by `subvolume list` to
+    ///   reconstruct the path from a subvolume up to the mount root.
+    ///
+    /// Both items are inserted in tree id 1 (the root tree). Caller
+    /// is responsible for keeping the matching `DIR_ITEM` and
+    /// `DIR_INDEX` entries inside `parent_root`'s FS tree consistent
+    /// (typically via a parallel `link_dir_entry`-style emission).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either item already exists, or if any tree
+    /// operation fails.
+    pub fn insert_root_ref(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        parent_root: u64,
+        child_root: u64,
+        dirid: u64,
+        dir_index: u64,
+        name: &[u8],
+    ) -> io::Result<()> {
+        use btrfs_disk::items::RootRef;
+
+        let payload = RootRef::serialize(dirid, dir_index, name);
+        let root_tree_id = 1u64;
+
+        let ref_key = DiskKey {
+            objectid: parent_root,
+            key_type: KeyType::RootRef,
+            offset: child_root,
+        };
+        self.insert_item_helper(fs_info, root_tree_id, &ref_key, &payload)?;
+
+        let backref_key = DiskKey {
+            objectid: child_root,
+            key_type: KeyType::RootBackref,
+            offset: parent_root,
+        };
+        self.insert_item_helper(fs_info, root_tree_id, &backref_key, &payload)?;
+
+        Ok(())
+    }
+
+    /// Set the `RDONLY` bit in the `ROOT_ITEM.flags` of `tree_id`'s
+    /// root tree entry, marking the subvolume read-only.
+    ///
+    /// Reads the existing `ROOT_ITEM` at `(tree_id, ROOT_ITEM, 0)` in
+    /// the root tree, parses it, ORs `RootItemFlags::RDONLY` into
+    /// `flags`, reserialises, and overwrites in place. Other fields
+    /// are preserved verbatim.
+    ///
+    /// Idempotent: calling on a tree that is already RDONLY leaves
+    /// the on-disk bytes unchanged (but still marks the leaf dirty,
+    /// which costs one COW per call).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no `ROOT_ITEM` exists for `tree_id`, or if
+    /// any tree operation fails.
+    pub fn set_root_readonly(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+    ) -> io::Result<()> {
+        use btrfs_disk::items::{RootItem, RootItemFlags};
+
+        let key = DiskKey {
+            objectid: tree_id,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            1, // root tree
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )?;
+        if !found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "set_root_readonly: ROOT_ITEM for tree {tree_id} not found"
+            )));
+        }
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("set_root_readonly: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        let ri_data = leaf.item_data(slot).to_vec();
+        let mut root_item = RootItem::parse(&ri_data).ok_or_else(|| {
+            io::Error::other("set_root_readonly: malformed ROOT_ITEM")
+        })?;
+        root_item.flags |= RootItemFlags::RDONLY;
+        let new_ri = root_item.to_bytes();
+        items::update_item(leaf, slot, &new_ri)?;
+        fs_info.mark_dirty(leaf);
+        path.release();
+        Ok(())
+    }
+
+    /// Mark `subvol_id` as the filesystem's default subvolume by
+    /// upserting a `DIR_ITEM` keyed under
+    /// `(BTRFS_ROOT_TREE_DIR_OBJECTID = 6, DIR_ITEM,
+    /// name_hash("default"))` in the root tree (id 1). The entry's
+    /// location key is `(subvol_id, ROOT_ITEM, u64::MAX)`, matching
+    /// mkfs's convention; kernel `btrfs_find_root` does a range
+    /// search by objectid so the offset value is not load-bearing.
+    /// On mount without an explicit `subvolid=`, the kernel resolves
+    /// the default to `subvol_id`.
+    ///
+    /// On-disk equivalent of `btrfs subvolume set-default
+    /// <subvol_id>`. Idempotent: if a "default" DIR_ITEM already
+    /// exists at this key (e.g. mkfs's default pointing at the FS
+    /// tree), it is overwritten in place. The payload size is
+    /// independent of `subvol_id`, so in-place update works without
+    /// a delete+insert cycle.
+    ///
+    /// The matching `INODE_ITEM` for inode 6 is left to the caller
+    /// (mkfs historically did not create one — the kernel does not
+    /// require it for the default-subvol lookup path).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any tree operation fails.
+    pub fn set_default_subvol(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        subvol_id: u64,
+    ) -> io::Result<()> {
+        use btrfs_disk::{items::DirItem, util::btrfs_name_hash};
+
+        const DEFAULT_NAME: &[u8] = b"default";
+
+        let location = DiskKey {
+            objectid: subvol_id,
+            key_type: KeyType::RootItem,
+            offset: u64::MAX,
+        };
+        let payload = DirItem::serialize(
+            &location,
+            self.transid,
+            btrfs_disk::raw::BTRFS_FT_DIR as u8,
+            DEFAULT_NAME,
+        );
+        let key = DiskKey {
+            objectid: u64::from(btrfs_disk::raw::BTRFS_ROOT_TREE_DIR_OBJECTID),
+            key_type: KeyType::DirItem,
+            offset: u64::from(btrfs_name_hash(DEFAULT_NAME)),
+        };
+
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            1,
+            &key,
+            &mut path,
+            SearchIntent::Insert((ITEM_SIZE + payload.len()) as u32),
+            true,
+        )?;
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("set_default_subvol: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        if found {
+            // Existing "default" DIR_ITEM (e.g. mkfs's bootstrap one
+            // pointing at the FS tree). Same payload size — patch in
+            // place rather than delete+insert.
+            items::update_item(leaf, slot, &payload)?;
+        } else {
+            items::insert_item(leaf, slot, &key, &payload)?;
+        }
+        fs_info.mark_dirty(leaf);
+        path.release();
+        Ok(())
     }
 
     /// Mark a block as pinned (freed but not yet committed).

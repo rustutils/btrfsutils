@@ -3888,3 +3888,241 @@ fn set_xattr_round_trips_passes_btrfs_check() {
 
     assert_btrfs_check(&img_path);
 }
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn set_inode_nlink_round_trips() {
+    use btrfs_disk::items::{InodeItem, Timespec};
+    use btrfs_transaction::inode::InodeArgs;
+
+    let (_dir, img_path) = create_test_image();
+    let inode_no = 257u64;
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let mut trans = Transaction::start(&mut fs).expect("start");
+
+        let args = InodeArgs::new(trans.transid, 0o100644).with_uniform_time(
+            Timespec {
+                sec: 1_700_000_000,
+                nsec: 0,
+            },
+        );
+        trans.create_inode(&mut fs, 5, inode_no, &args).unwrap();
+        trans.set_inode_nlink(&mut fs, 5, inode_no, 7).unwrap();
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().unwrap();
+    }
+
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(&img_path)
+        .unwrap();
+    let mut fs = Filesystem::open(file).expect("reopen");
+    let key = DiskKey {
+        objectid: inode_no,
+        key_type: KeyType::InodeItem,
+        offset: 0,
+    };
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        None,
+        &mut fs,
+        5,
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .unwrap();
+    assert!(found, "INODE_ITEM missing");
+    let leaf = path.leaf().unwrap();
+    let parsed = InodeItem::parse(leaf.item_data(path.leaf_slot())).unwrap();
+    assert_eq!(parsed.nlink, 7);
+    path.release();
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn insert_root_ref_inserts_paired_keys() {
+    use btrfs_disk::items::RootRef;
+
+    let (_dir, img_path) = create_test_image();
+    // The FS tree (id 5) is the only subvolume in a fresh image. Pretend
+    // we're recording a directory entry that the parent root tree (id 1)
+    // would point at. The keys are insertable in tree id 1 because no
+    // ROOT_REF/ROOT_BACKREF exists between (1, 5) by default.
+    let parent_root = 1u64;
+    let child_root = 5u64;
+    let dirid = 256u64;
+    let dir_index = 42u64;
+    let name: &[u8] = b"my-subvol";
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).expect("open");
+        let mut trans = Transaction::start(&mut fs).expect("start");
+        trans
+            .insert_root_ref(
+                &mut fs,
+                parent_root,
+                child_root,
+                dirid,
+                dir_index,
+                name,
+            )
+            .expect("insert_root_ref");
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().unwrap();
+    }
+
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(&img_path)
+        .unwrap();
+    let mut fs = Filesystem::open(file).expect("reopen");
+
+    for (objectid, kt, offset) in [
+        (parent_root, KeyType::RootRef, child_root),
+        (child_root, KeyType::RootBackref, parent_root),
+    ] {
+        let key = DiskKey {
+            objectid,
+            key_type: kt,
+            offset,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            1,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .unwrap();
+        assert!(found, "key not found: {key:?}");
+        let leaf = path.leaf().unwrap();
+        let rr = RootRef::parse(leaf.item_data(path.leaf_slot())).unwrap();
+        assert_eq!(rr.dirid, dirid);
+        assert_eq!(rr.sequence, dir_index);
+        assert_eq!(rr.name, name);
+        path.release();
+    }
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn set_root_readonly_helper_round_trips() {
+    let (_dir, img_path) = create_test_image();
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).unwrap();
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        trans.set_root_readonly(&mut fs, 5).expect("set readonly");
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(&img_path)
+        .unwrap();
+    let mut fs = Filesystem::open(file).unwrap();
+    let key = DiskKey {
+        objectid: 5,
+        key_type: KeyType::RootItem,
+        offset: 0,
+    };
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        None,
+        &mut fs,
+        1,
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .unwrap();
+    assert!(found);
+    let leaf = path.leaf().unwrap();
+    let ri = RootItem::parse(leaf.item_data(path.leaf_slot())).unwrap();
+    assert!(ri.flags.contains(RootItemFlags::RDONLY));
+    path.release();
+
+    assert_btrfs_check(&img_path);
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn set_default_subvol_inserts_dir_item() {
+    let (_dir, img_path) = create_test_image();
+
+    {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(&img_path)
+            .unwrap();
+        let mut fs = Filesystem::open(file).unwrap();
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        // Override mkfs's default (FS tree, id 5) with id 256. Tree
+        // 256 doesn't actually exist in this image, but the helper
+        // writes the DIR_ITEM regardless; this lets us tell the
+        // helper-installed item apart from the bootstrap one.
+        trans
+            .set_default_subvol(&mut fs, 256)
+            .expect("set default");
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .open(&img_path)
+        .unwrap();
+    let mut fs = Filesystem::open(file).unwrap();
+    let key = DiskKey {
+        objectid: u64::from(btrfs_disk::raw::BTRFS_ROOT_TREE_DIR_OBJECTID),
+        key_type: KeyType::DirItem,
+        offset: u64::from(btrfs_disk::util::btrfs_name_hash(b"default")),
+    };
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        None,
+        &mut fs,
+        1,
+        &key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )
+    .unwrap();
+    assert!(found, "default DIR_ITEM not found in root tree");
+    let leaf = path.leaf().unwrap();
+    let entries = DirItem::parse_all(leaf.item_data(path.leaf_slot()));
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, b"default");
+    assert_eq!(entries[0].location.objectid, 256);
+    assert_eq!(entries[0].location.key_type, KeyType::RootItem);
+    assert_eq!(entries[0].location.offset, u64::MAX);
+    path.release();
+}

@@ -977,6 +977,30 @@ impl RootRef {
             name,
         })
     }
+
+    /// Serialize a `(dirid, sequence, name)` tuple to the on-disk
+    /// `btrfs_root_ref` byte representation: 18-byte fixed header
+    /// (`dirid` u64 + `sequence` u64 + `name_len` u16, all
+    /// little-endian) followed by the raw name bytes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `name.len()` does not fit in a `u16` (the on-disk
+    /// `name_len` field is 16 bits). Practical names are always far
+    /// below 65535 bytes.
+    #[must_use]
+    pub fn serialize(dirid: u64, sequence: u64, name: &[u8]) -> Vec<u8> {
+        let header = mem::size_of::<raw::btrfs_root_ref>();
+        let mut buf = Vec::with_capacity(header + name.len());
+        buf.put_u64_le(dirid);
+        buf.put_u64_le(sequence);
+        buf.put_u16_le(
+            u16::try_from(name.len())
+                .expect("RootRef::serialize: name length does not fit in u16"),
+        );
+        buf.put_slice(name);
+        buf
+    }
 }
 
 /// File extent descriptor, stored as `EXTENT_DATA` in the FS tree.
@@ -2794,6 +2818,26 @@ mod tests {
     fn root_ref_too_short() {
         let hdr_size = mem::size_of::<raw::btrfs_root_ref>();
         assert!(RootRef::parse(&vec![0u8; hdr_size - 1]).is_none());
+    }
+
+    #[test]
+    fn root_ref_serialize_round_trip() {
+        let bytes = RootRef::serialize(256, 42, b"snapshot-1");
+        let parsed = RootRef::parse(&bytes).unwrap();
+        assert_eq!(parsed.dirid, 256);
+        assert_eq!(parsed.sequence, 42);
+        assert_eq!(parsed.name, b"snapshot-1");
+        // Header is 18 bytes (8 + 8 + 2) plus the name.
+        assert_eq!(bytes.len(), mem::size_of::<raw::btrfs_root_ref>() + 10);
+    }
+
+    #[test]
+    fn root_ref_serialize_empty_name() {
+        let bytes = RootRef::serialize(7, 0, b"");
+        let parsed = RootRef::parse(&bytes).unwrap();
+        assert_eq!(parsed.dirid, 7);
+        assert_eq!(parsed.sequence, 0);
+        assert!(parsed.name.is_empty());
     }
 
     #[test]

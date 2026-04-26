@@ -6,6 +6,27 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-transaction`: subvolume-creation helpers groundwork for the
+  rootdir → transaction migration (Phase 3, Implementation Phase 1).
+  Five new helpers, all built on existing `search_slot` /
+  `insert_item` / `update_item` plumbing:
+  `Transaction::set_inode_nlink(tree, ino, nlink)` patches the
+  inode's `nlink` field in place (modelled on
+  `update_inode_nbytes`). `Transaction::insert_root_ref(parent_root,
+  child_root, dirid, dir_index, name)` inserts paired `ROOT_REF` +
+  `ROOT_BACKREF` records into the root tree (id 1) using the new
+  `RootRef::serialize` from `btrfs-disk`.
+  `Transaction::set_root_readonly(tree_id)` ORs `RootItemFlags::RDONLY`
+  into the existing `ROOT_ITEM`'s flags field.
+  `Transaction::set_default_subvol(subvol_id)` upserts a `"default"`
+  `DIR_ITEM` under `BTRFS_ROOT_TREE_DIR_OBJECTID` (overwriting
+  mkfs's bootstrap default in place because the payload size is
+  independent of `subvol_id`). Each helper has a privileged
+  integration test against a fresh mkfs image; the readonly /
+  default ones additionally pass `btrfs check` end-to-end.
+- `btrfs-disk`: `RootRef::serialize(dirid, sequence, name)` mirrors
+  the existing `parse`, producing the on-disk `btrfs_root_ref`
+  byte sequence (18-byte fixed header plus the raw name).
 - `btrfs-disk`: `chunk::ChunkTreeCache::plan_write` now routes RAID5
   and RAID6 chunks via a new `WritePlan::Parity(ParityPlan)` variant
   that names every data column slot of every touched physical row
