@@ -17,6 +17,17 @@ All notable changes to this project will be documented in this file.
   `read_free_space_info` lifted to `pub(crate)` for the helper's
   idempotency probe.
 
+- `btrfs-transaction`: `convert::create_block_group_tree(trans, fs_info)`
+  helper. Snapshots `BLOCK_GROUP_ITEM` rows from the extent tree,
+  pins the BG-tree-id routing override to the extent tree, creates
+  tree id 11 if absent, moves each BG item from extent tree to BGT
+  (skipping per-key when already migrated), and sets the
+  `BLOCK_GROUP_TREE` compat_ro flag if not already set. Extracted
+  from `convert_to_block_group_tree` so mkfs's `post_bootstrap` can
+  call it directly to materialise BGT from a bootstrap that left
+  BG items in the extent tree. Per-item idempotent so a partial
+  conversion can be resumed.
+
 ### Changed
 
 - `btrfs-mkfs`: quota tree creation (`-O quota` / `-O squota`) moves

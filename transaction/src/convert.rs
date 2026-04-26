@@ -351,12 +351,13 @@ pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
     fs_info: &mut Filesystem<R>,
 ) -> io::Result<()> {
     let bgt_bit = u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE);
-    let fst_bit = u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE);
-    let fst_valid_bit =
-        u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID);
     let compat_ro = fs_info.superblock.compat_ro_flags;
 
-    // Preconditions: refuse-on-weird, no repair attempts.
+    // Preconditions specific to the conversion path: refuse-on-weird,
+    // no repair attempts. The shared per-item move + create + flag
+    // logic lives in [`create_block_group_tree`], which has weaker
+    // preconditions (it tolerates an existing BGT root and an
+    // already-set BGT flag for resumable use from mkfs).
     if compat_ro & bgt_bit != 0 {
         return Err(io::Error::other(
             "convert_to_block_group_tree: block group tree already enabled",
@@ -367,76 +368,134 @@ pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
             "convert_to_block_group_tree: stale block group tree root present (refusing)",
         ));
     }
+
+    create_block_group_tree(trans, fs_info)
+}
+
+/// Materialise the block group tree (objectid 11) from the extent
+/// tree's `BLOCK_GROUP_ITEM` rows in a single transaction.
+///
+/// Steps performed:
+///
+/// 1. Verify the free space tree is enabled and VALID. The kernel
+///    requires both before BGT can be turned on.
+/// 2. Snapshot every `BLOCK_GROUP_ITEM` from the extent tree
+///    (compound-key order). This runs *before* the routing override
+///    is pinned, so the read sees the pre-conversion state.
+/// 3. Pin the BG-tree-id override to the extent tree for the
+///    duration of the function. Allocator + `update_block_group_used`
+///    calls during the body keep reading BG state from the extent
+///    tree, even though BGT is being built up under them.
+/// 4. Create the BGT root if it doesn't already exist.
+/// 5. Per snapshot: insert into BGT (skip if the same key is already
+///    present there) and delete from the extent tree (skip if it's
+///    already gone). This makes the function idempotent at the
+///    per-item level — a partial conversion (e.g. interrupted commit)
+///    can be resumed by re-calling.
+/// 6. Set the `BLOCK_GROUP_TREE` compat_ro flag if it isn't set yet.
+///    Callers that already set the flag (mkfs's bootstrap) get
+///    a no-op here.
+/// 7. Drop the routing override; subsequent allocator /
+///    `update_block_group_used` calls (notably the commit's
+///    `flush_delayed_refs`) route to the freshly populated BGT.
+///
+/// Intended for two callers:
+/// * [`convert_to_block_group_tree`] uses it as the body after
+///   stricter precondition checks (refuses if BGT is already
+///   enabled or a stale root is present).
+/// * mkfs's `post_bootstrap` will use it directly: bootstrap leaves
+///   BG items in the extent tree and sets the BGT flag, then this
+///   helper materialises tree 11 and migrates the items in.
+///
+/// # Errors
+///
+/// Returns an error if the FST is missing or not VALID, or if any
+/// tree read/write or allocator operation fails.
+pub fn create_block_group_tree<R: Read + Write + Seek>(
+    trans: &mut Transaction<R>,
+    fs_info: &mut Filesystem<R>,
+) -> io::Result<()> {
+    let bgt_bit = u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE);
+    let fst_bit = u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE);
+    let fst_valid_bit =
+        u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE_VALID);
+    let compat_ro = fs_info.superblock.compat_ro_flags;
+
     if compat_ro & fst_bit == 0 {
         return Err(io::Error::other(
-            "convert_to_block_group_tree: free space tree must be enabled first (kernel requires FST for BGT)",
+            "create_block_group_tree: free space tree must be enabled first (kernel requires FST for BGT)",
         ));
     }
     if compat_ro & fst_valid_bit == 0 {
         return Err(io::Error::other(
-            "convert_to_block_group_tree: free space tree is not marked VALID (refusing)",
+            "create_block_group_tree: free space tree is not marked VALID (refusing)",
         ));
     }
 
-    // Step 1: snapshot every BLOCK_GROUP_ITEM from the extent
-    // tree. This must run BEFORE we pin the override or create
-    // any new tree, because load_block_groups currently routes to
-    // the extent tree (BGT not registered yet) which is what we
-    // want for this read.
+    // Snapshot before pinning so the read sees the extent tree as it
+    // was before any conversion-side modifications. May be empty on a
+    // re-call where every BG item has already been moved to BGT —
+    // that's the per-item-idempotent path and the loop below
+    // becomes a no-op.
     let snapshots = collect_block_group_items(fs_info)?;
-    debug_assert!(
-        !snapshots.is_empty(),
-        "convert_to_block_group_tree: no block group items found in extent tree",
-    );
 
-    // Step 2: pin the routing override to the extent tree for the
-    // remainder of the conversion. The guard restores the previous
-    // value (None) on drop, even on panic or `?`.
     let mut guard = fs_info.pin_block_group_tree(EXTENT_TREE_ID);
     let fs_info = guard.fs_mut();
 
-    // Step 3: create the BGT root. The internal alloc + root-tree
-    // ROOT_ITEM insert both call the allocator, which now reads
-    // from the extent tree thanks to the override.
-    trans.create_empty_tree(fs_info, BLOCK_GROUP_TREE_ID)?;
-
-    // Step 4: insert every snapshotted BG item into BGT, in the
-    // order returned by collect_block_group_items (already sorted
-    // by extent-tree compound key, so by BG start). Inserts go
-    // into the freshly created empty leaf; if there are too many
-    // for a single leaf the standard split path runs and the
-    // override keeps the allocator reading from the extent tree.
-    for snap in &snapshots {
-        insert_in_tree(
-            trans,
-            fs_info,
-            BLOCK_GROUP_TREE_ID,
-            &snap.key,
-            &snap.data,
-        )?;
+    if fs_info.root_bytenr(BLOCK_GROUP_TREE_ID).is_none() {
+        trans.create_empty_tree(fs_info, BLOCK_GROUP_TREE_ID)?;
     }
 
-    // Step 5: delete every BG item from the extent tree. These
-    // deletions go through the standard search_slot Delete path,
-    // which COWs extent tree leaves and may rebalance neighbours.
-    // The override holds, so any allocator call during these COWs
-    // continues to read BG state from the extent tree (which is
-    // semantically still consistent — we are removing
-    // BLOCK_GROUP_ITEM records, not changing BG identities).
+    // Per-item idempotency: skip the insert when the same key is
+    // already in BGT (resume of a partial migration), and skip the
+    // delete when the key isn't in the extent tree (already moved).
     for snap in &snapshots {
-        delete_one(trans, fs_info, EXTENT_TREE_ID, &snap.key)?;
+        if !key_present_in_tree(fs_info, BLOCK_GROUP_TREE_ID, &snap.key)? {
+            insert_in_tree(
+                trans,
+                fs_info,
+                BLOCK_GROUP_TREE_ID,
+                &snap.key,
+                &snap.data,
+            )?;
+        }
+        if key_present_in_tree(fs_info, EXTENT_TREE_ID, &snap.key)? {
+            delete_one(trans, fs_info, EXTENT_TREE_ID, &snap.key)?;
+        }
     }
 
-    // Step 6: flip the compat_ro bit. The in-memory superblock is
-    // serialised by the commit path.
-    fs_info.superblock.compat_ro_flags |= bgt_bit;
+    if compat_ro & bgt_bit == 0 {
+        fs_info.superblock.compat_ro_flags |= bgt_bit;
+    }
 
-    // Guard drops here, restoring bg_tree_override to None. Past
-    // this point, fs_info.block_group_tree_id() returns 11 and
-    // any subsequent allocator/update_block_group_used calls
-    // (notably from the upcoming commit's flush_delayed_refs)
-    // route to the freshly populated BGT.
+    // Guard drops here, restoring bg_tree_override. Past this point,
+    // fs_info.block_group_tree_id() returns 11 and any subsequent
+    // allocator/update_block_group_used calls (notably from the
+    // upcoming commit's flush_delayed_refs) route to the freshly
+    // populated BGT.
     Ok(())
+}
+
+/// Read-only check: does `tree_id` contain an exact-key match for
+/// `key`? Used by [`create_block_group_tree`] for per-item
+/// idempotency.
+fn key_present_in_tree<R: Read + Write + Seek>(
+    fs_info: &mut Filesystem<R>,
+    tree_id: u64,
+    key: &DiskKey,
+) -> io::Result<bool> {
+    let mut path = BtrfsPath::new();
+    let found = search::search_slot(
+        None,
+        fs_info,
+        tree_id,
+        key,
+        &mut path,
+        SearchIntent::ReadOnly,
+        false,
+    )?;
+    path.release();
+    Ok(found)
 }
 
 /// Walk the extent tree and snapshot every `BLOCK_GROUP_ITEM`

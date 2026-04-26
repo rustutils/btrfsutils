@@ -2767,6 +2767,212 @@ fn convert_to_block_group_tree_idempotent_after_one_run() {
     drop(dir);
 }
 
+// ----- create_block_group_tree (extracted helper) -----
+
+#[test]
+fn create_block_group_tree_from_empty_extent_bg_state() {
+    // Open a no-BGT mkfs image, call the helper, commit. Every BG
+    // item should move from extent tree to BGT and the BGT
+    // compat_ro flag should flip.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^block-group-tree"]);
+
+    let pre = {
+        let mut fs = open_rw(&img_path);
+        assert!(fs.root_bytenr(11).is_none());
+        assert_eq!(
+            fs.superblock.compat_ro_flags & COMPAT_RO_BLOCK_GROUP_TREE,
+            0
+        );
+        collect_bg_items_from(&mut fs, 2)
+    };
+    assert!(!pre.is_empty(), "extent tree must have BG items pre-call");
+
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::create_block_group_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let mut fs = open_rw(&img_path);
+    assert!(fs.root_bytenr(11).is_some(), "BGT root should now exist");
+    assert_ne!(
+        fs.superblock.compat_ro_flags & COMPAT_RO_BLOCK_GROUP_TREE,
+        0,
+        "BGT compat_ro flag should be set"
+    );
+    let post_extent = collect_bg_items_from(&mut fs, 2);
+    assert!(
+        post_extent.is_empty(),
+        "extent tree should have no BG items, found {}",
+        post_extent.len()
+    );
+    let post_bgt = collect_bg_items_from(&mut fs, 11);
+    assert_eq!(
+        post_bgt.len(),
+        pre.len(),
+        "BGT BG-item count should match pre-call extent count"
+    );
+    drop(fs);
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn create_block_group_tree_idempotent_after_one_run() {
+    // First call moves BG items to BGT and sets the flag. Second
+    // call is a no-op: extent tree still empty, BGT items unchanged.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^block-group-tree"]);
+
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::create_block_group_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let after_first = {
+        let mut fs = open_rw(&img_path);
+        collect_bg_items_from(&mut fs, 11)
+    };
+
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::create_block_group_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+
+    let mut fs = open_rw(&img_path);
+    let post_extent = collect_bg_items_from(&mut fs, 2);
+    assert!(post_extent.is_empty(), "extent tree should still be empty");
+    let after_second = collect_bg_items_from(&mut fs, 11);
+    let keys_first: Vec<_> = after_first.iter().map(|(k, _)| *k).collect();
+    let keys_second: Vec<_> = after_second.iter().map(|(k, _)| *k).collect();
+    assert_eq!(keys_first, keys_second, "BGT keys must be stable");
+    drop(fs);
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn create_block_group_tree_no_fst_errors() {
+    // Without FST, the helper must surface a clear error rather
+    // than producing an unmountable BGT (kernel requires FST + VALID
+    // for BGT).
+    let (dir, img_path) =
+        create_test_image_with_features(&["^free-space-tree"]);
+    let mut fs = open_rw(&img_path);
+    assert_eq!(fs.superblock.compat_ro_flags & COMPAT_RO_FREE_SPACE_TREE, 0);
+    let mut trans = Transaction::start(&mut fs).unwrap();
+    let err =
+        convert::create_block_group_tree(&mut trans, &mut fs).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("free space tree must be enabled"),
+        "expected FST-required error, got: {msg}"
+    );
+    trans.abort(&mut fs);
+    drop(fs);
+    drop(dir);
+}
+
+#[test]
+fn create_block_group_tree_routing_flips_after_call() {
+    // Verify the BG-tree-id routing is the extent tree pre-call
+    // (no BGT root) and BGT post-call (root present, override
+    // dropped). The mid-call check (override pinned to extent tree)
+    // is exercised implicitly by the basic test — if it wasn't
+    // pinned, the allocator would route to the freshly-created
+    // empty BGT and the BG-used updates would land on a tree that
+    // doesn't yet have the corresponding BLOCK_GROUP_ITEM rows,
+    // failing fast.
+    let (dir, img_path) =
+        create_test_image_with_features(&["^block-group-tree"]);
+    let mut fs = open_rw(&img_path);
+    assert_eq!(
+        fs.block_group_tree_id(),
+        2,
+        "pre-call routing should be extent tree (no BGT root)"
+    );
+
+    let mut trans = Transaction::start(&mut fs).unwrap();
+    convert::create_block_group_tree(&mut trans, &mut fs).unwrap();
+    assert_eq!(
+        fs.block_group_tree_id(),
+        11,
+        "post-call routing should be BGT (root present, override dropped)"
+    );
+    trans.commit(&mut fs).unwrap();
+
+    let fs2 = open_rw(&img_path);
+    assert_eq!(fs2.block_group_tree_id(), 11);
+    drop(fs2);
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
+#[test]
+fn create_then_alloc_block_group_tree_passes_btrfs_check() {
+    // After create_block_group_tree returns, do a mutating
+    // transaction (50 items into the root tree). The commit's
+    // flush_delayed_refs must update BG used in BGT (not extent
+    // tree); btrfs check verifies the consistency. This catches the
+    // "BG state landed in the wrong tree" failure mode which the
+    // basic test doesn't (basic test commits without subsequent
+    // mutations, so BG used updates from later transactions are not
+    // exercised).
+    let (dir, img_path) =
+        create_test_image_with_features(&["^block-group-tree"]);
+
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        convert::create_block_group_tree(&mut trans, &mut fs).unwrap();
+        trans.commit(&mut fs).unwrap();
+    }
+
+    // After the convert, routing must be BGT.
+    {
+        let fs = open_rw(&img_path);
+        assert_eq!(fs.block_group_tree_id(), 11);
+    }
+
+    {
+        let mut fs = open_rw(&img_path);
+        let mut trans = Transaction::start(&mut fs).unwrap();
+        let data = [0xC3u8; 64];
+        for i in 0..50u64 {
+            let key = DiskKey {
+                objectid: 1_000_000 + i,
+                key_type: KeyType::TemporaryItem,
+                offset: 0,
+            };
+            let mut path = BtrfsPath::new();
+            search::search_slot(
+                Some(&mut trans),
+                &mut fs,
+                1,
+                &key,
+                &mut path,
+                SearchIntent::Insert((ITEM_SIZE + data.len()) as u32),
+                true,
+            )
+            .unwrap();
+            let leaf = path.nodes[0].as_mut().unwrap();
+            items::insert_item(leaf, path.slots[0], &key, &data).unwrap();
+            fs.mark_dirty(leaf);
+            path.release();
+        }
+        trans.commit(&mut fs).unwrap();
+    }
+
+    assert_btrfs_check(&img_path);
+    drop(dir);
+}
+
 #[test]
 fn convert_to_free_space_tree_then_mutate_and_recommit() {
     // After conversion, ordinary insert transactions must continue
