@@ -5,8 +5,11 @@
 //! which bootstraps a complete `BlockReader` from a raw block device or image.
 
 use crate::{
-    chunk::{self, ChunkTreeCache},
-    raw,
+    chunk::{
+        self, ChunkTreeCache, ParityKind, ParityPlan, ParityRow,
+        StripePlacement, WritePlan,
+    },
+    raid56, raw,
     superblock::{self, Superblock},
     tree::{KeyType, TreeBlock},
 };
@@ -117,9 +120,9 @@ impl<R: Read + Seek> BlockReader<R> {
     pub fn read_block(&mut self, logical: u64) -> io::Result<Vec<u8>> {
         // Tree blocks are always nodesize <= stripe_len, so a single
         // block lives entirely in one row. Use plan_read so striped
-        // profiles (RAID0, RAID10) route to the correct device column;
-        // mirrored/SINGLE chunks return one placement on stripes[0]
-        // either way.
+        // profiles (RAID0 / RAID10 / RAID5 / RAID6) route to the
+        // correct device column; mirrored/SINGLE chunks return one
+        // placement on stripes[0] either way.
         self.read_data(logical, self.nodesize as usize)
     }
 
@@ -156,15 +159,16 @@ impl<R: Read + Seek> BlockReader<R> {
     /// exactly `len` bytes. Used for reading file data extents.
     ///
     /// Uses [`ChunkTreeCache::plan_read`](crate::chunk::ChunkTreeCache::plan_read)
-    /// internally so reads on striped profiles (RAID0 / RAID10) that span
-    /// multiple rows assemble the bytes from the correct devices in
-    /// order.
+    /// internally so reads on striped profiles (RAID0 / RAID10 /
+    /// RAID5 / RAID6) that span multiple rows assemble the bytes from
+    /// the correct devices in order. RAID5/RAID6 reads route to the
+    /// data column owning each row's bytes, ignoring parity (degraded
+    /// reads are out of scope).
     ///
     /// # Errors
     ///
     /// Returns an error if the logical address is unmapped, the request
-    /// extends past the chunk, the chunk uses RAID5/RAID6 (not yet
-    /// implemented), or the underlying read fails.
+    /// extends past the chunk, or the underlying read fails.
     pub fn read_data(
         &mut self,
         logical: u64,
@@ -209,32 +213,127 @@ impl<R: Read + Write + Seek> BlockReader<R> {
     /// Uses [`ChunkTreeCache::plan_write`](crate::chunk::ChunkTreeCache::plan_write)
     /// internally. For DUP / RAID1 / RAID1C3 / RAID1C4 every mirror
     /// receives the same bytes; for RAID0 each row goes to exactly one
-    /// device; for RAID10 each row goes to one mirror pair. Writes
-    /// larger than `stripe_len` on a striped profile are split into
-    /// per-row segments automatically.
+    /// device; for RAID10 each row goes to one mirror pair; for
+    /// RAID5/RAID6 the executor prereads every data column slot of
+    /// every touched row, mixes in caller bytes, computes parity, then
+    /// writes data + parity. Writes larger than `stripe_len` on a
+    /// striped profile are split into per-row segments automatically.
     ///
     /// # Errors
     ///
-    /// Returns an error if the logical address is unmapped, the request
-    /// extends past the chunk, any referenced device is not open, the
-    /// chunk uses RAID5/RAID6 (not yet implemented), or any underlying
-    /// write fails.
+    /// Returns an error if the logical address is unmapped, the
+    /// request extends past the chunk, any referenced device is not
+    /// open, or any underlying read/write fails.
     pub fn write_block(&mut self, logical: u64, buf: &[u8]) -> io::Result<()> {
-        let placements =
-            self.chunk_cache.plan_write(logical, buf.len()).ok_or_else(
-                || {
-                    io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!(
-                            "logical address {logical} not mapped or unsupported profile"
-                        ),
-                    )
-                },
-            )?;
+        let plan = self.chunk_cache.plan_write(logical, buf.len()).ok_or_else(
+            || {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "logical address {logical} not mapped or unsupported profile"
+                    ),
+                )
+            },
+        )?;
+        match plan {
+            WritePlan::Plain(placements) => {
+                self.execute_plain_plan(buf, &placements)
+            }
+            WritePlan::Parity(plan) => self.execute_parity_plan(buf, &plan),
+        }
+    }
+
+    fn execute_plain_plan(
+        &mut self,
+        buf: &[u8],
+        placements: &[StripePlacement],
+    ) -> io::Result<()> {
         for p in placements {
             let dev = self.device_handle_mut(p.devid)?;
             dev.seek(SeekFrom::Start(p.physical))?;
             dev.write_all(&buf[p.buf_offset..p.buf_offset + p.len])?;
+        }
+        Ok(())
+    }
+
+    /// Run the read-modify-write cycle for a RAID5/RAID6 write.
+    ///
+    /// For every row in the plan: preread each data column slot into a
+    /// scratch buffer, overlay any caller bytes, compute P (and Q for
+    /// RAID6) over the assembled scratches, then issue the data writes
+    /// (the overlaid byte ranges only) and the parity writes (full
+    /// `stripe_len` slots).
+    fn execute_parity_plan(
+        &mut self,
+        buf: &[u8],
+        plan: &ParityPlan,
+    ) -> io::Result<()> {
+        let stripe_len = plan.stripe_len as usize;
+        for row in &plan.rows {
+            self.execute_parity_row(buf, stripe_len, row)?;
+        }
+        Ok(())
+    }
+
+    fn execute_parity_row(
+        &mut self,
+        buf: &[u8],
+        stripe_len: usize,
+        row: &ParityRow,
+    ) -> io::Result<()> {
+        // Preread every data column slot of the row into its own scratch.
+        let mut scratch: Vec<Vec<u8>> =
+            Vec::with_capacity(row.data_columns.len());
+        for col in &row.data_columns {
+            let mut slot = vec![0u8; stripe_len];
+            let dev = self.device_handle_mut(col.devid)?;
+            dev.seek(SeekFrom::Start(col.physical))?;
+            dev.read_exact(&mut slot)?;
+            scratch.push(slot);
+        }
+        // Overlay caller bytes onto each touched slot.
+        for (col, slot) in row.data_columns.iter().zip(scratch.iter_mut()) {
+            if let Some(ov) = &col.overlay {
+                let dst_start = ov.slot_offset as usize;
+                let dst_end = dst_start + ov.len as usize;
+                let src_start = ov.buf_offset;
+                let src_end = src_start + ov.len as usize;
+                slot[dst_start..dst_end]
+                    .copy_from_slice(&buf[src_start..src_end]);
+            }
+        }
+        // Compute parity from the assembled (post-overlay) data slots.
+        let stripe_refs: Vec<&[u8]> =
+            scratch.iter().map(Vec::as_slice).collect();
+        let want_q = row.parity_targets.iter().any(|t| t.kind == ParityKind::Q);
+        let (p_buf, q_buf) = if want_q {
+            let (p, q) = raid56::compute_p_q(&stripe_refs);
+            (p, Some(q))
+        } else {
+            (raid56::compute_p(&stripe_refs), None)
+        };
+        // Issue the data writes (overlaid byte ranges only).
+        for col in &row.data_columns {
+            let Some(ov) = &col.overlay else { continue };
+            let dev = self.device_handle_mut(col.devid)?;
+            dev.seek(SeekFrom::Start(
+                col.physical + u64::from(ov.slot_offset),
+            ))?;
+            let src_start = ov.buf_offset;
+            let src_end = src_start + ov.len as usize;
+            dev.write_all(&buf[src_start..src_end])?;
+        }
+        // Issue the parity writes (full stripe_len slots).
+        for target in &row.parity_targets {
+            let bytes = match target.kind {
+                ParityKind::P => &p_buf,
+                ParityKind::Q => {
+                    q_buf.as_ref().expect("Q target without Q computation")
+                }
+            };
+            let dev = self.device_handle_mut(target.devid)?;
+            dev.seek(SeekFrom::Start(target.physical))?;
+            dev.write_all(bytes)?;
         }
         Ok(())
     }

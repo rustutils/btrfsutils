@@ -3639,6 +3639,126 @@ fn multi_device_raid10_metadata_cow_round_trip() {
     }
 }
 
+/// 3-device RAID5 (metadata + data both RAID5), commit a small COW
+/// transaction, reopen, verify the inserted item is readable. Exercises
+/// the parity-aware `plan_write` / `plan_read` routing for RAID5: every
+/// modified tree block triggers a read-modify-write cycle that prereads
+/// the row's other data columns, recomputes parity, and writes the data
+/// + parity slots through the executor.
+#[test]
+fn multi_device_raid5_metadata_cow_round_trip() {
+    let (_dir, paths) = create_multi_device_test_image(3, "raid5", "raid5");
+
+    let test_objectid = 100_003u64;
+    let test_key = DiskKey {
+        objectid: test_objectid,
+        key_type: KeyType::TemporaryItem,
+        offset: 13,
+    };
+    let test_data = b"raid5 cow round trip";
+
+    {
+        let devices = open_devices_by_devid(&paths);
+        let mut fs = Filesystem::open_multi(devices).expect("open_multi");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &test_key,
+            &mut path,
+            SearchIntent::Insert((25 + test_data.len()) as u32),
+            true,
+        )
+        .expect("search");
+        assert!(!found);
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &test_key, test_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    {
+        let devices = open_devices_by_devid(&paths);
+        let mut fs = Filesystem::open_multi(devices).expect("reopen multi");
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            1,
+            &test_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search");
+        assert!(found, "RAID5 round-trip lost the inserted item");
+        path.release();
+    }
+}
+
+/// Same shape as the RAID5 round-trip but with a 4-device RAID6 layout.
+/// Exercises the dual-parity (P + Q) write path.
+#[test]
+fn multi_device_raid6_metadata_cow_round_trip() {
+    let (_dir, paths) = create_multi_device_test_image(4, "raid6", "raid6");
+
+    let test_objectid = 100_004u64;
+    let test_key = DiskKey {
+        objectid: test_objectid,
+        key_type: KeyType::TemporaryItem,
+        offset: 17,
+    };
+    let test_data = b"raid6 cow round trip";
+
+    {
+        let devices = open_devices_by_devid(&paths);
+        let mut fs = Filesystem::open_multi(devices).expect("open_multi");
+        let mut trans = Transaction::start(&mut fs).expect("start txn");
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut trans),
+            &mut fs,
+            1,
+            &test_key,
+            &mut path,
+            SearchIntent::Insert((25 + test_data.len()) as u32),
+            true,
+        )
+        .expect("search");
+        assert!(!found);
+        let leaf = path.nodes[0].as_mut().unwrap();
+        items::insert_item(leaf, path.slots[0], &test_key, test_data).unwrap();
+        fs.mark_dirty(leaf);
+        path.release();
+
+        trans.commit(&mut fs).expect("commit");
+        fs.sync().expect("sync");
+    }
+
+    {
+        let devices = open_devices_by_devid(&paths);
+        let mut fs = Filesystem::open_multi(devices).expect("reopen multi");
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            None,
+            &mut fs,
+            1,
+            &test_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            false,
+        )
+        .expect("search");
+        assert!(found, "RAID6 round-trip lost the inserted item");
+        path.release();
+    }
+}
+
 /// Opening a multi-device filesystem with only one device handle when
 /// the chunk tree references two should fail at bootstrap with a
 /// clear error.

@@ -6,6 +6,26 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-disk`: `chunk::ChunkTreeCache::plan_write` now routes RAID5
+  and RAID6 chunks via a new `WritePlan::Parity(ParityPlan)` variant
+  that names every data column slot of every touched physical row
+  plus the rotating parity column(s). The executor (in `BlockReader`)
+  prereads each data slot, overlays the caller's bytes, computes
+  parity, then issues data + parity writes. `plan_read` likewise
+  routes RAID5/6 reads to the data column owning each row's bytes,
+  ignoring parity. Non-parity profiles are unchanged
+  (`WritePlan::Plain`).
+- `btrfs-disk`: new `raid56` module with `compute_p` (XOR) and
+  `compute_p_q` (XOR + Reed-Solomon over GF(2^8) with reduction
+  polynomial `x^8 + x^4 + x^3 + x^2 + 1`). Self-contained, no
+  GPL-derived code; backed by exhaustive unit tests including
+  reconstruction round-trips and hand-verified GF table values.
+- `btrfs-transaction`: integration tests
+  `multi_device_raid5_metadata_cow_round_trip` and
+  `multi_device_raid6_metadata_cow_round_trip` exercise the new
+  parity-aware write executor end-to-end (mkfs RAID5/6 image, COW
+  insert, commit, reopen, verify item is reachable).
+
 - `btrfs-transaction`: `convert::seed_free_space_tree(trans, fs_info)`
   helper. Walks every block group, derives free ranges from the
   extent tree, and inserts one `FREE_SPACE_INFO` plus one

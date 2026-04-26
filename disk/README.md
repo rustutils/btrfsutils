@@ -26,7 +26,15 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
   RootItem, FileExtentItem, ExtentItem, ChunkItem, DevItem, DevExtent,
   BlockGroupItem, QgroupStatus/Info/Limit, and more)
 - **Chunk tree**: logical-to-physical address resolution via ChunkTreeCache,
-  sys_chunk_array bootstrap parsing
+  sys_chunk_array bootstrap parsing. `plan_write` and `plan_read` cover
+  every RAID profile (SINGLE / DUP / RAID0 / RAID1* / RAID10 / RAID5 /
+  RAID6); RAID5/6 writes use a parity-aware executor that prereads each
+  data column slot, recomputes P (and Q for RAID6) over the assembled
+  row, and writes the data + parity stripes to the rotating column
+  positions.
+- **RAID5/6 parity math**: `compute_p` (XOR) and `compute_p_q` (XOR +
+  Reed-Solomon over GF(2^8) with reduction polynomial 0x1D) in the
+  `raid56` module.
 - **Block reader**: read tree blocks by logical address, full filesystem
   bootstrap (superblock -> chunk tree -> root tree)
 - **Tree traversal**: BFS/DFS walk with visitor callbacks

@@ -133,6 +133,132 @@ pub struct StripePlacement {
     pub len: usize,
 }
 
+/// Result of [`ChunkTreeCache::plan_write`].
+///
+/// Non-parity profiles (SINGLE / DUP / RAID1* / RAID0 / RAID10) produce a
+/// `Plain` plan: a flat list of placements, each a slice of the caller's
+/// buffer to a `(devid, physical)` location. RAID5 and RAID6 produce a
+/// `Parity` plan: per-row descriptors that the executor must read into
+/// scratch buffers, mix with the caller's bytes, compute parity over,
+/// then write data + parity slices to the device columns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WritePlan {
+    /// SINGLE / DUP / RAID1* / RAID0 / RAID10 placements. The caller
+    /// just iterates the vec and writes slices of its buffer.
+    Plain(Vec<StripePlacement>),
+    /// RAID5 / RAID6 placements. The caller must run the parity
+    /// executor: preread every data column slot of every touched row,
+    /// overlay caller bytes, compute P (and Q for RAID6), then write
+    /// the overlaid byte ranges and the parity slots.
+    Parity(ParityPlan),
+}
+
+impl WritePlan {
+    /// Convenience for tests and non-parity callers: returns the
+    /// placements if `Plain`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the plan is `Parity` — used in test code where the
+    /// profile under test should never produce a parity plan.
+    #[cfg(test)]
+    #[must_use]
+    pub fn unwrap_plain(self) -> Vec<StripePlacement> {
+        match self {
+            Self::Plain(p) => p,
+            Self::Parity(_) => panic!("plan_write returned Parity"),
+        }
+    }
+}
+
+/// Per-row write plan for RAID5/RAID6 chunks.
+///
+/// All rows share `stripe_len` (every data column slot is exactly
+/// `stripe_len` bytes; every parity slot is exactly `stripe_len`
+/// bytes). The executor allocates `stripe_len`-sized scratch buffers
+/// per data column per row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParityPlan {
+    /// Bytes per column slot. Same for every row; convenient to carry
+    /// once at the plan level.
+    pub stripe_len: u32,
+    /// One descriptor per physical row touched by the write.
+    pub rows: Vec<ParityRow>,
+}
+
+/// One physical row of a RAID5/RAID6 chunk that the write touches.
+///
+/// `data_columns` lists the data column slots in the row (length
+/// `num_stripes - nparity`). Every entry is a full `stripe_len` slot
+/// on a device; the executor must preread the slot, optionally
+/// overlay caller bytes, then both write the overlaid range back to
+/// the device (if the overlay is non-empty) and use the assembled
+/// slot for parity computation.
+///
+/// `parity_targets` are the parity column slots (1 entry for RAID5,
+/// 2 for RAID6). The executor writes the computed parity bytes to
+/// each target's physical offset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParityRow {
+    /// One per data stripe of the row, in column order (data column 0
+    /// of the row first). Length equals `num_stripes - nparity`.
+    pub data_columns: Vec<ParityDataColumn>,
+    /// Parity column outputs for the row (1 for RAID5, 2 for RAID6).
+    pub parity_targets: Vec<ParityTarget>,
+}
+
+/// One data column slot in a [`ParityRow`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParityDataColumn {
+    /// Device this column lives on.
+    pub devid: u64,
+    /// Physical byte offset of the slot's start on the device. The
+    /// slot always covers `[physical, physical + stripe_len)`.
+    pub physical: u64,
+    /// Byte range from the caller's buffer that overlays the slot, or
+    /// `None` if the caller did not touch this column (parity still
+    /// needs the existing bytes from disk).
+    pub overlay: Option<CallerOverlay>,
+}
+
+/// A range of caller bytes that overlays a data column slot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallerOverlay {
+    /// Offset within the column slot where the overlay starts
+    /// (`0 <= slot_offset < stripe_len`).
+    pub slot_offset: u32,
+    /// Offset in the caller's buffer where the overlay bytes start.
+    pub buf_offset: usize,
+    /// Length of the overlay in bytes
+    /// (`slot_offset + len <= stripe_len`).
+    pub len: u32,
+}
+
+/// One parity column slot to write.
+///
+/// The bytes themselves are computed by the executor — this struct
+/// only carries the destination.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParityTarget {
+    /// `P` (XOR) or `Q` (Reed-Solomon).
+    pub kind: ParityKind,
+    /// Device id of the parity column.
+    pub devid: u64,
+    /// Physical byte offset of the slot's start on the device. Length
+    /// is always `stripe_len`.
+    pub physical: u64,
+}
+
+/// Which parity polynomial a [`ParityTarget`] holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParityKind {
+    /// XOR of the row's data columns. Used by RAID5 and RAID6.
+    P,
+    /// Reed-Solomon over GF(2^8) with `x^8 + x^4 + x^3 + x^2 + 1`.
+    /// RAID6 only.
+    Q,
+}
+
 /// Cache of chunk tree mappings for resolving logical to physical addresses.
 ///
 /// Keyed by logical start address. Uses a `BTreeMap` for efficient range lookups.
@@ -206,12 +332,11 @@ impl ChunkTreeCache {
     /// logical address `logical`, accounting for the chunk's RAID
     /// profile and stripe length.
     ///
-    /// Returns one [`StripePlacement`] per (row, mirror) the caller must
-    /// write. The caller iterates the placements and writes
-    /// `buf[p.buf_offset..p.buf_offset + p.len]` to device `p.devid`
-    /// at byte offset `p.physical`.
+    /// Returns a [`WritePlan`]: a `Plain` variant (a flat vec of
+    /// [`StripePlacement`]s) for non-parity profiles, and a `Parity`
+    /// variant ([`ParityPlan`]) for RAID5/RAID6.
     ///
-    /// Per-profile fan-out for a single row:
+    /// Per-profile fan-out for a single row of a non-parity profile:
     ///
     /// - SINGLE: one placement (column 0).
     /// - DUP / RAID1 / RAID1C3 / RAID1C4: `num_stripes` placements
@@ -219,35 +344,54 @@ impl ChunkTreeCache {
     /// - RAID0: one placement (column = `stripe_nr % num_stripes`).
     /// - RAID10: `sub_stripes` placements (the mirror pair for the row).
     ///
+    /// For RAID5/RAID6 the plan instead names every data column slot of
+    /// every touched physical row plus the rotating parity column(s);
+    /// the caller must run a parity executor that prereads the data
+    /// slots, mixes in caller bytes, computes parity, then writes data
+    /// + parity to the device.
+    ///
     /// Buffers larger than `stripe_len - stripe_offset` span multiple
     /// rows; each row's placements are appended in order.
     ///
-    /// Returns `None` if `logical` is unmapped, if `logical + len`
-    /// exceeds the chunk, or if the chunk uses RAID5/RAID6 (not yet
-    /// implemented — those need their own plan).
+    /// Returns `None` if `logical` is unmapped or if `logical + len`
+    /// exceeds the chunk.
     #[must_use]
-    pub fn plan_write(
-        &self,
-        logical: u64,
-        len: usize,
-    ) -> Option<Vec<StripePlacement>> {
-        plan_io(self.lookup(logical)?, logical, len, /* read = */ false)
+    pub fn plan_write(&self, logical: u64, len: usize) -> Option<WritePlan> {
+        let mapping = self.lookup(logical)?;
+        match mapping.profile() {
+            ChunkProfile::Raid5 | ChunkProfile::Raid6 => {
+                plan_parity_write(mapping, logical, len).map(WritePlan::Parity)
+            }
+            _ => plan_io(mapping, logical, len, /* read = */ false)
+                .map(WritePlan::Plain),
+        }
     }
 
     /// Plan the per-device reads needed to fetch `len` bytes from the
     /// logical address `logical`. Returns exactly one placement per row
-    /// (the first stripe of each row) — the caller assembles the bytes
-    /// in order.
+    /// (the first stripe of each row, or the row's data column for
+    /// RAID5/RAID6) — the caller assembles the bytes in order.
     ///
-    /// Like [`plan_write`](Self::plan_write), returns `None` for unmapped
-    /// addresses, out-of-bounds requests, or RAID5/RAID6 chunks.
+    /// Reads on RAID5/RAID6 ignore parity columns: the data column
+    /// owning each row's bytes is read directly. Degraded reads
+    /// (reconstructing a missing data column from parity) are out of
+    /// scope.
+    ///
+    /// Returns `None` if `logical` is unmapped or if `logical + len`
+    /// exceeds the chunk.
     #[must_use]
     pub fn plan_read(
         &self,
         logical: u64,
         len: usize,
     ) -> Option<Vec<StripePlacement>> {
-        plan_io(self.lookup(logical)?, logical, len, /* read = */ true)
+        let mapping = self.lookup(logical)?;
+        match mapping.profile() {
+            ChunkProfile::Raid5 | ChunkProfile::Raid6 => {
+                plan_parity_read(mapping, logical, len)
+            }
+            _ => plan_io(mapping, logical, len, /* read = */ true),
+        }
     }
 
     /// Return the number of cached chunk mappings.
@@ -270,14 +414,18 @@ impl ChunkTreeCache {
 
 /// Compute per-device placements for a logical-range I/O within `mapping`.
 ///
-/// The shared core for [`ChunkTreeCache::plan_write`] and
-/// [`ChunkTreeCache::plan_read`]: walks the request row by row, and for
-/// each row picks the columns of `mapping.stripes` that own that row's
-/// bytes per the chunk's RAID profile.
+/// The shared core for plain (non-parity) write and read planning:
+/// walks the request row by row, and for each row picks the columns of
+/// `mapping.stripes` that own that row's bytes per the chunk's RAID
+/// profile.
 ///
 /// `read` is true for read planning (one placement per row, picking the
 /// first column of the row's mirror group) and false for write planning
 /// (every column of the row's mirror group).
+///
+/// RAID5/RAID6 must be routed via [`plan_parity_write`] /
+/// [`plan_parity_read`] — this function panics on those profiles in
+/// debug builds and returns `None` in release builds.
 fn plan_io(
     mapping: &ChunkMapping,
     logical: u64,
@@ -292,8 +440,11 @@ fn plan_io(
     if end > mapping.logical.checked_add(mapping.length)? {
         return None;
     }
-    // RAID5/RAID6 routing isn't implemented; signal that to the caller.
     let profile = mapping.profile();
+    debug_assert!(
+        !matches!(profile, ChunkProfile::Raid5 | ChunkProfile::Raid6),
+        "plan_io does not handle RAID5/RAID6; route via plan_parity_*",
+    );
     if matches!(profile, ChunkProfile::Raid5 | ChunkProfile::Raid6) {
         return None;
     }
@@ -418,6 +569,292 @@ fn fill_row_columns(
             unreachable!()
         }
     }
+}
+
+/// Compute the rotating parity column(s) for a physical row of a
+/// RAID5/RAID6 chunk.
+///
+/// Returns `(p_col, q_col)`. For RAID5, `q_col == p_col` (only one
+/// parity column exists). For RAID6, `p_col` and `q_col` are the two
+/// rotating parity slots.
+///
+/// The rotation matches btrfs's left-symmetric layout: at physical row
+/// `r`, the rightmost parity column is `(num_stripes - 1 - r) mod
+/// num_stripes`, and (for RAID6) the second parity column is one slot
+/// to its left.
+fn parity_columns(num_stripes: u64, nparity: u64, phys_row: u64) -> (u16, u16) {
+    debug_assert!(num_stripes > nparity);
+    let n = num_stripes;
+    let q = (2 * n - 1 - (phys_row % n)) % n;
+    let p = if nparity == 1 {
+        q
+    } else {
+        (2 * n - 2 - (phys_row % n)) % n
+    };
+    (
+        u16::try_from(p).expect("p_col bounded by num_stripes (u16)"),
+        u16::try_from(q).expect("q_col bounded by num_stripes (u16)"),
+    )
+}
+
+/// Walk `0..num_stripes`, skip the parity slot(s), and return the
+/// physical column index of the `data_col_in_row`-th data slot.
+fn nth_data_col(
+    num_stripes: u16,
+    nparity: u64,
+    p_col: u16,
+    q_col: u16,
+    data_col_in_row: u64,
+) -> u16 {
+    let mut idx: u64 = 0;
+    for c in 0..num_stripes {
+        if c == p_col || (nparity == 2 && c == q_col) {
+            continue;
+        }
+        if idx == data_col_in_row {
+            return c;
+        }
+        idx += 1;
+    }
+    panic!("data_col_in_row {data_col_in_row} out of range")
+}
+
+/// Build the per-data-column descriptors for one physical row of a
+/// RAID5/RAID6 plan.
+#[allow(clippy::too_many_arguments)]
+fn build_parity_data_columns(
+    mapping: &ChunkMapping,
+    phys_row: u64,
+    stripe_len: u64,
+    data_per_row: u64,
+    row_logical_start: u64,
+    row_a: u64,
+    row_b: u64,
+    row_buf_base: usize,
+    (p_col, q_col): (u16, u16),
+    nparity: u64,
+) -> Vec<ParityDataColumn> {
+    let mut data_columns =
+        Vec::with_capacity(usize::try_from(data_per_row).unwrap_or(0));
+    for data_idx in 0..data_per_row {
+        let phys_col =
+            nth_data_col(mapping.num_stripes, nparity, p_col, q_col, data_idx);
+        let stripe = &mapping.stripes[phys_col as usize];
+        let physical = stripe.offset + phys_row * stripe_len;
+        let slot_logical_start = row_logical_start + data_idx * stripe_len;
+        let slot_logical_end = slot_logical_start + stripe_len;
+        let lo = row_a.max(slot_logical_start);
+        let hi = row_b.min(slot_logical_end);
+        let overlay = (lo < hi).then(|| {
+            let slot_offset = u32::try_from(lo - slot_logical_start)
+                .expect("slot_offset < stripe_len (u32)");
+            let len_bytes =
+                u32::try_from(hi - lo).expect("overlay len < stripe_len (u32)");
+            let buf_offset = row_buf_base
+                + usize::try_from(lo - row_a)
+                    .expect("overlay buf_offset capped by len");
+            CallerOverlay {
+                slot_offset,
+                buf_offset,
+                len: len_bytes,
+            }
+        });
+        data_columns.push(ParityDataColumn {
+            devid: stripe.devid,
+            physical,
+            overlay,
+        });
+    }
+    data_columns
+}
+
+/// Build the parity column targets (1 for RAID5, 2 for RAID6) for one
+/// physical row.
+fn build_parity_targets(
+    mapping: &ChunkMapping,
+    phys_row: u64,
+    stripe_len: u64,
+    p_col: u16,
+    q_col: u16,
+    nparity: u64,
+) -> Vec<ParityTarget> {
+    let p_stripe = &mapping.stripes[p_col as usize];
+    let mut targets = vec![ParityTarget {
+        kind: ParityKind::P,
+        devid: p_stripe.devid,
+        physical: p_stripe.offset + phys_row * stripe_len,
+    }];
+    if nparity == 2 {
+        let q_stripe = &mapping.stripes[q_col as usize];
+        targets.push(ParityTarget {
+            kind: ParityKind::Q,
+            devid: q_stripe.devid,
+            physical: q_stripe.offset + phys_row * stripe_len,
+        });
+    }
+    targets
+}
+
+/// Plan a write to a RAID5 or RAID6 chunk.
+///
+/// Walks the physical rows touched by the request, and for each row
+/// builds:
+/// - one [`ParityDataColumn`] per data column, with the optional
+///   caller-byte overlay describing what (if anything) the caller is
+///   writing into that column slot;
+/// - one [`ParityTarget`] per parity column (1 for RAID5, 2 for
+///   RAID6).
+///
+/// The executor must preread every data column slot of every touched
+/// row to compute parity (since even single-tree-block writes only
+/// cover a fraction of one data column slot, the rest of the row is
+/// untouched but still feeds parity).
+fn plan_parity_write(
+    mapping: &ChunkMapping,
+    logical: u64,
+    len: usize,
+) -> Option<ParityPlan> {
+    let nparity: u64 = match mapping.profile() {
+        ChunkProfile::Raid5 => 1,
+        ChunkProfile::Raid6 => 2,
+        _ => unreachable!("plan_parity_write called for non-RAID5/6 profile"),
+    };
+    let n = u64::from(mapping.num_stripes);
+    let stripe_len = mapping.stripe_len;
+    debug_assert!(stripe_len > 0, "chunk stripe_len must be non-zero");
+    debug_assert!(n > nparity, "RAID5/6 needs more stripes than parity");
+    let stripe_len_u32 = u32::try_from(stripe_len).ok()?;
+
+    if len == 0 {
+        return Some(ParityPlan {
+            stripe_len: stripe_len_u32,
+            rows: Vec::new(),
+        });
+    }
+
+    let end = logical.checked_add(len as u64)?;
+    if end > mapping.logical.checked_add(mapping.length)? {
+        return None;
+    }
+
+    let data_per_row = n - nparity;
+    let logical_per_phys_row = data_per_row * stripe_len;
+    let chunk_off_start = logical - mapping.logical;
+    let chunk_off_end = end - mapping.logical;
+
+    let phys_row_start = chunk_off_start / logical_per_phys_row;
+    let phys_row_end = (chunk_off_end - 1) / logical_per_phys_row;
+
+    let mut rows = Vec::with_capacity(
+        usize::try_from(phys_row_end - phys_row_start + 1)
+            .expect("phys_row count fits in usize"),
+    );
+
+    for phys_row in phys_row_start..=phys_row_end {
+        let row_logical_start = phys_row * logical_per_phys_row;
+        let row_logical_end = row_logical_start + logical_per_phys_row;
+        let row_a = chunk_off_start.max(row_logical_start);
+        let row_b = chunk_off_end.min(row_logical_end);
+        debug_assert!(row_a < row_b, "non-empty row coverage");
+        let row_buf_base = usize::try_from(row_a - chunk_off_start)
+            .expect("row_buf_base capped by len (usize)");
+        let (p_col, q_col) = parity_columns(n, nparity, phys_row);
+        let data_columns = build_parity_data_columns(
+            mapping,
+            phys_row,
+            stripe_len,
+            data_per_row,
+            row_logical_start,
+            row_a,
+            row_b,
+            row_buf_base,
+            (p_col, q_col),
+            nparity,
+        );
+        let parity_targets = build_parity_targets(
+            mapping, phys_row, stripe_len, p_col, q_col, nparity,
+        );
+        rows.push(ParityRow {
+            data_columns,
+            parity_targets,
+        });
+    }
+
+    Some(ParityPlan {
+        stripe_len: stripe_len_u32,
+        rows,
+    })
+}
+
+/// Plan a read from a RAID5 or RAID6 chunk.
+///
+/// Same shape as [`plan_io`] for RAID0: one placement per row, picking
+/// the data column that owns the row's bytes (skipping parity
+/// columns). Degraded reads (data column missing -> reconstruct from
+/// parity) are out of scope.
+fn plan_parity_read(
+    mapping: &ChunkMapping,
+    logical: u64,
+    len: usize,
+) -> Option<Vec<StripePlacement>> {
+    let nparity: u64 = match mapping.profile() {
+        ChunkProfile::Raid5 => 1,
+        ChunkProfile::Raid6 => 2,
+        _ => unreachable!("plan_parity_read called for non-RAID5/6 profile"),
+    };
+    let n = u64::from(mapping.num_stripes);
+    let stripe_len = mapping.stripe_len;
+    debug_assert!(stripe_len > 0, "chunk stripe_len must be non-zero");
+    debug_assert!(n > nparity, "RAID5/6 needs more stripes than parity");
+
+    if len == 0 {
+        return Some(Vec::new());
+    }
+
+    let end = logical.checked_add(len as u64)?;
+    if end > mapping.logical.checked_add(mapping.length)? {
+        return None;
+    }
+
+    let data_per_row = n - nparity;
+    let mut placements = Vec::new();
+    let mut buf_offset: usize = 0;
+    let mut cur = logical - mapping.logical;
+    let mut remaining = len;
+
+    while remaining > 0 {
+        let stripe_nr = cur / stripe_len;
+        let stripe_offset = cur % stripe_len;
+        let row_bytes =
+            usize::try_from((stripe_len - stripe_offset).min(remaining as u64))
+                .expect("row_bytes capped by remaining (usize)");
+
+        let phys_row = stripe_nr / data_per_row;
+        let data_col_in_row = stripe_nr % data_per_row;
+        let (p_col, q_col) = parity_columns(n, nparity, phys_row);
+        let phys_col = nth_data_col(
+            mapping.num_stripes,
+            nparity,
+            p_col,
+            q_col,
+            data_col_in_row,
+        );
+
+        let stripe = &mapping.stripes[phys_col as usize];
+        let per_device_offset = phys_row * stripe_len + stripe_offset;
+        placements.push(StripePlacement {
+            devid: stripe.devid,
+            physical: stripe.offset + per_device_offset,
+            buf_offset,
+            len: row_bytes,
+        });
+
+        buf_offset += row_bytes;
+        cur += row_bytes as u64;
+        remaining -= row_bytes;
+    }
+
+    Some(placements)
 }
 
 /// Parse a chunk item (`btrfs_chunk` + stripes) from a raw byte buffer.
@@ -1029,7 +1466,7 @@ mod tests {
     fn plan_write_single_one_row() {
         let m = make_chunk(0, 1, 1, 65536, 1 << 20, &[(1, 0x1000)]);
         let cache = cache_with(m);
-        let placements = cache.plan_write(0, 4096).unwrap();
+        let placements = cache.plan_write(0, 4096).unwrap().unwrap_plain();
         assert_eq!(
             placements,
             vec![StripePlacement {
@@ -1049,7 +1486,10 @@ mod tests {
         // row index increases.
         let m = make_chunk(0, 1, 1, 65536, 1 << 20, &[(1, 0x10000)]);
         let cache = cache_with(m);
-        let placements = cache.plan_write(32 * 1024, 96 * 1024).unwrap();
+        let placements = cache
+            .plan_write(32 * 1024, 96 * 1024)
+            .unwrap()
+            .unwrap_plain();
         assert_eq!(placements.len(), 2);
         // Row 0: offset 32K, 32K bytes (rest of stripe 0).
         assert_eq!(placements[0].devid, 1);
@@ -1079,7 +1519,7 @@ mod tests {
             &[(1, 0x1000), (1, 0x2_0000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(4096, 16384).unwrap();
+        let placements = cache.plan_write(4096, 16384).unwrap().unwrap_plain();
         assert_eq!(placements.len(), 2);
         assert_eq!(placements[0].devid, 1);
         assert_eq!(placements[0].physical, 0x1000 + 4096);
@@ -1102,7 +1542,7 @@ mod tests {
             &[(1, 0x1000), (2, 0x2000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(0, 8192).unwrap();
+        let placements = cache.plan_write(0, 8192).unwrap().unwrap_plain();
         assert_eq!(placements.len(), 2);
         assert_eq!(placements[0].devid, 1);
         assert_eq!(placements[1].devid, 2);
@@ -1123,7 +1563,7 @@ mod tests {
             &[(1, 0x1000), (2, 0x2000), (3, 0x3000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(0, 8192).unwrap();
+        let placements = cache.plan_write(0, 8192).unwrap().unwrap_plain();
         assert_eq!(placements.len(), 3);
         assert_eq!(placements[0].devid, 1);
         assert_eq!(placements[1].devid, 2);
@@ -1141,7 +1581,7 @@ mod tests {
             &[(1, 0x1000), (2, 0x2000), (3, 0x3000), (4, 0x4000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(0, 8192).unwrap();
+        let placements = cache.plan_write(0, 8192).unwrap().unwrap_plain();
         assert_eq!(placements.len(), 4);
         assert_eq!(placements[3].devid, 4);
     }
@@ -1161,7 +1601,7 @@ mod tests {
             &[(1, 0x10000), (2, 0x20000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(0, 4096).unwrap();
+        let placements = cache.plan_write(0, 4096).unwrap().unwrap_plain();
         assert_eq!(placements.len(), 1);
         assert_eq!(placements[0].devid, 1);
         assert_eq!(placements[0].physical, 0x10000);
@@ -1182,7 +1622,7 @@ mod tests {
             &[(1, 0x10000), (2, 0x20000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(65536, 4096).unwrap();
+        let placements = cache.plan_write(65536, 4096).unwrap().unwrap_plain();
         assert_eq!(placements.len(), 1);
         assert_eq!(placements[0].devid, 2);
         assert_eq!(placements[0].physical, 0x20000);
@@ -1201,7 +1641,8 @@ mod tests {
             &[(1, 0x10000), (2, 0x20000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(2 * 65536, 4096).unwrap();
+        let placements =
+            cache.plan_write(2 * 65536, 4096).unwrap().unwrap_plain();
         assert_eq!(placements.len(), 1);
         assert_eq!(placements[0].devid, 1);
         assert_eq!(placements[0].physical, 0x10000 + 65536);
@@ -1220,7 +1661,8 @@ mod tests {
             &[(1, 0x10000), (2, 0x20000), (3, 0x30000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(0, 192 * 1024).unwrap();
+        let placements =
+            cache.plan_write(0, 192 * 1024).unwrap().unwrap_plain();
         assert_eq!(placements.len(), 3);
         for (i, p) in placements.iter().enumerate() {
             assert_eq!(p.devid, (i + 1) as u64);
@@ -1249,7 +1691,10 @@ mod tests {
             &[(1, 0x10000), (2, 0x20000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(32 * 1024, 96 * 1024).unwrap();
+        let placements = cache
+            .plan_write(32 * 1024, 96 * 1024)
+            .unwrap()
+            .unwrap_plain();
         assert_eq!(placements.len(), 2);
         assert_eq!(placements[0].devid, 1);
         assert_eq!(placements[0].physical, 0x10000 + 32 * 1024);
@@ -1276,7 +1721,7 @@ mod tests {
             &[(1, 0x10000), (2, 0x20000), (3, 0x30000), (4, 0x40000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(0, 4096).unwrap();
+        let placements = cache.plan_write(0, 4096).unwrap().unwrap_plain();
         assert_eq!(placements.len(), 2);
         assert_eq!(placements[0].devid, 1);
         assert_eq!(placements[0].physical, 0x10000);
@@ -1300,7 +1745,7 @@ mod tests {
         );
         let cache = cache_with(m);
         // Row 1 (logical = STRIPE_LEN) -> pair 1 = stripes[2,3] = devs (3, 4).
-        let placements = cache.plan_write(65536, 4096).unwrap();
+        let placements = cache.plan_write(65536, 4096).unwrap().unwrap_plain();
         assert_eq!(placements.len(), 2);
         assert_eq!(placements[0].devid, 3);
         assert_eq!(placements[1].devid, 4);
@@ -1319,7 +1764,8 @@ mod tests {
             &[(1, 0x10000), (2, 0x20000), (3, 0x30000), (4, 0x40000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(2 * 65536, 4096).unwrap();
+        let placements =
+            cache.plan_write(2 * 65536, 4096).unwrap().unwrap_plain();
         assert_eq!(placements.len(), 2);
         assert_eq!(placements[0].devid, 1);
         assert_eq!(placements[0].physical, 0x10000 + 65536);
@@ -1380,7 +1826,10 @@ mod tests {
         );
         let cache = cache_with(m);
         let r = cache.plan_read(32 * 1024, 96 * 1024).unwrap();
-        let w = cache.plan_write(32 * 1024, 96 * 1024).unwrap();
+        let w = cache
+            .plan_write(32 * 1024, 96 * 1024)
+            .unwrap()
+            .unwrap_plain();
         assert_eq!(r, w);
     }
 
@@ -1395,7 +1844,7 @@ mod tests {
         // Request entirely past the chunk.
         assert!(cache.plan_write(2 << 20, 4096).is_none());
         // Empty request still succeeds (zero placements).
-        let p = cache.plan_write(0, 0).unwrap();
+        let p = cache.plan_write(0, 0).unwrap().unwrap_plain();
         assert!(p.is_empty());
     }
 
@@ -1406,7 +1855,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_write_raid5_returns_none() {
+    fn plan_write_raid5_returns_parity_plan() {
         let m = make_chunk(
             raw::BTRFS_BLOCK_GROUP_RAID5,
             3,
@@ -1416,8 +1865,278 @@ mod tests {
             &[(1, 0), (2, 0), (3, 0)],
         );
         let cache = cache_with(m);
-        // RAID5 not implemented — must fail explicitly so callers know.
-        assert!(cache.plan_write(0, 4096).is_none());
+        let plan = cache.plan_write(0, 4096).unwrap();
+        match plan {
+            WritePlan::Parity(_) => {}
+            WritePlan::Plain(_) => panic!("expected Parity plan for RAID5"),
+        }
+    }
+
+    // --- RAID5 / RAID6 plan_write parity routing ---
+
+    /// Helper for parity-plan tests: build a RAID5/RAID6 chunk with
+    /// per-device offsets that match the column index, so a column's
+    /// physical address tells you which devid (and therefore which
+    /// column) the executor will write to.
+    fn make_parity_chunk(
+        chunk_type_bit: u32,
+        num_stripes: u16,
+        stripe_len: u64,
+        length: u64,
+    ) -> ChunkMapping {
+        // Devid `i+1` lives at physical `0x10_0000 + i * 0x10_0000`.
+        let stripes: Vec<(u64, u64)> = (0..num_stripes)
+            .map(|i| (u64::from(i) + 1, 0x10_0000 + u64::from(i) * 0x10_0000))
+            .collect();
+        make_chunk(chunk_type_bit, num_stripes, 1, stripe_len, length, &stripes)
+    }
+
+    #[test]
+    fn plan_write_raid5_three_devices_single_row() {
+        // 3-device RAID5, stripe_len=64K. Tree-block-style write of 16K
+        // at logical 0: covers data column 0 of physical row 0. Column
+        // layout for row 0: P at col 2 (= 3-1-0), data cols are 0, 1.
+        let m =
+            make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID5, 3, 65536, 3 << 20);
+        let cache = cache_with(m);
+        let WritePlan::Parity(plan) = cache.plan_write(0, 16 * 1024).unwrap()
+        else {
+            panic!("expected Parity");
+        };
+        assert_eq!(plan.stripe_len, 65536);
+        assert_eq!(plan.rows.len(), 1);
+        let row = &plan.rows[0];
+        // Two data columns, one parity target.
+        assert_eq!(row.data_columns.len(), 2);
+        assert_eq!(row.parity_targets.len(), 1);
+        assert_eq!(row.parity_targets[0].kind, ParityKind::P);
+        // Parity column is col 2 -> devid 3.
+        assert_eq!(row.parity_targets[0].devid, 3);
+        // Data column 0 of the row is physical col 0 -> devid 1, with
+        // overlay covering [0, 16384).
+        assert_eq!(row.data_columns[0].devid, 1);
+        let ov = row.data_columns[0].overlay.as_ref().unwrap();
+        assert_eq!(ov.slot_offset, 0);
+        assert_eq!(ov.buf_offset, 0);
+        assert_eq!(ov.len, 16 * 1024);
+        // Data column 1 is physical col 1 -> devid 2, untouched.
+        assert_eq!(row.data_columns[1].devid, 2);
+        assert!(row.data_columns[1].overlay.is_none());
+    }
+
+    #[test]
+    fn plan_write_raid5_data_column_rotation() {
+        // Walk physical rows of a 4-device RAID5 chunk and verify the
+        // parity column rotates: row r -> P at col (4-1-r) mod 4.
+        let m =
+            make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID5, 4, 65536, 8 << 20);
+        let cache = cache_with(m);
+        // data_per_row = 3, logical_per_phys_row = 3 * 64K = 192K.
+        let row_bytes = 192 * 1024;
+        for phys_row in 0u64..4 {
+            let logical = phys_row * row_bytes;
+            let WritePlan::Parity(plan) =
+                cache.plan_write(logical, 16 * 1024).unwrap()
+            else {
+                panic!("expected Parity");
+            };
+            let row = &plan.rows[0];
+            let expected_p_col = ((4 - 1 - phys_row) % 4) as u16;
+            // Map col index to devid (devid = col + 1).
+            assert_eq!(
+                row.parity_targets[0].devid,
+                u64::from(expected_p_col) + 1,
+                "parity row {phys_row}",
+            );
+        }
+    }
+
+    #[test]
+    fn plan_write_raid6_four_devices_single_row() {
+        // 4-device RAID6, stripe_len=64K. Two data, two parity. Row 0:
+        // P at col 2 (4-2-0), Q at col 3 (4-1-0). Data cols: 0, 1.
+        // Single 16K write at logical 0.
+        let m =
+            make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID6, 4, 65536, 4 << 20);
+        let cache = cache_with(m);
+        let WritePlan::Parity(plan) = cache.plan_write(0, 16 * 1024).unwrap()
+        else {
+            panic!("expected Parity");
+        };
+        let row = &plan.rows[0];
+        assert_eq!(row.data_columns.len(), 2);
+        assert_eq!(row.parity_targets.len(), 2);
+        assert_eq!(row.parity_targets[0].kind, ParityKind::P);
+        assert_eq!(row.parity_targets[1].kind, ParityKind::Q);
+        // P col = 2 -> devid 3, Q col = 3 -> devid 4.
+        assert_eq!(row.parity_targets[0].devid, 3);
+        assert_eq!(row.parity_targets[1].devid, 4);
+        assert_eq!(row.data_columns[0].devid, 1);
+        assert_eq!(row.data_columns[1].devid, 2);
+    }
+
+    #[test]
+    fn plan_write_raid56_partial_row_overlay_offsets() {
+        // Write that covers only the middle 4K of one column slot. The
+        // overlay must report slot_offset = the offset within the slot,
+        // not the chunk-wide offset. Other column has no overlay.
+        let m =
+            make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID5, 3, 65536, 3 << 20);
+        let cache = cache_with(m);
+        // Logical 0x4000 -> stripe_nr 0, stripe_offset 0x4000. Row 0,
+        // data col 0 (physical col 0, devid 1).
+        let WritePlan::Parity(plan) = cache.plan_write(0x4000, 0x1000).unwrap()
+        else {
+            panic!("expected Parity");
+        };
+        let row = &plan.rows[0];
+        let ov = row.data_columns[0].overlay.as_ref().unwrap();
+        assert_eq!(ov.slot_offset, 0x4000);
+        assert_eq!(ov.len, 0x1000);
+        assert_eq!(ov.buf_offset, 0);
+        assert!(row.data_columns[1].overlay.is_none());
+    }
+
+    #[test]
+    fn plan_write_raid5_spanning_two_data_columns_in_one_row() {
+        // 3-device RAID5: row 0 has 2 data slots (each 64K of logical).
+        // Logical 0..128K covers both data columns of row 0 fully.
+        // Both data columns should have overlay covering full slot;
+        // one row total.
+        let m =
+            make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID5, 3, 65536, 3 << 20);
+        let cache = cache_with(m);
+        let WritePlan::Parity(plan) = cache.plan_write(0, 128 * 1024).unwrap()
+        else {
+            panic!("expected Parity");
+        };
+        assert_eq!(plan.rows.len(), 1);
+        let row = &plan.rows[0];
+        // Both data columns covered by caller bytes.
+        for (i, dc) in row.data_columns.iter().enumerate() {
+            let ov = dc.overlay.as_ref().expect("data col overlay");
+            assert_eq!(ov.slot_offset, 0);
+            assert_eq!(ov.len, 65536);
+            assert_eq!(ov.buf_offset, i * 65536);
+        }
+    }
+
+    #[test]
+    fn plan_write_raid5_spans_two_physical_rows() {
+        // 3-device RAID5: logical_per_phys_row = 128K. Write 192K
+        // starting at 64K: covers (logical 64K..128K, dat col 1 of row 0)
+        // + (logical 128K..256K, both data cols of row 1).
+        let m =
+            make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID5, 3, 65536, 3 << 20);
+        let cache = cache_with(m);
+        let WritePlan::Parity(plan) =
+            cache.plan_write(64 * 1024, 192 * 1024).unwrap()
+        else {
+            panic!("expected Parity");
+        };
+        assert_eq!(plan.rows.len(), 2);
+        // Row 0: P col = 2, data cols = (0, 1). Caller covers data col 1.
+        let r0 = &plan.rows[0];
+        assert!(r0.data_columns[0].overlay.is_none());
+        let ov0 = r0.data_columns[1].overlay.as_ref().unwrap();
+        assert_eq!(ov0.slot_offset, 0);
+        assert_eq!(ov0.len, 65536);
+        assert_eq!(ov0.buf_offset, 0);
+        // Row 1: P col = 1 ((3-1-1) mod 3), data cols = phys 0 and 2.
+        let r1 = &plan.rows[1];
+        assert_eq!(r1.parity_targets[0].devid, 2);
+        for (i, dc) in r1.data_columns.iter().enumerate() {
+            let ov = dc.overlay.as_ref().unwrap();
+            assert_eq!(ov.slot_offset, 0);
+            assert_eq!(ov.len, 65536);
+            // Buf offsets: row 0 consumed 64K, row 1 starts at 64K
+            // and each col is 64K.
+            assert_eq!(ov.buf_offset, 64 * 1024 + i * 65536);
+        }
+    }
+
+    // --- RAID5 / RAID6 plan_read ---
+
+    #[test]
+    fn plan_read_raid5_routes_to_data_column() {
+        // 3-device RAID5: read at logical 0 of 4K. Should land on data
+        // column 0 of row 0 = physical col 0 = devid 1, ignoring parity.
+        let m =
+            make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID5, 3, 65536, 3 << 20);
+        let cache = cache_with(m);
+        let placements = cache.plan_read(0, 4096).unwrap();
+        assert_eq!(placements.len(), 1);
+        assert_eq!(placements[0].devid, 1);
+        assert_eq!(placements[0].physical, 0x10_0000);
+    }
+
+    #[test]
+    fn plan_read_raid5_second_data_column_routes_to_devid_2() {
+        // Logical = stripe_len = 64K -> stripe_nr 1, data col 1 of row 0
+        // = physical col 1 = devid 2.
+        let m =
+            make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID5, 3, 65536, 3 << 20);
+        let cache = cache_with(m);
+        let placements = cache.plan_read(65536, 4096).unwrap();
+        assert_eq!(placements.len(), 1);
+        assert_eq!(placements[0].devid, 2);
+    }
+
+    #[test]
+    fn plan_read_raid5_advances_to_next_physical_row() {
+        // Logical = 128K = 2 * stripe_len -> stripe_nr 2, phys_row 1
+        // (since data_per_row = 2). Row 1 P col = 1 (= (3-1-1) mod 3),
+        // so data cols are phys 0 and 2. data_col_in_row = 0 -> phys 0
+        // = devid 1.
+        let m =
+            make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID5, 3, 65536, 3 << 20);
+        let cache = cache_with(m);
+        let placements = cache.plan_read(128 * 1024, 4096).unwrap();
+        assert_eq!(placements.len(), 1);
+        assert_eq!(placements[0].devid, 1);
+        // Per-device stripe_nr = 1 (advanced on the device).
+        assert_eq!(placements[0].physical, 0x10_0000 + 65536);
+    }
+
+    #[test]
+    fn plan_read_raid6_routes_skipping_two_parity_columns() {
+        // 4-device RAID6, row 0: P col 2, Q col 3, data cols 0 and 1.
+        // Logical 0 -> data col 0 -> phys 0 -> devid 1.
+        let m =
+            make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID6, 4, 65536, 4 << 20);
+        let cache = cache_with(m);
+        let placements = cache.plan_read(0, 4096).unwrap();
+        assert_eq!(placements.len(), 1);
+        assert_eq!(placements[0].devid, 1);
+    }
+
+    #[test]
+    fn plan_write_raid5_buf_offsets_cover_request_exactly() {
+        // Tile property: across all rows, the caller-overlay byte
+        // ranges sum to the request length and tile [0, len) in the
+        // caller's buffer without gaps or overlaps.
+        let m =
+            make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID5, 3, 65536, 3 << 20);
+        let cache = cache_with(m);
+        let req_len = 200 * 1024;
+        let WritePlan::Parity(plan) =
+            cache.plan_write(8 * 1024, req_len).unwrap()
+        else {
+            panic!();
+        };
+        let mut overlays: Vec<&CallerOverlay> = plan
+            .rows
+            .iter()
+            .flat_map(|r| r.data_columns.iter())
+            .filter_map(|dc| dc.overlay.as_ref())
+            .collect();
+        overlays.sort_by_key(|o| o.buf_offset);
+        let mut next = 0usize;
+        for o in &overlays {
+            assert_eq!(o.buf_offset, next);
+            next += o.len as usize;
+        }
+        assert_eq!(next, req_len);
     }
 
     #[test]
@@ -1434,7 +2153,8 @@ mod tests {
             &[(1, 0x10000), (2, 0x20000)],
         );
         let cache = cache_with(m);
-        let placements = cache.plan_write(0, 256 * 1024).unwrap();
+        let placements =
+            cache.plan_write(0, 256 * 1024).unwrap().unwrap_plain();
         let total: usize = placements.iter().map(|p| p.len).sum();
         assert_eq!(total, 256 * 1024);
         // Check buf_offsets tile contiguously.

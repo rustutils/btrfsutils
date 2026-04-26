@@ -85,6 +85,7 @@
 
 pub mod chunk;
 pub mod items;
+pub mod raid56;
 #[allow(missing_docs)]
 pub mod raw;
 pub mod reader;
