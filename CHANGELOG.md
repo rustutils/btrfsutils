@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Removed
+
+- `btrfs-mkfs`: legacy `--rootdir` walker and the helpers it called.
+  All five `--rootdir` features (subvols, reflink, shrink,
+  inode-flags, plus the simple case) now run exclusively through
+  the transactional path landed in earlier commits, so the legacy
+  body of `make_btrfs_with_rootdir` and its supporting machinery
+  are dead code. Deleted in `mkfs.rs`: the entire post-validation
+  body of `make_btrfs_with_rootdir` (now just delegates to
+  `make_btrfs_with_rootdir_via_transaction`),
+  `converge_extent_tree_block_count`, `write_rootdir_trees`,
+  `metadata_extent_item`, `add_block_group_items`,
+  `RootTreeRootdirArgs`, `patch_root_item_fs`,
+  `build_root_tree_rootdir`, `build_free_space_tree_with_used`,
+  `build_block_group_tree_with_used`, and the `UsedBytes` struct.
+  Deleted in `rootdir.rs`: `walk_directory`, `walk_single_tree`,
+  `write_file_data`, `RootdirPlan`, `SubvolPlan`, `SubvolMeta`,
+  `FileAllocation`, `DataOutput`, `apply_nbytes_updates`,
+  `fixup_inode_nlink`/`fixup_inode_size`/`fixup_inline_nbytes`,
+  `patch_inode_field`, `try_compress_inline`,
+  `try_compress_regular`, `lzo_compress_inline`,
+  `lzo_compress_extent`, `max_inline_data_size`, plus
+  `CompressConfig::extent_type_byte` / `is_enabled` and the LZO
+  round-trip tests. Net: +31 / -2228 LOC across two files. Items
+  serializers in `mkfs/src/items.rs` and the `tree.rs` /
+  `treebuilder.rs` machinery are kept because they still serve
+  the no-rootdir bootstrap path; deleting them needs a bootstrap
+  migration first.
+
 ### Added
 
 - `btrfs-mkfs`: `--rootdir --inode-flags` now goes through the new
