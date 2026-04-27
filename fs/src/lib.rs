@@ -38,5 +38,5 @@ pub mod stat;
 
 pub use cache::{CacheStats, LruTreeBlockCache};
 pub use dir::{Entry, FileKind};
-pub use filesystem::{Filesystem, Inode, StatFs, SubvolId};
+pub use filesystem::{Filesystem, Inode, StatFs, SubvolId, SubvolInfo};
 pub use stat::Stat;

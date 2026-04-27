@@ -210,26 +210,39 @@ Bugs the sweep caught:
 LZO had no new bugs — `decompress_lzo` survived the sweep with all
 its per-sector framing edge cases handled correctly.
 
-### F5 — Multi-subvolume traversal
+### F5 — Multi-subvolume traversal ✅
 
-**Scope:**
-- Detect subvolume crossings in `lookup`: when `DirItem.location`
-  has `key_type == ROOT_ITEM`, the entry is a subvolume root, not
-  a regular dir entry. Resolve the new subvol's tree root from
-  `Inner.tree_roots`, return an `Inode` carrying the new `subvol`.
-- `Filesystem::list_subvolumes() -> Vec<SubvolInfo>` returning name,
-  id, parent, ctime, ro flag, default flag.
-- `Filesystem::open_subvol(SubvolId)` — open with a different default
-  subvolume root than `BTRFS_FS_TREE_OBJECTID`.
-- Fuse adapter: parse `subvol=` and `subvolid=` from mount options;
-  call `Filesystem::open_subvol` accordingly.
+Done. `Filesystem::lookup` detects subvolume crossings (DirItem with
+`location.key_type == ROOT_ITEM`) and returns an `Inode` carrying
+the new subvol id and objectid 256. Reads, readdir, readlink, and
+xattr ops automatically follow into the new subvolume's tree via
+`tree_root_for(subvol)`. The `..` synthesised at subvolume roots
+resolves via `ROOT_BACKREF` in the root tree.
 
-**Test plan:**
-- Snapshot/subvol fixture: `mkfs.btrfs --rootdir` + post-mount
-  `btrfs subvolume create` + `btrfs subvolume snapshot`.
-- Tests: lookup that crosses into a subvol; readdir on the subvol
-  root; `..` from a subvol root resolves correctly; readlink across
-  subvol boundary; `list_subvolumes` returns expected set.
+`Filesystem::list_subvolumes() -> Vec<SubvolInfo>` walks the root
+tree, returning id, parent, name, ctime, generation, and read-only
+flag for every subvolume. System trees are filtered out via
+`is_subvolume_id` (id == 5 OR 256 ≤ id ≤ u64::MAX - 256).
+
+`Filesystem::open_subvol(reader, SubvolId)` opens with a non-default
+subvolume as `root()`. `Filesystem::default_subvol() -> SubvolId`
+exposes the choice.
+
+Fixture: `mkfs.btrfs --rootdir --subvol sub1 --subvol sub1/nested
+--subvol sub2`. Tests resolve names → ids dynamically via
+`list_subvolumes` since mkfs id assignment isn't argument-order
+deterministic. 9 tests cover lookup crossing, nested-subvol
+crossing, readdir of subvol root, `..` resolving via ROOT_BACKREF
+to FS_TREE, `..` resolving via ROOT_BACKREF to a non-default parent
+subvol, list_subvolumes shape, open_subvol happy path,
+open_subvol unknown id (NotFound), open_subvol invalid id
+(InvalidInput).
+
+Out of scope (kept simple): the FUSE adapter does not yet parse
+`subvol=` / `subvolid=` mount options, since adding CLI flags to
+`btrfs-fuse` is independent of the filesystem-crate semantics. To
+mount a non-default subvol via fuse today, a small follow-up adds
+`--subvol`/`--subvolid` args to `fuse/src/main.rs`.
 
 ### F6 — Read-only ioctls
 

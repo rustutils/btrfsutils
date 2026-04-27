@@ -18,10 +18,12 @@ use crate::{
         INODE_CACHE_DEFAULT_ENTRIES, InodeCache, LruTreeBlockCache,
         TREE_BLOCK_CACHE_DEFAULT_ENTRIES,
     },
-    dir, read, xattr,
+    dir, read,
+    stat::to_system_time,
+    xattr,
 };
 use btrfs_disk::{
-    items::{DirItem, InodeItem},
+    items::{DirItem, InodeItem, RootItem, RootItemFlags, RootRef},
     reader::{BlockReader, Traversal, filesystem_open, tree_walk},
     superblock::Superblock,
     tree::{KeyType, TreeBlock},
@@ -30,13 +32,27 @@ use std::{
     collections::BTreeMap,
     io, mem,
     sync::{Arc, Mutex, MutexGuard},
+    time::SystemTime,
 };
 
 /// `BTRFS_FS_TREE_OBJECTID` — the default subvolume's tree root.
 const FS_TREE_OBJECTID: u64 = 5;
 
-/// `BTRFS_FIRST_FREE_OBJECTID` — the root directory of any subvolume.
+/// `BTRFS_FIRST_FREE_OBJECTID` — the root directory of any subvolume,
+/// and the lower bound for non-default subvolume IDs.
 const ROOT_DIR_OBJECTID: u64 = 256;
+
+/// `BTRFS_LAST_FREE_OBJECTID` — upper bound of the user-subvolume id
+/// range. Anything above is reserved for system trees (UUID, etc.).
+const LAST_FREE_OBJECTID: u64 = u64::MAX - 256;
+
+/// Whether `id` names a subvolume tree (the default `FS_TREE` plus
+/// the user-allocatable range). Used to filter system trees out of
+/// [`Filesystem::list_subvolumes`] and to validate `open_subvol`.
+fn is_subvolume_id(id: u64) -> bool {
+    id == FS_TREE_OBJECTID
+        || (ROOT_DIR_OBJECTID..=LAST_FREE_OBJECTID).contains(&id)
+}
 
 /// Identifier for a subvolume tree (the tree's root objectid).
 ///
@@ -51,6 +67,28 @@ pub struct SubvolId(pub u64);
 pub struct Inode {
     pub subvol: SubvolId,
     pub ino: u64,
+}
+
+/// Metadata for a single subvolume, returned by
+/// [`Filesystem::list_subvolumes`].
+#[derive(Debug, Clone)]
+pub struct SubvolInfo {
+    /// The subvolume's tree id.
+    pub id: SubvolId,
+    /// Parent subvolume, or `None` for the default `FS_TREE`
+    /// (`SubvolId(5)`) — it has no `ROOT_BACKREF` because nothing
+    /// contains it.
+    pub parent: Option<SubvolId>,
+    /// Path component of this subvolume within its parent. Empty
+    /// for the default `FS_TREE`.
+    pub name: Vec<u8>,
+    /// Read-only flag (set on snapshots taken with `-r`, or `--ro`
+    /// on `mkfs --subvol`).
+    pub readonly: bool,
+    /// Last modification time of the subvolume's `ROOT_ITEM`.
+    pub ctime: SystemTime,
+    /// Generation when the subvolume was created or last modified.
+    pub generation: u64,
 }
 
 /// Filesystem-wide statistics, returned by [`Filesystem::statfs`].
@@ -125,12 +163,44 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     /// that want non-blocking open can wrap the call in
     /// `tokio::task::spawn_blocking` themselves.
     pub fn open(reader: R) -> io::Result<Self> {
+        Self::open_inner(reader, SubvolId(FS_TREE_OBJECTID))
+    }
+
+    /// Bootstrap the filesystem and select a non-default subvolume
+    /// as the [`Filesystem::root`].
+    ///
+    /// `subvol` must be the tree id of an existing subvolume — pass
+    /// the value from a previously-listed [`SubvolInfo::id`], or use
+    /// `SubvolId(5)` to get the default. Errors with `NotFound` if
+    /// the id is unknown, `InvalidInput` if it's outside the
+    /// subvolume id range.
+    pub fn open_subvol(reader: R, subvol: SubvolId) -> io::Result<Self> {
+        Self::open_inner(reader, subvol)
+    }
+
+    fn open_inner(reader: R, default_subvol: SubvolId) -> io::Result<Self> {
+        if !is_subvolume_id(default_subvol.0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "{} is not a valid subvolume id (must be 5 or in \
+                     [256, u64::MAX - 256])",
+                    default_subvol.0,
+                ),
+            ));
+        }
         let mut fs = filesystem_open(reader)
             .map_err(|e| io::Error::other(e.to_string()))?;
         let blksize = fs.superblock.sectorsize;
         if !fs.tree_roots.contains_key(&FS_TREE_OBJECTID) {
             return Err(io::Error::other(
                 "default FS tree (objectid 5) not found in root tree",
+            ));
+        }
+        if !fs.tree_roots.contains_key(&default_subvol.0) {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("subvolume {} not found", default_subvol.0),
             ));
         }
         // Attach a tree-block cache to the underlying reader so every
@@ -146,7 +216,7 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             inner: Arc::new(Inner {
                 superblock: fs.superblock,
                 tree_roots: fs.tree_roots,
-                default_subvol: SubvolId(FS_TREE_OBJECTID),
+                default_subvol,
                 blksize,
                 reader: Mutex::new(fs.reader),
                 tree_block_cache,
@@ -172,6 +242,24 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             subvol: self.inner.default_subvol,
             ino: ROOT_DIR_OBJECTID,
         }
+    }
+
+    /// The subvolume `Filesystem` was opened against (the default
+    /// `FS_TREE` unless [`Filesystem::open_subvol`] was used).
+    #[must_use]
+    pub fn default_subvol(&self) -> SubvolId {
+        self.inner.default_subvol
+    }
+
+    /// Enumerate every subvolume on the filesystem.
+    ///
+    /// Walks the root tree, parsing `ROOT_ITEM` and `ROOT_BACKREF`
+    /// entries to build a [`SubvolInfo`] per subvolume. The default
+    /// `FS_TREE` (`SubvolId(5)`) is included with `parent: None` and
+    /// an empty `name`.
+    pub async fn list_subvolumes(&self) -> io::Result<Vec<SubvolInfo>> {
+        let this = self.clone();
+        spawn_blocking(move || this.list_subvolumes_blocking()).await
     }
 
     /// Filesystem sectorsize.
@@ -282,25 +370,39 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         parent: Inode,
         name: &[u8],
     ) -> io::Result<Option<(Inode, InodeItem)>> {
-        let tree_root = self.tree_root_for(parent.subvol)?;
+        let parent_tree = self.tree_root_for(parent.subvol)?;
         let mut reader = self.lock_reader();
         let Some(entry) =
-            lookup_in_dir(&mut reader, tree_root, parent.ino, name)?
+            lookup_in_dir(&mut reader, parent_tree, parent.ino, name)?
         else {
             return Ok(None);
         };
-        let child_oid = entry.location.objectid;
-        let child = Inode {
-            subvol: parent.subvol,
-            ino: child_oid,
+
+        // Subvolume crossing: a `DirItem` whose `location` points at a
+        // `ROOT_ITEM` key is not a regular dirent — it's a mount of
+        // another subvolume's root. The child inode lives at objectid
+        // 256 of that subvolume's tree, not at `entry.location.objectid`
+        // in the parent's tree.
+        let child = if entry.location.key_type == KeyType::RootItem {
+            Inode {
+                subvol: SubvolId(entry.location.objectid),
+                ino: ROOT_DIR_OBJECTID,
+            }
+        } else {
+            Inode {
+                subvol: parent.subvol,
+                ino: entry.location.objectid,
+            }
         };
+
         // Reuse the cached InodeItem if present; otherwise fetch and
-        // populate. Holding the reader mutex across both calls is fine
-        // because the inode cache uses interior mutability.
+        // populate. The fetch uses the *child*'s tree (which equals
+        // the parent's for non-crossings).
         let item = if let Some(cached) = self.inner.inode_cache.get(child) {
             (*cached).clone()
         } else {
-            let Some(item) = read_inode(&mut reader, tree_root, child_oid)?
+            let child_tree = self.tree_root_for(child.subvol)?;
+            let Some(item) = read_inode(&mut reader, child_tree, child.ino)?
             else {
                 return Ok(None);
             };
@@ -350,13 +452,29 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             });
         }
         if offset <= 1 {
-            let parent_oid =
-                find_parent_oid(&mut reader, tree_root, dir_ino.ino)?;
-            entries.push(Entry {
-                ino: Inode {
+            // For most inodes `..` lives in the same subvolume tree
+            // (walk INODE_REF). For a subvolume root we instead walk
+            // ROOT_BACKREF in the root tree to find the parent
+            // subvolume's containing directory.
+            let parent = if dir_ino.ino == ROOT_DIR_OBJECTID
+                && dir_ino.subvol.0 != FS_TREE_OBJECTID
+            {
+                find_root_backref_parent(
+                    &mut reader,
+                    self.inner.superblock.root,
+                    dir_ino.subvol.0,
+                )?
+                .unwrap_or(dir_ino)
+            } else {
+                let parent_oid =
+                    find_parent_oid(&mut reader, tree_root, dir_ino.ino)?;
+                Inode {
                     subvol: dir_ino.subvol,
                     ino: parent_oid,
-                },
+                }
+            };
+            entries.push(Entry {
+                ino: parent,
                 kind: FileKind::Directory,
                 name: b"..".to_vec(),
                 offset: 2,
@@ -465,6 +583,54 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         xattr::get_xattr(&mut reader, tree_root, ino.ino, name)
     }
 
+    fn list_subvolumes_blocking(&self) -> io::Result<Vec<SubvolInfo>> {
+        let root_tree = self.inner.superblock.root;
+        // Collect ROOT_ITEM (id → metadata) and ROOT_BACKREF (id →
+        // (parent, name)) in a single root-tree walk. Each subvolume
+        // has at most one BACKREF; we keep the first if any duplicate
+        // appears.
+        let mut roots: BTreeMap<u64, RootItem> = BTreeMap::new();
+        let mut backrefs: BTreeMap<u64, (u64, RootRef)> = BTreeMap::new();
+        let mut reader = self.lock_reader();
+        for_each_item(&mut reader, root_tree, |key, data| {
+            match key.key_type {
+                KeyType::RootItem if is_subvolume_id(key.objectid) => {
+                    if let Some(item) = RootItem::parse(data) {
+                        roots.entry(key.objectid).or_insert(item);
+                    }
+                }
+                KeyType::RootBackref => {
+                    if let Some(rr) = RootRef::parse(data) {
+                        backrefs
+                            .entry(key.objectid)
+                            .or_insert((key.offset, rr));
+                    }
+                }
+                _ => {}
+            }
+        })?;
+        drop(reader);
+
+        let mut out = Vec::with_capacity(roots.len());
+        for (id, item) in roots {
+            let (parent, name) = match backrefs.get(&id) {
+                Some((parent_id, rr)) => {
+                    (Some(SubvolId(*parent_id)), rr.name.clone())
+                }
+                None => (None, Vec::new()),
+            };
+            out.push(SubvolInfo {
+                id: SubvolId(id),
+                parent,
+                name,
+                readonly: item.flags.contains(RootItemFlags::RDONLY),
+                ctime: to_system_time(&item.ctime),
+                generation: item.generation,
+            });
+        }
+        Ok(out)
+    }
+
     /// Acquire the I/O lock. Forwards a poisoned mutex without
     /// unwrapping at every call site.
     fn lock_reader(&self) -> MutexGuard<'_, BlockReader<R>> {
@@ -473,15 +639,22 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
 
     /// Map a [`SubvolId`] to its tree root logical address.
     fn tree_root_for(&self, subvol: SubvolId) -> io::Result<u64> {
-        if subvol == self.inner.default_subvol {
-            // Validated in `open` that this entry exists.
-            Ok(self.inner.tree_roots[&subvol.0].0)
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                format!("subvolume {} not yet supported", subvol.0),
-            ))
+        if !is_subvolume_id(subvol.0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} is not a valid subvolume id", subvol.0),
+            ));
         }
+        self.inner
+            .tree_roots
+            .get(&subvol.0)
+            .map(|(logical, _)| *logical)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("subvolume {} not found", subvol.0),
+                )
+            })
     }
 }
 
@@ -581,4 +754,32 @@ fn find_parent_oid<R: io::Read + io::Seek>(
         }
     })?;
     Ok(parent)
+}
+
+/// Resolve the parent of a subvolume root via `ROOT_BACKREF` in the
+/// root tree. Returns `Some(parent_inode)` where `parent_inode` is
+/// the directory in the parent subvolume that contains this one,
+/// or `None` for top-level subvolumes (no `ROOT_BACKREF`, e.g. the
+/// default `FS_TREE`).
+fn find_root_backref_parent<R: io::Read + io::Seek>(
+    reader: &mut BlockReader<R>,
+    root_tree_logical: u64,
+    child_subvol: u64,
+) -> io::Result<Option<Inode>> {
+    let mut found = None;
+    for_each_item(reader, root_tree_logical, |key, data| {
+        if found.is_some() {
+            return;
+        }
+        if key.objectid == child_subvol && key.key_type == KeyType::RootBackref
+        {
+            if let Some(rr) = RootRef::parse(data) {
+                found = Some(Inode {
+                    subvol: SubvolId(key.offset),
+                    ino: rr.dirid,
+                });
+            }
+        }
+    })?;
+    Ok(found)
 }

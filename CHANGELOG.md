@@ -73,6 +73,27 @@ All notable changes to this project will be documented in this file.
   `&TreeBlock`. All ripple sites in `cli/`, `tune/`, `fs/`,
   `mkfs/`, `transaction/`, and the integration tests updated.
 
+- `btrfs-fs`: multi-subvolume traversal. `Filesystem::lookup` now
+  detects subvolume crossings (a `DirItem` whose `location.key_type`
+  is `ROOT_ITEM`) and returns an `Inode` carrying the new subvol id
+  and `objectid 256`. Reads, `readdir`, `readlink`, and xattr ops
+  follow into the new subvolume's tree automatically. `..` from a
+  non-default subvolume root resolves via `ROOT_BACKREF` in the
+  root tree, returning the directory in the parent subvolume that
+  contains the current one.
+- `btrfs-fs`: `Filesystem::list_subvolumes() -> Vec<SubvolInfo>`
+  walks the root tree and returns id, parent, name, ctime,
+  generation, and read-only flag for every subvolume (default
+  `FS_TREE` plus user subvolumes 256..LAST_FREE). System trees
+  (CSUM, UUID, BLOCK_GROUP, etc.) are filtered out.
+- `btrfs-fs`: `Filesystem::open_subvol(reader, SubvolId)` opens the
+  filesystem with a non-default subvolume as the
+  [`Filesystem::root`]. Validates the id is in the subvolume range
+  (errors `InvalidInput` otherwise) and that the tree exists in the
+  root tree (errors `NotFound` otherwise).
+- `btrfs-fs`: `Filesystem::default_subvol() -> SubvolId` getter for
+  embedders that need to know which subvolume `root()` points at.
+
 ### Fixed
 
 - `btrfs-fs`: zstd-compressed extents on multi-chunk files now
