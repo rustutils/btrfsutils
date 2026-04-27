@@ -36,6 +36,17 @@ All notable changes to this project will be documented in this file.
   the async filesystem op, and replies from the task — the FUSE
   worker thread returns immediately, so concurrent FUSE callbacks
   don't serialise on a single in-flight I/O.
+- `btrfs-fuse` integration tests: 10 unprivileged tests in
+  `fuse/tests/mount.rs` that spawn the `btrfs-fuse` binary, mount it
+  against a fixture image, and exercise the mounted filesystem
+  through ordinary POSIX calls (`std::fs`, `xattr` crate). Coverage:
+  mount/unmount lifecycle, root listing, file reads (small, large,
+  nested), `stat` (verifies the 1↔256 inode swap), readlink, xattr
+  get/list, and a 16-thread × 50-iteration concurrent-read stress
+  test that catches double-reply, dropped-reply, and deadlock bugs in
+  the spawn-task dispatch path. `MountedFuse` RAII guard handles
+  cleanup with lazy unmount so a panicked test doesn't wedge the
+  mountpoint.
 
 ## 0.12.0
 

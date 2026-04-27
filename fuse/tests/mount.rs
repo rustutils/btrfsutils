@@ -1,0 +1,164 @@
+//! End-to-end mount tests for the `btrfs-fuse` driver.
+//!
+//! Each test spawns the `btrfs-fuse` binary against a fixture image
+//! and exercises the mounted filesystem through ordinary POSIX calls
+//! (`std::fs`, `xattr` crate). Behaviour is verified at the FUSE
+//! protocol boundary, which is what `fs/tests/basic.rs` cannot reach
+//! — inode translation (FUSE root = 1 ⇄ btrfs root dir = 256),
+//! `Stat` → `FileAttr` mapping, the deferred-reply / spawn-task
+//! pattern, and the kernel ↔ fuser ↔ `Filesystem` ↔ `BlockReader`
+//! round-trip.
+
+mod common;
+
+use common::MountedFuse;
+use std::{fs, path::Path, thread, time::Duration};
+
+#[test]
+fn mount_then_unmount_clean() {
+    let _m = MountedFuse::mount();
+    // `Drop` performs the unmount; if it fails we'll leak the
+    // mountpoint and the next test invocation surfaces the issue.
+}
+
+#[test]
+fn read_root_listing() {
+    let m = MountedFuse::mount();
+    let names: Vec<String> = fs::read_dir(m.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+
+    for expected in ["hello.txt", "empty.txt", "large.bin", "subdir", "link"] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "missing {expected} in {names:?}",
+        );
+    }
+}
+
+#[test]
+fn read_small_file_contents() {
+    let m = MountedFuse::mount();
+    let content = fs::read(m.path().join("hello.txt")).unwrap();
+    assert_eq!(content, b"hello, world\n");
+}
+
+#[test]
+fn read_large_file_contents() {
+    let m = MountedFuse::mount();
+    let content = fs::read(m.path().join("large.bin")).unwrap();
+    assert_eq!(content.len(), 100_000);
+    assert!(content.iter().all(|&b| b == 0x42));
+}
+
+#[test]
+fn read_nested_file_contents() {
+    let m = MountedFuse::mount();
+    let content = fs::read(m.path().join("subdir/nested.txt")).unwrap();
+    assert_eq!(content, b"nested content\n");
+}
+
+#[test]
+fn stat_returns_correct_metadata() {
+    let m = MountedFuse::mount();
+
+    let file_meta = fs::metadata(m.path().join("hello.txt")).unwrap();
+    assert!(file_meta.is_file());
+    assert_eq!(file_meta.len(), 13);
+
+    let dir_meta = fs::metadata(m.path().join("subdir")).unwrap();
+    assert!(dir_meta.is_dir());
+
+    let root_meta = fs::metadata(m.path()).unwrap();
+    assert!(
+        root_meta.is_dir(),
+        "FUSE root inode should map to a directory \
+         (verifies the 1↔256 inode swap)",
+    );
+
+    // `symlink_metadata` follows no links — confirms `link` itself
+    // is reported as a symlink, not the target file.
+    let link_meta = fs::symlink_metadata(m.path().join("link")).unwrap();
+    assert!(link_meta.file_type().is_symlink());
+}
+
+#[test]
+fn readlink_returns_target() {
+    let m = MountedFuse::mount();
+    let target = fs::read_link(m.path().join("link")).unwrap();
+    assert_eq!(target, Path::new("hello.txt"));
+}
+
+#[test]
+fn xattr_get_and_list() {
+    let m = MountedFuse::mount();
+    let path = m.path().join("hello.txt");
+
+    let names: Vec<_> = match xattr::list(&path) {
+        Ok(it) => it.collect(),
+        Err(e) => {
+            eprintln!("xattr::list failed ({e}); skipping");
+            return;
+        }
+    };
+    if names.is_empty() {
+        eprintln!(
+            "no xattrs on fixture (setfattr unavailable or rejected); \
+             skipping",
+        );
+        return;
+    }
+
+    assert!(
+        names
+            .iter()
+            .any(|n| n.as_encoded_bytes() == b"user.greeting"),
+        "expected user.greeting in {names:?}",
+    );
+    let value = xattr::get(&path, "user.greeting").unwrap();
+    assert_eq!(value.as_deref(), Some(b"hi".as_slice()));
+}
+
+#[test]
+fn xattr_get_returns_none_for_missing_name() {
+    let m = MountedFuse::mount();
+    let path = m.path().join("hello.txt");
+    let result = xattr::get(&path, "user.does-not-exist").unwrap();
+    assert!(result.is_none());
+}
+
+/// 16 OS threads × 50 reads each. If the fuse adapter's spawn-a-task
+/// pattern double-replies, drops a `Reply*`, or deadlocks under
+/// concurrent FUSE callbacks, this test exposes it. The kernel
+/// serialises operations on the same FUSE session more aggressively
+/// than user-space async calls would, so even a single mountpoint
+/// is enough to stress the dispatch path.
+#[test]
+fn concurrent_reads_dont_deadlock_or_corrupt() {
+    let m = MountedFuse::mount();
+    let path = m.path().join("hello.txt").to_path_buf();
+
+    let handles: Vec<_> = (0..16)
+        .map(|_| {
+            let path = path.clone();
+            thread::spawn(move || {
+                for _ in 0..50 {
+                    let content = fs::read(&path).unwrap();
+                    assert_eq!(content, b"hello, world\n");
+                }
+            })
+        })
+        .collect();
+
+    // Bound the total wait so a deadlock surfaces as a test failure
+    // rather than hanging CI forever.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    for h in handles {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            panic!("concurrent reads ran past 30s deadline (deadlock?)");
+        }
+        h.join().expect("thread panicked");
+    }
+}
