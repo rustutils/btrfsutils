@@ -16,5 +16,6 @@
 
 pub mod fs;
 pub mod inode;
+pub mod ioctl;
 
 pub use fs::BtrfsFuse;

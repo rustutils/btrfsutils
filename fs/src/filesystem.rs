@@ -34,6 +34,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
     time::SystemTime,
 };
+use uuid::Uuid;
 
 /// `BTRFS_FS_TREE_OBJECTID` — the default subvolume's tree root.
 const FS_TREE_OBJECTID: u64 = 5;
@@ -70,8 +71,13 @@ pub struct Inode {
 }
 
 /// Metadata for a single subvolume, returned by
-/// [`Filesystem::list_subvolumes`].
+/// [`Filesystem::list_subvolumes`] and
+/// [`Filesystem::get_subvol_info`].
+///
+/// Marked `#[non_exhaustive]` so additional fields can be added in
+/// the future without breaking pattern destructuring at call sites.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SubvolInfo {
     /// The subvolume's tree id.
     pub id: SubvolId,
@@ -82,13 +88,30 @@ pub struct SubvolInfo {
     /// Path component of this subvolume within its parent. Empty
     /// for the default `FS_TREE`.
     pub name: Vec<u8>,
+    /// Inode number of the directory in `parent` that holds this
+    /// subvolume entry. Zero for top-level subvolumes (no parent).
+    pub dirid: u64,
     /// Read-only flag (set on snapshots taken with `-r`, or `--ro`
     /// on `mkfs --subvol`).
     pub readonly: bool,
     /// Last modification time of the subvolume's `ROOT_ITEM`.
     pub ctime: SystemTime,
+    /// Creation time.
+    pub otime: SystemTime,
     /// Generation when the subvolume was created or last modified.
     pub generation: u64,
+    /// Transaction id of the last `ROOT_ITEM` update.
+    pub ctransid: u64,
+    /// Transaction id when the subvolume was created.
+    pub otransid: u64,
+    /// UUID of this subvolume.
+    pub uuid: Uuid,
+    /// UUID of the parent subvolume (for snapshots). All zeros for
+    /// non-snapshot subvolumes.
+    pub parent_uuid: Uuid,
+    /// UUID of the subvolume this was received from (for `btrfs
+    /// receive`). All zeros for non-received subvolumes.
+    pub received_uuid: Uuid,
 }
 
 /// Filesystem-wide statistics, returned by [`Filesystem::statfs`].
@@ -260,6 +283,32 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     pub async fn list_subvolumes(&self) -> io::Result<Vec<SubvolInfo>> {
         let this = self.clone();
         spawn_blocking(move || this.list_subvolumes_blocking()).await
+    }
+
+    /// Fetch metadata for a single subvolume.
+    ///
+    /// Currently implemented as a filtered [`Filesystem::list_subvolumes`]
+    /// call — the root-tree walk dominates either way, so a one-shot
+    /// lookup wouldn't be faster than the cached/single-pass list.
+    /// Returns `Ok(None)` for an unknown id.
+    pub async fn get_subvol_info(
+        &self,
+        id: SubvolId,
+    ) -> io::Result<Option<SubvolInfo>> {
+        Ok(self
+            .list_subvolumes()
+            .await?
+            .into_iter()
+            .find(|s| s.id == id))
+    }
+
+    /// Read-only access to the parsed primary-device superblock.
+    /// Used by ioctl handlers (`FS_INFO`, `GET_FEATURES`, etc.) and
+    /// by embedders that need to inspect format-level fields without
+    /// re-parsing.
+    #[must_use]
+    pub fn superblock(&self) -> &Superblock {
+        &self.inner.superblock
     }
 
     /// Filesystem sectorsize.
@@ -613,19 +662,26 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
 
         let mut out = Vec::with_capacity(roots.len());
         for (id, item) in roots {
-            let (parent, name) = match backrefs.get(&id) {
+            let (parent, name, dirid) = match backrefs.get(&id) {
                 Some((parent_id, rr)) => {
-                    (Some(SubvolId(*parent_id)), rr.name.clone())
+                    (Some(SubvolId(*parent_id)), rr.name.clone(), rr.dirid)
                 }
-                None => (None, Vec::new()),
+                None => (None, Vec::new(), 0),
             };
             out.push(SubvolInfo {
                 id: SubvolId(id),
                 parent,
                 name,
+                dirid,
                 readonly: item.flags.contains(RootItemFlags::RDONLY),
                 ctime: to_system_time(&item.ctime),
+                otime: to_system_time(&item.otime),
                 generation: item.generation,
+                ctransid: item.ctransid,
+                otransid: item.otransid,
+                uuid: item.uuid,
+                parent_uuid: item.parent_uuid,
+                received_uuid: item.received_uuid,
             });
         }
         Ok(out)

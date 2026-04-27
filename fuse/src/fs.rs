@@ -11,13 +11,17 @@
 //!   FUSE worker thread returns immediately, so concurrent FUSE
 //!   callbacks don't serialise on a single in-flight I/O.
 
-use crate::inode;
+use crate::{
+    inode,
+    ioctl::{self, IoctlOutcome},
+};
 use anyhow::{Context, Result};
 use btrfs_fs::{FileKind, Filesystem, Inode, Stat, SubvolId};
 use fuser::{
     Errno, FileAttr, FileHandle, FileType, Filesystem as FuserFilesystem,
-    Generation, INodeNo, LockOwner, OpenFlags, ReplyAttr, ReplyData,
-    ReplyDirectory, ReplyEntry, ReplyStatfs, ReplyXattr, Request,
+    Generation, INodeNo, IoctlFlags, LockOwner, OpenFlags, ReplyAttr,
+    ReplyData, ReplyDirectory, ReplyEntry, ReplyIoctl, ReplyStatfs, ReplyXattr,
+    Request,
 };
 use std::{ffi::OsStr, fs::File, io, os::unix::ffi::OsStrExt, time::Duration};
 use tokio::runtime::Runtime;
@@ -335,5 +339,26 @@ impl FuserFilesystem for BtrfsFuse {
         reply.statfs(
             s.blocks, s.bfree, s.bavail, 0, 0, s.bsize, s.namelen, s.frsize,
         );
+    }
+
+    fn ioctl(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        _fh: FileHandle,
+        _flags: IoctlFlags,
+        cmd: u32,
+        _in_data: &[u8],
+        _out_size: u32,
+        reply: ReplyIoctl,
+    ) {
+        let target = self.fuse_inode(ino.0);
+        let fs = self.fs.clone();
+        self.runtime.spawn(async move {
+            match ioctl::dispatch(&fs, target, cmd).await {
+                IoctlOutcome::Ok(data) => reply.ioctl(0, &data),
+                IoctlOutcome::Err(errno) => reply.error(errno),
+            }
+        });
     }
 }

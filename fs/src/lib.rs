@@ -36,7 +36,9 @@ mod xattr;
 pub mod dir;
 pub mod stat;
 
+pub use btrfs_disk::superblock::Superblock;
 pub use cache::{CacheStats, LruTreeBlockCache};
 pub use dir::{Entry, FileKind};
 pub use filesystem::{Filesystem, Inode, StatFs, SubvolId, SubvolInfo};
 pub use stat::Stat;
+pub use uuid::Uuid;

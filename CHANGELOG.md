@@ -102,6 +102,28 @@ All notable changes to this project will be documented in this file.
   `BtrfsFuse::open_subvol(file, SubvolId)` is the new library entry
   point.
 
+- `btrfs-fs`: `SubvolInfo` is now `#[non_exhaustive]` and gained
+  `dirid`, `otime`, `ctransid`, `otransid`, `uuid`, `parent_uuid`,
+  and `received_uuid` fields — everything `BTRFS_IOC_GET_SUBVOL_INFO`
+  needs. The default `FS_TREE` reports `dirid: 0` (no parent
+  directory).
+- `btrfs-fs`: `Filesystem::get_subvol_info(SubvolId)` returns
+  metadata for a single subvolume (filtered `list_subvolumes`).
+- `btrfs-fs`: `Filesystem::superblock() -> &Superblock` getter for
+  embedders/ioctl handlers that need format-level fields.
+  `Superblock` and `Uuid` are re-exported from the crate root.
+- `btrfs-fuse`: F6.1 ioctl plumbing. Implements the
+  `fuser::Filesystem::ioctl` callback and dispatches:
+  `BTRFS_IOC_FS_INFO`, `BTRFS_IOC_GET_FEATURES`,
+  `BTRFS_IOC_GET_SUBVOL_INFO`. Each FUSE_IOCTL request runs in a
+  spawned tokio task that owns the `ReplyIoctl`, awaits the
+  filesystem call, and serialises the response into the kernel's
+  on-disk C struct layout (no bindgen types leak into the public
+  API). Unknown ioctls return `ENOTTY`. `fuse/src/ioctl.rs` re-derives
+  the ioctl numbers via const `_IOR` helpers since bindgen doesn't
+  expand the macro family. Variable-size ioctls (`TREE_SEARCH_V2` and
+  friends) come in F6.2.
+
 ### Fixed
 
 - `btrfs-fuse`: the FUSE root inode (`1`) now maps onto the

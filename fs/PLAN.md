@@ -247,32 +247,49 @@ library entry point. The fuse adapter learned its
 now maps onto whatever subvolume the `Filesystem` was opened with,
 not unconditionally `SubvolId(5)`.
 
-### F6 — Read-only ioctls
+### F6.1 — Read-only ioctls (fixed-size) ✅
+
+Done. `FUSE_IOCTL` plumbing landed in `btrfs-fuse` and three
+fixed-size read-only ioctls dispatched through it:
+
+- `BTRFS_IOC_FS_INFO` — superblock geometry, UUIDs, csum type
+- `BTRFS_IOC_GET_FEATURES` — compat / compat_ro / incompat words
+- `BTRFS_IOC_GET_SUBVOL_INFO` — full subvolume metadata
+
+`btrfs-fs` grew the supporting `Filesystem::superblock()` and
+`Filesystem::get_subvol_info(SubvolId)` accessors, and `SubvolInfo`
+gained `dirid`/`uuid`/`parent_uuid`/`received_uuid`/`otime`/transids
+(marked `#[non_exhaustive]` for future-proofing).
+
+`fuse/src/ioctl.rs` re-derives the kernel ioctl numbers via const
+`_IOR` helpers (bindgen doesn't expand the macro family) and
+serialises responses into the on-disk C struct layout without
+leaking `btrfs_disk::raw` types into the public API.
+
+5 new tests in `fuse/tests/ioctl.rs`:
+- 3 libc::ioctl-driven tests (one per ioctl)
+- 1 unknown-ioctl test verifying `ENOTTY`
+- 1 CLI E2E test that runs our `btrfs subvolume show` against the
+  fuse mount — exercises `BTRFS_IOC_GET_SUBVOL_INFO` end-to-end
+  through real CLI consumer code
+
+### F6.2 — Read-only ioctls (variable-size + walks)
 
 **Scope:**
-- `FUSE_IOCTL` plumbing in `btrfs-fuse`: implement `fuser::Filesystem::ioctl`,
-  decode the request based on the ioctl number, dispatch to
-  `btrfs-fs`.
-- ioctls implemented:
-  - `BTRFS_IOC_FS_INFO` — fs UUID, num devices, nodesize, etc.
-  - `BTRFS_IOC_DEV_INFO` — per-device info
-  - `BTRFS_IOC_TREE_SEARCH_V2` — generic tree search (used by
-    `btrfs subvolume list`, etc.)
-  - `BTRFS_IOC_INO_LOOKUP` / `INO_LOOKUP_USER` — inode → path
-  - `BTRFS_IOC_LOGICAL_INO_V2` — logical → inode
-  - `BTRFS_IOC_GET_FEATURES` — feature flags
-  - `BTRFS_IOC_GET_SUBVOL_INFO` — subvol metadata
-  - `BTRFS_IOC_GET_SUBVOL_ROOTREF` — subvol parent backrefs
-  - `BTRFS_IOC_INO_PATHS` — inode → all paths
+- `BTRFS_IOC_TREE_SEARCH_V2` — generic tree search with
+  variable-size out buffer; needs the FUSE retry-with-bigger-buffer
+  dance
+- `BTRFS_IOC_INO_LOOKUP` / `INO_LOOKUP_USER` — inode → path
+- `BTRFS_IOC_LOGICAL_INO_V2` — logical → inode (extent-tree walk)
+- `BTRFS_IOC_DEV_INFO` — per-device info
+- `BTRFS_IOC_GET_SUBVOL_ROOTREF` — subvol parent backrefs
+- `BTRFS_IOC_INO_PATHS` — inode → all paths (hardlink resolution)
 
 **Test plan:**
-- Each ioctl tested via either:
-  - Direct `btrfs_fs::ioctl::dispatch()` call (preferred — no fuse
-    mount needed)
-  - End-to-end: spawn fuse mount, run `btrfs subvolume list /mnt`,
-    parse output (privileged, only for cross-validation)
-- Compare results against running the same ioctl on a kernel-mounted
-  copy of the fixture.
+- libc::ioctl-driven tests for each new ioctl
+- End-to-end: `btrfs subvolume list <fuse-mount>` exercises
+  TREE_SEARCH_V2; `btrfs filesystem show <fuse-mount>` exercises
+  DEV_INFO
 
 **Out of scope:** write ioctls (F11), admin ioctls (balance, scrub,
 qgroup) — those are kernel-managed operations; users run them
