@@ -93,6 +93,23 @@ All notable changes to this project will be documented in this file.
   root tree (errors `NotFound` otherwise).
 - `btrfs-fs`: `Filesystem::default_subvol() -> SubvolId` getter for
   embedders that need to know which subvolume `root()` points at.
+- `btrfs-fuse`: `--subvol PATH` and `--subvolid ID` CLI flags on the
+  `btrfs-fuse` binary mount the named subvolume as the FUSE root.
+  `--subvol PATH` resolves to a [`SubvolId`] by walking each
+  subvolume's parent chain to build a slash-separated full path,
+  matched against the user's argument. The two flags are mutually
+  exclusive; absent both, the default `FS_TREE` is used as before.
+  `BtrfsFuse::open_subvol(file, SubvolId)` is the new library entry
+  point.
+
+### Fixed
+
+- `btrfs-fuse`: the FUSE root inode (`1`) now maps onto the
+  filesystem's selected mount subvolume rather than always
+  `SubvolId(5)`. Without this fix, `BtrfsFuse::open_subvol` would
+  open the right subvolume internally but every FUSE callback would
+  ignore it and serve content from `FS_TREE` regardless. Surfaced
+  by the new `--subvol` mount tests.
 
 ### Fixed
 

@@ -238,11 +238,14 @@ subvol, list_subvolumes shape, open_subvol happy path,
 open_subvol unknown id (NotFound), open_subvol invalid id
 (InvalidInput).
 
-Out of scope (kept simple): the FUSE adapter does not yet parse
-`subvol=` / `subvolid=` mount options, since adding CLI flags to
-`btrfs-fuse` is independent of the filesystem-crate semantics. To
-mount a non-default subvol via fuse today, a small follow-up adds
-`--subvol`/`--subvolid` args to `fuse/src/main.rs`.
+Follow-up (now landed): `btrfs-fuse` exposes `--subvol PATH` and
+`--subvolid ID`, mutually exclusive. `--subvol` resolves the path
+against each subvolume's full parent-chain path; `--subvolid` takes
+the tree id directly. `BtrfsFuse::open_subvol` is the matching
+library entry point. The fuse adapter learned its
+`mount_subvol` field at the same time — the FUSE root inode (`1`)
+now maps onto whatever subvolume the `Filesystem` was opened with,
+not unconditionally `SubvolId(5)`.
 
 ### F6 — Read-only ioctls
 

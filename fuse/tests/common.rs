@@ -78,11 +78,52 @@ fn build_fixture(base: &Path) -> PathBuf {
 }
 
 /// Path to the per-process shared fixture image, built on first use.
-fn fixture_path() -> &'static Path {
+pub fn fixture_path() -> &'static Path {
     static INIT: OnceLock<(tempfile::TempDir, PathBuf)> = OnceLock::new();
     let (_td, path) = INIT.get_or_init(|| {
         let td = tempfile::tempdir().unwrap();
         let img = build_fixture(td.path());
+        (td, img)
+    });
+    path
+}
+
+/// Build a fixture with multiple subvolumes for the `--subvol` /
+/// `--subvolid` mount tests.
+fn build_multi_subvol_fixture(base: &Path) -> PathBuf {
+    let src = base.join("src");
+    fs::create_dir(&src).unwrap();
+    fs::write(src.join("at_root.txt"), b"in default subvol\n").unwrap();
+
+    let sub = src.join("sub");
+    fs::create_dir(&sub).unwrap();
+    fs::write(sub.join("inside.txt"), b"inside the subvol\n").unwrap();
+
+    let img = base.join("test.img");
+    File::create(&img)
+        .unwrap()
+        .set_len(128 * 1024 * 1024)
+        .unwrap();
+    btrfs_test_utils::run(
+        "mkfs.btrfs",
+        &[
+            "-f",
+            "--rootdir",
+            src.to_str().unwrap(),
+            "--subvol",
+            "sub",
+            img.to_str().unwrap(),
+        ],
+    );
+    img
+}
+
+/// Per-process cache for the multi-subvol fixture.
+pub fn multi_subvol_fixture_path() -> &'static Path {
+    static INIT: OnceLock<(tempfile::TempDir, PathBuf)> = OnceLock::new();
+    let (_td, path) = INIT.get_or_init(|| {
+        let td = tempfile::tempdir().unwrap();
+        let img = build_multi_subvol_fixture(td.path());
         (td, img)
     });
     path
@@ -101,16 +142,29 @@ pub struct MountedFuse {
 }
 
 impl MountedFuse {
-    /// Mount the fixture image and wait for the kernel to surface its
-    /// contents. Panics on timeout or spawn failure.
+    /// Mount the default fixture image and wait for the kernel to
+    /// surface its contents. Panics on timeout or spawn failure.
     pub fn mount() -> Self {
+        Self::mount_with(fixture_path(), &[], "hello.txt")
+    }
+
+    /// Spawn `btrfs-fuse` against `image` with `extra_args` appended,
+    /// and wait until `ready_file` becomes visible at the mountpoint.
+    /// Used by tests that exercise `--subvol` / `--subvolid` and need
+    /// to assert against a non-default fixture.
+    pub fn mount_with(
+        image: &Path,
+        extra_args: &[&str],
+        ready_file: &str,
+    ) -> Self {
         let tempdir = tempfile::tempdir().unwrap();
         let mountpoint = tempdir.path().to_path_buf();
         let bin = env!("CARGO_BIN_EXE_btrfs-fuse");
         let child = Command::new(bin)
-            .arg(fixture_path())
+            .arg(image)
             .arg(&mountpoint)
             .arg("-f")
+            .args(extra_args)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -121,7 +175,7 @@ impl MountedFuse {
             mountpoint,
             child: Some(child),
         };
-        this.wait_until_ready();
+        this.wait_until_ready(ready_file);
         this
     }
 
@@ -131,12 +185,11 @@ impl MountedFuse {
         &self.mountpoint
     }
 
-    /// Poll the mountpoint until it lists the expected fixture
-    /// contents, or panic after [`READY_TIMEOUT`]. Polling
-    /// `read_dir` doubles as a liveness probe — if the child died
-    /// during bootstrap we surface the failure here rather than later
-    /// in an opaque test assertion.
-    fn wait_until_ready(&mut self) {
+    /// Poll the mountpoint until `ready_file` appears, or panic after
+    /// [`READY_TIMEOUT`]. Polling `read_dir` doubles as a liveness
+    /// probe — if the child died during bootstrap we surface the
+    /// failure here rather than later in an opaque test assertion.
+    fn wait_until_ready(&mut self, ready_file: &str) {
         let start = Instant::now();
         loop {
             if let Some(child) = self.child.as_mut() {
@@ -147,7 +200,7 @@ impl MountedFuse {
                 }
             }
             if let Ok(entries) = fs::read_dir(&self.mountpoint) {
-                if entries.flatten().any(|e| e.file_name() == "hello.txt") {
+                if entries.flatten().any(|e| e.file_name() == ready_file) {
                     return;
                 }
             }

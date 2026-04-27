@@ -128,6 +128,66 @@ fn xattr_get_returns_none_for_missing_name() {
     assert!(result.is_none());
 }
 
+// ── --subvol / --subvolid ─────────────────────────────────────────
+
+/// `--subvol PATH` mounts the named subvolume at the FUSE root, so
+/// the contents of `sub/` should be directly visible at the
+/// mountpoint root (not nested under `sub/`).
+#[test]
+fn mount_with_subvol_path_arg() {
+    let m = common::MountedFuse::mount_with(
+        common::multi_subvol_fixture_path(),
+        &["--subvol", "sub"],
+        "inside.txt",
+    );
+    let names: Vec<String> = fs::read_dir(m.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names.iter().any(|n| n == "inside.txt"),
+        "subvol root should contain inside.txt; got {names:?}",
+    );
+    // The default-subvol's `at_root.txt` should NOT be visible —
+    // we mounted `sub` only.
+    assert!(
+        !names.iter().any(|n| n == "at_root.txt"),
+        "default-subvol files should not leak through; got {names:?}",
+    );
+
+    let content = fs::read(m.path().join("inside.txt")).unwrap();
+    assert_eq!(content, b"inside the subvol\n");
+}
+
+/// `--subvolid <ID>` selects a subvolume by tree id rather than by
+/// path. We don't know the id upfront, so this test mounts the
+/// default first to discover it (via `subvolume list`-style data) —
+/// here using `btrfs inspect-internal` would be heavyweight, so we
+/// just confirm a known id (`5` = default `FS_TREE`) round-trips
+/// correctly. With the default subvol explicitly selected, the
+/// fixture's top-level `at_root.txt` should be visible.
+#[test]
+fn mount_with_subvolid_default_round_trips() {
+    let m = common::MountedFuse::mount_with(
+        common::multi_subvol_fixture_path(),
+        &["--subvolid", "5"],
+        "at_root.txt",
+    );
+    let names: Vec<String> = fs::read_dir(m.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names.iter().any(|n| n == "at_root.txt"),
+        "default subvol should expose at_root.txt; got {names:?}",
+    );
+    assert!(
+        names.iter().any(|n| n == "sub"),
+        "default subvol should expose the `sub` mount entry; \
+         got {names:?}",
+    );
+}
+
 /// 16 OS threads × 50 reads each. If the fuse adapter's spawn-a-task
 /// pattern double-replies, drops a `Reply*`, or deadlocks under
 /// concurrent FUSE callbacks, this test exposes it. The kernel

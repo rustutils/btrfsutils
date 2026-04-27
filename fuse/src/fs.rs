@@ -24,12 +24,14 @@ use tokio::runtime::Runtime;
 
 const TTL: Duration = Duration::from_secs(1);
 
-/// Default FS tree objectid (`BTRFS_FS_TREE_OBJECTID`).
-const FS_TREE_OBJECTID: u64 = 5;
-
 pub struct BtrfsFuse {
     fs: Filesystem<File>,
     blksize: u32,
+    /// Subvolume that the FUSE root inode (`1`) maps onto. This is
+    /// whatever `Filesystem` was opened with — the default `FS_TREE`
+    /// for `BtrfsFuse::open`, or a user-selected subvolume for
+    /// `BtrfsFuse::open_subvol`.
+    mount_subvol: SubvolId,
     /// Tokio runtime used to drive async [`Filesystem`] ops. Each FUSE
     /// callback `spawn`s a task here; the FUSE worker thread itself
     /// returns immediately.
@@ -37,10 +39,22 @@ pub struct BtrfsFuse {
 }
 
 impl BtrfsFuse {
-    /// Bootstrap the filesystem from an open image file or block device.
+    /// Bootstrap the filesystem from an open image file or block device,
+    /// using the default subvolume (`FS_TREE`, id 5) as the mount root.
     pub fn open(file: File) -> Result<Self> {
-        let fs = Filesystem::open(file)?;
+        Self::from_filesystem(Filesystem::open(file)?)
+    }
+
+    /// Bootstrap the filesystem with a non-default subvolume as the
+    /// mount root. The id must come from a previous call to
+    /// [`btrfs_fs::Filesystem::list_subvolumes`].
+    pub fn open_subvol(file: File, subvol: btrfs_fs::SubvolId) -> Result<Self> {
+        Self::from_filesystem(Filesystem::open_subvol(file, subvol)?)
+    }
+
+    fn from_filesystem(fs: Filesystem<File>) -> Result<Self> {
         let blksize = fs.blksize();
+        let mount_subvol = fs.default_subvol();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .thread_name("btrfs-fuse-worker")
@@ -49,15 +63,18 @@ impl BtrfsFuse {
         Ok(Self {
             fs,
             blksize,
+            mount_subvol,
             runtime,
         })
     }
-}
 
-fn fuse_inode(ino: u64) -> Inode {
-    Inode {
-        subvol: SubvolId(FS_TREE_OBJECTID),
-        ino: inode::fuse_to_btrfs(ino),
+    /// Translate a FUSE inode (always `1` for the mount root) into a
+    /// btrfs [`Inode`] in the active mount subvolume.
+    fn fuse_inode(&self, ino: u64) -> Inode {
+        Inode {
+            subvol: self.mount_subvol,
+            ino: inode::fuse_to_btrfs(ino),
+        }
     }
 }
 
@@ -101,7 +118,7 @@ impl FuserFilesystem for BtrfsFuse {
         name: &OsStr,
         reply: ReplyEntry,
     ) {
-        let parent_ino = fuse_inode(parent.0);
+        let parent_ino = self.fuse_inode(parent.0);
         let name = name.as_bytes().to_vec();
         let fs = self.fs.clone();
         let blksize = self.blksize;
@@ -136,7 +153,7 @@ impl FuserFilesystem for BtrfsFuse {
         _fh: Option<FileHandle>,
         reply: ReplyAttr,
     ) {
-        let target = fuse_inode(ino.0);
+        let target = self.fuse_inode(ino.0);
         let fuse_ino = ino.0;
         let fs = self.fs.clone();
         self.runtime.spawn(async move {
@@ -161,7 +178,7 @@ impl FuserFilesystem for BtrfsFuse {
         offset: u64,
         mut reply: ReplyDirectory,
     ) {
-        let dir_ino = fuse_inode(ino.0);
+        let dir_ino = self.fuse_inode(ino.0);
         let fuse_ino = ino.0;
         let fs = self.fs.clone();
         self.runtime.spawn(async move {
@@ -189,7 +206,7 @@ impl FuserFilesystem for BtrfsFuse {
     }
 
     fn readlink(&self, _req: &Request, ino: INodeNo, reply: ReplyData) {
-        let target = fuse_inode(ino.0);
+        let target = self.fuse_inode(ino.0);
         let fuse_ino = ino.0;
         let fs = self.fs.clone();
         self.runtime.spawn(async move {
@@ -220,7 +237,7 @@ impl FuserFilesystem for BtrfsFuse {
         _lock: Option<LockOwner>,
         reply: ReplyData,
     ) {
-        let target = fuse_inode(ino.0);
+        let target = self.fuse_inode(ino.0);
         let fuse_ino = ino.0;
         let fs = self.fs.clone();
         self.runtime.spawn(async move {
@@ -246,7 +263,7 @@ impl FuserFilesystem for BtrfsFuse {
         size: u32,
         reply: ReplyXattr,
     ) {
-        let target = fuse_inode(ino.0);
+        let target = self.fuse_inode(ino.0);
         let fuse_ino = ino.0;
         let fs = self.fs.clone();
         self.runtime.spawn(async move {
@@ -284,7 +301,7 @@ impl FuserFilesystem for BtrfsFuse {
         size: u32,
         reply: ReplyXattr,
     ) {
-        let target = fuse_inode(ino.0);
+        let target = self.fuse_inode(ino.0);
         let fuse_ino = ino.0;
         let name_bytes = name.as_bytes().to_vec();
         let fs = self.fs.clone();
