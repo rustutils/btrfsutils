@@ -280,10 +280,71 @@ impl<R: Read + Write + Seek> Transaction<R> {
             ));
         }
 
-        // Find a region with enough contiguous free space. The cursor
-        // for `Data` is shared with metadata/system in `self.alloc`,
-        // but advanced here by the variable extent size rather than
-        // the fixed nodesize used by `alloc_block`.
+        let logical = self.reserve_data_extent(
+            fs_info,
+            aligned_size,
+            owner_root,
+            owner_ino,
+            owner_offset,
+        )?;
+
+        // Write the data to disk now (zero-padded to sector alignment).
+        // BlockReader::write_block fans out to all stripe copies.
+        if raw_len == aligned_size {
+            fs_info.reader_mut().write_block(logical, data)?;
+        } else {
+            let mut padded = Vec::with_capacity(aligned_size as usize);
+            padded.extend_from_slice(data);
+            padded.resize(aligned_size as usize, 0);
+            fs_info.reader_mut().write_block(logical, &padded)?;
+        }
+
+        Ok(logical)
+    }
+
+    /// Reserve a sector-aligned data extent without writing any
+    /// bytes. Returns the allocated logical address. Queues the
+    /// `+1 EXTENT_DATA_REF` delayed ref exactly like
+    /// [`alloc_data_extent`], so subsequent commit machinery
+    /// produces the matching `EXTENT_ITEM` and FST entries; the
+    /// caller is responsible for placing actual content at the
+    /// returned address before commit (e.g. via
+    /// [`BlockReader::write_block`](btrfs_disk::reader::BlockReader::write_block),
+    /// or — for `mkfs --rootdir --reflink` — `FICLONERANGE` from a
+    /// source file into each stripe's backing device file).
+    ///
+    /// `aligned_size` must be `> 0` and a multiple of `sectorsize`.
+    /// Unlike [`alloc_data_extent`], this function never zero-pads
+    /// or rounds the size up — the caller knows the exact extent
+    /// length up front.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `aligned_size` is zero or misaligned, or
+    /// if no DATA block group has enough free contiguous space.
+    pub fn reserve_data_extent(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        aligned_size: u64,
+        owner_root: u64,
+        owner_ino: u64,
+        owner_offset: u64,
+    ) -> io::Result<u64> {
+        let sectorsize = u64::from(fs_info.sectorsize);
+        if aligned_size == 0 {
+            return Err(io::Error::other(
+                "reserve_data_extent: aligned_size must be > 0",
+            ));
+        }
+        if !aligned_size.is_multiple_of(sectorsize) {
+            return Err(io::Error::other(format!(
+                "reserve_data_extent: aligned_size {aligned_size} not a \
+                 multiple of sectorsize {sectorsize}"
+            )));
+        }
+
+        // Find a region with enough contiguous free space. Same cursor
+        // logic as `alloc_data_extent` (and `alloc_block`).
         let kind = BlockGroupKind::Data;
         #[allow(clippy::map_entry)]
         if !self.alloc.contains_key(&kind) {
@@ -321,23 +382,10 @@ impl<R: Read + Write + Seek> Transaction<R> {
         debug_assert_eq!(
             logical % sectorsize,
             0,
-            "alloc_data_extent: address {logical:#x} not aligned to sectorsize {sectorsize}",
+            "reserve_data_extent: address {logical:#x} not aligned to \
+             sectorsize {sectorsize}",
         );
 
-        // Write the data to disk now (zero-padded to sector alignment).
-        // BlockReader::write_block fans out to all stripe copies.
-        if raw_len == aligned_size {
-            fs_info.reader_mut().write_block(logical, data)?;
-        } else {
-            let mut padded = Vec::with_capacity(aligned_size as usize);
-            padded.extend_from_slice(data);
-            padded.resize(aligned_size as usize, 0);
-            fs_info.reader_mut().write_block(logical, &padded)?;
-        }
-
-        // Queue the +1 EXTENT_DATA_REF. flush_delayed_refs will create
-        // the EXTENT_ITEM, update bytes_used, and record the range in
-        // bg_range_deltas for the FST.
         self.delayed_refs.add_data_ref(
             logical,
             aligned_size,
@@ -1556,6 +1604,98 @@ impl<R: Read + Write + Seek> Transaction<R> {
         fs_info.mark_dirty(leaf);
         path.release();
         Ok(())
+    }
+
+    /// Patch the `total_bytes` field of a device's `DEV_ITEM` in the
+    /// chunk tree (id 3) and mirror the change into the superblock's
+    /// embedded `dev_item` if `devid` matches the primary device.
+    ///
+    /// Returns the previous `total_bytes` value (for accounting at
+    /// the call site, e.g. updating `fs.superblock.total_bytes`).
+    ///
+    /// Used by:
+    /// - `mkfs --rootdir --shrink`: trim the device after rootdir
+    ///   population so the image is no larger than the chunk layout
+    ///   actually requires.
+    /// - `rescue fix-device-size`: re-align device totals when the
+    ///   on-disk values disagree with the underlying block device or
+    ///   image file (currently does its own version of this; can be
+    ///   migrated to this helper).
+    ///
+    /// The caller is responsible for setting `fs.superblock.total_bytes`
+    /// (the sum across all devices) — this helper only touches the
+    /// per-device `DEV_ITEM` and the superblock's embedded
+    /// `dev_item.total_bytes` (single-device convenience). For
+    /// multi-device callers, sum the per-device values manually.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `DEV_ITEM` for `devid` cannot be
+    /// found in the chunk tree, or if any tree operation fails.
+    pub fn set_device_total_bytes(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        devid: u64,
+        new_total: u64,
+    ) -> io::Result<u64> {
+        // Byte offset of `total_bytes` inside the on-disk
+        // `btrfs_dev_item`: it follows the leading u64 `devid`.
+        const TOTAL_BYTES_OFFSET: usize = 8;
+
+        let key = DiskKey {
+            objectid: u64::from(btrfs_disk::raw::BTRFS_DEV_ITEMS_OBJECTID),
+            key_type: KeyType::DeviceItem,
+            offset: devid,
+        };
+        let chunk_tree = u64::from(btrfs_disk::raw::BTRFS_CHUNK_TREE_OBJECTID);
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            chunk_tree,
+            &key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )?;
+        if !found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "set_device_total_bytes: DEV_ITEM for devid {devid} not found"
+            )));
+        }
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("set_device_total_bytes: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        let item_len = leaf.item_size(slot) as usize;
+        if item_len < TOTAL_BYTES_OFFSET + 8 {
+            path.release();
+            return Err(io::Error::other(format!(
+                "set_device_total_bytes: DEV_ITEM payload {item_len} bytes < {}",
+                TOTAL_BYTES_OFFSET + 8,
+            )));
+        }
+        let payload = leaf.item_data_mut(slot);
+        let old_total = u64::from_le_bytes(
+            payload[TOTAL_BYTES_OFFSET..TOTAL_BYTES_OFFSET + 8]
+                .try_into()
+                .unwrap(),
+        );
+        payload[TOTAL_BYTES_OFFSET..TOTAL_BYTES_OFFSET + 8]
+            .copy_from_slice(&new_total.to_le_bytes());
+        fs_info.mark_dirty(leaf);
+        path.release();
+
+        // Mirror into the superblock's embedded dev_item if this is
+        // the primary device. (For multi-device, the caller handles
+        // each device separately; only the primary's dev_item lives
+        // in the superblock.)
+        if fs_info.superblock.dev_item.devid == devid {
+            fs_info.superblock.dev_item.total_bytes = new_total;
+        }
+
+        Ok(old_total)
     }
 
     /// Mark a block as pinned (freed but not yet committed).

@@ -6,6 +6,36 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-mkfs`: `--rootdir --reflink` and `--rootdir --shrink` both
+  go through the new transactional walker now. Together with the
+  earlier subvol migration, this leaves only `--inode-flags` on the
+  legacy path.
+
+  `--shrink` (single-device only) computes the smallest size that
+  still covers the on-disk chunk layout via `ChunkLayout::new`,
+  patches `DEV_ITEM.total_bytes` and the superblock via the new
+  `Transaction::set_device_total_bytes` helper before the
+  transaction commits, then truncates the image after `fs.sync()`.
+  Verified by the existing `mkfs_rootdir_shrink` integration test
+  (now exercising the new path).
+
+  `--reflink` adds `Transaction::reserve_data_extent` (allocate a
+  data extent address + queue the `+1 EXTENT_DATA_REF` without
+  writing any bytes — `alloc_data_extent` now wraps it). The walker
+  opens a separate set of writeable device handles up front, then
+  for each file chunk: reserves an extent, walks the chunk cache
+  for per-stripe `(devid, physical)` placements, issues
+  `FICLONERANGE` from the source file into each device handle,
+  reads the cloned bytes back via `BlockReader::read_data` for
+  CRC32C csumming, inserts the matching `EXTENT_DATA` and
+  `EXTENT_CSUM` items, and bumps `INODE.nbytes`. RAID5/6 chunks
+  are rejected (parity isn't recomputed by FICLONERANGE);
+  compression is silently disabled when reflink is on (the recorded
+  compression byte and the cloned source bytes wouldn't agree).
+  New privileged test `mkfs_rootdir_reflink_on_btrfs` mounts a
+  btrfs workspace, runs `mkfs --rootdir --reflink` with both
+  source and destination inside it, and verifies the file reads
+  back identical after mounting the destination.
 - `btrfs-mkfs`: `--rootdir --subvol` now goes through the new
   transactional walker, in addition to the previously-migrated
   simple case. All four subvolume types (`rw` / `ro` / `default` /

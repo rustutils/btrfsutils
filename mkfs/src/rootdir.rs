@@ -1177,6 +1177,163 @@ pub fn apply_nbytes_updates(
     }
 }
 
+/// `--reflink` path for one file: reserve a data extent in the
+/// destination, FICLONERANGE the source bytes into each stripe's
+/// backing device, then insert `EXTENT_DATA` + `EXTENT_CSUM`
+/// records and bump `INODE.nbytes`.
+///
+/// The source file is read once per chunk via FICLONERANGE
+/// (zero-copy clone of extents — both source and destination must
+/// be on a filesystem that supports it, typically btrfs). The
+/// destination bytes are read back via `BlockReader::read_data` to
+/// compute checksums; this is one extra read per chunk but matches
+/// what the legacy `--reflink` path did.
+///
+/// Compression is unsupported on this path (the recorded extent
+/// `compression` byte would have to match the on-disk bytes, but
+/// FICLONERANGE clones source bytes verbatim — the result would be
+/// inconsistent). The caller is expected to suppress the user's
+/// compress setting when routing here.
+///
+/// RAID5 / RAID6 are unsupported: the new bytes would land in the
+/// data column but parity isn't recomputed by FICLONERANGE.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // chunked loop with reserve / clone / csum / extent / nbytes steps
+#[allow(clippy::cast_possible_truncation)] // aligned_size fits in usize for any practical chunk
+fn reflink_file_to_transaction<R>(
+    fs: &mut btrfs_transaction::Filesystem<R>,
+    trans: &mut btrfs_transaction::Transaction<R>,
+    src_path: &Path,
+    src_size: u64,
+    tree_id: u64,
+    inode: u64,
+    nodatasum: bool,
+    device_handles: &BTreeMap<u64, std::fs::File>,
+) -> Result<()>
+where
+    R: std::io::Read + std::io::Write + std::io::Seek,
+{
+    use btrfs_disk::{
+        chunk::WritePlan,
+        items::{CompressionType, FileExtentItem},
+    };
+    use std::os::unix::io::AsRawFd;
+
+    const MAX_EXTENT_SIZE: u64 = 1024 * 1024;
+    let sectorsize = u64::from(fs.sectorsize);
+
+    let src_file = fs::File::open(src_path).with_context(|| {
+        format!("--reflink: cannot open source '{}'", src_path.display())
+    })?;
+
+    let mut file_offset = 0u64;
+    let mut bytes_left = src_size;
+    while bytes_left > 0 {
+        let chunk_len = bytes_left.min(MAX_EXTENT_SIZE);
+        let aligned_size = align_up(chunk_len, sectorsize);
+
+        let logical = trans
+            .reserve_data_extent(fs, aligned_size, tree_id, inode, file_offset)
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "reserve_data_extent for '{}': {e}",
+                    src_path.display()
+                )
+            })?;
+
+        let plan = fs
+            .reader()
+            .chunk_cache()
+            .plan_write(logical, aligned_size as usize)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--reflink: no chunk plan for logical {logical:#x}"
+                )
+            })?;
+        let placements = match plan {
+            WritePlan::Plain(p) => p,
+            WritePlan::Parity(_) => {
+                anyhow::bail!(
+                    "--reflink is not supported on RAID5/RAID6 chunks"
+                );
+            }
+        };
+
+        for placement in &placements {
+            let dev_file =
+                device_handles.get(&placement.devid).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "--reflink: no open handle for devid {}",
+                        placement.devid
+                    )
+                })?;
+            let src_off = file_offset + placement.buf_offset as u64;
+            ficlonerange(
+                src_file.as_raw_fd(),
+                src_off,
+                placement.len as u64,
+                dev_file.as_raw_fd(),
+                placement.physical,
+            )
+            .with_context(|| {
+                format!(
+                    "FICLONERANGE failed for '{}' to device {}; \
+                     source and image must be on the same filesystem",
+                    src_path.display(),
+                    placement.devid
+                )
+            })?;
+        }
+
+        if !nodatasum {
+            let on_disk =
+                fs.reader_mut().read_data(logical, aligned_size as usize)?;
+            trans.insert_csums(fs, logical, &on_disk).map_err(|e| {
+                anyhow::anyhow!(
+                    "insert_csums after reflink of '{}': {e}",
+                    src_path.display()
+                )
+            })?;
+        }
+
+        // Reflink stores raw bytes (no compression).
+        let extent_data = FileExtentItem::to_bytes_regular(
+            trans.transid,
+            aligned_size,
+            CompressionType::None,
+            false,
+            logical,
+            aligned_size,
+            0,
+            aligned_size,
+        );
+        trans
+            .insert_file_extent(fs, tree_id, inode, file_offset, &extent_data)
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "insert_file_extent (reflink) for '{}': {e}",
+                    src_path.display()
+                )
+            })?;
+
+        let nbytes_delta = i64::try_from(aligned_size)
+            .map_err(|_| anyhow::anyhow!("--reflink: aligned_size overflow"))?;
+        trans
+            .update_inode_nbytes(fs, tree_id, inode, nbytes_delta)
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "update_inode_nbytes after reflink of '{}': {e}",
+                    src_path.display()
+                )
+            })?;
+
+        file_offset += aligned_size;
+        bytes_left = bytes_left.saturating_sub(chunk_len);
+    }
+
+    Ok(())
+}
+
 /// Walk `rootdir` depth-first and apply each entry to an open
 /// filesystem via the transaction crate.
 ///
@@ -1220,6 +1377,7 @@ pub fn walk_to_transaction<R>(
     now_sec: u64,
     compress: CompressConfig,
     subvol_args: &[SubvolArg],
+    reflink_handles: Option<&BTreeMap<u64, std::fs::File>>,
 ) -> Result<()>
 where
     R: std::io::Read + std::io::Write + std::io::Seek,
@@ -1250,6 +1408,7 @@ where
         now_sec,
         compress,
         &main_boundaries,
+        reflink_handles,
     )?;
 
     // Process deferred subvolumes; nested subvols append to the
@@ -1307,6 +1466,7 @@ where
             now_sec,
             compress,
             &sub_boundaries,
+            reflink_handles,
         )?;
         deferred.extend(nested);
 
@@ -1356,6 +1516,7 @@ fn walk_one_tree_to_transaction<R>(
     now_sec: u64,
     compress: CompressConfig,
     subvol_boundaries: &HashMap<PathBuf, (u64, SubvolType)>,
+    reflink_handles: Option<&BTreeMap<u64, std::fs::File>>,
 ) -> Result<Vec<DeferredSubvol>>
 where
     R: std::io::Read + std::io::Write + std::io::Seek,
@@ -1595,34 +1756,54 @@ where
                     )
                 })?;
         } else if meta.is_file() && size > 0 {
-            use btrfs_disk::items::CompressionType;
-            let comp = match compress.algorithm {
-                CompressAlgorithm::No => None,
-                CompressAlgorithm::Zlib => Some(CompressionType::Zlib),
-                CompressAlgorithm::Lzo => Some(CompressionType::Lzo),
-                CompressAlgorithm::Zstd => Some(CompressionType::Zstd),
-            };
-            let mut data = Vec::with_capacity(size as usize);
-            let mut f = fs::File::open(&host_path).with_context(|| {
-                format!("cannot open '{}'", host_path.display())
-            })?;
-            f.read_to_end(&mut data)?;
-            trans
-                .write_file_data(
+            if let Some(handles) = reflink_handles {
+                // --reflink: skip the byte copy and FICLONERANGE the
+                // source extents into each stripe's backing device.
+                // Compression is incompatible with reflink (the extent
+                // bytes on disk would be the source's uncompressed
+                // bytes regardless of the recorded compression byte),
+                // so we ignore the user's compress setting here and
+                // store the raw bytes uncompressed.
+                reflink_file_to_transaction(
                     fs,
+                    trans,
+                    &host_path,
+                    size,
                     root_objectid,
                     btrfs_ino,
-                    0,
-                    &data,
                     /* nodatasum */ false,
-                    comp,
-                )
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "write_file_data for '{}': {e}",
-                        host_path.display()
-                    )
+                    handles,
+                )?;
+            } else {
+                use btrfs_disk::items::CompressionType;
+                let comp = match compress.algorithm {
+                    CompressAlgorithm::No => None,
+                    CompressAlgorithm::Zlib => Some(CompressionType::Zlib),
+                    CompressAlgorithm::Lzo => Some(CompressionType::Lzo),
+                    CompressAlgorithm::Zstd => Some(CompressionType::Zstd),
+                };
+                let mut data = Vec::with_capacity(size as usize);
+                let mut f = fs::File::open(&host_path).with_context(|| {
+                    format!("cannot open '{}'", host_path.display())
                 })?;
+                f.read_to_end(&mut data)?;
+                trans
+                    .write_file_data(
+                        fs,
+                        root_objectid,
+                        btrfs_ino,
+                        0,
+                        &data,
+                        /* nodatasum */ false,
+                        comp,
+                    )
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "write_file_data for '{}': {e}",
+                            host_path.display()
+                        )
+                    })?;
+            }
         }
     }
 

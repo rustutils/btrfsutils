@@ -2646,6 +2646,67 @@ fn mkfs_rootdir_subvols() {
     );
 }
 
+/// Test --rootdir --reflink end-to-end on an actual btrfs filesystem.
+///
+/// FICLONERANGE requires both source and destination on a filesystem
+/// that supports it (typically btrfs). To exercise the path for real,
+/// this test mounts a btrfs workspace, creates the source rootdir
+/// AND the destination image inside it, runs `mkfs --rootdir
+/// --reflink`, then mounts the destination and verifies file content
+/// reads back correctly.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mkfs_rootdir_reflink_on_btrfs() {
+    let outer = tempdir().unwrap();
+
+    // Mount::new mounts at base_dir.join("mnt"), so each Mount needs
+    // a distinct base. Outer btrfs workspace gets `outer/ws`, dest
+    // mount gets `outer/dest`.
+    let workspace_base = outer.path().join("ws");
+    std::fs::create_dir_all(&workspace_base).unwrap();
+    let workspace_img = BackingFile::new(
+        &workspace_base,
+        "workspace.img",
+        1024 * 1024 * 1024,
+    );
+    workspace_img.mkfs();
+    let workspace_lo = LoopbackDevice::new(workspace_img);
+    let workspace_mnt = Mount::new(workspace_lo, &workspace_base);
+    let workspace = workspace_mnt.path();
+
+    // Source rootdir + 1 MB payload (large enough to need a regular
+    // extent rather than going inline).
+    let rootdir = workspace.join("rootdir");
+    std::fs::create_dir_all(&rootdir).unwrap();
+    let payload = vec![0xCDu8; 1024 * 1024];
+    std::fs::write(rootdir.join("data.bin"), &payload).unwrap();
+
+    // Destination image inside the same btrfs mount so source and
+    // dest share a filesystem (FICLONERANGE precondition).
+    let dest_img = BackingFile::new(workspace, "dest.img", 512 * 1024 * 1024);
+    dest_img.mkfs_rootdir(&our_mkfs_bin(), &rootdir, &["--reflink"]);
+
+    let dest_lo = LoopbackDevice::new(dest_img);
+    let dest_base = outer.path().join("dest");
+    std::fs::create_dir_all(&dest_base).unwrap();
+    let dest_mnt = Mount::new(dest_lo, &dest_base);
+    let dest_mp = dest_mnt.path();
+
+    // The cloned file reads back identical to the source.
+    let read = std::fs::read(dest_mp.join("data.bin")).unwrap();
+    assert_eq!(read.len(), payload.len());
+    assert_eq!(read, payload);
+
+    // Drop the inner mount + loop device + image (which lives inside
+    // the workspace mount) explicitly, with a `sync` between, so the
+    // workspace mount has nothing holding it open by the time the
+    // outer Mount RAII guard runs its umount.
+    drop(dest_mnt);
+    let _ = std::process::Command::new("sync").status();
+    // dest_lo drops here, detaching the loop device and removing the
+    // backing file (dest.img) from inside the workspace.
+}
+
 /// Set a single extended attribute via `setxattr(2)`.
 fn set_user_xattr(path: &Path, name: &str, value: &[u8]) {
     let c_path =

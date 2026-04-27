@@ -501,20 +501,58 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
 /// / `XATTR_ITEM` and inline / regular `EXTENT_DATA` records via the
 /// transaction crate's high-level helpers), and commits.
 ///
-/// Only handles the simple case (no `--subvol`, no `--reflink`, no
-/// `--shrink`, no `--inode-flags`); the dispatch in
-/// [`make_btrfs_with_rootdir`] gates this.
+/// `opts.shrink` (single-device only) patches the device's
+/// `DEV_ITEM.total_bytes` and the superblock to the smallest size
+/// that still covers the on-disk chunk layout, then truncates the
+/// image after sync. `opts.reflink` opens a separate set of
+/// writeable device handles and threads them into the walker so
+/// `FICLONERANGE` can clone source bytes into each stripe slot.
+/// Inode-flags still route to the legacy walker.
+#[allow(clippy::too_many_lines)]
 fn make_btrfs_with_rootdir_via_transaction(
     cfg: &MkfsConfig,
     rootdir: &Path,
     compress: rootdir::CompressConfig,
     subvol_args: &[crate::args::SubvolArg],
+    opts: RootdirOptions,
 ) -> Result<()> {
     use btrfs_transaction::{Filesystem, Transaction};
     use std::collections::BTreeMap;
 
     let now = cfg.now_secs();
     make_btrfs(cfg).context("make_btrfs (empty bootstrap)")?;
+
+    // Shrink is single-device only. Compute the target size up
+    // front from the chunk layout (deterministic given cfg, so this
+    // matches what `make_btrfs` already laid out).
+    let shrunk_size = if opts.shrink && cfg.devices.len() == 1 {
+        Some(compute_shrunk_size(cfg)?)
+    } else {
+        None
+    };
+
+    // For --reflink: open a separate set of writeable file handles
+    // per device so the walker can issue FICLONERANGE without
+    // contending for ownership of the handles consumed by
+    // `Filesystem::open*`.
+    let reflink_handles: Option<BTreeMap<u64, File>> = if opts.reflink {
+        let mut handles: BTreeMap<u64, File> = BTreeMap::new();
+        for dev in &cfg.devices {
+            let file = OpenOptions::new()
+                .write(true)
+                .open(&dev.path)
+                .with_context(|| {
+                    format!(
+                        "--reflink: cannot open {} for FICLONERANGE",
+                        dev.path.display()
+                    )
+                })?;
+            handles.insert(dev.devid, file);
+        }
+        Some(handles)
+    } else {
+        None
+    };
 
     if cfg.devices.len() == 1 {
         let file = OpenOptions::new()
@@ -538,7 +576,20 @@ fn make_btrfs_with_rootdir_via_transaction(
             now,
             compress,
             subvol_args,
+            reflink_handles.as_ref(),
         )?;
+        if let Some(shrunk) = shrunk_size {
+            trans
+                .set_device_total_bytes(
+                    &mut fs,
+                    cfg.devices[0].devid,
+                    shrunk,
+                )
+                .with_context(|| {
+                    "transactional rootdir: set_device_total_bytes for --shrink"
+                })?;
+            fs.superblock.total_bytes = shrunk;
+        }
         trans
             .commit(&mut fs)
             .context("transactional rootdir: commit")?;
@@ -576,6 +627,7 @@ fn make_btrfs_with_rootdir_via_transaction(
             now,
             compress,
             subvol_args,
+            reflink_handles.as_ref(),
         )?;
         trans
             .commit(&mut fs)
@@ -583,7 +635,60 @@ fn make_btrfs_with_rootdir_via_transaction(
         fs.sync().context("transactional rootdir: fsync")?;
     }
 
+    // Truncate the image after sync so a crash leaves either the
+    // pre-shrink superblock (image still longer than the new
+    // total_bytes — kernel ignores the tail) or the post-shrink one
+    // (image already truncated — also consistent).
+    if let Some(shrunk) = shrunk_size {
+        let f = OpenOptions::new()
+            .write(true)
+            .open(&cfg.devices[0].path)
+            .with_context(|| {
+                format!(
+                    "failed to reopen {} for --shrink truncate",
+                    cfg.devices[0].path.display()
+                )
+            })?;
+        f.set_len(shrunk).context("--shrink: set_len")?;
+    }
+
     Ok(())
+}
+
+/// Compute the smallest size the single device can be truncated to
+/// without losing any chunk data. Mirrors the legacy `--shrink`
+/// computation in `make_btrfs_with_rootdir`: walk the chunk layout
+/// to find the last physical byte used by any chunk, then sectorsize-
+/// align.
+fn compute_shrunk_size(cfg: &MkfsConfig) -> Result<u64> {
+    debug_assert_eq!(cfg.devices.len(), 1);
+    let dev = &cfg.devices[0];
+    let chunk_devs: Vec<ChunkDevice> = cfg
+        .devices
+        .iter()
+        .map(|d| ChunkDevice {
+            devid: d.devid,
+            total_bytes: d.total_bytes,
+            dev_uuid: d.dev_uuid,
+        })
+        .collect();
+    let chunks =
+        ChunkLayout::new(&chunk_devs, cfg.metadata_profile, cfg.data_profile)
+            .ok_or_else(|| {
+            anyhow::anyhow!("compute_shrunk_size: chunk layout failed")
+        })?;
+    let mut phys_end = SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE;
+    for s in &chunks.meta_stripes {
+        if s.devid == dev.devid {
+            phys_end = phys_end.max(s.offset + chunks.meta_size);
+        }
+    }
+    for s in &chunks.data_stripes {
+        if s.devid == dev.devid {
+            phys_end = phys_end.max(s.offset + chunks.data_size);
+        }
+    }
+    Ok(rootdir::align_up(phys_end, u64::from(cfg.sectorsize)))
 }
 
 /// Create a btrfs filesystem populated from a source directory.
@@ -626,15 +731,17 @@ pub fn make_btrfs_with_rootdir(
     }
 
     // Route through the transaction-based path unless the user
-    // requests a feature the new walker doesn't yet support:
-    // FICLONERANGE reflink, image shrink, or per-path inode flags.
-    // Subvolumes (`--subvol`) are now handled.
-    if !opts.reflink && !opts.shrink && inode_flags.is_empty() {
+    // requests `--inode-flags`, which the new walker doesn't yet
+    // support. Subvolumes (`--subvol`), image shrink (`--shrink`),
+    // and FICLONERANGE reflink (`--reflink`) all run through the
+    // transactional walker now.
+    if inode_flags.is_empty() {
         return make_btrfs_with_rootdir_via_transaction(
             cfg,
             rootdir,
             compress,
             subvol_args,
+            opts,
         );
     }
 
