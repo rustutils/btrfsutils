@@ -11,7 +11,13 @@ All notable changes to this project will be documented in this file.
   `read`, `readlink`, `getattr`, `xattr_get`/`xattr_list`, and
   `statfs`. FUSE-independent — drives the `btrfs-fuse` mount and any
   other embedder. Inodes are modelled as `(SubvolId, ino)` to leave
-  room for multi-subvolume traversal.
+  room for multi-subvolume traversal. The handle is `Clone` (cheap
+  `Arc` bump) and all operations take `&self`, so multiple worker
+  threads can drive the same filesystem concurrently. I/O still
+  serialises on a single internal mutex today, but that's an
+  implementation detail — future work (per-thread readers, lock-free
+  cache hits) won't change the API. `R: Read + Seek + Send` is the
+  bound; for `File` and `Cursor<Vec<u8>>` it's free.
 
 ### Changed
 
@@ -22,7 +28,8 @@ All notable changes to this project will be documented in this file.
   should depend on `btrfs-fs` directly. The `read.rs`, `xattr.rs`,
   `dir.rs`, and `stat.rs` modules — and the dependencies on
   `flate2`/`zstd`/`lzokay`/`btrfs-disk`/`libc` — are gone from
-  `fuse/`.
+  `fuse/`. The outer `Mutex<Filesystem<File>>` in `BtrfsFuse` is also
+  gone now that `Filesystem` is `&self`-callable.
 
 ## 0.12.0
 

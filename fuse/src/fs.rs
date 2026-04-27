@@ -17,10 +17,7 @@ use fuser::{
     Generation, INodeNo, LockOwner, OpenFlags, ReplyAttr, ReplyData,
     ReplyDirectory, ReplyEntry, ReplyStatfs, ReplyXattr, Request,
 };
-use std::{
-    ffi::OsStr, fs::File, io, os::unix::ffi::OsStrExt, sync::Mutex,
-    time::Duration,
-};
+use std::{ffi::OsStr, fs::File, io, os::unix::ffi::OsStrExt, time::Duration};
 
 const TTL: Duration = Duration::from_secs(1);
 
@@ -28,7 +25,7 @@ const TTL: Duration = Duration::from_secs(1);
 const FS_TREE_OBJECTID: u64 = 5;
 
 pub struct BtrfsFuse {
-    fs: Mutex<Filesystem<File>>,
+    fs: Filesystem<File>,
     blksize: u32,
 }
 
@@ -37,10 +34,7 @@ impl BtrfsFuse {
     pub fn open(file: File) -> Result<Self> {
         let fs = Filesystem::open(file)?;
         let blksize = fs.blksize();
-        Ok(Self {
-            fs: Mutex::new(fs),
-            blksize,
-        })
+        Ok(Self { fs, blksize })
     }
 }
 
@@ -92,8 +86,7 @@ impl FuserFilesystem for BtrfsFuse {
         reply: ReplyEntry,
     ) {
         let parent_ino = fuse_inode(parent.0);
-        let mut fs = self.fs.lock().unwrap();
-        match fs.lookup(parent_ino, name.as_bytes()) {
+        match self.fs.lookup(parent_ino, name.as_bytes()) {
             Ok(Some((ino, item))) => {
                 let fuse_ino = inode::btrfs_to_fuse(ino.ino);
                 let stat = Stat::from_inode(ino, &item, self.blksize);
@@ -123,8 +116,7 @@ impl FuserFilesystem for BtrfsFuse {
         reply: ReplyAttr,
     ) {
         let target = fuse_inode(ino.0);
-        let mut fs = self.fs.lock().unwrap();
-        match fs.getattr(target) {
+        match self.fs.getattr(target) {
             Ok(Some(stat)) => reply.attr(&TTL, &to_file_attr(ino.0, &stat)),
             Ok(None) => reply.error(Errno::ENOENT),
             Err(e) => {
@@ -143,8 +135,7 @@ impl FuserFilesystem for BtrfsFuse {
         mut reply: ReplyDirectory,
     ) {
         let dir_ino = fuse_inode(ino.0);
-        let mut fs = self.fs.lock().unwrap();
-        let entries = match fs.readdir(dir_ino, offset) {
+        let entries = match self.fs.readdir(dir_ino, offset) {
             Ok(v) => v,
             Err(e) => {
                 log::warn!("readdir ino={} offset={offset}: {e}", ino.0);
@@ -168,8 +159,7 @@ impl FuserFilesystem for BtrfsFuse {
 
     fn readlink(&self, _req: &Request, ino: INodeNo, reply: ReplyData) {
         let target = fuse_inode(ino.0);
-        let mut fs = self.fs.lock().unwrap();
-        match fs.readlink(target) {
+        match self.fs.readlink(target) {
             Ok(Some(t)) => reply.data(&t),
             Ok(None) => {
                 log::warn!("readlink ino={}: no inline extent found", ino.0);
@@ -194,8 +184,7 @@ impl FuserFilesystem for BtrfsFuse {
         reply: ReplyData,
     ) {
         let target = fuse_inode(ino.0);
-        let mut fs = self.fs.lock().unwrap();
-        match fs.read(target, offset, size) {
+        match self.fs.read(target, offset, size) {
             Ok(data) => reply.data(&data),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 reply.error(Errno::ENOENT);
@@ -218,8 +207,7 @@ impl FuserFilesystem for BtrfsFuse {
         reply: ReplyXattr,
     ) {
         let target = fuse_inode(ino.0);
-        let mut fs = self.fs.lock().unwrap();
-        let names = match fs.xattr_list(target) {
+        let names = match self.fs.xattr_list(target) {
             Ok(v) => v,
             Err(e) => {
                 log::warn!("listxattr ino={}: {e}", ino.0);
@@ -253,8 +241,7 @@ impl FuserFilesystem for BtrfsFuse {
         reply: ReplyXattr,
     ) {
         let target = fuse_inode(ino.0);
-        let mut fs = self.fs.lock().unwrap();
-        match fs.xattr_get(target, name.as_bytes()) {
+        match self.fs.xattr_get(target, name.as_bytes()) {
             Ok(Some(value)) =>
             {
                 #[allow(clippy::cast_possible_truncation)]
@@ -279,7 +266,7 @@ impl FuserFilesystem for BtrfsFuse {
     }
 
     fn statfs(&self, _req: &Request, _ino: INodeNo, reply: ReplyStatfs) {
-        let s = self.fs.lock().unwrap().statfs();
+        let s = self.fs.statfs();
         reply.statfs(
             s.blocks, s.bfree, s.bavail, 0, 0, s.bsize, s.namelen, s.frsize,
         );

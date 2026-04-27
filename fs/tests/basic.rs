@@ -77,7 +77,7 @@ fn open_fixture() -> Filesystem<File> {
 
 #[test]
 fn lookup_finds_file_in_root() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (_ino, item) = fs.lookup(root, b"hello.txt").unwrap().unwrap();
     assert_eq!(item.size, 13); // "hello, world\n"
@@ -85,7 +85,7 @@ fn lookup_finds_file_in_root() {
 
 #[test]
 fn lookup_returns_none_for_missing_name() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let result = fs.lookup(root, b"does-not-exist").unwrap();
     assert!(result.is_none());
@@ -93,7 +93,7 @@ fn lookup_returns_none_for_missing_name() {
 
 #[test]
 fn lookup_finds_subdir() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (_ino, item) = fs.lookup(root, b"subdir").unwrap().unwrap();
     assert_eq!(item.mode & libc::S_IFMT, libc::S_IFDIR);
@@ -101,7 +101,7 @@ fn lookup_finds_subdir() {
 
 #[test]
 fn lookup_finds_symlink() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (_ino, item) = fs.lookup(root, b"link").unwrap().unwrap();
     assert_eq!(item.mode & libc::S_IFMT, libc::S_IFLNK);
@@ -111,7 +111,7 @@ fn lookup_finds_symlink() {
 
 #[test]
 fn getattr_of_root_is_directory() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let stat = fs.getattr(root).unwrap().expect("root must exist");
     assert_eq!(stat.kind, FileKind::Directory);
@@ -119,7 +119,7 @@ fn getattr_of_root_is_directory() {
 
 #[test]
 fn getattr_returns_none_for_missing_ino() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let bogus = btrfs_fs::Inode {
         subvol: root.subvol,
@@ -133,7 +133,7 @@ fn getattr_returns_none_for_missing_ino() {
 
 #[test]
 fn readdir_root_lists_all_entries() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let entries = fs.readdir(root, 0).unwrap();
     let names: Vec<&[u8]> = entries.iter().map(|e| e.name.as_slice()).collect();
@@ -149,7 +149,7 @@ fn readdir_root_lists_all_entries() {
 
 #[test]
 fn readdir_pagination_skips_dot() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     // Starting at offset 1 should skip ".".
     let entries = fs.readdir(root, 1).unwrap();
@@ -160,7 +160,7 @@ fn readdir_pagination_skips_dot() {
 
 #[test]
 fn readdir_subdir_parent_is_root() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (sub, _) = fs.lookup(root, b"subdir").unwrap().unwrap();
     let entries = fs.readdir(sub, 0).unwrap();
@@ -174,7 +174,7 @@ fn readdir_subdir_parent_is_root() {
 
 #[test]
 fn read_small_file_returns_full_contents() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (ino, _) = fs.lookup(root, b"hello.txt").unwrap().unwrap();
     let data = fs.read(ino, 0, 1024).unwrap();
@@ -183,7 +183,7 @@ fn read_small_file_returns_full_contents() {
 
 #[test]
 fn read_empty_file_returns_empty() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (ino, _) = fs.lookup(root, b"empty.txt").unwrap().unwrap();
     let data = fs.read(ino, 0, 1024).unwrap();
@@ -192,7 +192,7 @@ fn read_empty_file_returns_empty() {
 
 #[test]
 fn read_large_file_returns_full_contents() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (ino, _) = fs.lookup(root, b"large.bin").unwrap().unwrap();
     let data = fs.read(ino, 0, 200_000).unwrap();
@@ -202,7 +202,7 @@ fn read_large_file_returns_full_contents() {
 
 #[test]
 fn read_large_file_with_offset_and_partial_size() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (ino, _) = fs.lookup(root, b"large.bin").unwrap().unwrap();
     let data = fs.read(ino, 50_000, 10_000).unwrap();
@@ -212,7 +212,7 @@ fn read_large_file_with_offset_and_partial_size() {
 
 #[test]
 fn read_past_eof_returns_empty() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (ino, _) = fs.lookup(root, b"hello.txt").unwrap().unwrap();
     let data = fs.read(ino, 1000, 100).unwrap();
@@ -221,7 +221,7 @@ fn read_past_eof_returns_empty() {
 
 #[test]
 fn read_nested_file_in_subdir() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (sub, _) = fs.lookup(root, b"subdir").unwrap().unwrap();
     let (file, _) = fs.lookup(sub, b"nested.txt").unwrap().unwrap();
@@ -233,7 +233,7 @@ fn read_nested_file_in_subdir() {
 
 #[test]
 fn readlink_returns_target_path() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (ino, _) = fs.lookup(root, b"link").unwrap().unwrap();
     let target = fs.readlink(ino).unwrap();
@@ -244,7 +244,7 @@ fn readlink_returns_target_path() {
 
 #[test]
 fn xattr_list_and_get_if_supported() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (ino, _) = fs.lookup(root, b"hello.txt").unwrap().unwrap();
     let names = fs.xattr_list(ino).unwrap();
@@ -266,7 +266,7 @@ fn xattr_list_and_get_if_supported() {
 
 #[test]
 fn xattr_get_returns_none_for_missing_name() {
-    let mut fs = open_fixture();
+    let fs = open_fixture();
     let root = fs.root();
     let (ino, _) = fs.lookup(root, b"hello.txt").unwrap().unwrap();
     let value = fs.xattr_get(ino, b"user.does-not-exist").unwrap();
@@ -286,4 +286,42 @@ fn statfs_returns_sensible_values() {
     assert_eq!(s.bsize, 4096);
     assert_eq!(s.namelen, 255);
     assert_eq!(s.frsize, 4096);
+}
+
+// ── concurrency ─────────────────────────────────────────────────────
+
+/// `Filesystem` is `Clone` (cheap `Arc` bump) and exposes `&self` ops,
+/// so multiple worker threads can drive the same handle. This test
+/// fans out a directory scan + N file reads across threads to make
+/// sure the API actually composes that way.
+#[test]
+fn filesystem_handle_is_send_sync_and_clones() {
+    let fs = open_fixture();
+    let entries = fs.readdir(fs.root(), 0).unwrap();
+    let names: Vec<Vec<u8>> = entries
+        .iter()
+        .filter(|e| e.name != b"." && e.name != b"..")
+        .map(|e| e.name.clone())
+        .collect();
+
+    let handles: Vec<_> = names
+        .into_iter()
+        .map(|name| {
+            let fs = fs.clone();
+            std::thread::spawn(move || {
+                let root = fs.root();
+                if let Some((ino, item)) = fs.lookup(root, &name).unwrap() {
+                    let _ = fs.read(ino, 0, item.size as u32).unwrap();
+                    let _ = fs.getattr(ino).unwrap();
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    /// Compile-time proof that the type is `Send + Sync`.
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<btrfs_fs::Filesystem<File>>();
 }
