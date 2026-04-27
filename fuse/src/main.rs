@@ -83,7 +83,7 @@ fn main() -> Result<()> {
 
     // TODO: respect `--foreground=false` once we add a daemonize path.
     let _ = args.foreground;
-    fuser::mount2(fs, &args.mountpoint, &config).with_context(|| {
+    fuser::mount(fs, &args.mountpoint, &config).with_context(|| {
         format!("mounting at {}", args.mountpoint.display())
     })?;
     Ok(())

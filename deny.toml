@@ -62,7 +62,10 @@ skip-tree = []
 unknown-registry = "warn"
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# Pinned to a specific commit on xfbs/fuser carrying the
+# `ReplyIoctl::retry` API (PR pending upstream). Drop once the
+# next `fuser` release ships with that API.
+allow-git = ["https://github.com/xfbs/fuser.git"]
 
 [sources.allow-org]
 github = []

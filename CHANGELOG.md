@@ -122,6 +122,18 @@ All notable changes to this project will be documented in this file.
   API). Unknown ioctls return `ENOTTY`. `fuse/src/ioctl.rs` re-derives
   the ioctl numbers via const `_IOR` helpers since bindgen doesn't
   expand the macro family.
+- `btrfs-fuse` now depends on a `fuser` git fork
+  ([xfbs/fuser PR](https://github.com/xfbs/fuser), pinned to commit
+  `37bfb7f`) carrying a `ReplyIoctl::retry(in_iovs, out_iovs)` API
+  plus a new `arg: u64` parameter on the `Filesystem::ioctl`
+  callback. This unblocks variable-size btrfs ioctls
+  (`TREE_SEARCH_V2`, `LOGICAL_INO_V2`, `INO_PATHS`,
+  `GET_SUBVOL_ROOTREF`) that exceed the 14-bit size field encoded
+  in the ioctl number. The git dep means `btrfs-fuse` is marked
+  `publish = false` until upstream merges and ships a release;
+  the other workspace crates publish normally because none depend
+  on `fuser`. `cargo deny`'s `allow-git` list explicitly permits
+  the fork URL.
 - `btrfs-fuse`: F6.2 (fixed-size subset). Two more ioctl handlers:
   `BTRFS_IOC_DEV_INFO` (per-device geometry) and
   `BTRFS_IOC_INO_LOOKUP` (objectid → path resolution by walking

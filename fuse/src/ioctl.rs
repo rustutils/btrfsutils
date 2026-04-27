@@ -31,7 +31,7 @@
 
 use btrfs_fs::{Filesystem, Inode, SubvolId};
 use bytes::{Buf, BufMut};
-use fuser::Errno;
+use fuser::{Errno, IoctlFlags, IoctlIovec};
 use std::fs::File;
 
 // ── ioctl number encoding ─────────────────────────────────────────
@@ -84,22 +84,34 @@ pub const BTRFS_IOC_INO_LOOKUP: u32 = iowr(BTRFS_MAGIC, 18, INO_LOOKUP_SIZE);
 
 // ── handlers ──────────────────────────────────────────────────────
 
-/// Outcome of an ioctl dispatch: either bytes to return to userspace
-/// (success) or an [`Errno`] for the FUSE adapter to forward.
+/// Outcome of an ioctl dispatch: bytes to return to userspace,
+/// an [`Errno`] for the FUSE adapter to forward, or a
+/// `FUSE_IOCTL_RETRY` request describing the userspace iovecs the
+/// kernel should re-send the ioctl with.
 pub enum IoctlOutcome {
     Ok(Vec<u8>),
     Err(Errno),
+    Retry {
+        in_iovs: Vec<IoctlIovec>,
+        out_iovs: Vec<IoctlIovec>,
+    },
 }
 
 /// Decode `cmd` and dispatch to the matching handler. Unknown ioctls
 /// produce `ENOTTY`, the standard "no such ioctl" return.
 ///
-/// `in_data` carries the input portion of `_IOWR` ioctls (`devid`
-/// for `DEV_INFO`, `treeid`+`objectid` for `INO_LOOKUP`, etc.).
+/// `arg` is the userspace pointer the ioctl was called with — used
+/// by handlers that respond with `FUSE_IOCTL_RETRY` (variable-size
+/// buffers). `flags` indicates whether this is the first call or
+/// the post-retry pass with `FUSE_IOCTL_UNRESTRICTED` set.
+/// `in_data` carries the input portion (`devid` for `DEV_INFO`,
+/// `treeid`+`objectid` for `INO_LOOKUP`, etc.).
 pub async fn dispatch(
     fs: &Filesystem<File>,
     target: Inode,
     cmd: u32,
+    _arg: u64,
+    _flags: IoctlFlags,
     in_data: &[u8],
 ) -> IoctlOutcome {
     match cmd {

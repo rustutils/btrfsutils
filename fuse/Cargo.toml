@@ -8,6 +8,11 @@ homepage.workspace = true
 description = "Userspace FUSE driver for btrfs, built on btrfs-disk."
 readme = "README.md"
 rust-version = "1.87"
+# Depends on a git fork of `fuser` carrying the `ReplyIoctl::retry`
+# API (PR pending upstream). cargo refuses to publish crates with
+# git deps; flip back to `true` once the upstream `fuser` release
+# ships with the API and we can switch to the registry version.
+publish = false
 
 # Linux-only (depends on `fuser`, which targets FUSE on Linux).
 [package.metadata.docs.rs]
@@ -23,7 +28,13 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
-fuser = { version = "0.17" }
+# Pinned to xfbs/fuser PR carrying `ReplyIoctl::retry` and the
+# `arg: u64` parameter on `Filesystem::ioctl`. Needed for
+# variable-size btrfs ioctls (TREE_SEARCH_V2, INO_PATHS, ...).
+# Replace with the next published `fuser` (≥ 0.18 once the PR
+# lands) and drop the git source. Version pin satisfies
+# `cargo deny`'s wildcard check.
+fuser = { version = "0.17", git = "https://github.com/xfbs/fuser.git", rev = "37bfb7fdc7f454c70c54c931ef75c71240c0ddea" }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 bytes = { workspace = true }
 libc = { workspace = true }
