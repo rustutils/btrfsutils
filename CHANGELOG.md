@@ -134,6 +134,21 @@ All notable changes to this project will be documented in this file.
   the other workspace crates publish normally because none depend
   on `fuser`. `cargo deny`'s `allow-git` list explicitly permits
   the fork URL.
+- `btrfs-fs`: `Filesystem::tree_search(filter, max_buf_size)`
+  walks any subvolume tree (or the root tree, id 1) and returns
+  matching items. Mirrors the kernel
+  `BTRFS_IOC_TREE_SEARCH_V2` semantics: items are returned where
+  the `(objectid, type, offset)` compound key falls in
+  `[min, max]` and the leaf generation falls in `[min_transid,
+  max_transid]`, capped by `max_items` and `max_buf_size`. New
+  public types `SearchFilter` and `SearchItem`.
+- `btrfs-fuse`: F6.3 lands `BTRFS_IOC_TREE_SEARCH` (v1, fixed
+  4096-byte struct, no retry needed) and `BTRFS_IOC_TREE_SEARCH_V2`
+  (variable-size, uses the new `ReplyIoctl::retry` API). Both
+  share parsing/serialisation helpers; v2's two-call protocol
+  reads `buf_size` from the initial 112-byte header, requests
+  retry covering `arg..arg + 112 + buf_size`, then writes the
+  populated key + items in the second call.
 - `btrfs-fuse`: F6.2 (fixed-size subset). Two more ioctl handlers:
   `BTRFS_IOC_DEV_INFO` (per-device geometry) and
   `BTRFS_IOC_INO_LOOKUP` (objectid → path resolution by walking

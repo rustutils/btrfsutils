@@ -13,23 +13,19 @@
 //! `btrfs_disk::raw`. This is the only place in the project that
 //! re-derives them.
 //!
-//! Currently implemented (F6.1, F6.2 fixed-size):
-//! - `BTRFS_IOC_FS_INFO`
-//! - `BTRFS_IOC_GET_FEATURES`
-//! - `BTRFS_IOC_GET_SUBVOL_INFO`
-//! - `BTRFS_IOC_DEV_INFO`
-//! - `BTRFS_IOC_INO_LOOKUP`
+//! Currently implemented:
+//! - `BTRFS_IOC_FS_INFO` (F6.1)
+//! - `BTRFS_IOC_GET_FEATURES` (F6.1)
+//! - `BTRFS_IOC_GET_SUBVOL_INFO` (F6.1)
+//! - `BTRFS_IOC_DEV_INFO` (F6.2)
+//! - `BTRFS_IOC_INO_LOOKUP` (F6.2)
+//! - `BTRFS_IOC_TREE_SEARCH_V2` (F6.3, uses retry)
 //!
-//! Blocked on `fuser` 0.17 not exposing `FUSE_IOCTL_RETRY` in its
-//! reply API: `BTRFS_IOC_TREE_SEARCH_V2`, `BTRFS_IOC_LOGICAL_INO_V2`,
-//! `BTRFS_IOC_INO_PATHS`, `BTRFS_IOC_GET_SUBVOL_ROOTREF`. Each of
-//! these has a struct or buffer larger than the 14-bit size field
-//! the ioctl number can encode (max 16 383 bytes); without retry
-//! support the FUSE layer silently truncates input/output to that
-//! cap. We'll land them after upstreaming a retry-reply API to
-//! fuser, or by forking.
+//! Still unimplemented (also need retry; pending follow-up
+//! commits): `BTRFS_IOC_LOGICAL_INO_V2`, `BTRFS_IOC_INO_PATHS`,
+//! `BTRFS_IOC_GET_SUBVOL_ROOTREF`.
 
-use btrfs_fs::{Filesystem, Inode, SubvolId};
+use btrfs_fs::{Filesystem, Inode, SearchFilter, SubvolId};
 use bytes::{Buf, BufMut};
 use fuser::{Errno, IoctlFlags, IoctlIovec};
 use std::fs::File;
@@ -73,6 +69,29 @@ const DEV_INFO_SIZE: u32 = 4096;
 /// Size of `struct btrfs_ioctl_ino_lookup_args`: `treeid`(8) +
 /// `objectid`(8) + `name`[4080] = 4096 bytes.
 const INO_LOOKUP_SIZE: u32 = 4096;
+/// Size of `struct btrfs_ioctl_search_args` (v1): `key`
+/// (`btrfs_ioctl_search_key`, 104) + `buf[3992]` = 4096 bytes.
+/// Fixed-size — no retry needed.
+const SEARCH_ARGS_V1_SIZE: u32 = 4096;
+/// Size of the `buf` area in v1: 4096 - 104 = 3992 bytes.
+const SEARCH_ARGS_V1_BUF: usize = 3992;
+/// Size of `struct btrfs_ioctl_search_args_v2`: `key`
+/// (`btrfs_ioctl_search_key`, 104) + `buf_size`(8) + `buf[0]`(0) =
+/// 112 bytes. The trailing `buf[0]` is a flexible array — the
+/// userspace caller passes 112 + `buf_size` bytes, which exceeds
+/// the 14-bit cap and requires the FUSE retry mechanism.
+const SEARCH_ARGS_V2_SIZE: u32 = 112;
+/// Size of `struct btrfs_ioctl_search_key` (the prefix of
+/// `btrfs_ioctl_search_args_v2`).
+const SEARCH_KEY_SIZE: usize = 104;
+/// Size of `struct btrfs_ioctl_search_header`: `transid`(8) +
+/// `objectid`(8) + `offset`(8) + `type`(4) + `len`(4) = 32 bytes.
+/// Written between each item in the response buf area; the items
+/// are emitted directly so the constant is documentary, but the
+/// `Filesystem::tree_search` caller uses the same value internally
+/// when calculating `max_buf_size` budget.
+#[allow(dead_code)]
+const SEARCH_HEADER_SIZE: usize = 32;
 
 pub const BTRFS_IOC_FS_INFO: u32 = ior(BTRFS_MAGIC, 31, FS_INFO_SIZE);
 pub const BTRFS_IOC_GET_FEATURES: u32 =
@@ -81,6 +100,10 @@ pub const BTRFS_IOC_GET_SUBVOL_INFO: u32 =
     ior(BTRFS_MAGIC, 60, SUBVOL_INFO_SIZE);
 pub const BTRFS_IOC_DEV_INFO: u32 = iowr(BTRFS_MAGIC, 30, DEV_INFO_SIZE);
 pub const BTRFS_IOC_INO_LOOKUP: u32 = iowr(BTRFS_MAGIC, 18, INO_LOOKUP_SIZE);
+pub const BTRFS_IOC_TREE_SEARCH: u32 =
+    iowr(BTRFS_MAGIC, 17, SEARCH_ARGS_V1_SIZE);
+pub const BTRFS_IOC_TREE_SEARCH_V2: u32 =
+    iowr(BTRFS_MAGIC, 17, SEARCH_ARGS_V2_SIZE);
 
 // ── handlers ──────────────────────────────────────────────────────
 
@@ -110,8 +133,8 @@ pub async fn dispatch(
     fs: &Filesystem<File>,
     target: Inode,
     cmd: u32,
-    _arg: u64,
-    _flags: IoctlFlags,
+    arg: u64,
+    flags: IoctlFlags,
     in_data: &[u8],
 ) -> IoctlOutcome {
     match cmd {
@@ -120,6 +143,12 @@ pub async fn dispatch(
         BTRFS_IOC_GET_SUBVOL_INFO => get_subvol_info(fs, target.subvol).await,
         BTRFS_IOC_DEV_INFO => dev_info(fs, in_data),
         BTRFS_IOC_INO_LOOKUP => ino_lookup(fs, target.subvol, in_data).await,
+        BTRFS_IOC_TREE_SEARCH => {
+            tree_search_v1(fs, target.subvol, in_data).await
+        }
+        BTRFS_IOC_TREE_SEARCH_V2 => {
+            tree_search_v2(fs, target.subvol, arg, flags, in_data).await
+        }
         _ => IoctlOutcome::Err(Errno::ENOTTY),
     }
 }
@@ -325,4 +354,239 @@ async fn ino_lookup(
     buf.resize(INO_LOOKUP_SIZE as usize, 0);
     debug_assert_eq!(buf.len(), INO_LOOKUP_SIZE as usize);
     IoctlOutcome::Ok(buf)
+}
+
+/// `BTRFS_IOC_TREE_SEARCH` (v1): same semantics as v2 but with a
+/// fixed 3992-byte response buffer. No retry needed because the
+/// whole 4096-byte struct fits in the cmd-encoded size.
+async fn tree_search_v1(
+    fs: &Filesystem<File>,
+    current_subvol: SubvolId,
+    in_data: &[u8],
+) -> IoctlOutcome {
+    if in_data.len() < SEARCH_ARGS_V1_SIZE as usize {
+        return IoctlOutcome::Err(Errno::EINVAL);
+    }
+    let (filter, raw_key) = match parse_search_key(in_data, current_subvol) {
+        Ok(v) => v,
+        Err(o) => return o,
+    };
+
+    let items = match fs.tree_search(filter, SEARCH_ARGS_V1_BUF).await {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("ioctl TREE_SEARCH tree={} failed: {e}", filter.tree_id,);
+            return IoctlOutcome::Err(Errno::EIO);
+        }
+    };
+
+    let mut out: Vec<u8> = Vec::with_capacity(SEARCH_ARGS_V1_SIZE as usize);
+    write_search_key(&mut out, filter.tree_id, &raw_key, items.len(), None);
+    write_search_items(&mut out, &items);
+    out.resize(SEARCH_ARGS_V1_SIZE as usize, 0);
+    IoctlOutcome::Ok(out)
+}
+
+/// `BTRFS_IOC_TREE_SEARCH_V2`: walk a tree and return items matching
+/// a compound `(objectid, type, offset)` key range.
+///
+/// Two-call protocol:
+///
+/// 1. **First call** (`flags` does not contain `FUSE_IOCTL_UNRESTRICTED`):
+///    `in_data` is just the 112-byte `btrfs_ioctl_search_args_v2`
+///    header — the kernel/FUSE only forwards what fits in the
+///    cmd-encoded size. We read `buf_size` from offset 104, then
+///    return `IoctlOutcome::Retry` describing iovecs that cover the
+///    full args header (input) and the args + buf area (output).
+/// 2. **Second call** (with `FUSE_IOCTL_UNRESTRICTED`): `in_data`
+///    is the 112-byte header. We parse the search key, run the
+///    search, and emit a `112 + buf_size`-byte response: updated
+///    header (with `nr_items` set to the actual count) followed by
+///    each item as a `btrfs_ioctl_search_header` + raw payload.
+async fn tree_search_v2(
+    fs: &Filesystem<File>,
+    current_subvol: SubvolId,
+    arg: u64,
+    flags: IoctlFlags,
+    in_data: &[u8],
+) -> IoctlOutcome {
+    if in_data.len() < SEARCH_ARGS_V2_SIZE as usize {
+        return IoctlOutcome::Err(Errno::EINVAL);
+    }
+    // buf_size lives at offset SEARCH_KEY_SIZE within the args
+    // struct (right after the 104-byte search_key).
+    let buf_size = u64::from_le_bytes(
+        in_data[SEARCH_KEY_SIZE..SEARCH_KEY_SIZE + 8]
+            .try_into()
+            .unwrap(),
+    );
+    let total_len = u64::from(SEARCH_ARGS_V2_SIZE) + buf_size;
+
+    if !flags.contains(IoctlFlags::FUSE_IOCTL_UNRESTRICTED) {
+        // First call: ask the kernel to re-issue with the full
+        // userspace buffer. Input we need = the args header only
+        // (the buf area is uninitialized output space). Output
+        // covers the entire range so we can write back both the
+        // updated header and the populated buf.
+        return IoctlOutcome::Retry {
+            in_iovs: vec![IoctlIovec {
+                base: arg,
+                len: u64::from(SEARCH_ARGS_V2_SIZE),
+            }],
+            out_iovs: vec![IoctlIovec {
+                base: arg,
+                len: total_len,
+            }],
+        };
+    }
+
+    // Second call: parse the search key and run the search.
+    let (filter, raw_key) = match parse_search_key(in_data, current_subvol) {
+        Ok(v) => v,
+        Err(o) => return o,
+    };
+
+    #[allow(clippy::cast_possible_truncation)]
+    let buf_size_usize = buf_size as usize;
+    let items = match fs.tree_search(filter, buf_size_usize).await {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!(
+                "ioctl TREE_SEARCH_V2 tree={} failed: {e}",
+                filter.tree_id,
+            );
+            return IoctlOutcome::Err(Errno::EIO);
+        }
+    };
+
+    #[allow(clippy::cast_possible_truncation)]
+    let mut out: Vec<u8> = Vec::with_capacity(total_len as usize);
+    write_search_key(
+        &mut out,
+        filter.tree_id,
+        &raw_key,
+        items.len(),
+        Some(buf_size),
+    );
+    write_search_items(&mut out, &items);
+    #[allow(clippy::cast_possible_truncation)]
+    out.resize(total_len as usize, 0);
+    IoctlOutcome::Ok(out)
+}
+
+/// Snapshot of the raw fields read from the search key, kept around
+/// so [`write_search_key`] can echo them back unchanged in the
+/// response (only `nr_items` and `buf_size` are mutated).
+struct RawSearchKey {
+    min_objectid: u64,
+    max_objectid: u64,
+    min_offset: u64,
+    max_offset: u64,
+    min_transid: u64,
+    max_transid: u64,
+    min_type: u32,
+    max_type: u32,
+}
+
+/// Parse the 104-byte `btrfs_ioctl_search_key` prefix from `in_data`
+/// into a [`SearchFilter`] and a [`RawSearchKey`] echo. Returns
+/// `Err(IoctlOutcome::Err)` if the buffer is too short.
+fn parse_search_key(
+    in_data: &[u8],
+    current_subvol: SubvolId,
+) -> Result<(SearchFilter, RawSearchKey), IoctlOutcome> {
+    if in_data.len() < SEARCH_KEY_SIZE {
+        return Err(IoctlOutcome::Err(Errno::EINVAL));
+    }
+    let mut key = &in_data[..SEARCH_KEY_SIZE];
+    let tree_id = key.get_u64_le();
+    let min_objectid = key.get_u64_le();
+    let max_objectid = key.get_u64_le();
+    let min_offset = key.get_u64_le();
+    let max_offset = key.get_u64_le();
+    let min_transid = key.get_u64_le();
+    let max_transid = key.get_u64_le();
+    let min_type = key.get_u32_le();
+    let max_type = key.get_u32_le();
+    let nr_items = key.get_u32_le();
+
+    let filter = SearchFilter {
+        // tree_id == 0 means "use the file's current subvolume",
+        // matching the kernel behaviour for fd-issued searches.
+        tree_id: if tree_id == 0 {
+            current_subvol.0
+        } else {
+            tree_id
+        },
+        min_objectid,
+        max_objectid,
+        min_type,
+        max_type,
+        min_offset,
+        max_offset,
+        min_transid,
+        max_transid,
+        max_items: nr_items,
+    };
+    let raw = RawSearchKey {
+        min_objectid,
+        max_objectid,
+        min_offset,
+        max_offset,
+        min_transid,
+        max_transid,
+        min_type,
+        max_type,
+    };
+    Ok((filter, raw))
+}
+
+/// Write the 104-byte search key back into `out`, with `nr_items`
+/// updated to the actual count returned. For v2 the trailing
+/// `buf_size` field is appended (pass `Some(buf_size)`); v1 stops
+/// at the 104-byte key (pass `None`).
+fn write_search_key(
+    out: &mut Vec<u8>,
+    tree_id: u64,
+    raw: &RawSearchKey,
+    actual_items: usize,
+    buf_size_v2: Option<u64>,
+) {
+    out.put_u64_le(tree_id);
+    out.put_u64_le(raw.min_objectid);
+    out.put_u64_le(raw.max_objectid);
+    out.put_u64_le(raw.min_offset);
+    out.put_u64_le(raw.max_offset);
+    out.put_u64_le(raw.min_transid);
+    out.put_u64_le(raw.max_transid);
+    out.put_u32_le(raw.min_type);
+    out.put_u32_le(raw.max_type);
+    #[allow(clippy::cast_possible_truncation)]
+    out.put_u32_le(actual_items as u32);
+    // Reserved fields after nr_items: u32 unused, then 4 × u64
+    // unused (see `btrfs_ioctl_search_key` layout).
+    out.put_u32_le(0); // unused
+    for _ in 0..4 {
+        out.put_u64_le(0); // unused1..unused4
+    }
+    if let Some(buf_size) = buf_size_v2 {
+        out.put_u64_le(buf_size);
+        debug_assert_eq!(out.len(), SEARCH_ARGS_V2_SIZE as usize);
+    } else {
+        debug_assert_eq!(out.len(), SEARCH_KEY_SIZE);
+    }
+}
+
+/// Append items to the response buffer in
+/// `btrfs_ioctl_search_header`-prefixed order.
+fn write_search_items(out: &mut Vec<u8>, items: &[btrfs_fs::SearchItem]) {
+    for item in items {
+        out.put_u64_le(item.transid);
+        out.put_u64_le(item.objectid);
+        out.put_u64_le(item.offset);
+        out.put_u32_le(item.item_type);
+        #[allow(clippy::cast_possible_truncation)]
+        out.put_u32_le(item.data.len() as u32);
+        out.put_slice(&item.data);
+    }
 }

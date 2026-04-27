@@ -31,6 +31,7 @@ const BTRFS_IOC_GET_FEATURES: u32 = ioc_ior(0x94, 57, 24);
 const BTRFS_IOC_GET_SUBVOL_INFO: u32 = ioc_ior(0x94, 60, 504);
 const BTRFS_IOC_DEV_INFO: u32 = ioc_iowr(0x94, 30, 4096);
 const BTRFS_IOC_INO_LOOKUP: u32 = ioc_iowr(0x94, 18, 4096);
+const BTRFS_IOC_TREE_SEARCH: u32 = ioc_iowr(0x94, 17, 4096);
 
 /// Wrapper around `libc::ioctl` for the read-only ioctls in F6.1.
 /// Returns the response bytes (length matches the ioctl's encoded
@@ -130,6 +131,83 @@ fn ioctl_get_subvol_info_for_default_subvol() {
     assert_eq!(flags & 1, 0, "default subvol is not read-only");
 }
 
+// ── BTRFS_IOC_TREE_SEARCH ─────────────────────────────────────────
+
+/// `BTRFS_IOC_TREE_SEARCH` (v1, 4096-byte fixed): walk the root
+/// tree (id 1) for `ROOT_ITEM` keys and check that we get back the
+/// expected number of subvolumes from a multi-subvol fixture
+/// (default FS_TREE id 5 + 3 user subvols).
+#[test]
+fn ioctl_tree_search_root_items_in_root_tree() {
+    let m = MountedFuse::mount_with(
+        common::multi_subvol_fixture_path(),
+        &[],
+        "at_root.txt",
+    );
+
+    // Build a 4096-byte input: search_key (104) + buf (3992 zeros).
+    // tree_id = 1 (BTRFS_ROOT_TREE_OBJECTID),
+    // type range = ROOT_ITEM_KEY (132) only,
+    // objectid range = 0..u64::MAX, offset range = 0..u64::MAX,
+    // transid range = 0..u64::MAX, nr_items = 16.
+    let mut input = vec![0u8; 4096];
+    let key = &mut input[..104];
+    key[0..8].copy_from_slice(&1u64.to_le_bytes()); // tree_id
+    key[8..16].copy_from_slice(&0u64.to_le_bytes()); // min_objectid
+    key[16..24].copy_from_slice(&u64::MAX.to_le_bytes()); // max_objectid
+    key[24..32].copy_from_slice(&0u64.to_le_bytes()); // min_offset
+    key[32..40].copy_from_slice(&u64::MAX.to_le_bytes()); // max_offset
+    key[40..48].copy_from_slice(&0u64.to_le_bytes()); // min_transid
+    key[48..56].copy_from_slice(&u64::MAX.to_le_bytes()); // max_transid
+    key[56..60].copy_from_slice(&132u32.to_le_bytes()); // min_type ROOT_ITEM
+    key[60..64].copy_from_slice(&132u32.to_le_bytes()); // max_type ROOT_ITEM
+    key[64..68].copy_from_slice(&16u32.to_le_bytes()); // nr_items
+
+    let buf = unsafe { run_iowr_ioctl(m.path(), BTRFS_IOC_TREE_SEARCH, input) }
+        .expect("TREE_SEARCH ioctl");
+
+    // Read nr_items from the response key (offset 64..68).
+    let nr_items = u32::from_le_bytes(buf[64..68].try_into().unwrap()) as usize;
+    // Default FS_TREE (5) + 3 user subvolumes (sub plus internal
+    // tombstones for system trees can also produce ROOT_ITEM
+    // entries depending on mkfs). Just assert ≥ 2 — the default
+    // and at least the `sub` subvol should both appear.
+    assert!(
+        nr_items >= 2,
+        "expected ≥ 2 ROOT_ITEM entries, got {nr_items}",
+    );
+
+    // Parse the items: each is 32-byte header + payload. The kernel
+    // (and our impl) treats `(objectid, type, offset)` as a single
+    // compound key — items whose type falls outside the range CAN
+    // be returned when their compound key is between min and max.
+    // Callers filter by type themselves; the test does too.
+    let mut cursor = 104; // key prefix is 104 bytes; buf starts here for v1
+    let mut found_fs_tree_root_item = false;
+    for _ in 0..nr_items {
+        if cursor + 32 > buf.len() {
+            break;
+        }
+        let objectid = u64::from_le_bytes(
+            buf[cursor + 8..cursor + 16].try_into().unwrap(),
+        );
+        let item_type = u32::from_le_bytes(
+            buf[cursor + 24..cursor + 28].try_into().unwrap(),
+        );
+        let len = u32::from_le_bytes(
+            buf[cursor + 28..cursor + 32].try_into().unwrap(),
+        ) as usize;
+        if item_type == 132 && objectid == 5 {
+            found_fs_tree_root_item = true;
+        }
+        cursor += 32 + len;
+    }
+    assert!(
+        found_fs_tree_root_item,
+        "expected ROOT_ITEM for FS_TREE (objectid 5) in results",
+    );
+}
+
 // ── CLI-driven end-to-end ─────────────────────────────────────────
 
 /// `btrfs subvolume show` against our fuse mount issues
@@ -176,6 +254,48 @@ fn our_btrfs_cli_subvolume_show_against_fuse_mount() {
             || stdout.contains("\t5 ")
             || stdout.contains(" 5\n"),
         "expected default subvol id 5 in output:\n{stdout}",
+    );
+}
+
+/// `btrfs subvolume list` against our fuse mount issues
+/// `BTRFS_IOC_TREE_SEARCH` (v1) on the root tree. The output should
+/// list the user subvolumes of the multi-subvol fixture.
+#[test]
+fn our_btrfs_cli_subvolume_list_against_fuse_mount() {
+    let fuse_bin = std::path::Path::new(env!("CARGO_BIN_EXE_btrfs-fuse"));
+    let cli_bin = fuse_bin.parent().unwrap().join("btrfs");
+    if !cli_bin.exists() {
+        eprintln!(
+            "btrfs CLI binary not built at {}; skipping",
+            cli_bin.display(),
+        );
+        return;
+    }
+
+    let m = MountedFuse::mount_with(
+        common::multi_subvol_fixture_path(),
+        &[],
+        "at_root.txt",
+    );
+    let output = std::process::Command::new(&cli_bin)
+        .args(["subvolume", "list"])
+        .arg(m.path())
+        .output()
+        .expect("spawn btrfs subvolume list");
+
+    assert!(
+        output.status.success(),
+        "btrfs subvolume list failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Multi-subvol fixture contains a `sub` subvolume — the CLI's
+    // output format mirrors btrfs-progs and should mention it
+    // somewhere.
+    assert!(
+        stdout.contains("sub"),
+        "expected `sub` in subvolume list output:\n{stdout}",
     );
 }
 

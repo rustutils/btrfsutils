@@ -117,6 +117,40 @@ pub struct SubvolInfo {
     pub received_uuid: Uuid,
 }
 
+/// Compound-key range filter for [`Filesystem::tree_search`]. Mirrors
+/// the kernel's `btrfs_ioctl_search_key` semantics: items are returned
+/// where `(min_objectid, min_type, min_offset) <= (key) <= (max_objectid,
+/// max_type, max_offset)` treated as a single 17-byte compound key, AND
+/// the leaf's generation falls in `[min_transid, max_transid]`.
+#[derive(Debug, Clone, Copy)]
+pub struct SearchFilter {
+    /// Tree to search (e.g. `1` for root tree, `5` for default FS tree,
+    /// or any subvolume id).
+    pub tree_id: u64,
+    pub min_objectid: u64,
+    pub max_objectid: u64,
+    pub min_type: u32,
+    pub max_type: u32,
+    pub min_offset: u64,
+    pub max_offset: u64,
+    pub min_transid: u64,
+    pub max_transid: u64,
+    /// Maximum items to return.
+    pub max_items: u32,
+}
+
+/// One item returned by [`Filesystem::tree_search`]. `transid` is the
+/// leaf's generation (matching the kernel ioctl's
+/// `btrfs_ioctl_search_header.transid`).
+#[derive(Debug, Clone)]
+pub struct SearchItem {
+    pub transid: u64,
+    pub objectid: u64,
+    pub item_type: u32,
+    pub offset: u64,
+    pub data: Vec<u8>,
+}
+
 /// Filesystem-wide statistics, returned by [`Filesystem::statfs`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StatFs {
@@ -328,6 +362,26 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         } else {
             None
         }
+    }
+
+    /// Run a tree search matching the kernel's `BTRFS_IOC_TREE_SEARCH_V2`
+    /// semantics. Returns at most `filter.max_items` items, stopping
+    /// early if `max_buf_size` (the userspace buffer cap, including
+    /// per-item 32-byte headers) would be exceeded by adding the next
+    /// item.
+    ///
+    /// Note: the kernel runs the search against any tree by id; we
+    /// only resolve subvolume trees and the root tree (`tree_id == 1`).
+    /// Searches against the chunk/extent/csum/etc. trees would need
+    /// additional plumbing — they're not exposed today.
+    pub async fn tree_search(
+        &self,
+        filter: SearchFilter,
+        max_buf_size: usize,
+    ) -> io::Result<Vec<SearchItem>> {
+        let this = self.clone();
+        spawn_blocking(move || this.tree_search_blocking(filter, max_buf_size))
+            .await
     }
 
     /// Resolve `objectid` in `subvol` to its slash-separated path
@@ -669,6 +723,82 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         let tree_root = self.tree_root_for(ino.subvol)?;
         let mut reader = self.lock_reader();
         xattr::get_xattr(&mut reader, tree_root, ino.ino, name)
+    }
+
+    fn tree_search_blocking(
+        &self,
+        filter: SearchFilter,
+        max_buf_size: usize,
+    ) -> io::Result<Vec<SearchItem>> {
+        // The root tree itself is at superblock.root; subvolume trees
+        // are looked up via tree_root_for. tree_id == 1 is the root
+        // tree (BTRFS_ROOT_TREE_OBJECTID). Anything else has to be a
+        // subvolume id we know about.
+        // sizeof(btrfs_ioctl_search_header).
+        const HEADER_SIZE: usize = 32;
+
+        let tree_root = if filter.tree_id == 1 {
+            self.inner.superblock.root
+        } else {
+            self.tree_root_for(SubvolId(filter.tree_id))?
+        };
+        let min = (filter.min_objectid, filter.min_type, filter.min_offset);
+        let max = (filter.max_objectid, filter.max_type, filter.max_offset);
+
+        let mut results: Vec<SearchItem> = Vec::new();
+        let mut buf_used: usize = 0;
+        let mut reader = self.lock_reader();
+        tree_walk(&mut reader, tree_root, Traversal::Dfs, &mut |block| {
+            if results.len() >= filter.max_items as usize {
+                return;
+            }
+            let TreeBlock::Leaf {
+                items,
+                data,
+                header,
+            } = block
+            else {
+                return;
+            };
+            let leaf_transid = header.generation;
+            if leaf_transid < filter.min_transid
+                || leaf_transid > filter.max_transid
+            {
+                return;
+            }
+            let hdr_size = mem::size_of::<btrfs_disk::raw::btrfs_header>();
+            for item in items {
+                if results.len() >= filter.max_items as usize {
+                    return;
+                }
+                let key = &item.key;
+                let item_type = u32::from(key.key_type.to_raw());
+                let compound = (key.objectid, item_type, key.offset);
+                if compound < min || compound > max {
+                    continue;
+                }
+                let start = hdr_size + item.offset as usize;
+                let end = start + item.size as usize;
+                if end > data.len() {
+                    continue;
+                }
+                let payload = &data[start..end];
+                let next_used = buf_used + HEADER_SIZE + payload.len();
+                if next_used > max_buf_size {
+                    // Stop entirely — no more items will fit.
+                    return;
+                }
+                results.push(SearchItem {
+                    transid: leaf_transid,
+                    objectid: key.objectid,
+                    item_type,
+                    offset: key.offset,
+                    data: payload.to_vec(),
+                });
+                buf_used = next_used;
+            }
+        })?;
+        Ok(results)
     }
 
     fn ino_lookup_blocking(

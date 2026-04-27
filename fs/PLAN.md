@@ -295,7 +295,22 @@ End-to-end CLI tests: `btrfs inspect-internal rootid <mount>` uses
 objectid=`BTRFS_FIRST_FREE_OBJECTID`) and now succeeds against our
 fuse mount, returning the default subvol id 5.
 
-### F6.3 — Variable-size ioctls (blocked on fuser retry support)
+### F6.3 — Variable-size ioctls (TREE_SEARCH landed, others pending)
+
+`BTRFS_IOC_TREE_SEARCH` (v1, fixed-size 4096) and
+`BTRFS_IOC_TREE_SEARCH_V2` (variable-size, uses `ReplyIoctl::retry`)
+both implemented. `Filesystem::tree_search(filter, max_buf_size)`
+in `btrfs-fs` does the underlying tree walk with compound-key range
+filtering (matching kernel semantics). E2E: `btrfs subvolume list
+<fuse-mount>` works against the multi-subvol fixture.
+
+Still pending in this phase, also using the retry API:
+`BTRFS_IOC_LOGICAL_INO_V2`, `BTRFS_IOC_INO_PATHS`,
+`BTRFS_IOC_GET_SUBVOL_ROOTREF`. Each follows the same retry shape
+as TREE_SEARCH_V2 — read a small initial header, return retry with
+iovecs covering the full struct + buffer, then process.
+
+### F6.3-historical (blocker resolved)
 
 **Scope:**
 - `BTRFS_IOC_TREE_SEARCH_V2` — generic tree search; the args struct
