@@ -6,11 +6,13 @@
 //! - inode-number translation (FUSE root = 1 ⇄ btrfs root dir = 256),
 //! - converting [`btrfs_fs::Stat`] → [`fuser::FileAttr`] and
 //!   [`btrfs_fs::FileKind`] → [`fuser::FileType`],
-//! - turning each operation's `io::Result`/`Option` return into the
-//!   appropriate `reply.*` call.
+//! - spawning a tokio task per FUSE callback that owns the `Reply*`,
+//!   awaits the async filesystem op, and replies from the task. The
+//!   FUSE worker thread returns immediately, so concurrent FUSE
+//!   callbacks don't serialise on a single in-flight I/O.
 
 use crate::inode;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use btrfs_fs::{FileKind, Filesystem, Inode, Stat, SubvolId};
 use fuser::{
     Errno, FileAttr, FileHandle, FileType, Filesystem as FuserFilesystem,
@@ -18,6 +20,7 @@ use fuser::{
     ReplyDirectory, ReplyEntry, ReplyStatfs, ReplyXattr, Request,
 };
 use std::{ffi::OsStr, fs::File, io, os::unix::ffi::OsStrExt, time::Duration};
+use tokio::runtime::Runtime;
 
 const TTL: Duration = Duration::from_secs(1);
 
@@ -27,6 +30,10 @@ const FS_TREE_OBJECTID: u64 = 5;
 pub struct BtrfsFuse {
     fs: Filesystem<File>,
     blksize: u32,
+    /// Tokio runtime used to drive async [`Filesystem`] ops. Each FUSE
+    /// callback `spawn`s a task here; the FUSE worker thread itself
+    /// returns immediately.
+    runtime: Runtime,
 }
 
 impl BtrfsFuse {
@@ -34,7 +41,16 @@ impl BtrfsFuse {
     pub fn open(file: File) -> Result<Self> {
         let fs = Filesystem::open(file)?;
         let blksize = fs.blksize();
-        Ok(Self { fs, blksize })
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .thread_name("btrfs-fuse-worker")
+            .build()
+            .context("failed to build tokio runtime")?;
+        Ok(Self {
+            fs,
+            blksize,
+            runtime,
+        })
     }
 }
 
@@ -86,26 +102,31 @@ impl FuserFilesystem for BtrfsFuse {
         reply: ReplyEntry,
     ) {
         let parent_ino = fuse_inode(parent.0);
-        match self.fs.lookup(parent_ino, name.as_bytes()) {
-            Ok(Some((ino, item))) => {
-                let fuse_ino = inode::btrfs_to_fuse(ino.ino);
-                let stat = Stat::from_inode(ino, &item, self.blksize);
-                reply.entry(
-                    &TTL,
-                    &to_file_attr(fuse_ino, &stat),
-                    Generation(0),
-                );
+        let name = name.as_bytes().to_vec();
+        let fs = self.fs.clone();
+        let blksize = self.blksize;
+        self.runtime.spawn(async move {
+            match fs.lookup(parent_ino, &name).await {
+                Ok(Some((ino, item))) => {
+                    let fuse_ino = inode::btrfs_to_fuse(ino.ino);
+                    let stat = Stat::from_inode(ino, &item, blksize);
+                    reply.entry(
+                        &TTL,
+                        &to_file_attr(fuse_ino, &stat),
+                        Generation(0),
+                    );
+                }
+                Ok(None) => reply.error(Errno::ENOENT),
+                Err(e) => {
+                    log::warn!(
+                        "lookup parent={} name={}: {e}",
+                        parent_ino.ino,
+                        String::from_utf8_lossy(&name),
+                    );
+                    reply.error(Errno::EIO);
+                }
             }
-            Ok(None) => reply.error(Errno::ENOENT),
-            Err(e) => {
-                log::warn!(
-                    "lookup parent={} name={}: {e}",
-                    parent.0,
-                    name.display()
-                );
-                reply.error(Errno::EIO);
-            }
-        }
+        });
     }
 
     fn getattr(
@@ -116,14 +137,20 @@ impl FuserFilesystem for BtrfsFuse {
         reply: ReplyAttr,
     ) {
         let target = fuse_inode(ino.0);
-        match self.fs.getattr(target) {
-            Ok(Some(stat)) => reply.attr(&TTL, &to_file_attr(ino.0, &stat)),
-            Ok(None) => reply.error(Errno::ENOENT),
-            Err(e) => {
-                log::warn!("getattr ino={}: {e}", ino.0);
-                reply.error(Errno::EIO);
+        let fuse_ino = ino.0;
+        let fs = self.fs.clone();
+        self.runtime.spawn(async move {
+            match fs.getattr(target).await {
+                Ok(Some(stat)) => {
+                    reply.attr(&TTL, &to_file_attr(fuse_ino, &stat));
+                }
+                Ok(None) => reply.error(Errno::ENOENT),
+                Err(e) => {
+                    log::warn!("getattr ino={fuse_ino}: {e}");
+                    reply.error(Errno::EIO);
+                }
             }
-        }
+        });
     }
 
     fn readdir(
@@ -135,41 +162,51 @@ impl FuserFilesystem for BtrfsFuse {
         mut reply: ReplyDirectory,
     ) {
         let dir_ino = fuse_inode(ino.0);
-        let entries = match self.fs.readdir(dir_ino, offset) {
-            Ok(v) => v,
-            Err(e) => {
-                log::warn!("readdir ino={} offset={offset}: {e}", ino.0);
-                reply.error(Errno::EIO);
-                return;
+        let fuse_ino = ino.0;
+        let fs = self.fs.clone();
+        self.runtime.spawn(async move {
+            let entries = match fs.readdir(dir_ino, offset).await {
+                Ok(v) => v,
+                Err(e) => {
+                    log::warn!("readdir ino={fuse_ino} offset={offset}: {e}");
+                    reply.error(Errno::EIO);
+                    return;
+                }
+            };
+            for entry in entries {
+                let child_ino = INodeNo(inode::btrfs_to_fuse(entry.ino.ino));
+                if reply.add(
+                    child_ino,
+                    entry.offset,
+                    to_file_type(entry.kind),
+                    OsStr::from_bytes(&entry.name),
+                ) {
+                    break;
+                }
             }
-        };
-        for entry in entries {
-            let child_ino = INodeNo(inode::btrfs_to_fuse(entry.ino.ino));
-            if reply.add(
-                child_ino,
-                entry.offset,
-                to_file_type(entry.kind),
-                OsStr::from_bytes(&entry.name),
-            ) {
-                break;
-            }
-        }
-        reply.ok();
+            reply.ok();
+        });
     }
 
     fn readlink(&self, _req: &Request, ino: INodeNo, reply: ReplyData) {
         let target = fuse_inode(ino.0);
-        match self.fs.readlink(target) {
-            Ok(Some(t)) => reply.data(&t),
-            Ok(None) => {
-                log::warn!("readlink ino={}: no inline extent found", ino.0);
-                reply.error(Errno::EIO);
+        let fuse_ino = ino.0;
+        let fs = self.fs.clone();
+        self.runtime.spawn(async move {
+            match fs.readlink(target).await {
+                Ok(Some(t)) => reply.data(&t),
+                Ok(None) => {
+                    log::warn!(
+                        "readlink ino={fuse_ino}: no inline extent found"
+                    );
+                    reply.error(Errno::EIO);
+                }
+                Err(e) => {
+                    log::warn!("readlink ino={fuse_ino}: {e}");
+                    reply.error(Errno::EIO);
+                }
             }
-            Err(e) => {
-                log::warn!("readlink ino={}: {e}", ino.0);
-                reply.error(Errno::EIO);
-            }
-        }
+        });
     }
 
     fn read(
@@ -184,19 +221,22 @@ impl FuserFilesystem for BtrfsFuse {
         reply: ReplyData,
     ) {
         let target = fuse_inode(ino.0);
-        match self.fs.read(target, offset, size) {
-            Ok(data) => reply.data(&data),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                reply.error(Errno::ENOENT);
+        let fuse_ino = ino.0;
+        let fs = self.fs.clone();
+        self.runtime.spawn(async move {
+            match fs.read(target, offset, size).await {
+                Ok(data) => reply.data(&data),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    reply.error(Errno::ENOENT);
+                }
+                Err(e) => {
+                    log::warn!(
+                        "read ino={fuse_ino} offset={offset} size={size}: {e}"
+                    );
+                    reply.error(Errno::EIO);
+                }
             }
-            Err(e) => {
-                log::warn!(
-                    "read ino={} offset={offset} size={size}: {e}",
-                    ino.0
-                );
-                reply.error(Errno::EIO);
-            }
-        }
+        });
     }
 
     fn listxattr(
@@ -207,29 +247,33 @@ impl FuserFilesystem for BtrfsFuse {
         reply: ReplyXattr,
     ) {
         let target = fuse_inode(ino.0);
-        let names = match self.fs.xattr_list(target) {
-            Ok(v) => v,
-            Err(e) => {
-                log::warn!("listxattr ino={}: {e}", ino.0);
-                reply.error(Errno::EIO);
-                return;
+        let fuse_ino = ino.0;
+        let fs = self.fs.clone();
+        self.runtime.spawn(async move {
+            let names = match fs.xattr_list(target).await {
+                Ok(v) => v,
+                Err(e) => {
+                    log::warn!("listxattr ino={fuse_ino}: {e}");
+                    reply.error(Errno::EIO);
+                    return;
+                }
+            };
+
+            let mut buf: Vec<u8> = Vec::new();
+            for name in &names {
+                buf.extend_from_slice(name);
+                buf.push(0);
             }
-        };
 
-        let mut buf: Vec<u8> = Vec::new();
-        for name in &names {
-            buf.extend_from_slice(name);
-            buf.push(0);
-        }
-
-        #[allow(clippy::cast_possible_truncation)]
-        if size == 0 {
-            reply.size(buf.len() as u32);
-        } else if buf.len() <= size as usize {
-            reply.data(&buf);
-        } else {
-            reply.error(Errno::ERANGE);
-        }
+            #[allow(clippy::cast_possible_truncation)]
+            if size == 0 {
+                reply.size(buf.len() as u32);
+            } else if buf.len() <= size as usize {
+                reply.data(&buf);
+            } else {
+                reply.error(Errno::ERANGE);
+            }
+        });
     }
 
     fn getxattr(
@@ -241,28 +285,32 @@ impl FuserFilesystem for BtrfsFuse {
         reply: ReplyXattr,
     ) {
         let target = fuse_inode(ino.0);
-        match self.fs.xattr_get(target, name.as_bytes()) {
-            Ok(Some(value)) =>
-            {
-                #[allow(clippy::cast_possible_truncation)]
-                if size == 0 {
-                    reply.size(value.len() as u32);
-                } else if value.len() <= size as usize {
-                    reply.data(&value);
-                } else {
-                    reply.error(Errno::ERANGE);
+        let fuse_ino = ino.0;
+        let name_bytes = name.as_bytes().to_vec();
+        let fs = self.fs.clone();
+        self.runtime.spawn(async move {
+            match fs.xattr_get(target, &name_bytes).await {
+                Ok(Some(value)) =>
+                {
+                    #[allow(clippy::cast_possible_truncation)]
+                    if size == 0 {
+                        reply.size(value.len() as u32);
+                    } else if value.len() <= size as usize {
+                        reply.data(&value);
+                    } else {
+                        reply.error(Errno::ERANGE);
+                    }
+                }
+                Ok(None) => reply.error(Errno::ENODATA),
+                Err(e) => {
+                    log::warn!(
+                        "getxattr ino={fuse_ino} name={}: {e}",
+                        String::from_utf8_lossy(&name_bytes),
+                    );
+                    reply.error(Errno::EIO);
                 }
             }
-            Ok(None) => reply.error(Errno::ENODATA),
-            Err(e) => {
-                log::warn!(
-                    "getxattr ino={} name={}: {e}",
-                    ino.0,
-                    name.display()
-                );
-                reply.error(Errno::EIO);
-            }
-        }
+        });
     }
 
     fn statfs(&self, _req: &Request, _ino: INodeNo, reply: ReplyStatfs) {

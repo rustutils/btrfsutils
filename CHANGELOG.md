@@ -12,12 +12,13 @@ All notable changes to this project will be documented in this file.
   `statfs`. FUSE-independent — drives the `btrfs-fuse` mount and any
   other embedder. Inodes are modelled as `(SubvolId, ino)` to leave
   room for multi-subvolume traversal. The handle is `Clone` (cheap
-  `Arc` bump) and all operations take `&self`, so multiple worker
-  threads can drive the same filesystem concurrently. I/O still
-  serialises on a single internal mutex today, but that's an
-  implementation detail — future work (per-thread readers, lock-free
-  cache hits) won't change the API. `R: Read + Seek + Send` is the
-  bound; for `File` and `Cursor<Vec<u8>>` it's free.
+  `Arc` bump) and all operations are `async fn`, so multiple tokio
+  tasks can drive the same filesystem concurrently. Sync I/O is
+  wrapped in `tokio::task::spawn_blocking` so the runtime is never
+  blocked on disk reads. Future work (a native async I/O backend,
+  per-thread readers, lock-free cache hits) won't change the API.
+  `R: Read + Seek + Send + 'static` is the bound; for `File` and
+  `Cursor<Vec<u8>>` it's free.
 
 ### Changed
 
@@ -30,6 +31,11 @@ All notable changes to this project will be documented in this file.
   `flate2`/`zstd`/`lzokay`/`btrfs-disk`/`libc` — are gone from
   `fuse/`. The outer `Mutex<Filesystem<File>>` in `BtrfsFuse` is also
   gone now that `Filesystem` is `&self`-callable.
+- `btrfs-fuse` carries an internal multi-thread tokio runtime. Each
+  FUSE callback spawns a task that owns the `Reply*` handle, awaits
+  the async filesystem op, and replies from the task — the FUSE
+  worker thread returns immediately, so concurrent FUSE callbacks
+  don't serialise on a single in-flight I/O.
 
 ## 0.12.0
 

@@ -128,34 +128,26 @@ Done. `Filesystem<R: Read + Seek + Send>` is `Clone` (cheap `Arc`
 bump). All ops take `&self`. Fuse adapter loses its outer Mutex.
 Compile-time `Send + Sync` assertion + multithread test.
 
-### F2 — Async refactor
+### F2 — Async refactor ✅
 
-**Scope:**
-- Add `tokio` (default-features = false, with `rt`, `sync`,
-  `rt-multi-thread`) as a dep. The crate becomes async-only.
-- Convert all `Filesystem` ops to `async fn`. The internal sync I/O
-  path (BlockReader access, tree_walk callbacks) gets wrapped in
-  `tokio::task::spawn_blocking` once per op so the async runtime is
-  not blocked. Inside `spawn_blocking`, the existing sync `Mutex`
-  guards the reader.
-- `fuse/`: depend on `tokio`. `BtrfsFuse` carries a `tokio::runtime::Handle`.
-  Each `fuser::Filesystem` callback `runtime.spawn(async move { ... })`s
-  a task that owns the `Reply*`, awaits the `Filesystem` op, and calls
-  `reply.data()` / `reply.error()` from the task.
-- Tests: every test becomes `#[tokio::test]`. Concurrency test
-  expanded to use `tokio::spawn` per-thread instead of `std::thread`.
+Done. `Filesystem<R>` ops are all `async fn`. Sync I/O wrapped in
+`tokio::task::spawn_blocking`; sync `Mutex` held only inside the
+blocking task, never across `.await`. Bound: `R: Read + Seek + Send +
+'static`.
 
-**Test plan:**
-- All 20 existing `fs/tests/basic.rs` tests pass under
-  `#[tokio::test]`.
-- A `concurrent_async_reads` test that spawns N tokio tasks, each
-  reading a different file, and verifies all complete with correct
-  data — proving the runtime + spawn_blocking + cache integration
-  doesn't serialize spuriously.
+`btrfs-fuse` carries an internal multi-thread tokio runtime; each
+FUSE callback spawns a task that owns the `Reply*`, awaits the async
+op, and replies from the task. FUSE worker threads return
+immediately.
 
-**Out of scope:** native async I/O. `BlockReader` stays sync;
-`spawn_blocking` is the bridge. F8 will replace this with a real
-async backend if profiling justifies it.
+All 19 read-path tests under `#[tokio::test]`. New
+`concurrent_async_reads` test spawns one task per fixture entry on a
+4-worker multi-thread runtime and verifies parallel
+`lookup → read → getattr` chains all complete correctly. Compile-time
+`Send + Sync` assertion still in place.
+
+Native async I/O remains out of scope (deferred to F8 if profiling
+justifies it).
 
 ### F3 — Caches
 

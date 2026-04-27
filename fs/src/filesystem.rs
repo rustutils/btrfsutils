@@ -1,10 +1,15 @@
 //! The [`Filesystem`] type and its operation methods.
 //!
-//! [`Filesystem`] is `Clone` and exposes all operations through `&self`,
-//! so embedders can hold an `Arc`-like handle and call concurrently
-//! from multiple threads. The current implementation serialises I/O
-//! behind a single `Mutex<BlockReader<R>>`; future work (per-thread
-//! readers, lock-free cache hits) is internal and won't change the API.
+//! [`Filesystem`] is `Clone` (cheap `Arc` bump) and exposes all
+//! operations as `async fn`. Internally each op runs the (currently
+//! sync) I/O work inside [`tokio::task::spawn_blocking`] so the
+//! async runtime is never blocked. Future work (a native async I/O
+//! backend, lock-free cache hits) is internal and won't change the
+//! API.
+//!
+//! Embedders must call these methods inside a tokio runtime context.
+//! `btrfs-fuse` provides one; tests use `#[tokio::test]`; other
+//! embedders bring their own.
 
 use crate::{Entry, FileKind, Stat, dir, read, xattr};
 use btrfs_disk::{
@@ -60,15 +65,15 @@ pub struct StatFs {
 /// High-level read-only btrfs filesystem.
 ///
 /// `Filesystem` is a cheap-to-clone handle (`Arc` internally) and all
-/// operations take `&self`, so multiple threads can drive the same
-/// filesystem concurrently. Today, I/O still serialises on a single
-/// internal mutex; that's an implementation detail that can be relaxed
-/// later (per-thread readers, RAII cache hits) without an API change.
-pub struct Filesystem<R: io::Read + io::Seek + Send> {
+/// operations are `async fn`, so multiple tokio tasks can drive the
+/// same filesystem concurrently. I/O still serialises on a single
+/// internal mutex (held only inside `spawn_blocking`); a future phase
+/// can swap that for a reader pool without changing the public API.
+pub struct Filesystem<R: io::Read + io::Seek + Send + 'static> {
     inner: Arc<Inner<R>>,
 }
 
-impl<R: io::Read + io::Seek + Send> Clone for Filesystem<R> {
+impl<R: io::Read + io::Seek + Send + 'static> Clone for Filesystem<R> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -77,25 +82,30 @@ impl<R: io::Read + io::Seek + Send> Clone for Filesystem<R> {
 }
 
 /// Shared state behind every [`Filesystem`] handle.
-struct Inner<R: io::Read + io::Seek + Send> {
+struct Inner<R: io::Read + io::Seek + Send + 'static> {
     /// Parsed primary-device superblock.
     superblock: Superblock,
-    /// Map of tree id → (root block logical address, key offset). Used
-    /// for resolving subvolume tree roots; multi-subvolume support will
-    /// look up additional entries here.
+    /// Map of tree id → (root block logical address, key offset).
+    /// Multi-subvolume support will look up additional entries here.
     tree_roots: BTreeMap<u64, (u64, u64)>,
     /// Cached objectid of the default subvolume.
     default_subvol: SubvolId,
     /// Filesystem sectorsize, forwarded from the superblock.
     blksize: u32,
-    /// I/O backend. The lock serialises all on-disk reads; future work
-    /// can swap this for a pool of readers without changing the public
-    /// `&self` API.
+    /// I/O backend. Held only inside `spawn_blocking`, never across an
+    /// `.await`. Future work can swap this for a pool of readers
+    /// without changing the public `&self` API.
     reader: Mutex<BlockReader<R>>,
 }
 
-impl<R: io::Read + io::Seek + Send> Filesystem<R> {
-    /// Bootstrap the filesystem from a reader over an image or block device.
+impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
+    /// Bootstrap the filesystem from a reader over an image or block
+    /// device.
+    ///
+    /// This is sync because the heavy work happens during the bootstrap
+    /// (chunk tree walk, root tree walk) and only runs once. Embedders
+    /// that want non-blocking open can wrap the call in
+    /// `tokio::task::spawn_blocking` themselves.
     pub fn open(reader: R) -> io::Result<Self> {
         let fs = filesystem_open(reader)
             .map_err(|e| io::Error::other(e.to_string()))?;
@@ -132,10 +142,103 @@ impl<R: io::Read + io::Seek + Send> Filesystem<R> {
     }
 
     /// Look up a child of `parent` by name.
-    ///
-    /// Returns the child inode and its parsed [`InodeItem`], or `None` if
-    /// no entry with that name exists.
-    pub fn lookup(
+    pub async fn lookup(
+        &self,
+        parent: Inode,
+        name: &[u8],
+    ) -> io::Result<Option<(Inode, InodeItem)>> {
+        let this = self.clone();
+        let name = name.to_vec();
+        spawn_blocking(move || this.lookup_blocking(parent, &name)).await
+    }
+
+    /// Read the inode item for `ino`.
+    pub async fn read_inode_item(
+        &self,
+        ino: Inode,
+    ) -> io::Result<Option<InodeItem>> {
+        let this = self.clone();
+        spawn_blocking(move || this.read_inode_item_blocking(ino)).await
+    }
+
+    /// Read inode metadata as a [`Stat`].
+    pub async fn getattr(&self, ino: Inode) -> io::Result<Option<Stat>> {
+        let this = self.clone();
+        spawn_blocking(move || this.getattr_blocking(ino)).await
+    }
+
+    /// List the entries of a directory inode, starting strictly after
+    /// `offset`. `.` and `..` are synthesised at offsets 0 and 1.
+    pub async fn readdir(
+        &self,
+        dir_ino: Inode,
+        offset: u64,
+    ) -> io::Result<Vec<Entry>> {
+        let this = self.clone();
+        spawn_blocking(move || this.readdir_blocking(dir_ino, offset)).await
+    }
+
+    /// Read the target of a symbolic link.
+    pub async fn readlink(&self, ino: Inode) -> io::Result<Option<Vec<u8>>> {
+        let this = self.clone();
+        spawn_blocking(move || this.readlink_blocking(ino)).await
+    }
+
+    /// Read `size` bytes from `ino` starting at `offset`. Sparse holes
+    /// and prealloc extents return zeros; compressed extents are
+    /// decompressed.
+    pub async fn read(
+        &self,
+        ino: Inode,
+        offset: u64,
+        size: u32,
+    ) -> io::Result<Vec<u8>> {
+        let this = self.clone();
+        spawn_blocking(move || this.read_blocking(ino, offset, size)).await
+    }
+
+    /// List all xattr names for an inode.
+    pub async fn xattr_list(&self, ino: Inode) -> io::Result<Vec<Vec<u8>>> {
+        let this = self.clone();
+        spawn_blocking(move || this.xattr_list_blocking(ino)).await
+    }
+
+    /// Look up the value of a single xattr by exact name.
+    pub async fn xattr_get(
+        &self,
+        ino: Inode,
+        name: &[u8],
+    ) -> io::Result<Option<Vec<u8>>> {
+        let this = self.clone();
+        let name = name.to_vec();
+        spawn_blocking(move || this.xattr_get_blocking(ino, &name)).await
+    }
+
+    /// Filesystem-wide statistics pulled straight from the superblock.
+    /// No I/O — sync.
+    #[must_use]
+    pub fn statfs(&self) -> StatFs {
+        let sb = &self.inner.superblock;
+        let bsize = u64::from(sb.sectorsize);
+        let blocks = sb.total_bytes / bsize;
+        let bfree = sb.total_bytes.saturating_sub(sb.bytes_used) / bsize;
+        StatFs {
+            blocks,
+            bfree,
+            bavail: bfree,
+            bsize: sb.sectorsize,
+            namelen: 255,
+            frsize: sb.sectorsize,
+        }
+    }
+
+    // ── Sync (blocking) implementations ─────────────────────────────
+    //
+    // The `_blocking` methods carry the actual logic. They run inside
+    // `spawn_blocking`, so they're allowed to take the reader Mutex
+    // and do sync I/O without blocking the runtime.
+
+    fn lookup_blocking(
         &self,
         parent: Inode,
         name: &[u8],
@@ -151,30 +254,31 @@ impl<R: io::Read + io::Seek + Send> Filesystem<R> {
         let Some(item) = read_inode(&mut reader, tree_root, child_oid)? else {
             return Ok(None);
         };
-        let child = Inode {
-            subvol: parent.subvol,
-            ino: child_oid,
-        };
-        Ok(Some((child, item)))
+        Ok(Some((
+            Inode {
+                subvol: parent.subvol,
+                ino: child_oid,
+            },
+            item,
+        )))
     }
 
-    /// Read the inode item for `ino`.
-    pub fn read_inode_item(&self, ino: Inode) -> io::Result<Option<InodeItem>> {
+    fn read_inode_item_blocking(
+        &self,
+        ino: Inode,
+    ) -> io::Result<Option<InodeItem>> {
         let tree_root = self.tree_root_for(ino.subvol)?;
         let mut reader = self.lock_reader();
         read_inode(&mut reader, tree_root, ino.ino)
     }
 
-    /// Read inode metadata as a [`Stat`].
-    pub fn getattr(&self, ino: Inode) -> io::Result<Option<Stat>> {
+    fn getattr_blocking(&self, ino: Inode) -> io::Result<Option<Stat>> {
         Ok(self
-            .read_inode_item(ino)?
+            .read_inode_item_blocking(ino)?
             .map(|item| Stat::from_inode(ino, &item, self.inner.blksize)))
     }
 
-    /// List the entries of a directory inode, starting strictly after
-    /// `offset`. `.` and `..` are synthesised at offsets 0 and 1.
-    pub fn readdir(
+    fn readdir_blocking(
         &self,
         dir_ino: Inode,
         offset: u64,
@@ -230,13 +334,7 @@ impl<R: io::Read + io::Seek + Send> Filesystem<R> {
         Ok(entries)
     }
 
-    /// Read the target of a symbolic link.
-    ///
-    /// Returns `None` if the inode has no inline extent data or does not
-    /// exist. The result is trimmed to the inode's `size`, since
-    /// `mkfs.btrfs --rootdir` stores a trailing NUL after the target in
-    /// the inline extent payload.
-    pub fn readlink(&self, ino: Inode) -> io::Result<Option<Vec<u8>>> {
+    fn readlink_blocking(&self, ino: Inode) -> io::Result<Option<Vec<u8>>> {
         let tree_root = self.tree_root_for(ino.subvol)?;
         let blksize = self.inner.blksize;
         let mut reader = self.lock_reader();
@@ -252,11 +350,7 @@ impl<R: io::Read + io::Seek + Send> Filesystem<R> {
         }))
     }
 
-    /// Read `size` bytes from `ino` starting at `offset`.
-    ///
-    /// Sparse holes and prealloc extents return zeros; compressed extents
-    /// are decompressed.
-    pub fn read(
+    fn read_blocking(
         &self,
         ino: Inode,
         offset: u64,
@@ -282,15 +376,13 @@ impl<R: io::Read + io::Seek + Send> Filesystem<R> {
         )
     }
 
-    /// List all xattr names for an inode.
-    pub fn xattr_list(&self, ino: Inode) -> io::Result<Vec<Vec<u8>>> {
+    fn xattr_list_blocking(&self, ino: Inode) -> io::Result<Vec<Vec<u8>>> {
         let tree_root = self.tree_root_for(ino.subvol)?;
         let mut reader = self.lock_reader();
         xattr::list_xattrs(&mut reader, tree_root, ino.ino)
     }
 
-    /// Look up the value of a single xattr by exact name.
-    pub fn xattr_get(
+    fn xattr_get_blocking(
         &self,
         ino: Inode,
         name: &[u8],
@@ -300,25 +392,8 @@ impl<R: io::Read + io::Seek + Send> Filesystem<R> {
         xattr::get_xattr(&mut reader, tree_root, ino.ino, name)
     }
 
-    /// Filesystem-wide statistics pulled straight from the superblock.
-    #[must_use]
-    pub fn statfs(&self) -> StatFs {
-        let sb = &self.inner.superblock;
-        let bsize = u64::from(sb.sectorsize);
-        let blocks = sb.total_bytes / bsize;
-        let bfree = sb.total_bytes.saturating_sub(sb.bytes_used) / bsize;
-        StatFs {
-            blocks,
-            bfree,
-            bavail: bfree,
-            bsize: sb.sectorsize,
-            namelen: 255,
-            frsize: sb.sectorsize,
-        }
-    }
-
-    /// Acquire the I/O lock. Helper that forwards a poisoned mutex to a
-    /// caller without unwrapping at every call site.
+    /// Acquire the I/O lock. Forwards a poisoned mutex without
+    /// unwrapping at every call site.
     fn lock_reader(&self) -> MutexGuard<'_, BlockReader<R>> {
         self.inner.reader.lock().unwrap()
     }
@@ -335,6 +410,18 @@ impl<R: io::Read + io::Seek + Send> Filesystem<R> {
             ))
         }
     }
+}
+
+/// Run a sync closure on the tokio blocking pool, mapping a
+/// `JoinError` to an `io::Error` so callers see a single error type.
+async fn spawn_blocking<F, T>(f: F) -> io::Result<T>
+where
+    F: FnOnce() -> io::Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| io::Error::other(format!("blocking task failed: {e}")))?
 }
 
 /// DFS the given tree, calling `visitor(item_key, item_data)` for every
