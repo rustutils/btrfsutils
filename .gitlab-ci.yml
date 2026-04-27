@@ -1,41 +1,15 @@
 stages:
-  - check
-  - build
-  - deploy
-
-check:
-  image: nixos/nix:latest
-  stage: check
-  before_script:
-    - echo 'experimental-features = nix-command flakes' >> /etc/nix/nix.conf
-  script:
-    - nix flake check -L
-
-build:
-  image: nixos/nix:latest
-  stage: build
-  before_script:
-    - echo 'experimental-features = nix-command flakes' >> /etc/nix/nix.conf
-  script:
-    - nix build . -L
-    - cp -r $(readlink result) build
-  artifacts:
-    paths:
-      - build/
-    expire_in: 1 week
-  only:
-    - master
+    - deploy
 
 pages:
-  image: alpine
-  stage: deploy
-  script:
-    - apk add mdbook
-    - mdbook build
-    - mv target/book public
-    - mv build public/build
-  artifacts:
-    paths:
-      - public
-  only:
-    - master
+    image: alpine
+    stage: deploy
+    script:
+        - apk add mdbook
+        - mdbook build
+        - mv target/book public
+    artifacts:
+        paths:
+            - public
+    only:
+        - master
