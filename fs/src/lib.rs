@@ -28,6 +28,7 @@
     clippy::module_name_repetitions
 )]
 
+mod cache;
 mod filesystem;
 mod read;
 mod xattr;
@@ -35,6 +36,7 @@ mod xattr;
 pub mod dir;
 pub mod stat;
 
+pub use cache::{CacheStats, LruTreeBlockCache};
 pub use dir::{Entry, FileKind};
 pub use filesystem::{Filesystem, Inode, StatFs, SubvolId};
 pub use stat::Stat;

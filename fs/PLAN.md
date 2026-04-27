@@ -149,31 +149,36 @@ All 19 read-path tests under `#[tokio::test]`. New
 Native async I/O remains out of scope (deferred to F8 if profiling
 justifies it).
 
-### F3 — Caches
+### F3 — Caches ✅
 
-**Scope:**
-- `tree_block_cache: RwLock<LruCache<u64, Arc<TreeBlock>>>` keyed by
-  bytenr. Default size: 64 MiB. Wraps `BlockReader::read_tree_block`.
-- `inode_cache: RwLock<LruCache<Inode, Arc<InodeItem>>>`. Default
-  size: 4096 entries. Populated on `lookup`, `getattr`,
-  `read_inode_item`.
-- `extent_map_cache: RwLock<LruCache<Inode, Arc<ExtentMap>>>` where
-  `ExtentMap` is a sorted `Vec<ExtentRef>` for the file. Built lazily
-  on first `read`; serves all subsequent reads of the file.
-- Generation counter on `Inner` (atomic `u64`). Incremented on every
-  transaction commit (F9). All cache entries carry the generation
-  they were observed at; stale entries are dropped on lookup.
-- A simple bench harness under `fs/benches/` measuring random read
-  latency before/after caches. Target: ≥10× speedup on the fixture.
+Done. Three caches sit on the read path:
 
-**Test plan:**
-- Unit tests for `LruCache` eviction.
-- Integration test that reads the same file 100× and asserts the
-  underlying `BlockReader::read_tree_block` is called only once for
-  cold reads (hook a counter into `BlockReader` for the test, or
-  verify via timing).
+- `LruTreeBlockCache`: `Mutex<LruCache<u64, Arc<TreeBlock>>>` keyed
+  by logical address, plugged into `BlockReader` via the
+  `TreeBlockCache` trait added to `btrfs-disk`. Default 4096 entries
+  (~64 MiB).
+- `InodeCache`: `Mutex<LruCache<Inode, Arc<InodeItem>>>`, populated
+  on `lookup` / `getattr` / `read_inode_item` / `readlink`. Default
+  4096 entries.
+- `ExtentMapCache`: `Mutex<LruCache<Inode, Arc<ExtentMap>>>` built
+  lazily on first `read` of a file; subsequent reads skip the FS
+  tree walk entirely. Default 1024 entries.
 
-**Out of scope:** persistent cache (across `Filesystem` instances).
+`Mutex` rather than `RwLock` because LRU mutation happens on every
+access (touching MRU order) — even a "read" needs exclusive access
+to the cache structure.
+
+`Filesystem::tree_block_cache_stats() -> CacheStats` exposes lock-free
+atomic hit/miss/insertion counters for tests and observability.
+
+The trait + invalidation methods are wired up but the generation
+counter for transaction-commit invalidation is deferred to F9 (no
+write path yet, no invalidation yet).
+
+Out of scope (deferred): persistent cache (across `Filesystem`
+instances), benchmarks under `fs/benches/`. The two-test cache suite
+(`fs/tests/cache.rs`) verifies effectiveness directly via the stats
+API rather than via timing.
 
 ### F4 — Compression test sweep
 

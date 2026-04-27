@@ -886,7 +886,7 @@ mod tests {
             block.header().fsid
         );
 
-        if let TreeBlock::Node { ptrs, .. } = &block {
+        if let TreeBlock::Node { ptrs, .. } = &*block {
             for ptr in ptrs {
                 verify_tree_fsid(reader, ptr.blockptr, expected_fsid);
             }

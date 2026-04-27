@@ -18,7 +18,34 @@ use std::{
     collections::BTreeMap,
     io::{self, Read, Seek, SeekFrom, Write},
     mem,
+    sync::Arc,
 };
+
+/// Pluggable cache for parsed [`TreeBlock`]s, consulted by
+/// [`BlockReader::read_tree_block`].
+///
+/// The trait is `Send + Sync` and uses `&self` methods so a single cache
+/// can be shared across threads (and, eventually, across multiple
+/// `BlockReader` instances in a reader pool). Implementations use
+/// interior mutability — typically a `Mutex<lru::LruCache<...>>` or
+/// similar.
+///
+/// `btrfs-disk` does not provide an LRU implementation: keeping the
+/// crate dependency-light is more important than convenience here.
+/// The `btrfs-fs` crate ships an `LruTreeBlockCache` that most
+/// embedders will use.
+pub trait TreeBlockCache: Send + Sync {
+    /// Look up a tree block by logical address. Returns `None` on miss.
+    fn get(&self, addr: u64) -> Option<Arc<TreeBlock>>;
+
+    /// Insert a freshly-read tree block into the cache. Implementations
+    /// decide eviction policy.
+    fn put(&self, addr: u64, block: Arc<TreeBlock>);
+
+    /// Drop a single entry. Used by writers (e.g. the transaction crate
+    /// during `CoW`) to invalidate stale blocks.
+    fn invalidate(&self, addr: u64);
+}
 
 /// A block reader that resolves logical addresses through a chunk cache.
 ///
@@ -30,6 +57,10 @@ pub struct BlockReader<R> {
     devices: BTreeMap<u64, R>,
     nodesize: u32,
     chunk_cache: ChunkTreeCache,
+    /// Optional shared tree-block cache. `None` means no caching (the
+    /// default — preserves existing behaviour for one-shot readers).
+    /// Wired up by [`BlockReader::with_cache`].
+    cache: Option<Arc<dyn TreeBlockCache>>,
 }
 
 impl<R> BlockReader<R> {
@@ -50,7 +81,25 @@ impl<R> BlockReader<R> {
             devices,
             nodesize,
             chunk_cache,
+            cache: None,
         }
+    }
+
+    /// Attach a [`TreeBlockCache`] to this reader.
+    ///
+    /// Subsequent calls to [`BlockReader::read_tree_block`] will consult
+    /// the cache before reading from disk and populate it on miss.
+    /// Cache hits return the stored `Arc<TreeBlock>` unchanged. Detach
+    /// by passing `None`.
+    pub fn set_cache(&mut self, cache: Option<Arc<dyn TreeBlockCache>>) {
+        self.cache = cache;
+    }
+
+    /// Builder-style helper: attach a cache and return the reader.
+    #[must_use]
+    pub fn with_cache(mut self, cache: Arc<dyn TreeBlockCache>) -> Self {
+        self.cache = Some(cache);
+        self
     }
 
     /// Create a multi-device block reader.
@@ -67,6 +116,7 @@ impl<R> BlockReader<R> {
             devices,
             nodesize,
             chunk_cache,
+            cache: None,
         }
     }
 
@@ -128,12 +178,29 @@ impl<R: Read + Seek> BlockReader<R> {
 
     /// Read and parse a tree block at a logical address.
     ///
+    /// If a [`TreeBlockCache`] is attached the cache is consulted first
+    /// and populated on miss; the returned `Arc` either points at the
+    /// cached entry or at a freshly-parsed block.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the logical address is unmapped or the underlying read fails.
-    pub fn read_tree_block(&mut self, logical: u64) -> io::Result<TreeBlock> {
+    /// Returns an error if the logical address is unmapped or the
+    /// underlying read fails.
+    pub fn read_tree_block(
+        &mut self,
+        logical: u64,
+    ) -> io::Result<Arc<TreeBlock>> {
+        if let Some(cache) = self.cache.as_ref() {
+            if let Some(hit) = cache.get(logical) {
+                return Ok(hit);
+            }
+        }
         let buf = self.read_block(logical)?;
-        Ok(TreeBlock::parse(&buf))
+        let block = Arc::new(TreeBlock::parse(&buf));
+        if let Some(cache) = self.cache.as_ref() {
+            cache.put(logical, Arc::clone(&block));
+        }
+        Ok(block)
     }
 
     /// Return a reference to the chunk cache.
@@ -561,7 +628,7 @@ pub fn read_chunk_tree<R: Read + Seek>(
 ) -> io::Result<()> {
     let block = reader.read_tree_block(root_logical)?;
 
-    match &block {
+    match &*block {
         TreeBlock::Leaf { items, data, .. } => {
             for item in items {
                 if item.key.key_type != KeyType::ChunkItem {
@@ -640,7 +707,7 @@ fn tree_walk_dfs<R: Read + Seek>(
     let block = reader.read_tree_block(logical)?;
     visitor(&block);
 
-    if let TreeBlock::Node { ptrs, .. } = &block {
+    if let TreeBlock::Node { ptrs, .. } = &*block {
         for ptr in ptrs {
             tree_walk_dfs(reader, ptr.blockptr, visitor)?;
         }
@@ -658,7 +725,7 @@ fn tree_walk_bfs<R: Read + Seek>(
     let root_level = root_block.header().level;
     visitor(&root_block);
 
-    let mut current_level_ptrs: Vec<u64> = match &root_block {
+    let mut current_level_ptrs: Vec<u64> = match &*root_block {
         TreeBlock::Node { ptrs, .. } => {
             ptrs.iter().map(|p| p.blockptr).collect()
         }
@@ -672,7 +739,7 @@ fn tree_walk_bfs<R: Read + Seek>(
             let block = reader.read_tree_block(*logical)?;
             visitor(&block);
 
-            if let TreeBlock::Node { ptrs, .. } = &block {
+            if let TreeBlock::Node { ptrs, .. } = &*block {
                 next_level_ptrs.extend(ptrs.iter().map(|p| p.blockptr));
             }
         }
@@ -867,14 +934,14 @@ pub fn tree_stats_collect<R: Read + Seek>(
         levels: root_level + 1,
     };
 
-    walk_stats(reader, root_block, &mut stats, find_inline, nodesize)?;
+    walk_stats(reader, &root_block, &mut stats, find_inline, nodesize)?;
     Ok(stats)
 }
 
 /// Recursively walk a tree block, accumulating stats.
 fn walk_stats<R: Read + Seek>(
     reader: &mut BlockReader<R>,
-    block: TreeBlock,
+    block: &TreeBlock,
     stats: &mut TreeStats,
     find_inline: bool,
     nodesize: u64,
@@ -902,7 +969,7 @@ fn walk_stats<R: Read + Seek>(
                 let inline_hdr_size =
                     mem::offset_of!(raw::btrfs_file_extent_item, disk_bytenr);
                 let header_size = mem::size_of::<raw::btrfs_header>();
-                for item in &items {
+                for item in items {
                     if item.key.key_type != KeyType::ExtentData {
                         continue;
                     }
@@ -926,7 +993,7 @@ fn walk_stats<R: Read + Seek>(
 
             for ptr in ptrs {
                 let child = reader.read_tree_block(ptr.blockptr)?;
-                walk_stats(reader, child, stats, find_inline, nodesize)?;
+                walk_stats(reader, &child, stats, find_inline, nodesize)?;
 
                 let cur = ptr.blockptr;
                 if last_block + nodesize == cur {
@@ -970,7 +1037,7 @@ fn collect_root_items<R: Read + Seek>(
 ) -> io::Result<()> {
     let block = reader.read_tree_block(logical)?;
 
-    match &block {
+    match &*block {
         TreeBlock::Leaf { items, data, .. } => {
             // ROOT_ITEM contains btrfs_root_item; the bytenr field gives
             // the root block of that tree.

@@ -47,6 +47,31 @@ All notable changes to this project will be documented in this file.
   the spawn-task dispatch path. `MountedFuse` RAII guard handles
   cleanup with lazy unmount so a panicked test doesn't wedge the
   mountpoint.
+- `btrfs-disk`: pluggable tree-block cache via `TreeBlockCache`
+  trait. `BlockReader::read_tree_block` returns `Arc<TreeBlock>`,
+  consults the attached cache before disk, and populates on miss.
+  Trait is `Send + Sync` with `&self` methods (interior mutability)
+  so the cache is shareable across threads. `btrfs-disk` ships the
+  trait only — no LRU implementation, no extra deps; embedders
+  provide their own.
+- `btrfs-fs`: three-layer caching wired into `Filesystem`.
+  `LruTreeBlockCache` (the `TreeBlockCache` impl) plus inode and
+  per-inode extent-map caches. Default capacities: 4096 tree blocks
+  (~64 MiB), 4096 inodes, 1024 extent maps. `Filesystem::open`
+  builds and attaches the caches automatically.
+  `Filesystem::tree_block_cache_stats() -> CacheStats` exposes
+  hit/miss/insertion counters via lock-free atomics for tests,
+  benchmarks, and observability.
+
+### Changed
+
+- `btrfs-disk`: `BlockReader::read_tree_block` now returns
+  `Arc<TreeBlock>` instead of owning `TreeBlock`. Callers that
+  pattern-matched `match &block { ... }` need `match &*block`;
+  callers that consumed the block (e.g. `into_iter()`) borrow
+  instead (`iter()`). Internal `walk_stats` switched to
+  `&TreeBlock`. All ripple sites in `cli/`, `tune/`, `fs/`,
+  `mkfs/`, `transaction/`, and the integration tests updated.
 
 ## 0.12.0
 

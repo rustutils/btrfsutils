@@ -395,7 +395,7 @@ fn collect_items_dfs<R: Read + Seek>(
         }
     };
 
-    match &block {
+    match &*block {
         TreeBlock::Leaf {
             items: leaf_items,
             data,
@@ -1117,7 +1117,7 @@ fn collect_root_items_for_listing<R: Read + Seek>(
         .read_tree_block(logical)
         .with_context(|| format!("failed to read tree block at {logical}"))?;
 
-    match &block {
+    match &*block {
         TreeBlock::Leaf {
             items: leaf_items,
             data,

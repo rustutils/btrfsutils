@@ -12,6 +12,7 @@
 //! length. If fewer than 4 bytes remain before the next sector boundary, skip
 //! to align. The sector size is the filesystem `sectorsize` field.
 
+use crate::cache::ExtentRecord;
 use btrfs_disk::{
     items::{CompressionType, FileExtentBody, FileExtentItem, FileExtentType},
     reader::{BlockReader, Traversal, tree_walk},
@@ -21,15 +22,6 @@ use std::{io, io::Read, mem};
 
 /// Byte size of the fixed header that precedes inline or regular extent data.
 const EXTENT_HEADER_SIZE: usize = 21;
-
-/// A collected `EXTENT_DATA` item with its file position and raw bytes.
-struct ExtentRec {
-    /// Byte offset within the file where this extent begins (`key.offset`).
-    file_pos: u64,
-    item: FileExtentItem,
-    /// Raw item payload (header + body), used to extract inline data.
-    raw: Vec<u8>,
-}
 
 /// Decompress btrfs LZO format.
 ///
@@ -207,32 +199,18 @@ pub(crate) fn read_symlink<R: io::Read + io::Seek>(
     result.transpose()
 }
 
-/// Read bytes from a regular file.
+/// Walk the FS tree and collect every `EXTENT_DATA` item belonging to
+/// `oid`. The returned records are in tree-walk order (i.e. ascending
+/// file position, since the tree is key-sorted).
 ///
-/// Returns at most `size` bytes starting at `file_offset`, clamped to
-/// `file_size`. Inline, regular (compressed and uncompressed), and prealloc
-/// extents are all handled. Sparse holes return zeros.
-#[allow(clippy::too_many_lines)] // inherently complex: 4 extent variants × range math
-pub(crate) fn read_file<R: io::Read + io::Seek>(
+/// Used by [`crate::Filesystem`]'s extent-map cache so subsequent
+/// reads on the same inode reuse the parsed records.
+pub(crate) fn collect_extents<R: io::Read + io::Seek>(
     reader: &mut BlockReader<R>,
     fs_tree_root: u64,
     oid: u64,
-    file_size: u64,
-    file_offset: u64,
-    size: u32,
-    sector_size: u32,
-) -> io::Result<Vec<u8>> {
-    #[allow(clippy::cast_possible_truncation)]
-    // file reads are bounded by usize on 64-bit
-    let actual =
-        u64::from(size).min(file_size.saturating_sub(file_offset)) as usize;
-    if actual == 0 {
-        return Ok(vec![]);
-    }
-    let req_end = file_offset + actual as u64;
-
-    // Phase 1: collect all EXTENT_DATA items for this inode.
-    let mut extents: Vec<ExtentRec> = Vec::new();
+) -> io::Result<Vec<ExtentRecord>> {
+    let mut extents: Vec<ExtentRecord> = Vec::new();
     tree_walk(reader, fs_tree_root, Traversal::Dfs, &mut |block| {
         let TreeBlock::Leaf { items, data, .. } = block else {
             return;
@@ -250,7 +228,7 @@ pub(crate) fn read_file<R: io::Read + io::Seek>(
                 continue;
             }
             if let Some(parsed) = FileExtentItem::parse(&data[start..end]) {
-                extents.push(ExtentRec {
+                extents.push(ExtentRecord {
                     file_pos: item.key.offset,
                     item: parsed,
                     raw: data[start..end].to_vec(),
@@ -258,14 +236,42 @@ pub(crate) fn read_file<R: io::Read + io::Seek>(
             }
         }
     })?;
+    Ok(extents)
+}
 
-    // Phase 2: fill the output buffer from the collected extents.
+/// Read bytes from a regular file using a pre-collected extent map.
+///
+/// Returns at most `size` bytes starting at `file_offset`, clamped to
+/// `file_size`. Inline, regular (compressed and uncompressed), and
+/// prealloc extents are all handled. Sparse holes return zeros.
+///
+/// The extent map is supplied by the caller (typically built once via
+/// [`collect_extents`] and cached) so repeated reads of the same file
+/// don't re-walk the FS tree.
+#[allow(clippy::too_many_lines)] // inherently complex: 4 extent variants × range math
+pub(crate) fn read_file_with_map<R: io::Read + io::Seek>(
+    reader: &mut BlockReader<R>,
+    extents: &[ExtentRecord],
+    file_size: u64,
+    file_offset: u64,
+    size: u32,
+    sector_size: u32,
+) -> io::Result<Vec<u8>> {
+    #[allow(clippy::cast_possible_truncation)]
+    // file reads are bounded by usize on 64-bit
+    let actual =
+        u64::from(size).min(file_size.saturating_sub(file_offset)) as usize;
+    if actual == 0 {
+        return Ok(vec![]);
+    }
+    let req_end = file_offset + actual as u64;
+
     // Pre-zeroed so holes, prealloc, and gaps are returned as zeros.
     let mut out = vec![0u8; actual];
 
     #[allow(clippy::cast_possible_truncation)]
     // all offsets fit in usize on 64-bit Linux
-    for rec in &extents {
+    for rec in extents {
         let ext_start = rec.file_pos;
         match (&rec.item.extent_type, &rec.item.body) {
             (

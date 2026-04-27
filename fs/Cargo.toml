@@ -18,6 +18,7 @@ flate2 = { workspace = true }
 zstd = { workspace = true }
 lzokay = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
+lru = "0.18"
 
 [dev-dependencies]
 btrfs-test-utils = { workspace = true }

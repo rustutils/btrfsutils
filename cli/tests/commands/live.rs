@@ -3083,9 +3083,9 @@ fn rescue_fix_data_checksum_repair() {
                 .reader
                 .read_tree_block(bytenr)
                 .expect("read tree block");
-            match block {
+            match &*block {
                 TreeBlock::Node { ptrs, .. } => {
-                    for p in ptrs.into_iter().rev() {
+                    for p in ptrs.iter().rev() {
                         stack.push(p.blockptr);
                     }
                 }

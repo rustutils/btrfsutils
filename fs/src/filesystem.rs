@@ -11,7 +11,15 @@
 //! `btrfs-fuse` provides one; tests use `#[tokio::test]`; other
 //! embedders bring their own.
 
-use crate::{Entry, FileKind, Stat, dir, read, xattr};
+use crate::{
+    Entry, FileKind, Stat,
+    cache::{
+        EXTENT_MAP_CACHE_DEFAULT_ENTRIES, ExtentMapCache,
+        INODE_CACHE_DEFAULT_ENTRIES, InodeCache, LruTreeBlockCache,
+        TREE_BLOCK_CACHE_DEFAULT_ENTRIES,
+    },
+    dir, read, xattr,
+};
 use btrfs_disk::{
     items::{DirItem, InodeItem},
     reader::{BlockReader, Traversal, filesystem_open, tree_walk},
@@ -96,6 +104,16 @@ struct Inner<R: io::Read + io::Seek + Send + 'static> {
     /// `.await`. Future work can swap this for a pool of readers
     /// without changing the public `&self` API.
     reader: Mutex<BlockReader<R>>,
+    /// Concrete reference to the tree-block cache. Stored alongside
+    /// the `Arc<dyn TreeBlockCache>` inside the reader so callers can
+    /// inspect [`crate::CacheStats`] without going through the trait.
+    tree_block_cache: Arc<LruTreeBlockCache>,
+    /// Inode cache. Hit on `getattr`, `lookup`, `readlink`, `read`.
+    /// Populated whenever an `InodeItem` is parsed from the tree.
+    inode_cache: InodeCache,
+    /// Per-inode extent map cache. Built lazily on first `read` of a
+    /// file; reused for subsequent reads of the same inode.
+    extent_map_cache: ExtentMapCache,
 }
 
 impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
@@ -107,7 +125,7 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     /// that want non-blocking open can wrap the call in
     /// `tokio::task::spawn_blocking` themselves.
     pub fn open(reader: R) -> io::Result<Self> {
-        let fs = filesystem_open(reader)
+        let mut fs = filesystem_open(reader)
             .map_err(|e| io::Error::other(e.to_string()))?;
         let blksize = fs.superblock.sectorsize;
         if !fs.tree_roots.contains_key(&FS_TREE_OBJECTID) {
@@ -115,6 +133,15 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
                 "default FS tree (objectid 5) not found in root tree",
             ));
         }
+        // Attach a tree-block cache to the underlying reader so every
+        // tree walk past the first benefits transparently. We keep
+        // both a typed `Arc<LruTreeBlockCache>` (for stats) and the
+        // erased `Arc<dyn TreeBlockCache>` (for the reader) — they
+        // point at the same instance.
+        let tree_block_cache =
+            Arc::new(LruTreeBlockCache::new(TREE_BLOCK_CACHE_DEFAULT_ENTRIES));
+        fs.reader.set_cache(Some(tree_block_cache.clone()
+            as Arc<dyn btrfs_disk::reader::TreeBlockCache>));
         Ok(Self {
             inner: Arc::new(Inner {
                 superblock: fs.superblock,
@@ -122,8 +149,20 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
                 default_subvol: SubvolId(FS_TREE_OBJECTID),
                 blksize,
                 reader: Mutex::new(fs.reader),
+                tree_block_cache,
+                inode_cache: InodeCache::new(INODE_CACHE_DEFAULT_ENTRIES),
+                extent_map_cache: ExtentMapCache::new(
+                    EXTENT_MAP_CACHE_DEFAULT_ENTRIES,
+                ),
             }),
         })
+    }
+
+    /// Snapshot of the tree-block cache hit/miss counters. Useful for
+    /// tests, benchmarks, and embedders surfacing cache metrics.
+    #[must_use]
+    pub fn tree_block_cache_stats(&self) -> crate::CacheStats {
+        self.inner.tree_block_cache.stats()
     }
 
     /// Inode of the default subvolume's root directory (objectid 256).
@@ -251,25 +290,40 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             return Ok(None);
         };
         let child_oid = entry.location.objectid;
-        let Some(item) = read_inode(&mut reader, tree_root, child_oid)? else {
-            return Ok(None);
+        let child = Inode {
+            subvol: parent.subvol,
+            ino: child_oid,
         };
-        Ok(Some((
-            Inode {
-                subvol: parent.subvol,
-                ino: child_oid,
-            },
-            item,
-        )))
+        // Reuse the cached InodeItem if present; otherwise fetch and
+        // populate. Holding the reader mutex across both calls is fine
+        // because the inode cache uses interior mutability.
+        let item = if let Some(cached) = self.inner.inode_cache.get(child) {
+            (*cached).clone()
+        } else {
+            let Some(item) = read_inode(&mut reader, tree_root, child_oid)?
+            else {
+                return Ok(None);
+            };
+            self.inner.inode_cache.put(child, Arc::new(item.clone()));
+            item
+        };
+        Ok(Some((child, item)))
     }
 
     fn read_inode_item_blocking(
         &self,
         ino: Inode,
     ) -> io::Result<Option<InodeItem>> {
+        if let Some(cached) = self.inner.inode_cache.get(ino) {
+            return Ok(Some((*cached).clone()));
+        }
         let tree_root = self.tree_root_for(ino.subvol)?;
         let mut reader = self.lock_reader();
-        read_inode(&mut reader, tree_root, ino.ino)
+        let Some(item) = read_inode(&mut reader, tree_root, ino.ino)? else {
+            return Ok(None);
+        };
+        self.inner.inode_cache.put(ino, Arc::new(item.clone()));
+        Ok(Some(item))
     }
 
     fn getattr_blocking(&self, ino: Inode) -> io::Result<Option<Stat>> {
@@ -335,12 +389,12 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     }
 
     fn readlink_blocking(&self, ino: Inode) -> io::Result<Option<Vec<u8>>> {
+        let Some(item) = self.read_inode_item_blocking(ino)? else {
+            return Ok(None);
+        };
         let tree_root = self.tree_root_for(ino.subvol)?;
         let blksize = self.inner.blksize;
         let mut reader = self.lock_reader();
-        let Some(item) = read_inode(&mut reader, tree_root, ino.ino)? else {
-            return Ok(None);
-        };
         let target =
             read::read_symlink(&mut reader, tree_root, ino.ino, blksize)?;
         #[allow(clippy::cast_possible_truncation)]
@@ -356,24 +410,43 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         offset: u64,
         size: u32,
     ) -> io::Result<Vec<u8>> {
-        let tree_root = self.tree_root_for(ino.subvol)?;
-        let blksize = self.inner.blksize;
-        let mut reader = self.lock_reader();
-        let Some(item) = read_inode(&mut reader, tree_root, ino.ino)? else {
+        let Some(item) = self.read_inode_item_blocking(ino)? else {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 format!("inode {} not found", ino.ino),
             ));
         };
-        read::read_file(
+        let tree_root = self.tree_root_for(ino.subvol)?;
+        let blksize = self.inner.blksize;
+        // Build or fetch the extent map so repeated reads of the same
+        // file don't re-walk the FS tree.
+        let extent_map = self.extent_map_for(ino, tree_root)?;
+        let mut reader = self.lock_reader();
+        read::read_file_with_map(
             &mut reader,
-            tree_root,
-            ino.ino,
+            &extent_map.records,
             item.size,
             offset,
             size,
             blksize,
         )
+    }
+
+    /// Build (or fetch from cache) the [`ExtentMap`] for `ino`.
+    fn extent_map_for(
+        &self,
+        ino: Inode,
+        tree_root: u64,
+    ) -> io::Result<Arc<crate::cache::ExtentMap>> {
+        if let Some(cached) = self.inner.extent_map_cache.get(ino) {
+            return Ok(cached);
+        }
+        let mut reader = self.lock_reader();
+        let records = read::collect_extents(&mut reader, tree_root, ino.ino)?;
+        drop(reader);
+        let map = Arc::new(crate::cache::ExtentMap { records });
+        self.inner.extent_map_cache.put(ino, Arc::clone(&map));
+        Ok(map)
     }
 
     fn xattr_list_blocking(&self, ino: Inode) -> io::Result<Vec<Vec<u8>>> {

@@ -18,6 +18,10 @@ allow = [
   "MIT",
   "Unicode-3.0",
   "MPL-2.0",
+  # Pulled in transitively via `lru` → `hashbrown` → `foldhash`.
+  # OSI-approved permissive license, compatible with everything we
+  # already allow.
+  "Zlib",
 ]
 confidence-threshold = 0.8
 
