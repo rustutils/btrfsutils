@@ -6,6 +6,20 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-mkfs`: `--rootdir --inode-flags` now goes through the new
+  transactional walker. `walk_to_transaction` builds the same
+  `path → (nodatacow, nodatasum)` map the legacy walker maintains,
+  looks each entry up by its rootdir-relative path, and sets
+  `InodeFlags::NODATACOW` / `InodeFlags::NODATASUM` on the
+  `InodeArgs` passed to `Transaction::create_inode`. The same
+  `nodatasum` value is plumbed through to `write_file_data` and
+  the reflink path so per-sector csums are skipped on
+  `NODATASUM` files. The dispatcher in `make_btrfs_with_rootdir`
+  now unconditionally routes through the transactional path; the
+  legacy walker is unreachable dead code, slated for deletion in
+  the next commit. Verified by the existing
+  `rootdir_inode_flags_nodatacow_nodatasum` test (now exercising
+  the new path).
 - `btrfs-mkfs`: `--rootdir --reflink` and `--rootdir --shrink` both
   go through the new transactional walker now. Together with the
   earlier subvol migration, this leaves only `--inode-flags` on the

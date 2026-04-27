@@ -514,6 +514,7 @@ fn make_btrfs_with_rootdir_via_transaction(
     rootdir: &Path,
     compress: rootdir::CompressConfig,
     subvol_args: &[crate::args::SubvolArg],
+    inode_flags: &[crate::args::InodeFlagsArg],
     opts: RootdirOptions,
 ) -> Result<()> {
     use btrfs_transaction::{Filesystem, Transaction};
@@ -576,6 +577,7 @@ fn make_btrfs_with_rootdir_via_transaction(
             now,
             compress,
             subvol_args,
+            inode_flags,
             reflink_handles.as_ref(),
         )?;
         if let Some(shrunk) = shrunk_size {
@@ -627,6 +629,7 @@ fn make_btrfs_with_rootdir_via_transaction(
             now,
             compress,
             subvol_args,
+            inode_flags,
             reflink_handles.as_ref(),
         )?;
         trans
@@ -705,6 +708,8 @@ fn compute_shrunk_size(cfg: &MkfsConfig) -> Result<u64> {
 #[allow(clippy::cast_possible_truncation)] // key types fit in u8, devid-1 fits usize
 #[allow(clippy::cast_sign_loss)] // DATA_RELOC_TREE_OBJECTID is positive
 #[allow(clippy::similar_names)]
+#[allow(unreachable_code)] // legacy body below the dispatch is dead; next commit deletes it
+#[allow(unused_variables)] // legacy locals are dead alongside the body
 pub fn make_btrfs_with_rootdir(
     cfg: &MkfsConfig,
     rootdir: &Path,
@@ -730,20 +735,18 @@ pub fn make_btrfs_with_rootdir(
         );
     }
 
-    // Route through the transaction-based path unless the user
-    // requests `--inode-flags`, which the new walker doesn't yet
-    // support. Subvolumes (`--subvol`), image shrink (`--shrink`),
-    // and FICLONERANGE reflink (`--reflink`) all run through the
-    // transactional walker now.
-    if inode_flags.is_empty() {
-        return make_btrfs_with_rootdir_via_transaction(
-            cfg,
-            rootdir,
-            compress,
-            subvol_args,
-            opts,
-        );
-    }
+    // The transactional walker handles every `--rootdir` flag now
+    // (`--subvol`, `--shrink`, `--reflink`, `--inode-flags`). The
+    // legacy walker code below is unreachable; the next commit
+    // deletes it.
+    return make_btrfs_with_rootdir_via_transaction(
+        cfg,
+        rootdir,
+        compress,
+        subvol_args,
+        inode_flags,
+        opts,
+    );
 
     let generation = 1u64;
     let now = cfg.now_secs();

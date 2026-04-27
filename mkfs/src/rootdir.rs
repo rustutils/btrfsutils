@@ -1370,6 +1370,7 @@ where
 /// [`insert_root_ref`]: btrfs_transaction::Transaction::insert_root_ref
 /// [`Filesystem::open`]: btrfs_transaction::Filesystem::open
 /// [`mkfs::make_btrfs`]: crate::mkfs::make_btrfs
+#[allow(clippy::too_many_arguments)]
 pub fn walk_to_transaction<R>(
     rootdir: &Path,
     fs: &mut btrfs_transaction::Filesystem<R>,
@@ -1377,6 +1378,7 @@ pub fn walk_to_transaction<R>(
     now_sec: u64,
     compress: CompressConfig,
     subvol_args: &[SubvolArg],
+    inode_flags: &[InodeFlagsArg],
     reflink_handles: Option<&BTreeMap<u64, std::fs::File>>,
 ) -> Result<()>
 where
@@ -1396,6 +1398,15 @@ where
         next_subvol_id += 1;
     }
 
+    // Build the path → (nodatacow, nodatasum) lookup the legacy
+    // walker maintains for `--inode-flags` matches. Paths in the
+    // map are relative to `rootdir`, matching how the user passes
+    // them on the command line.
+    let inode_flags_map: HashMap<PathBuf, (bool, bool)> = inode_flags
+        .iter()
+        .map(|f| (f.path.clone(), (f.nodatacow, f.nodatasum)))
+        .collect();
+
     // Walk the main FS tree first.
     let main_boundaries = direct_subvol_boundaries(&subvol_id_map, None);
     let main_root = u64::from(raw::BTRFS_FS_TREE_OBJECTID);
@@ -1408,6 +1419,7 @@ where
         now_sec,
         compress,
         &main_boundaries,
+        &inode_flags_map,
         reflink_handles,
     )?;
 
@@ -1466,6 +1478,7 @@ where
             now_sec,
             compress,
             &sub_boundaries,
+            &inode_flags_map,
             reflink_handles,
         )?;
         deferred.extend(nested);
@@ -1516,6 +1529,7 @@ fn walk_one_tree_to_transaction<R>(
     now_sec: u64,
     compress: CompressConfig,
     subvol_boundaries: &HashMap<PathBuf, (u64, SubvolType)>,
+    inode_flags_map: &HashMap<PathBuf, (bool, bool)>,
     reflink_handles: Option<&BTreeMap<u64, std::fs::File>>,
 ) -> Result<Vec<DeferredSubvol>>
 where
@@ -1524,7 +1538,6 @@ where
     use btrfs_disk::items::{InodeFlags, Timespec};
     use btrfs_transaction::inode::InodeArgs;
 
-    let _ = rootdir; // reserved for future --inode-flags rel-path lookups
     let root_ino: u64 = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID); // 256
     let mut next_ino: u64 = root_ino + 1; // 257
 
@@ -1665,6 +1678,24 @@ where
             0
         };
 
+        // --inode-flags lookup: paths in `inode_flags_map` are relative
+        // to `rootdir`, matching how the user passes them. `nodatacow`
+        // implies `nodatasum` for regular files (since COW is what
+        // makes per-extent csums meaningful).
+        let rel_path = host_path.strip_prefix(rootdir).unwrap_or(&host_path);
+        let (nodatacow, nodatasum_arg) = inode_flags_map
+            .get(rel_path)
+            .copied()
+            .unwrap_or((false, false));
+        let nodatasum = nodatasum_arg || (nodatacow && meta.is_file());
+        let mut iflags = InodeFlags::empty();
+        if nodatacow {
+            iflags |= InodeFlags::NODATACOW;
+        }
+        if nodatasum {
+            iflags |= InodeFlags::NODATASUM;
+        }
+
         let args = InodeArgs {
             generation: trans.transid,
             transid: trans.transid,
@@ -1675,7 +1706,7 @@ where
             gid: meta.gid(),
             mode,
             rdev,
-            flags: InodeFlags::empty(),
+            flags: iflags,
             sequence: 0,
             atime: Timespec {
                 sec: meta.atime() as u64,
@@ -1771,7 +1802,7 @@ where
                     size,
                     root_objectid,
                     btrfs_ino,
-                    /* nodatasum */ false,
+                    nodatasum,
                     handles,
                 )?;
             } else {
@@ -1794,7 +1825,7 @@ where
                         btrfs_ino,
                         0,
                         &data,
-                        /* nodatasum */ false,
+                        nodatasum,
                         comp,
                     )
                     .map_err(|e| {

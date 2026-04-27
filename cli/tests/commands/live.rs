@@ -2664,11 +2664,8 @@ fn mkfs_rootdir_reflink_on_btrfs() {
     // mount gets `outer/dest`.
     let workspace_base = outer.path().join("ws");
     std::fs::create_dir_all(&workspace_base).unwrap();
-    let workspace_img = BackingFile::new(
-        &workspace_base,
-        "workspace.img",
-        1024 * 1024 * 1024,
-    );
+    let workspace_img =
+        BackingFile::new(&workspace_base, "workspace.img", 1024 * 1024 * 1024);
     workspace_img.mkfs();
     let workspace_lo = LoopbackDevice::new(workspace_img);
     let workspace_mnt = Mount::new(workspace_lo, &workspace_base);
