@@ -82,15 +82,41 @@ format:
 
 # run static linters
 check:
+    #!/usr/bin/env bash
+    set -euo pipefail
     cargo +nightly fmt --all --check
     cargo deny check
     taplo check
     RUSTDOCFLAGS="-Dwarnings" cargo doc --no-deps
     cargo clippy --all-features -- -Dwarnings
-    cargo check --target x86_64-unknown-linux-gnu
-    cargo check --target x86_64-unknown-linux-musl
+
+    # Detect the host arch and check both libc variants. The musl
+    # variant needs `<arch>-linux-musl-gcc` because zstd-sys / lzo-sys
+    # build scripts invoke a C compiler; skip musl when that compiler
+    # isn't on PATH so `just check` works on a stock developer machine.
+    host_arch=$(uname -m)
+    case "$host_arch" in
+      x86_64)  triple_prefix=x86_64-unknown-linux  ;;
+      aarch64) triple_prefix=aarch64-unknown-linux ;;
+      *) echo "unsupported host arch: $host_arch" >&2; exit 1 ;;
+    esac
+    cargo check --target "${triple_prefix}-gnu"
+    if command -v "${host_arch}-linux-musl-gcc" >/dev/null 2>&1; then
+      cargo check --target "${triple_prefix}-musl"
+    else
+      echo "skipping ${triple_prefix}-musl check: ${host_arch}-linux-musl-gcc not on PATH"
+    fi
+
     cargo check --features mkfs
     cargo check --features tune
+
+    # Verify each crate's declared `rust-version` actually compiles.
+    # cargo-msrv's verify subcommand reads `rust-version` from each
+    # workspace member's Cargo.toml and tries `cargo +<that-version>
+    # check`. Skip dev-only / non-published crates (test-utils, gen).
+    for member in disk uapi transaction stream mkfs cli tune fuse; do
+      cargo msrv verify --manifest-path "${member}/Cargo.toml"
+    done
 
 # Build deb and rpm packages from the nix build output.
 #

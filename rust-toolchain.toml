@@ -1,4 +1,14 @@
 [toolchain]
 channel = "1.94.1"
 components = ["clippy", "llvm-tools"]
-targets = ["x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl"]
+# Both arches × both libcs, so `just check` finds all four std libraries
+# regardless of which host a developer is on. The musl variants
+# additionally need a `<arch>-linux-musl-gcc` on PATH (zstd-sys / lzo-sys
+# build scripts invoke a C compiler); `just check` skips musl when that
+# compiler is missing rather than hard-failing.
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "aarch64-unknown-linux-gnu",
+  "aarch64-unknown-linux-musl",
+]

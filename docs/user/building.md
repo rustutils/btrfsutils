@@ -46,3 +46,8 @@ cargo-insta, and cargo-llvm-cov):
 ```sh
 nix develop
 ```
+
+Contributors who want to run the full lint sweep (`just check`) on a
+non-Nix machine may also need a host-arch musl cross-compiler — see
+the "Static checks" section of the
+[testing guide](../dev/testing.md) for setup instructions.

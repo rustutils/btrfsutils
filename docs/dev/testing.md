@@ -31,6 +31,44 @@ just coverage
 # open target/coverage/llvm-cov/html/index.html
 ```
 
+## Static checks
+
+Before committing, run `just check`. This wraps the formatter check
+(nightly `rustfmt`), `cargo deny`, `taplo` for `Cargo.toml` formatting,
+`cargo doc` (with `-Dwarnings`), `cargo clippy --all-features`,
+per-libc `cargo check` for the host arch, the optional CLI features,
+and `cargo msrv verify` against every publishable crate's declared
+`rust-version`.
+
+The host-arch detection means `just check` works on x86_64 and
+aarch64 alike. The musl half (`<host>-unknown-linux-musl`) needs a
+matching C cross-compiler on PATH, since the `zstd-sys` and
+`lzo-sys` build scripts compile C code:
+
+- **Nix devshell** (`nix develop`) provides everything; you don't
+  need any of the steps below.
+- **Fedora aarch64**: `dnf install musl-gcc` ships `musl-gcc` as a
+  thin wrapper around the host gcc plus musl specs. `cc-rs` looks
+  for the target-prefixed `aarch64-linux-musl-gcc` name, so symlink
+  it once:
+
+  ```sh
+  sudo ln -s /usr/bin/musl-gcc /usr/local/bin/aarch64-linux-musl-gcc
+  ```
+
+  (or set `CC_aarch64_unknown_linux_musl=musl-gcc` and
+  `AR_aarch64_unknown_linux_musl=ar` if you prefer to avoid touching
+  `/usr/local/bin`.)
+- **Debian / Ubuntu**: `apt install musl-tools` (host arch) or one
+  of the `gcc-<arch>-linux-musl-cross` packages for cross builds;
+  same target-prefix handling applies if `cc-rs` doesn't pick it up
+  automatically.
+
+If the cross C compiler isn't on PATH, `just check` prints
+`skipping <triple> check: <prefix>-linux-musl-gcc not on PATH` and
+keeps going — only CI is expected to fail on a missing musl
+toolchain.
+
 ## Unit tests
 
 Unit tests live as `#[cfg(test)] mod tests` blocks within the module they test.
