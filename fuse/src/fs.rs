@@ -348,14 +348,15 @@ impl FuserFilesystem for BtrfsFuse {
         _fh: FileHandle,
         _flags: IoctlFlags,
         cmd: u32,
-        _in_data: &[u8],
+        in_data: &[u8],
         _out_size: u32,
         reply: ReplyIoctl,
     ) {
         let target = self.fuse_inode(ino.0);
         let fs = self.fs.clone();
+        let in_data = in_data.to_vec();
         self.runtime.spawn(async move {
-            match ioctl::dispatch(&fs, target, cmd).await {
+            match ioctl::dispatch(&fs, target, cmd, &in_data).await {
                 IoctlOutcome::Ok(data) => reply.ioctl(0, &data),
                 IoctlOutcome::Err(errno) => reply.error(errno),
             }

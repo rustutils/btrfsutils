@@ -121,8 +121,21 @@ All notable changes to this project will be documented in this file.
   on-disk C struct layout (no bindgen types leak into the public
   API). Unknown ioctls return `ENOTTY`. `fuse/src/ioctl.rs` re-derives
   the ioctl numbers via const `_IOR` helpers since bindgen doesn't
-  expand the macro family. Variable-size ioctls (`TREE_SEARCH_V2` and
-  friends) come in F6.2.
+  expand the macro family.
+- `btrfs-fuse`: F6.2 (fixed-size subset). Two more ioctl handlers:
+  `BTRFS_IOC_DEV_INFO` (per-device geometry) and
+  `BTRFS_IOC_INO_LOOKUP` (objectid → path resolution by walking
+  the `INODE_REF` chain in the inode's subvolume tree).
+  `Filesystem::dev_info(devid)` and `Filesystem::ino_lookup(subvol,
+  objectid)` are the new public entry points. `DeviceItem` is
+  re-exported from `btrfs-fs`. Variable-size ioctls
+  (`TREE_SEARCH_V2`, `LOGICAL_INO_V2`, `INO_PATHS`,
+  `GET_SUBVOL_ROOTREF`) remain blocked on fuser 0.17 not exposing
+  `FUSE_IOCTL_RETRY` in its reply API — these all carry struct
+  buffers larger than the 14-bit size field encoded in the ioctl
+  number, so without retry support FUSE silently truncates them.
+  Will land after upstreaming the retry API to fuser, or by
+  forking.
 
 ### Fixed
 

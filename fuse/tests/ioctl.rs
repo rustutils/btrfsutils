@@ -22,9 +22,15 @@ const fn ioc_ior(magic: u8, nr: u8, size: u32) -> u32 {
     (2u32 << 30) | ((magic as u32) << 8) | (nr as u32) | (size << 16)
 }
 
+const fn ioc_iowr(magic: u8, nr: u8, size: u32) -> u32 {
+    (3u32 << 30) | ((magic as u32) << 8) | (nr as u32) | (size << 16)
+}
+
 const BTRFS_IOC_FS_INFO: u32 = ioc_ior(0x94, 31, 1024);
 const BTRFS_IOC_GET_FEATURES: u32 = ioc_ior(0x94, 57, 24);
 const BTRFS_IOC_GET_SUBVOL_INFO: u32 = ioc_ior(0x94, 60, 504);
+const BTRFS_IOC_DEV_INFO: u32 = ioc_iowr(0x94, 30, 4096);
+const BTRFS_IOC_INO_LOOKUP: u32 = ioc_iowr(0x94, 18, 4096);
 
 /// Wrapper around `libc::ioctl` for the read-only ioctls in F6.1.
 /// Returns the response bytes (length matches the ioctl's encoded
@@ -171,6 +177,120 @@ fn our_btrfs_cli_subvolume_show_against_fuse_mount() {
             || stdout.contains(" 5\n"),
         "expected default subvol id 5 in output:\n{stdout}",
     );
+}
+
+/// `btrfs inspect-internal rootid` calls
+/// `lookup_path_rootid(fd)` which issues `BTRFS_IOC_INO_LOOKUP` with
+/// `objectid = BTRFS_FIRST_FREE_OBJECTID` to discover the
+/// subvolume id of the file's containing tree. Exercises our
+/// INO_LOOKUP plumbing end-to-end through real CLI consumer code.
+#[test]
+fn our_btrfs_cli_inspect_rootid_against_fuse_mount() {
+    let fuse_bin = std::path::Path::new(env!("CARGO_BIN_EXE_btrfs-fuse"));
+    let cli_bin = fuse_bin.parent().unwrap().join("btrfs");
+    if !cli_bin.exists() {
+        eprintln!(
+            "btrfs CLI binary not built at {}; skipping CLI E2E test",
+            cli_bin.display(),
+        );
+        return;
+    }
+
+    let m = MountedFuse::mount();
+    let output = std::process::Command::new(&cli_bin)
+        .args(["inspect-internal", "rootid"])
+        .arg(m.path())
+        .output()
+        .expect("spawn btrfs inspect-internal rootid");
+
+    assert!(
+        output.status.success(),
+        "btrfs inspect-internal rootid failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+    assert_eq!(
+        trimmed, "5",
+        "expected default subvol id 5 from rootid; got {trimmed:?}",
+    );
+}
+
+// ── BTRFS_IOC_DEV_INFO ────────────────────────────────────────────
+
+/// `unsafe` wrapper for `_IOWR` ioctls: pre-fills `buf` with the
+/// caller's input bytes and reads the response back from the same
+/// buffer.
+unsafe fn run_iowr_ioctl<P: AsRef<std::path::Path>>(
+    path: P,
+    cmd: u32,
+    mut buf: Vec<u8>,
+) -> std::io::Result<Vec<u8>> {
+    let f = File::open(path)?;
+    let rc = unsafe {
+        libc::ioctl(
+            f.as_raw_fd(),
+            cmd as libc::c_ulong,
+            buf.as_mut_ptr() as *mut libc::c_void,
+        )
+    };
+    if rc < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(buf)
+}
+
+#[test]
+fn ioctl_dev_info_for_devid_one_returns_uuid_and_sizes() {
+    let m = MountedFuse::mount();
+    // Build a 4096-byte input where devid=1 and uuid is left zero.
+    let mut input = vec![0u8; 4096];
+    input[..8].copy_from_slice(&1u64.to_le_bytes());
+    let buf = unsafe { run_iowr_ioctl(m.path(), BTRFS_IOC_DEV_INFO, input) }
+        .expect("DEV_INFO ioctl");
+    let mut cursor = &buf[..];
+    let devid = cursor.get_u64_le();
+    let mut uuid = [0u8; 16];
+    cursor.copy_to_slice(&mut uuid);
+    let bytes_used = cursor.get_u64_le();
+    let total_bytes = cursor.get_u64_le();
+
+    assert_eq!(devid, 1);
+    assert_ne!(uuid, [0u8; 16], "device uuid should be populated");
+    assert_eq!(total_bytes, 128 * 1024 * 1024); // fixture is 128 MiB
+    assert!(bytes_used > 0 && bytes_used <= total_bytes);
+}
+
+#[test]
+fn ioctl_dev_info_unknown_devid_returns_enodev() {
+    let m = MountedFuse::mount();
+    let mut input = vec![0u8; 4096];
+    input[..8].copy_from_slice(&999u64.to_le_bytes());
+    let result = unsafe { run_iowr_ioctl(m.path(), BTRFS_IOC_DEV_INFO, input) };
+    let err = result.expect_err("expected ENODEV");
+    assert_eq!(err.raw_os_error(), Some(libc::ENODEV));
+}
+
+// ── BTRFS_IOC_INO_LOOKUP ──────────────────────────────────────────
+
+#[test]
+fn ioctl_ino_lookup_subvol_root_returns_empty_path() {
+    let m = MountedFuse::mount();
+    // Resolve objectid 256 (subvol root) in treeid 0 (current subvol).
+    let mut input = vec![0u8; 4096];
+    // treeid=0, objectid=256
+    input[8..16].copy_from_slice(&256u64.to_le_bytes());
+    let buf = unsafe { run_iowr_ioctl(m.path(), BTRFS_IOC_INO_LOOKUP, input) }
+        .expect("INO_LOOKUP ioctl");
+
+    let mut cursor = &buf[..];
+    let resolved_treeid = cursor.get_u64_le();
+    let resolved_oid = cursor.get_u64_le();
+    assert_eq!(resolved_treeid, 5, "default subvol resolves to FS_TREE");
+    assert_eq!(resolved_oid, 256);
+    // Path field should start with NUL (empty path for the subvol root).
+    assert_eq!(buf[16], 0, "subvol root should produce empty path");
 }
 
 // ── unknown ioctl error ───────────────────────────────────────────

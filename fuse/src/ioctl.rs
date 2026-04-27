@@ -13,17 +13,24 @@
 //! `btrfs_disk::raw`. This is the only place in the project that
 //! re-derives them.
 //!
-//! Currently implemented (F6.1):
+//! Currently implemented (F6.1, F6.2 fixed-size):
 //! - `BTRFS_IOC_FS_INFO`
 //! - `BTRFS_IOC_GET_FEATURES`
 //! - `BTRFS_IOC_GET_SUBVOL_INFO`
+//! - `BTRFS_IOC_DEV_INFO`
+//! - `BTRFS_IOC_INO_LOOKUP`
 //!
-//! Coming in F6.2: `TREE_SEARCH_V2` (variable-size out buffer with
-//! the FUSE retry dance), `INO_LOOKUP*`, `LOGICAL_INO`, `DEV_INFO`,
-//! `GET_SUBVOL_ROOTREF`, `INO_PATHS`.
+//! Blocked on `fuser` 0.17 not exposing `FUSE_IOCTL_RETRY` in its
+//! reply API: `BTRFS_IOC_TREE_SEARCH_V2`, `BTRFS_IOC_LOGICAL_INO_V2`,
+//! `BTRFS_IOC_INO_PATHS`, `BTRFS_IOC_GET_SUBVOL_ROOTREF`. Each of
+//! these has a struct or buffer larger than the 14-bit size field
+//! the ioctl number can encode (max 16 383 bytes); without retry
+//! support the FUSE layer silently truncates input/output to that
+//! cap. We'll land them after upstreaming a retry-reply API to
+//! fuser, or by forking.
 
 use btrfs_fs::{Filesystem, Inode, SubvolId};
-use bytes::BufMut;
+use bytes::{Buf, BufMut};
 use fuser::Errno;
 use std::fs::File;
 
@@ -46,6 +53,10 @@ const fn ior(ty: u8, nr: u8, size: u32) -> u32 {
     ioc(IOC_READ, ty, nr, size)
 }
 
+const fn iowr(ty: u8, nr: u8, size: u32) -> u32 {
+    ioc(IOC_READ | 1, ty, nr, size)
+}
+
 /// `BTRFS_IOCTL_MAGIC` from `<linux/btrfs.h>`.
 const BTRFS_MAGIC: u8 = 0x94;
 
@@ -53,19 +64,23 @@ const BTRFS_MAGIC: u8 = 0x94;
 const FS_INFO_SIZE: u32 = 1024;
 /// Size of `struct btrfs_ioctl_feature_flags` (24 bytes).
 const FEATURE_FLAGS_SIZE: u32 = 24;
-/// Size of `struct btrfs_ioctl_get_subvol_info_args`.
-///
-/// Layout: `treeid`(8) + `name`(256) + `parent_id`(8) + `dirid`(8) +
-/// `generation`(8) + `flags`(8) + `uuid`(16) + `parent_uuid`(16) +
-/// `received_uuid`(16) + `ctransid`/`otransid`/`stransid`/`rtransid`(32) +
-/// 4×`timespec`(64) + `reserved`(64) = 504 bytes.
+/// Size of `struct btrfs_ioctl_get_subvol_info_args` (504 bytes).
 const SUBVOL_INFO_SIZE: u32 = 504;
+/// Size of `struct btrfs_ioctl_dev_info_args`: `devid`(8) + `uuid`(16) +
+/// `bytes_used`(8) + `total_bytes`(8) + `unused`[379](3032) + `path`[1024]
+/// = 4096 bytes.
+const DEV_INFO_SIZE: u32 = 4096;
+/// Size of `struct btrfs_ioctl_ino_lookup_args`: `treeid`(8) +
+/// `objectid`(8) + `name`[4080] = 4096 bytes.
+const INO_LOOKUP_SIZE: u32 = 4096;
 
 pub const BTRFS_IOC_FS_INFO: u32 = ior(BTRFS_MAGIC, 31, FS_INFO_SIZE);
 pub const BTRFS_IOC_GET_FEATURES: u32 =
     ior(BTRFS_MAGIC, 57, FEATURE_FLAGS_SIZE);
 pub const BTRFS_IOC_GET_SUBVOL_INFO: u32 =
     ior(BTRFS_MAGIC, 60, SUBVOL_INFO_SIZE);
+pub const BTRFS_IOC_DEV_INFO: u32 = iowr(BTRFS_MAGIC, 30, DEV_INFO_SIZE);
+pub const BTRFS_IOC_INO_LOOKUP: u32 = iowr(BTRFS_MAGIC, 18, INO_LOOKUP_SIZE);
 
 // ── handlers ──────────────────────────────────────────────────────
 
@@ -78,15 +93,21 @@ pub enum IoctlOutcome {
 
 /// Decode `cmd` and dispatch to the matching handler. Unknown ioctls
 /// produce `ENOTTY`, the standard "no such ioctl" return.
+///
+/// `in_data` carries the input portion of `_IOWR` ioctls (`devid`
+/// for `DEV_INFO`, `treeid`+`objectid` for `INO_LOOKUP`, etc.).
 pub async fn dispatch(
     fs: &Filesystem<File>,
     target: Inode,
     cmd: u32,
+    in_data: &[u8],
 ) -> IoctlOutcome {
     match cmd {
         BTRFS_IOC_FS_INFO => fs_info(fs),
         BTRFS_IOC_GET_FEATURES => get_features(fs),
         BTRFS_IOC_GET_SUBVOL_INFO => get_subvol_info(fs, target.subvol).await,
+        BTRFS_IOC_DEV_INFO => dev_info(fs, in_data),
+        BTRFS_IOC_INO_LOOKUP => ino_lookup(fs, target.subvol, in_data).await,
         _ => IoctlOutcome::Err(Errno::ENOTTY),
     }
 }
@@ -195,4 +216,101 @@ fn write_timespec(buf: &mut Vec<u8>, t: std::time::SystemTime) {
     buf.put_u64_le(dur.as_secs());
     buf.put_u32_le(dur.subsec_nanos());
     buf.put_u32_le(0); // pad to 16-byte stride
+}
+
+/// `BTRFS_IOC_DEV_INFO`: per-device geometry. Userspace passes the
+/// `devid` (or all-zero `uuid` to look up by id); the kernel fills
+/// in `path`, `bytes_used`, `total_bytes`. We only support
+/// single-device images today, so any `devid != 1` (or unmatched
+/// uuid) returns `ENODEV`.
+fn dev_info(fs: &Filesystem<File>, in_data: &[u8]) -> IoctlOutcome {
+    if in_data.len() < DEV_INFO_SIZE as usize {
+        return IoctlOutcome::Err(Errno::EINVAL);
+    }
+    let mut cursor = in_data;
+    let req_devid = cursor.get_u64_le();
+    let mut req_uuid = [0u8; 16];
+    cursor.copy_to_slice(&mut req_uuid);
+
+    // The kernel honours `devid` first, falling back to `uuid` only
+    // when `devid == 0`. Mirror that.
+    let dev = if req_devid != 0 {
+        fs.dev_info(req_devid)
+    } else {
+        // Lookup by UUID. Single-device only — match against the
+        // primary device's uuid.
+        let primary = fs.dev_info(1);
+        primary.filter(|d| d.uuid.as_bytes() == &req_uuid)
+    };
+    let Some(dev) = dev else {
+        return IoctlOutcome::Err(Errno::ENODEV);
+    };
+
+    let mut buf: Vec<u8> = Vec::with_capacity(DEV_INFO_SIZE as usize);
+    buf.put_u64_le(dev.devid);
+    buf.put_slice(dev.uuid.as_bytes());
+    buf.put_u64_le(dev.bytes_used);
+    buf.put_u64_le(dev.total_bytes);
+    // `unused[379]` reserved padding before `path`.
+    buf.resize(buf.len() + 379 * 8, 0);
+    // path: 1024 bytes, NUL-padded. We don't have a real device path
+    // (the FS sees a backing file, not a /dev node); leave empty.
+    buf.resize(DEV_INFO_SIZE as usize, 0);
+    debug_assert_eq!(buf.len(), DEV_INFO_SIZE as usize);
+    IoctlOutcome::Ok(buf)
+}
+
+/// `BTRFS_IOC_INO_LOOKUP`: resolve a `(treeid, objectid)` pair to
+/// the path of the inode within its subvolume tree.
+///
+/// If `treeid == 0`, use the subvolume of the file the ioctl was
+/// issued against (passed in via `current_subvol`).
+async fn ino_lookup(
+    fs: &Filesystem<File>,
+    current_subvol: SubvolId,
+    in_data: &[u8],
+) -> IoctlOutcome {
+    if in_data.len() < INO_LOOKUP_SIZE as usize {
+        return IoctlOutcome::Err(Errno::EINVAL);
+    }
+    let mut cursor = in_data;
+    let treeid = cursor.get_u64_le();
+    let objectid = cursor.get_u64_le();
+
+    let subvol = if treeid == 0 {
+        current_subvol
+    } else {
+        SubvolId(treeid)
+    };
+
+    let path = match fs.ino_lookup(subvol, objectid).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return IoctlOutcome::Err(Errno::ENOENT),
+        Err(e) => {
+            log::warn!(
+                "ioctl INO_LOOKUP subvol={} objectid={objectid}: {e}",
+                subvol.0,
+            );
+            return IoctlOutcome::Err(Errno::EIO);
+        }
+    };
+
+    let mut buf: Vec<u8> = Vec::with_capacity(INO_LOOKUP_SIZE as usize);
+    // The kernel writes back the resolved treeid (in case it was 0)
+    // and objectid (unchanged), then the path.
+    buf.put_u64_le(subvol.0);
+    buf.put_u64_le(objectid);
+    // Path field is 4080 bytes, NUL-padded. Append a trailing `/`
+    // when the result is non-empty to match kernel `INO_LOOKUP`
+    // behaviour. Truncate to fit if longer.
+    let mut path_bytes = path.clone();
+    if !path_bytes.is_empty() {
+        path_bytes.push(b'/');
+    }
+    let max = 4080 - 1; // leave room for trailing NUL
+    let n = path_bytes.len().min(max);
+    buf.put_slice(&path_bytes[..n]);
+    buf.resize(INO_LOOKUP_SIZE as usize, 0);
+    debug_assert_eq!(buf.len(), INO_LOOKUP_SIZE as usize);
+    IoctlOutcome::Ok(buf)
 }

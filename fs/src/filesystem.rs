@@ -23,7 +23,10 @@ use crate::{
     xattr,
 };
 use btrfs_disk::{
-    items::{DirItem, InodeItem, RootItem, RootItemFlags, RootRef},
+    items::{
+        DeviceItem, DirItem, InodeItem, InodeRef, RootItem, RootItemFlags,
+        RootRef,
+    },
     reader::{BlockReader, Traversal, filesystem_open, tree_walk},
     superblock::Superblock,
     tree::{KeyType, TreeBlock},
@@ -309,6 +312,42 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     #[must_use]
     pub fn superblock(&self) -> &Superblock {
         &self.inner.superblock
+    }
+
+    /// Return the [`DeviceItem`] for `devid`, or `None` if no such
+    /// device exists on this filesystem.
+    ///
+    /// Currently single-device-only: returns the primary device's
+    /// embedded `dev_item` from the superblock when `devid == 1`,
+    /// `None` otherwise. Multi-device support would walk the dev
+    /// tree; landing alongside multi-device write support.
+    #[must_use]
+    pub fn dev_info(&self, devid: u64) -> Option<DeviceItem> {
+        if self.inner.superblock.dev_item.devid == devid {
+            Some(self.inner.superblock.dev_item.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Resolve `objectid` in `subvol` to its slash-separated path
+    /// from the subvolume root.
+    ///
+    /// Walks the `INODE_REF` chain upwards from `objectid` until it
+    /// reaches the subvolume root (objectid 256). For directories
+    /// the kernel `INO_LOOKUP` ioctl returns the path with a
+    /// trailing `/`; this helper does NOT add one — the caller can
+    /// append if it needs to mimic that exactly.
+    ///
+    /// Returns `Ok(None)` if any step in the chain has no
+    /// `INODE_REF` (orphaned inode, or wrong subvol).
+    pub async fn ino_lookup(
+        &self,
+        subvol: SubvolId,
+        objectid: u64,
+    ) -> io::Result<Option<Vec<u8>>> {
+        let this = self.clone();
+        spawn_blocking(move || this.ino_lookup_blocking(subvol, objectid)).await
     }
 
     /// Filesystem sectorsize.
@@ -632,6 +671,62 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         xattr::get_xattr(&mut reader, tree_root, ino.ino, name)
     }
 
+    fn ino_lookup_blocking(
+        &self,
+        subvol: SubvolId,
+        objectid: u64,
+    ) -> io::Result<Option<Vec<u8>>> {
+        // The subvolume root has no `INODE_REF`; an empty path is
+        // the right answer for it.
+        if objectid == ROOT_DIR_OBJECTID {
+            return Ok(Some(Vec::new()));
+        }
+        let tree_root = self.tree_root_for(subvol)?;
+        let mut reader = self.lock_reader();
+        let mut components: Vec<Vec<u8>> = Vec::new();
+        let mut current = objectid;
+        // Bound the walk so a corrupted INODE_REF cycle can't hang
+        // the FUSE worker forever. 4096 nesting levels is more than
+        // any sane btrfs depth.
+        for _ in 0..4096 {
+            if current == ROOT_DIR_OBJECTID {
+                components.reverse();
+                return Ok(Some(join_path(&components)));
+            }
+            let mut next_parent: Option<u64> = None;
+            let mut name: Option<Vec<u8>> = None;
+            for_each_item(&mut reader, tree_root, |key, data| {
+                if next_parent.is_some() {
+                    return;
+                }
+                if key.objectid == current && key.key_type == KeyType::InodeRef
+                {
+                    // A single INODE_REF item may pack multiple
+                    // entries (one per hardlink to this inode). The
+                    // kernel `INO_LOOKUP` picks the first; do the
+                    // same.
+                    if let Some(iref) =
+                        InodeRef::parse_all(data).into_iter().next()
+                    {
+                        next_parent = Some(key.offset);
+                        name = Some(iref.name);
+                    }
+                }
+            })?;
+            match (next_parent, name) {
+                (Some(p), Some(n)) => {
+                    components.push(n);
+                    current = p;
+                }
+                _ => return Ok(None),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("INODE_REF chain for objectid {objectid} too deep"),
+        ))
+    }
+
     fn list_subvolumes_blocking(&self) -> io::Result<Vec<SubvolInfo>> {
         let root_tree = self.inner.superblock.root;
         // Collect ROOT_ITEM (id → metadata) and ROOT_BACKREF (id →
@@ -790,6 +885,22 @@ fn lookup_in_dir<R: io::Read + io::Seek>(
         }
     })?;
     Ok(found)
+}
+
+/// Join path components with `/` separators (no leading or trailing
+/// slash). Used by [`Filesystem::ino_lookup_blocking`] to assemble
+/// the result of an `INODE_REF` walk.
+fn join_path(components: &[Vec<u8>]) -> Vec<u8> {
+    let total = components.iter().map(Vec::len).sum::<usize>()
+        + components.len().saturating_sub(1);
+    let mut out: Vec<u8> = Vec::with_capacity(total);
+    for (i, c) in components.iter().enumerate() {
+        if i > 0 {
+            out.push(b'/');
+        }
+        out.extend_from_slice(c);
+    }
+    out
 }
 
 /// Find the parent objectid of `oid` via `INODE_REF`. The `INODE_REF`

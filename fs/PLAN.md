@@ -273,23 +273,57 @@ leaking `btrfs_disk::raw` types into the public API.
   fuse mount — exercises `BTRFS_IOC_GET_SUBVOL_INFO` end-to-end
   through real CLI consumer code
 
-### F6.2 — Read-only ioctls (variable-size + walks)
+### F6.2 — Read-only ioctls (fixed-size subset) ✅
+
+Done. Two more ioctls landed on top of F6.1:
+
+- `BTRFS_IOC_DEV_INFO` — per-device geometry. Returns the primary
+  device's `dev_item` from the superblock; multi-device images need
+  a dev-tree walk (deferred). Unknown devid returns ENODEV.
+- `BTRFS_IOC_INO_LOOKUP` — `(treeid, objectid)` → path within the
+  subvolume. Walks the `INODE_REF` chain upwards from `objectid`
+  until the subvol root, with a 4096-iteration loop bound to defend
+  against corrupted ref cycles. `treeid == 0` resolves against the
+  file's containing subvolume.
+
+`btrfs-fs` gained `Filesystem::dev_info(devid)` and
+`Filesystem::ino_lookup(subvol, objectid)` plus a re-export of
+`DeviceItem`.
+
+End-to-end CLI tests: `btrfs inspect-internal rootid <mount>` uses
+`lookup_path_rootid` (which calls `BTRFS_IOC_INO_LOOKUP` with
+objectid=`BTRFS_FIRST_FREE_OBJECTID`) and now succeeds against our
+fuse mount, returning the default subvol id 5.
+
+### F6.3 — Variable-size ioctls (blocked on fuser retry support)
 
 **Scope:**
-- `BTRFS_IOC_TREE_SEARCH_V2` — generic tree search with
-  variable-size out buffer; needs the FUSE retry-with-bigger-buffer
-  dance
-- `BTRFS_IOC_INO_LOOKUP` / `INO_LOOKUP_USER` — inode → path
-- `BTRFS_IOC_LOGICAL_INO_V2` — logical → inode (extent-tree walk)
-- `BTRFS_IOC_DEV_INFO` — per-device info
-- `BTRFS_IOC_GET_SUBVOL_ROOTREF` — subvol parent backrefs
-- `BTRFS_IOC_INO_PATHS` — inode → all paths (hardlink resolution)
+- `BTRFS_IOC_TREE_SEARCH_V2` — generic tree search; the args struct
+  has a flexible `buf[0]` array that exceeds the 14-bit size encoded
+  in the ioctl number
+- `BTRFS_IOC_LOGICAL_INO_V2` — logical → inode (extent-tree walk);
+  variable-size inodes buffer
+- `BTRFS_IOC_INO_PATHS` — inode → all paths (hardlink resolution);
+  variable-size paths buffer
+- `BTRFS_IOC_GET_SUBVOL_ROOTREF` — subvol parent backrefs; 69 KiB
+  fixed struct, but still exceeds the 14-bit cap and needs retry
+- `BTRFS_IOC_LOGICAL_INO` (older variant) and other admin ioctls
+  whose buffers exceed 16 383 bytes
 
-**Test plan:**
-- libc::ioctl-driven tests for each new ioctl
-- End-to-end: `btrfs subvolume list <fuse-mount>` exercises
-  TREE_SEARCH_V2; `btrfs filesystem show <fuse-mount>` exercises
-  DEV_INFO
+**Blocker:** `fuser` 0.17's `ReplyIoctl` only exposes `ioctl(result,
+data)` — there's no `retry(in_iovs, out_iovs)` method. Without it,
+FUSE silently truncates input/output to the size encoded in the
+ioctl number's 14-bit size field. We can land this after one of:
+
+1. Upstreaming a `ReplyIoctl::retry(...)` to fuser
+2. Forking fuser locally
+3. Skipping fuser entirely with a custom FUSE protocol implementation
+
+Test plan once unblocked: `btrfs subvolume list <fuse-mount>` for
+TREE_SEARCH_V2, `btrfs inspect-internal inode-resolve <ino>` for
+INO_PATHS, `btrfs filesystem show <fuse-mount>` for DEV_INFO (already
+works with F6.2's fixed-size subset, but fuller multi-device coverage
+needs a dev-tree walk).
 
 **Out of scope:** write ioctls (F11), admin ioctls (balance, scrub,
 qgroup) — those are kernel-managed operations; users run them
