@@ -293,59 +293,87 @@ fn ensure_free_space_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
 }
 
 /// Idempotently create the FS tree (objectid 5) as an empty
-/// subvolume: `INODE_ITEM` at inode 256, ".." `INODE_REF` self-ref,
-/// and a `ROOT_ITEM` patched with the FS-tree-specific bits
-/// (subvolume UUID derived from fsid, `INODE_ROOT_ITEM_INIT` inode
-/// flag, ctime/otime set to `now`).
+/// subvolume. Wraps [`create_subvolume_shape`] with the FS-tree-
+/// specific UUID derivation: bit-flipped fsid (kept stable so
+/// repeat mkfs runs with the same fsid produce the same subvol
+/// UUID).
 fn ensure_fs_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
     fs: &mut Filesystem<R>,
     trans: &mut Transaction<R>,
     now: u64,
 ) -> Result<()> {
-    use btrfs_disk::items::Timespec;
-
     let fs_id = u64::from(BTRFS_FS_TREE_OBJECTID);
-    let root_ino = u64::from(btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID);
-
     if fs.root_bytenr(fs_id).is_some() {
         return Ok(());
     }
-
-    trans
-        .create_empty_tree(fs, fs_id)
-        .context("post_bootstrap: create_empty_tree(FS tree)")?;
-
-    // FS tree's root dir inode: same shape as data-reloc but with the
-    // BTRFS_INODE_ROOT_ITEM_INIT flag (kernel uses this to
-    // distinguish a subvolume root inode from a regular dir inode).
-    let now_ts = Timespec { sec: now, nsec: 0 };
-    let mut inode_args =
-        InodeArgs::new(trans.transid, 0o040_755).with_uniform_time(now_ts);
-    inode_args.nbytes = u64::from(fs.nodesize);
-    inode_args.flags = btrfs_disk::items::InodeFlags::from_bits_truncate(
-        u64::from(BTRFS_INODE_ROOT_ITEM_INIT),
-    );
-    trans
-        .create_inode(fs, fs_id, root_ino, &inode_args)
-        .context("post_bootstrap: create_inode(FS root dir)")?;
-
-    insert_inode_ref(fs, trans, fs_id, root_ino, root_ino, 0, b"..")?;
-
-    // Subvolume UUID derived from fsid by bit-flipping (matches what
-    // mkfs's `patch_root_item_fs` produces, kept stable so repeat
-    // mkfs runs with the same fsid produce the same subvol UUID).
     let mut uuid_bytes = *fs.superblock.fsid.as_bytes();
     for b in &mut uuid_bytes {
         *b ^= 0xFF;
     }
     let subvol_uuid = Uuid::from_bytes(uuid_bytes);
+    create_subvolume_shape(fs, trans, fs_id, now, subvol_uuid)
+}
+
+/// Materialise the on-disk shape of a subvolume tree (`INODE_ITEM`
+/// for inode 256, ".." `INODE_REF` self-ref, `ROOT_ITEM` patched so
+/// `root_dirid = 256` and the embedded `inode_data` mirrors the
+/// standalone inode).
+///
+/// Used by both [`ensure_fs_tree`] (for the canonical FS tree, id 5)
+/// and the rootdir subvolume path (for user-created `--subvol`
+/// trees, ids 256+).
+///
+/// Allocates the tree leaf (and its `ROOT_ITEM` in the root tree)
+/// via [`Transaction::create_empty_tree`], then populates the
+/// subvolume-shape items. The `BTRFS_INODE_ROOT_ITEM_INIT` flag on
+/// the inode tells the kernel this is a subvolume root rather than
+/// a regular directory, and the `ROOT_ITEM` patch keeps `btrfs check`
+/// happy by mirroring the inode metadata into the root item.
+///
+/// `now` is used as ctime/mtime/atime/otime for the inode and as
+/// ctime/otime in the `ROOT_ITEM`. `uuid` lands in `ROOT_ITEM.uuid`.
+///
+/// # Errors
+///
+/// Returns an error if any underlying transaction call fails.
+pub(crate) fn create_subvolume_shape<R>(
+    fs: &mut Filesystem<R>,
+    trans: &mut Transaction<R>,
+    tree_id: u64,
+    now: u64,
+    uuid: Uuid,
+) -> Result<()>
+where
+    R: std::io::Read + std::io::Write + std::io::Seek,
+{
+    use btrfs_disk::items::{InodeFlags, Timespec};
+
+    let root_ino = u64::from(btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID);
+
+    trans.create_empty_tree(fs, tree_id).with_context(|| {
+        format!("create_subvolume_shape: create_empty_tree({tree_id})")
+    })?;
+
+    let now_ts = Timespec { sec: now, nsec: 0 };
+    let mut inode_args =
+        InodeArgs::new(trans.transid, 0o040_755).with_uniform_time(now_ts);
+    inode_args.nbytes = u64::from(fs.nodesize);
+    inode_args.flags =
+        InodeFlags::from_bits_truncate(u64::from(BTRFS_INODE_ROOT_ITEM_INIT));
+    trans
+        .create_inode(fs, tree_id, root_ino, &inode_args)
+        .with_context(|| {
+            format!("create_subvolume_shape: create_inode({tree_id}, 256)")
+        })?;
+
+    insert_inode_ref(fs, trans, tree_id, root_ino, root_ino, 0, b"..")?;
 
     patch_root_item_subvol_dir(
         fs,
         trans,
-        fs_id,
+        tree_id,
         &inode_args,
-        Some(subvol_uuid),
+        Some(uuid),
         Some(now_ts),
     )?;
 

@@ -994,7 +994,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         time: btrfs_disk::items::Timespec,
     ) -> io::Result<()> {
         use btrfs_disk::{
-            items::{DirItem, InodeRef, RootItem},
+            items::{DirItem, InodeRef},
             util::btrfs_name_hash,
         };
 
@@ -1048,61 +1048,166 @@ impl<R: Read + Write + Seek> Transaction<R> {
         //    check passes.
         if parent_inode == u64::from(btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID)
         {
-            let root_key = DiskKey {
-                objectid: tree_id,
-                key_type: KeyType::RootItem,
-                offset: 0,
-            };
-            let mut path = BtrfsPath::new();
-            let found = search::search_slot(
-                Some(&mut *self),
+            self.mirror_root_item_size(
                 fs_info,
-                1, // root tree
-                &root_key,
-                &mut path,
-                SearchIntent::ReadOnly,
-                true,
+                tree_id,
+                (name.len() as u64) * 2,
             )?;
-            if !found {
-                path.release();
-                return Err(io::Error::other(format!(
-                    "link_dir_entry: ROOT_ITEM for tree {tree_id} not found"
-                )));
-            }
-            let leaf = path.nodes[0].as_mut().ok_or_else(|| {
-                io::Error::other("link_dir_entry: no leaf in path")
-            })?;
-            let slot = path.slots[0];
-            let ri_data = leaf.item_data(slot).to_vec();
-            let mut root_item = RootItem::parse(&ri_data).ok_or_else(|| {
-                io::Error::other("link_dir_entry: malformed ROOT_ITEM")
-            })?;
-            // Patch the embedded inode's size in place at the same
-            // offset used in the standalone INODE_ITEM.
-            let size_off =
-                std::mem::offset_of!(btrfs_disk::raw::btrfs_inode_item, size);
-            if root_item.inode_data.len() < size_off + 8 {
-                path.release();
-                return Err(io::Error::other(
-                    "link_dir_entry: ROOT_ITEM inode_data shorter than \
-                     btrfs_inode_item",
-                ));
-            }
-            let mut size = u64::from_le_bytes(
-                root_item.inode_data[size_off..size_off + 8]
-                    .try_into()
-                    .unwrap(),
-            );
-            size += (name.len() as u64) * 2;
-            root_item.inode_data[size_off..size_off + 8]
-                .copy_from_slice(&size.to_le_bytes());
-            let new_ri = root_item.to_bytes();
-            // Same-size in-place update — RootItem::to_bytes is fixed length.
-            items::update_item(leaf, slot, &new_ri)?;
-            fs_info.mark_dirty(leaf);
-            path.release();
         }
 
+        Ok(())
+    }
+
+    /// Link a subvolume tree (`subvol_id`) under `name` into a directory
+    /// entry of `parent_inode`.
+    ///
+    /// Same shape as [`link_dir_entry`](Self::link_dir_entry) but the
+    /// directory entry's location key points at a `ROOT_ITEM` instead
+    /// of an `INODE_ITEM`, and no `INODE_REF` is emitted (the parent
+    /// linkage for subvolumes is recorded via `ROOT_REF` /
+    /// `ROOT_BACKREF` in the root tree, not via `INODE_REF` in the
+    /// containing FS tree). Use
+    /// [`insert_root_ref`](Self::insert_root_ref) to insert those
+    /// after this call.
+    ///
+    /// Inserts:
+    ///
+    /// 1. `DIR_ITEM` at `(parent_inode, DIR_ITEM, name_hash(name))`
+    ///    with `location = (subvol_id, ROOT_ITEM, 0)` and
+    ///    `file_type = BTRFS_FT_DIR`.
+    /// 2. `DIR_INDEX` at `(parent_inode, DIR_INDEX, dir_index)` with
+    ///    the same payload.
+    ///
+    /// Bumps `parent_inode.size` by `2 * name.len()` and (if
+    /// `parent_inode == 256`) mirrors the size into the containing
+    /// `ROOT_ITEM`'s embedded inode, exactly like `link_dir_entry`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either inserted item already exists, or
+    /// if any underlying tree operation fails.
+    #[allow(clippy::too_many_arguments)]
+    pub fn link_subvol_entry(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        parent_inode: u64,
+        subvol_id: u64,
+        name: &[u8],
+        dir_index: u64,
+        time: btrfs_disk::items::Timespec,
+    ) -> io::Result<()> {
+        use btrfs_disk::{items::DirItem, util::btrfs_name_hash};
+
+        let transid = self.transid;
+
+        let location = DiskKey {
+            objectid: subvol_id,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let dir_data = DirItem::serialize(
+            &location,
+            transid,
+            btrfs_disk::raw::BTRFS_FT_DIR as u8,
+            name,
+        );
+
+        let dir_item_key = DiskKey {
+            objectid: parent_inode,
+            key_type: KeyType::DirItem,
+            offset: u64::from(btrfs_name_hash(name)),
+        };
+        self.insert_item_helper(fs_info, tree_id, &dir_item_key, &dir_data)?;
+
+        let dir_index_key = DiskKey {
+            objectid: parent_inode,
+            key_type: KeyType::DirIndex,
+            offset: dir_index,
+        };
+        self.insert_item_helper(fs_info, tree_id, &dir_index_key, &dir_data)?;
+
+        self.bump_dir_size(
+            fs_info,
+            tree_id,
+            parent_inode,
+            (name.len() as u64) * 2,
+            transid,
+            time,
+        )?;
+
+        if parent_inode == u64::from(btrfs_disk::raw::BTRFS_FIRST_FREE_OBJECTID)
+        {
+            self.mirror_root_item_size(
+                fs_info,
+                tree_id,
+                (name.len() as u64) * 2,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Mirror a `+delta` size bump from inode 256's `INODE_ITEM` into
+    /// the embedded `inode_data` of `tree_id`'s `ROOT_ITEM` so the
+    /// kernel's root-tree consistency check (and `btrfs check`) sees
+    /// matching values.
+    fn mirror_root_item_size(
+        &mut self,
+        fs_info: &mut Filesystem<R>,
+        tree_id: u64,
+        delta: u64,
+    ) -> io::Result<()> {
+        use btrfs_disk::items::RootItem;
+
+        let root_key = DiskKey {
+            objectid: tree_id,
+            key_type: KeyType::RootItem,
+            offset: 0,
+        };
+        let mut path = BtrfsPath::new();
+        let found = search::search_slot(
+            Some(&mut *self),
+            fs_info,
+            1,
+            &root_key,
+            &mut path,
+            SearchIntent::ReadOnly,
+            true,
+        )?;
+        if !found {
+            path.release();
+            return Err(io::Error::other(format!(
+                "mirror_root_item_size: ROOT_ITEM for tree {tree_id} not found"
+            )));
+        }
+        let leaf = path.nodes[0].as_mut().ok_or_else(|| {
+            io::Error::other("mirror_root_item_size: no leaf in path")
+        })?;
+        let slot = path.slots[0];
+        let ri_data = leaf.item_data(slot).to_vec();
+        let mut root_item = RootItem::parse(&ri_data).ok_or_else(|| {
+            io::Error::other("mirror_root_item_size: malformed ROOT_ITEM")
+        })?;
+        let size_off =
+            std::mem::offset_of!(btrfs_disk::raw::btrfs_inode_item, size);
+        if root_item.inode_data.len() < size_off + 8 {
+            path.release();
+            return Err(io::Error::other(
+                "mirror_root_item_size: ROOT_ITEM inode_data shorter than btrfs_inode_item",
+            ));
+        }
+        let mut size = u64::from_le_bytes(
+            root_item.inode_data[size_off..size_off + 8]
+                .try_into()
+                .unwrap(),
+        );
+        size += delta;
+        root_item.inode_data[size_off..size_off + 8]
+            .copy_from_slice(&size.to_le_bytes());
+        let new_ri = root_item.to_bytes();
+        items::update_item(leaf, slot, &new_ri)?;
+        fs_info.mark_dirty(leaf);
+        path.release();
         Ok(())
     }
 

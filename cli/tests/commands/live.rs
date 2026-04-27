@@ -2568,6 +2568,84 @@ fn mkfs_rootdir_hardlinks_and_xattrs() {
     assert_eq!(color.as_slice(), b"chartreuse");
 }
 
+/// Test --rootdir --subvol end-to-end: rw, ro, and nested subvols
+/// land as real kernel subvolumes after mount.
+///
+/// Verifies: each declared subvol appears in `btrfs subvolume list`
+/// (real subvol, not just a plain directory); files inside the
+/// subvol are readable; the ro subvol rejects writes; nested
+/// subvols nest correctly.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn mkfs_rootdir_subvols() {
+    let td = tempdir().unwrap();
+    let rootdir = td.path().join("rootdir");
+    std::fs::create_dir_all(&rootdir).unwrap();
+
+    // rw subvol with a file.
+    let rwsub = rootdir.join("rwsub");
+    std::fs::create_dir_all(&rwsub).unwrap();
+    std::fs::write(rwsub.join("rw-file.txt"), b"rw subvol content").unwrap();
+
+    // ro subvol with a file.
+    let rosub = rootdir.join("rosub");
+    std::fs::create_dir_all(&rosub).unwrap();
+    std::fs::write(rosub.join("ro-file.txt"), b"ro subvol content").unwrap();
+
+    // Nested subvol: rwsub/inner is its own subvol.
+    let nested = rwsub.join("inner");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(nested.join("nested-file.txt"), b"nested content").unwrap();
+
+    let file = BackingFile::new(td.path(), "disk.img", 512_000_000);
+    file.mkfs_rootdir(
+        &our_mkfs_bin(),
+        &rootdir,
+        &[
+            "--subvol",
+            "rw:rwsub",
+            "--subvol",
+            "ro:rosub",
+            "--subvol",
+            "rw:rwsub/inner",
+        ],
+    );
+    let lo = LoopbackDevice::new(file);
+    let mnt = Mount::new(lo, td.path());
+    let mp = mnt.path();
+
+    // List subvols and verify all three appear.
+    let listing = btrfs_ok(&["subvolume", "list", mp.to_str().unwrap()]);
+    assert!(
+        listing.contains("rwsub"),
+        "rwsub not in subvol listing:\n{listing}"
+    );
+    assert!(
+        listing.contains("rosub"),
+        "rosub not in subvol listing:\n{listing}"
+    );
+    assert!(
+        listing.contains("inner"),
+        "nested 'inner' not in subvol listing:\n{listing}"
+    );
+
+    // Verify file contents are readable through each subvol path.
+    let rw_data = std::fs::read(mp.join("rwsub/rw-file.txt")).unwrap();
+    assert_eq!(rw_data.as_slice(), b"rw subvol content");
+    let ro_data = std::fs::read(mp.join("rosub/ro-file.txt")).unwrap();
+    assert_eq!(ro_data.as_slice(), b"ro subvol content");
+    let nested_data =
+        std::fs::read(mp.join("rwsub/inner/nested-file.txt")).unwrap();
+    assert_eq!(nested_data.as_slice(), b"nested content");
+
+    // ro subvol rejects writes (kernel enforces ROOT_SUBVOL_RDONLY).
+    let write_attempt = std::fs::write(mp.join("rosub/new.txt"), b"nope");
+    assert!(
+        write_attempt.is_err(),
+        "writing into ro subvol should fail (got {write_attempt:?})"
+    );
+}
+
 /// Set a single extended attribute via `setxattr(2)`.
 fn set_user_xattr(path: &Path, name: &str, value: &[u8]) {
     let c_path =

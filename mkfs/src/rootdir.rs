@@ -1177,92 +1177,282 @@ pub fn apply_nbytes_updates(
     }
 }
 
-/// Walk `rootdir` depth-first and apply each entry to the FS tree
-/// (objectid 5) of an open filesystem via the transaction crate.
+/// Walk `rootdir` depth-first and apply each entry to an open
+/// filesystem via the transaction crate.
 ///
-/// Mirrors the inode-numbering, hardlink, and xattr semantics of
-/// [`walk_directory`] (which produces hand-built items for mkfs's
-/// legacy bootstrap pipeline) but emits items via
+/// Mirrors the inode-numbering, hardlink, xattr, and subvolume
+/// semantics of [`walk_directory`] (which produces hand-built items
+/// for mkfs's legacy bootstrap pipeline) but emits items via
 /// [`Transaction::create_inode`] / [`link_dir_entry`] /
-/// [`set_xattr`] / [`write_file_data`] so the filesystem can be
-/// reopened, populated, and committed without ever touching the
-/// hand-built `tree.rs` / `treebuilder.rs` machinery.
+/// [`set_xattr`] / [`write_file_data`] / [`link_subvol_entry`] /
+/// [`insert_root_ref`] so the filesystem can be reopened, populated,
+/// and committed without ever touching the hand-built `tree.rs` /
+/// `treebuilder.rs` machinery.
+///
+/// `subvol_args` declares which subdirectories of `rootdir` should
+/// become separate subvolumes (with optional `ro` / `default`
+/// flags). Subvolume IDs are assigned starting at
+/// `BTRFS_FIRST_FREE_OBJECTID` (256). Nested subvolumes are
+/// supported.
 ///
 /// Callers must:
 /// 1. Build the empty filesystem first (via [`mkfs::make_btrfs`]).
 /// 2. Open it with [`Filesystem::open`] / `open_multi`.
 /// 3. `Transaction::start`, then call this function, then `commit`.
 ///
-/// Subvolume boundaries (`--subvol`) are not handled here yet — the
-/// caller should route to the legacy path when `subvol_args` is
-/// non-empty.
-///
 /// # Errors
 ///
-/// Returns an error if any host-side stat/open/read fails, if any
-/// transaction-crate call fails, or if a subvolume boundary is
-/// encountered (an `--subvol`-using invocation must use the legacy
-/// path).
-///
-/// # Panics
-///
-/// Panics if the host directory iteration yields an entry whose
-/// `Path::file_name()` is empty (impossible for a valid directory
-/// entry) or if internal bookkeeping invariants are violated.
+/// Returns an error if any host-side stat/open/read fails or any
+/// transaction-crate call fails.
 ///
 /// [`Transaction::create_inode`]: btrfs_transaction::Transaction::create_inode
 /// [`link_dir_entry`]: btrfs_transaction::Transaction::link_dir_entry
 /// [`set_xattr`]: btrfs_transaction::Transaction::set_xattr
 /// [`write_file_data`]: btrfs_transaction::Transaction::write_file_data
+/// [`link_subvol_entry`]: btrfs_transaction::Transaction::link_subvol_entry
+/// [`insert_root_ref`]: btrfs_transaction::Transaction::insert_root_ref
 /// [`Filesystem::open`]: btrfs_transaction::Filesystem::open
 /// [`mkfs::make_btrfs`]: crate::mkfs::make_btrfs
-#[allow(clippy::cast_sign_loss)] // stat timestamps are non-negative in practice
-#[allow(clippy::cast_possible_truncation)] // *time_nsec fits in u32
-#[allow(clippy::too_many_lines)]
 pub fn walk_to_transaction<R>(
     rootdir: &Path,
     fs: &mut btrfs_transaction::Filesystem<R>,
     trans: &mut btrfs_transaction::Transaction<R>,
     now_sec: u64,
     compress: CompressConfig,
+    subvol_args: &[SubvolArg],
 ) -> Result<()>
+where
+    R: std::io::Read + std::io::Write + std::io::Seek,
+{
+    use uuid::Uuid;
+
+    // Assign subvol IDs starting at BTRFS_FIRST_FREE_OBJECTID (256),
+    // matching the legacy walker's policy. Each --subvol arg gets a
+    // unique tree id; the path-to-id mapping drives boundary
+    // detection in the per-tree walker.
+    let mut next_subvol_id = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID);
+    let mut subvol_id_map: HashMap<PathBuf, (u64, SubvolType)> = HashMap::new();
+    for arg in subvol_args {
+        subvol_id_map
+            .insert(arg.path.clone(), (next_subvol_id, arg.subvol_type));
+        next_subvol_id += 1;
+    }
+
+    // Walk the main FS tree first.
+    let main_boundaries = direct_subvol_boundaries(&subvol_id_map, None);
+    let main_root = u64::from(raw::BTRFS_FS_TREE_OBJECTID);
+    let mut deferred = walk_one_tree_to_transaction(
+        rootdir,
+        rootdir,
+        main_root,
+        fs,
+        trans,
+        now_sec,
+        compress,
+        &main_boundaries,
+    )?;
+
+    // Process deferred subvolumes; nested subvols append to the
+    // queue as they're discovered during each subvol's walk.
+    while let Some(def) = deferred.pop() {
+        // 1. Allocate the subvol tree, populate inode 256 + ".."
+        //    INODE_REF + ROOT_ITEM patch.
+        crate::post_bootstrap::create_subvolume_shape(
+            fs,
+            trans,
+            def.subvol_id,
+            now_sec,
+            Uuid::new_v4(),
+        )?;
+
+        // 2. Insert ROOT_REF (parent → child) + ROOT_BACKREF
+        //    (child → parent) in the root tree (tree id 1).
+        trans
+            .insert_root_ref(
+                fs,
+                def.parent_root_id,
+                def.subvol_id,
+                def.parent_dirid,
+                def.dir_index,
+                &def.name,
+            )
+            .with_context(|| {
+                format!(
+                    "insert_root_ref for subvol '{}'",
+                    String::from_utf8_lossy(&def.name)
+                )
+            })?;
+
+        // 3. Walk the subvol's contents into its own tree.
+        //
+        //    `direct_subvol_boundaries` compares its `parent_subvol_path`
+        //    against `subvol_id_map` keys, which are relative to
+        //    `rootdir` (the user wrote `--subvol rw:rwsub/inner`, not
+        //    an absolute path). `def.host_path` was captured during
+        //    the walk as an absolute path, so strip the rootdir prefix
+        //    before passing it. Without this, nested subvolumes silently
+        //    degrade to plain directories.
+        let def_rel = def
+            .host_path
+            .strip_prefix(rootdir)
+            .map_or_else(|_| def.host_path.clone(), Path::to_path_buf);
+        let sub_boundaries =
+            direct_subvol_boundaries(&subvol_id_map, Some(&def_rel));
+        let nested = walk_one_tree_to_transaction(
+            rootdir,
+            &def.host_path,
+            def.subvol_id,
+            fs,
+            trans,
+            now_sec,
+            compress,
+            &sub_boundaries,
+        )?;
+        deferred.extend(nested);
+
+        // 4. Apply ro / default flags after population so any
+        //    intra-subvol writes go in unrestricted.
+        if matches!(def.subvol_type, SubvolType::Ro | SubvolType::DefaultRo) {
+            trans
+                .set_root_readonly(fs, def.subvol_id)
+                .with_context(|| {
+                    format!(
+                        "set_root_readonly for subvol '{}'",
+                        String::from_utf8_lossy(&def.name)
+                    )
+                })?;
+        }
+        if matches!(
+            def.subvol_type,
+            SubvolType::Default | SubvolType::DefaultRo
+        ) {
+            trans
+                .set_default_subvol(fs, def.subvol_id)
+                .with_context(|| {
+                    format!(
+                        "set_default_subvol for subvol '{}'",
+                        String::from_utf8_lossy(&def.name)
+                    )
+                })?;
+        }
+    }
+    Ok(())
+}
+
+/// Walk one tree (the main FS tree, or a single subvolume) and emit
+/// its items via the transaction pipeline. Returns subvolume
+/// boundaries discovered inside this tree as `DeferredSubvol`
+/// entries for the caller to process.
+#[allow(clippy::cast_sign_loss)] // stat timestamps are non-negative in practice
+#[allow(clippy::cast_possible_truncation)] // *time_nsec fits in u32
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
+fn walk_one_tree_to_transaction<R>(
+    rootdir: &Path,
+    tree_root: &Path,
+    root_objectid: u64,
+    fs: &mut btrfs_transaction::Filesystem<R>,
+    trans: &mut btrfs_transaction::Transaction<R>,
+    now_sec: u64,
+    compress: CompressConfig,
+    subvol_boundaries: &HashMap<PathBuf, (u64, SubvolType)>,
+) -> Result<Vec<DeferredSubvol>>
 where
     R: std::io::Read + std::io::Write + std::io::Seek,
 {
     use btrfs_disk::items::{InodeFlags, Timespec};
     use btrfs_transaction::inode::InodeArgs;
 
-    let fs_tree = u64::from(raw::BTRFS_FS_TREE_OBJECTID);
+    let _ = rootdir; // reserved for future --inode-flags rel-path lookups
     let root_ino: u64 = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID); // 256
     let mut next_ino: u64 = root_ino + 1; // 257
 
-    // (host_dev, host_ino) -> btrfs_ino, for hardlink coalescing.
+    // (host_dev, host_ino) -> btrfs_ino, for hardlink coalescing
+    // within this tree only (the legacy walker scopes hardlink maps
+    // per-subvol; cross-subvol hardlinks are out of scope).
     let mut hardlink_map: HashMap<(u64, u64), u64> = HashMap::new();
-    // btrfs_ino -> final nlink (only entries > 1 need a fixup at the end).
     let mut nlink_count: HashMap<u64, u32> = HashMap::new();
-    // parent_ino -> next dir_index. Root dir starts at 2 (slots 0/1 are
-    // reserved for "." / ".." per the kernel convention).
     let mut dir_index_map: HashMap<u64, u64> = HashMap::new();
     dir_index_map.insert(root_ino, 2);
+    let mut deferred_subvols: Vec<DeferredSubvol> = Vec::new();
+    let now_ts = Timespec {
+        sec: now_sec,
+        nsec: 0,
+    };
 
-    // Apply xattrs to the root directory itself.
-    for (xname, xvalue) in read_xattrs(rootdir)? {
+    // Apply xattrs to the tree's root directory (inode 256).
+    for (xname, xvalue) in read_xattrs(tree_root)? {
         trans
-            .set_xattr(fs, fs_tree, root_ino, &xname, &xvalue)
-            .map_err(|e| anyhow::anyhow!("set_xattr on root dir: {e}"))?;
+            .set_xattr(fs, root_objectid, root_ino, &xname, &xvalue)
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "set_xattr on root dir of tree {root_objectid}: {e}"
+                )
+            })?;
     }
 
-    let mut stack: Vec<(PathBuf, u64)> = read_dir_sorted(rootdir)?
+    let mut stack: Vec<(PathBuf, u64)> = read_dir_sorted(tree_root)?
         .into_iter()
         .map(|p| (p, root_ino))
         .collect();
-    // DFS via stack: pop pushes children in reverse so iteration order
-    // matches name-sorted traversal.
 
     while let Some((host_path, parent_ino)) = stack.pop() {
         let meta = fs::symlink_metadata(&host_path).with_context(|| {
             format!("cannot stat '{}'", host_path.display())
         })?;
+
+        let name_os = host_path
+            .file_name()
+            .expect("entry has no filename")
+            .to_owned();
+        let name_bytes = name_os.as_encoded_bytes();
+
+        // Allocate dir_index in the parent before any per-kind branch
+        // so all paths (subvol boundary, hardlink, regular entry)
+        // reserve a slot in the same monotonic sequence.
+        let dir_index = {
+            let slot = dir_index_map.entry(parent_ino).or_insert(2);
+            let v = *slot;
+            *slot += 1;
+            v
+        };
+
+        // Subvol boundary: emit DIR_ITEM + DIR_INDEX in parent
+        // pointing at (subvol_id, ROOT_ITEM, 0), defer the actual
+        // subvol creation + walk to the caller.
+        let rel_to_tree =
+            host_path.strip_prefix(tree_root).unwrap_or(&host_path);
+        if meta.is_dir()
+            && let Some(&(subvol_id, subvol_type)) =
+                subvol_boundaries.get(rel_to_tree)
+        {
+            trans
+                .link_subvol_entry(
+                    fs,
+                    root_objectid,
+                    parent_ino,
+                    subvol_id,
+                    name_bytes,
+                    dir_index,
+                    now_ts,
+                )
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "link_subvol_entry for '{}': {e}",
+                        host_path.display()
+                    )
+                })?;
+            deferred_subvols.push(DeferredSubvol {
+                host_path: host_path.clone(),
+                subvol_id,
+                subvol_type,
+                parent_root_id: root_objectid,
+                parent_dirid: parent_ino,
+                dir_index,
+                name: name_bytes.to_vec(),
+            });
+            continue;
+        }
 
         let host_dev_ino = (meta.dev(), meta.ino());
         let is_hardlink = meta.nlink() > 1
@@ -1277,39 +1467,19 @@ where
             ino
         };
 
-        let name_os = host_path
-            .file_name()
-            .expect("entry has no filename")
-            .to_owned();
-        let name_bytes = name_os.as_encoded_bytes();
         let file_type = mode_to_btrfs_type(meta.mode());
 
-        // Allocate a dir_index slot in the parent. link_dir_entry will
-        // place the DIR_INDEX item at this offset.
-        let dir_index = {
-            let slot = dir_index_map.entry(parent_ino).or_insert(2);
-            let v = *slot;
-            *slot += 1;
-            v
-        };
-
-        // Hardlink: only emit the new dir entry and the extra INODE_REF.
-        // link_dir_entry inserts INODE_REF + DIR_ITEM + DIR_INDEX and
-        // bumps the parent dir's size in place.
         if is_hardlink {
             trans
                 .link_dir_entry(
                     fs,
-                    fs_tree,
+                    root_objectid,
                     parent_ino,
                     btrfs_ino,
                     name_bytes,
                     file_type,
                     dir_index,
-                    Timespec {
-                        sec: now_sec,
-                        nsec: 0,
-                    },
+                    now_ts,
                 )
                 .map_err(|e| {
                     anyhow::anyhow!(
@@ -1321,8 +1491,6 @@ where
             continue;
         }
 
-        // Track first occurrence of a hardlinkable inode so a later
-        // visit recognises it.
         if meta.nlink() > 1 && !meta.is_dir() {
             hardlink_map.insert(host_dev_ino, btrfs_ino);
             nlink_count.insert(btrfs_ino, 1);
@@ -1336,9 +1504,6 @@ where
             0
         };
 
-        // --inode-flags is not supported on this path (the caller
-        // routes to the legacy walker when inode_flags is non-empty),
-        // so InodeFlags is always empty here.
         let args = InodeArgs {
             generation: trans.transid,
             transid: trans.transid,
@@ -1363,14 +1528,11 @@ where
                 sec: meta.mtime() as u64,
                 nsec: meta.mtime_nsec() as u32,
             },
-            otime: Timespec {
-                sec: now_sec,
-                nsec: 0,
-            },
+            otime: now_ts,
         };
 
         trans
-            .create_inode(fs, fs_tree, btrfs_ino, &args)
+            .create_inode(fs, root_objectid, btrfs_ino, &args)
             .map_err(|e| {
                 anyhow::anyhow!(
                     "create_inode for '{}': {e}",
@@ -1380,16 +1542,13 @@ where
         trans
             .link_dir_entry(
                 fs,
-                fs_tree,
+                root_objectid,
                 parent_ino,
                 btrfs_ino,
                 name_bytes,
                 file_type,
                 dir_index,
-                Timespec {
-                    sec: now_sec,
-                    nsec: 0,
-                },
+                now_ts,
             )
             .map_err(|e| {
                 anyhow::anyhow!(
@@ -1400,7 +1559,7 @@ where
 
         for (xname, xvalue) in read_xattrs(&host_path)? {
             trans
-                .set_xattr(fs, fs_tree, btrfs_ino, &xname, &xvalue)
+                .set_xattr(fs, root_objectid, btrfs_ino, &xname, &xvalue)
                 .map_err(|e| {
                     anyhow::anyhow!(
                         "set_xattr on '{}': {e}",
@@ -1412,7 +1571,6 @@ where
         if meta.is_dir() {
             dir_index_map.insert(btrfs_ino, 2);
             let mut children = read_dir_sorted(&host_path)?;
-            // Push in reverse so pop yields name-sorted order.
             for child in children.drain(..).rev() {
                 stack.push((child, btrfs_ino));
             }
@@ -1421,11 +1579,10 @@ where
                 format!("cannot readlink '{}'", host_path.display())
             })?;
             let target_bytes = target.as_os_str().as_encoded_bytes();
-            // Symlink targets are always inline, never compressed.
             trans
                 .insert_inline_extent(
                     fs,
-                    fs_tree,
+                    root_objectid,
                     btrfs_ino,
                     0,
                     target_bytes,
@@ -1438,8 +1595,6 @@ where
                     )
                 })?;
         } else if meta.is_file() && size > 0 {
-            // Compression algo for the transaction crate. Map our
-            // mkfs-side enum to the disk-crate variant.
             use btrfs_disk::items::CompressionType;
             let comp = match compress.algorithm {
                 CompressAlgorithm::No => None,
@@ -1447,12 +1602,6 @@ where
                 CompressAlgorithm::Lzo => Some(CompressionType::Lzo),
                 CompressAlgorithm::Zstd => Some(CompressionType::Zstd),
             };
-            // Read entire file content. write_file_data picks inline
-            // (when size <= max_inline_data_size and offset == 0) or
-            // splits into ≤ 1 MiB regular extents otherwise. Reading
-            // upfront keeps memory bounded by individual file sizes;
-            // really large files are out of scope for `--rootdir`
-            // anyway since the entire data chunk has to fit.
             let mut data = Vec::with_capacity(size as usize);
             let mut f = fs::File::open(&host_path).with_context(|| {
                 format!("cannot open '{}'", host_path.display())
@@ -1460,8 +1609,13 @@ where
             f.read_to_end(&mut data)?;
             trans
                 .write_file_data(
-                    fs, fs_tree, btrfs_ino, 0, &data,
-                    /* nodatasum */ false, comp,
+                    fs,
+                    root_objectid,
+                    btrfs_ino,
+                    0,
+                    &data,
+                    /* nodatasum */ false,
+                    comp,
                 )
                 .map_err(|e| {
                     anyhow::anyhow!(
@@ -1472,20 +1626,17 @@ where
         }
     }
 
-    // Final pass: patch nlink for every inode that ended up with more
-    // than one hardlink. nlink stays at the default `1` set in the
-    // initial InodeArgs for everything else.
     for (&ino, &nlink) in &nlink_count {
         if nlink > 1 {
             trans
-                .set_inode_nlink(fs, fs_tree, ino, nlink)
+                .set_inode_nlink(fs, root_objectid, ino, nlink)
                 .map_err(|e| {
                     anyhow::anyhow!("set_inode_nlink({ino}, {nlink}): {e}")
                 })?;
         }
     }
 
-    Ok(())
+    Ok(deferred_subvols)
 }
 
 #[cfg(test)]

@@ -508,6 +508,7 @@ fn make_btrfs_with_rootdir_via_transaction(
     cfg: &MkfsConfig,
     rootdir: &Path,
     compress: rootdir::CompressConfig,
+    subvol_args: &[crate::args::SubvolArg],
 ) -> Result<()> {
     use btrfs_transaction::{Filesystem, Transaction};
     use std::collections::BTreeMap;
@@ -531,7 +532,12 @@ fn make_btrfs_with_rootdir_via_transaction(
         let mut trans = Transaction::start(&mut fs)
             .context("transactional rootdir: Transaction::start")?;
         rootdir::walk_to_transaction(
-            rootdir, &mut fs, &mut trans, now, compress,
+            rootdir,
+            &mut fs,
+            &mut trans,
+            now,
+            compress,
+            subvol_args,
         )?;
         trans
             .commit(&mut fs)
@@ -564,7 +570,12 @@ fn make_btrfs_with_rootdir_via_transaction(
         let mut trans = Transaction::start(&mut fs)
             .context("transactional rootdir: Transaction::start")?;
         rootdir::walk_to_transaction(
-            rootdir, &mut fs, &mut trans, now, compress,
+            rootdir,
+            &mut fs,
+            &mut trans,
+            now,
+            compress,
+            subvol_args,
         )?;
         trans
             .commit(&mut fs)
@@ -614,19 +625,17 @@ pub fn make_btrfs_with_rootdir(
         );
     }
 
-    // Route the simple case through the new transaction-based path:
-    // empty filesystem from `make_btrfs`, then walk the rootdir
-    // emitting items via the transaction crate. The legacy path
-    // (build everything in memory + raw pwrite) only runs when the
-    // user requests a feature the transactional walker doesn't yet
-    // support: subvolumes, FICLONERANGE reflink, image shrink, or
-    // per-path inode flags.
-    if subvol_args.is_empty()
-        && !opts.reflink
-        && !opts.shrink
-        && inode_flags.is_empty()
-    {
-        return make_btrfs_with_rootdir_via_transaction(cfg, rootdir, compress);
+    // Route through the transaction-based path unless the user
+    // requests a feature the new walker doesn't yet support:
+    // FICLONERANGE reflink, image shrink, or per-path inode flags.
+    // Subvolumes (`--subvol`) are now handled.
+    if !opts.reflink && !opts.shrink && inode_flags.is_empty() {
+        return make_btrfs_with_rootdir_via_transaction(
+            cfg,
+            rootdir,
+            compress,
+            subvol_args,
+        );
     }
 
     let generation = 1u64;

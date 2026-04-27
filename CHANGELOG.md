@@ -6,6 +6,41 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-mkfs`: `--rootdir --subvol` now goes through the new
+  transactional walker, in addition to the previously-migrated
+  simple case. All four subvolume types (`rw` / `ro` / `default` /
+  `default-ro`) and arbitrary nesting are supported.
+  `walk_to_transaction` builds a path → `(subvol_id, type)` map from
+  `subvol_args`, walks the main FS tree first, queues each
+  subvolume boundary as a `DeferredSubvol`, and (after the main
+  walk) processes the queue: `post_bootstrap::create_subvolume_shape`
+  materialises the subvol tree (allocate leaf, populate inode 256
+  with `INODE_ROOT_ITEM_INIT`, ".." `INODE_REF`, `ROOT_ITEM` patch
+  with a fresh v4 UUID), `Transaction::insert_root_ref` records the
+  parent linkage, the per-subvol walk emits the contents, and ro /
+  default flags land via `set_root_readonly` / `set_default_subvol`.
+  Nested subvols append back into the queue as the walker
+  encounters them. The legacy path now only runs when `--reflink`,
+  `--shrink`, or `--inode-flags` is requested. New helper
+  `Transaction::link_subvol_entry` (sister of `link_dir_entry`)
+  emits the parent's `DIR_ITEM` + `DIR_INDEX` pointing at a
+  `ROOT_ITEM` location and bumps parent dir size, with no
+  `INODE_REF` (subvol parent linkage uses `ROOT_REF` /
+  `ROOT_BACKREF` in the root tree instead). Both `link_*` helpers
+  now share a `mirror_root_item_size` helper for the inode-256 →
+  `ROOT_ITEM` size mirroring. Verified by the existing unprivileged
+  `subvol_*` mkfs tests (now exercising the new path) plus a new
+  privileged `mkfs_rootdir_subvols` test that mounts the result and
+  asserts `btrfs subvol list` listing, ro write rejection, and
+  nested-subvol visibility.
+
+  Pre-existing bug fixed in passing: `direct_subvol_boundaries` was
+  given an absolute `parent_subvol_path` while `subvol_id_map` keys
+  are relative to `rootdir`, so nested subvolume detection silently
+  no-op'd. The new walker strips the rootdir prefix before the
+  call. The legacy walker has the same gap but no test exercises
+  it; left untouched here since it would require touching legacy
+  code we're aiming to delete.
 - `btrfs-mkfs`: `--rootdir` for the simple case (no `--subvol`, no
   `--reflink`, no `--shrink`, no `--inode-flags`) now goes through
   the transaction crate end-to-end. `make_btrfs_with_rootdir` calls
