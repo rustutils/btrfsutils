@@ -1,25 +1,53 @@
 //! # Post-bootstrap transactions on a freshly-built mkfs image
 //!
-//! After [`mkfs::make_btrfs`](crate::mkfs::make_btrfs) (or
-//! `make_btrfs_with_rootdir`) finishes writing its bootstrap layout to
-//! disk, this module applies a single transaction-crate transaction to
-//! the resulting image to fill in pieces that mkfs's hand-built layout
-//! doesn't yet produce.
+//! After [`mkfs::make_btrfs`](crate::mkfs::make_btrfs) finishes
+//! writing its bootstrap (Root / Extent / Chunk / Dev + superblock),
+//! this module reopens the image with the transaction crate, starts
+//! a single transaction, and creates every always-present empty
+//! tree the bootstrap omits. The resulting filesystem is
+//! mkfs-equivalent to what btrfs-progs produces.
 //!
-//! Right now that is just the empty UUID tree (objectid 9), which
-//! btrfs-progs creates by default but our mkfs doesn't (PLAN B.3). The
-//! kernel populates UUID-tree entries lazily on snapshot/send, so an
-//! empty tree is the correct initial state.
+//! Steps applied per transaction (each idempotent so the same code
+//! works whether the bootstrap or a previous post-bootstrap run
+//! created the tree):
+//!
+//! 1. Block-group tree (objectid 11) — when the
+//!    `BLOCK_GROUP_TREE` `compat_ro` flag is set. Migrates every
+//!    `BLOCK_GROUP_ITEM` from the extent tree to BGT via
+//!    [`btrfs_transaction::convert::create_block_group_tree`]. Must
+//!    come first so subsequent allocations route correctly.
+//! 2. FS tree (objectid 5) — empty subvolume shape: inode 256
+//!    with `INODE_ROOT_ITEM_INIT`, ".." `INODE_REF`, `ROOT_ITEM`
+//!    patched to mirror the inode plus a fsid-derived UUID and
+//!    ctime/otime.
+//! 3. Csum tree (objectid 7) — empty leaf.
+//! 4. Data-reloc tree (objectid -9) — same subvolume shape as the
+//!    FS tree, but without `INODE_ROOT_ITEM_INIT` or a UUID
+//!    (matches mkfs convention).
+//! 5. Quota tree (objectid 8) — when `-O quota` or `-O squota` is
+//!    set. STATUS + INFO + LIMIT items for the FS tree's qgroupid
+//!    (0/5).
+//! 6. Free-space tree (objectid 10) — when the
+//!    `FREE_SPACE_TREE` `compat_ro` flag is set. Created empty,
+//!    then seeded with `FREE_SPACE_INFO` + `FREE_SPACE_EXTENT`
+//!    items derived from the current extent-tree state via
+//!    [`btrfs_transaction::convert::seed_free_space_tree`].
+//! 7. UUID tree (objectid 9) — empty leaf. Kernel populates
+//!    entries lazily on snapshot/send.
+//!
+//! Also exposes a `create_subvolume_shape` helper (used by the FS
+//! tree step here and by the rootdir walker for user `--subvol`
+//! trees) so the same allocate-leaf + populate-256 + ".." +
+//! `ROOT_ITEM` pattern doesn't get reimplemented.
 //!
 //! ## Why a separate module
 //!
-//! mkfs's current write path (`tree.rs` + `treebuilder.rs` + raw
-//! `pwrite`) is GPL-2.0 territory and was written looking at
-//! btrfs-progs. This module is the bridge to the MIT/Apache-licensed
-//! transaction crate: it opens the freshly-written image, runs a
-//! transaction against it, and closes. Keeping the bridge in its own
-//! file makes the licensing boundary obvious and gives us one place to
-//! grow as more migration work lands.
+//! mkfs's bootstrap (`tree.rs` + `treebuilder.rs` + raw `pwrite`)
+//! is GPL-2.0 territory and was written looking at btrfs-progs.
+//! This module is the bridge to the MIT/Apache-licensed transaction
+//! crate: it opens the bootstrap image, runs a transaction against
+//! it, commits, and closes. Keeping the bridge in its own file
+//! makes the licensing boundary obvious.
 
 use crate::{args::Profile, mkfs::MkfsConfig};
 use anyhow::{Context, Result};

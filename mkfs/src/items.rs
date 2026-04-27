@@ -1,8 +1,18 @@
 //! # Item serializers: produce on-disk byte payloads for btrfs tree items
 //!
-//! Each function serializes a specific item type into a `Vec<u8>` suitable
-//! for passing to `LeafBuilder::push`. Field positions are derived from the
-//! bindgen structs in `btrfs_disk::raw` via `offset_of!` and `size_of`.
+//! Each function serializes a specific item type into a `Vec<u8>`
+//! suitable for passing to [`LeafBuilder::push`](crate::tree::LeafBuilder).
+//! Field positions are derived from the bindgen structs in
+//! `btrfs_disk::raw` via `offset_of!` and `size_of`.
+//!
+//! Used by the bootstrap path in [`crate::mkfs`] (the
+//! `build_root_tree` / `build_extent_tree` / `build_chunk_tree` /
+//! `build_dev_tree` / `build_superblock_with_params` family).
+//! Post-bootstrap and `--rootdir` use the transaction crate's own
+//! item helpers (`btrfs_disk::items::*` parsers / serialisers and
+//! the `Transaction::insert_*` family). A handful of serializers
+//! here are unused by the current bootstrap (kept as utility
+//! exports for any future caller that wants them).
 
 use crate::tree::Key;
 use btrfs_disk::raw;

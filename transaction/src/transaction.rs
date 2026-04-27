@@ -1,9 +1,61 @@
 //! # Transaction lifecycle: start, commit, abort
 //!
-//! A `Transaction` groups multiple tree modifications into a single atomic
-//! commit. The commit point is the superblock write: all new tree blocks are
-//! written first (at new locations via COW), then the superblock is updated
-//! to point to the new root.
+//! A [`Transaction`] groups multiple tree modifications into a
+//! single atomic commit. The commit point is the superblock write:
+//! all new tree blocks are written first (at new locations via
+//! COW), then the superblock is updated to point to the new root.
+//!
+//! ## Lifecycle
+//!
+//! - [`Transaction::start`]: bumps the in-memory generation,
+//!   snapshots the current root pointers, and seeds the metadata
+//!   block-group cursor.
+//! - [`Transaction::commit`]: force-COWs the root tree (so every
+//!   commit advances `header.generation`), runs a convergence loop
+//!   draining delayed refs, root-item updates, and FST updates
+//!   until stable, flushes every dirty block to disk via the chunk
+//!   tree (writing all DUP / RAID1 / RAID0 / RAID10 / RAID5 /
+//!   RAID6 stripes per the chunk cache's `plan_write`), updates
+//!   superblock fields and the rotating backup roots, and writes
+//!   the superblock to all mirrors.
+//! - [`Transaction::abort`]: restores the in-memory root-pointer
+//!   snapshot so the next transaction reads consistent on-disk
+//!   state.
+//!
+//! ## High-level helpers
+//!
+//! Most callers don't drive `search_slot` + `insert_item` directly
+//! — this module also provides higher-level builders that compose
+//! several primitive operations:
+//!
+//! - **Block / extent allocation**:
+//!   [`Transaction::alloc_block`],
+//!   [`Transaction::alloc_tree_block`],
+//!   [`Transaction::alloc_data_extent`],
+//!   [`Transaction::reserve_data_extent`].
+//! - **File data**: [`Transaction::insert_file_extent`],
+//!   [`Transaction::insert_inline_extent`],
+//!   [`Transaction::insert_csums`],
+//!   [`Transaction::write_file_data`],
+//!   [`Transaction::update_inode_nbytes`].
+//! - **Inodes / directory entries**:
+//!   [`Transaction::create_inode`] (with
+//!   [`crate::inode::InodeArgs`]),
+//!   [`Transaction::link_dir_entry`],
+//!   [`Transaction::link_subvol_entry`],
+//!   [`Transaction::set_xattr`],
+//!   [`Transaction::set_inode_nlink`].
+//! - **Subvolume / root-tree management**:
+//!   [`Transaction::create_empty_tree`],
+//!   [`Transaction::insert_root_ref`],
+//!   [`Transaction::set_root_readonly`],
+//!   [`Transaction::set_default_subvol`],
+//!   [`Transaction::set_device_total_bytes`].
+//! - **Recovery**: [`Transaction::rebuild_chunk_tree`] (used by
+//!   `rescue chunk-recover --apply`).
+//! - **Free-form compression** (free functions, also exported):
+//!   [`try_compress`] (inline), [`try_compress_regular`]
+//!   (per-sector LZO framing).
 
 use crate::{
     allocation,
@@ -305,7 +357,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// Reserve a sector-aligned data extent without writing any
     /// bytes. Returns the allocated logical address. Queues the
     /// `+1 EXTENT_DATA_REF` delayed ref exactly like
-    /// [`alloc_data_extent`], so subsequent commit machinery
+    /// [`alloc_data_extent`](Self::alloc_data_extent), so subsequent commit machinery
     /// produces the matching `EXTENT_ITEM` and FST entries; the
     /// caller is responsible for placing actual content at the
     /// returned address before commit (e.g. via
@@ -314,7 +366,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// source file into each stripe's backing device file).
     ///
     /// `aligned_size` must be `> 0` and a multiple of `sectorsize`.
-    /// Unlike [`alloc_data_extent`], this function never zero-pads
+    /// Unlike [`alloc_data_extent`](Self::alloc_data_extent), this function never zero-pads
     /// or rounds the size up — the caller knows the exact extent
     /// length up front.
     ///

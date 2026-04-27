@@ -1,9 +1,18 @@
 # btrfs-mkfs
 
-A Rust implementation of `mkfs.btrfs` that creates btrfs filesystems by
-constructing B-tree nodes as raw byte buffers and writing them directly to
-block devices or image files with `pwrite`. No ioctls or mounted filesystem
-required.
+A Rust implementation of `mkfs.btrfs` that creates btrfs
+filesystems on block devices or image files. No ioctls or mounted
+filesystem required.
+
+Internally a three-phase pipeline: a hand-built bootstrap writes
+the four always-present trees (Root / Extent / Chunk / Dev) plus
+the superblock via raw `pwrite`; `post_bootstrap` reopens the
+image with the [`btrfs-transaction`](../transaction) crate and
+materialises every other always-present tree (FS, csum,
+data-reloc, UUID, plus FST / BGT / quota when their features are
+on); `--rootdir` then runs a third transaction that walks the
+source directory and emits items via the transaction crate's
+high-level helpers.
 
 ## Usage
 

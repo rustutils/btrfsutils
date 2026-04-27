@@ -1,44 +1,62 @@
 //! # Filesystem creation for btrfs
 //!
-//! Creates a new btrfs filesystem by constructing B-tree nodes as raw byte
-//! buffers and writing them directly to block devices or image files with
-//! `pwrite`. Does not use ioctls or require a mounted filesystem.
+//! Creates a new btrfs filesystem on one or more block devices or image
+//! files. Does not call any ioctls; uses raw `pwrite` for the bootstrap
+//! and the `btrfs-transaction` crate's commit pipeline for everything
+//! else.
 //!
 //! ## How it works
 //!
-//! The entry point is [`mkfs::make_btrfs`], which takes a [`mkfs::MkfsConfig`]
-//! describing the desired filesystem layout (devices, profiles, features,
-//! checksum algorithm).
+//! The entry point is [`mkfs::make_btrfs`] (or
+//! [`mkfs::make_btrfs_with_rootdir`] for `--rootdir`), which takes a
+//! [`mkfs::MkfsConfig`] describing the desired layout (devices,
+//! profiles, features, checksum algorithm).
 //!
-//! The creation process:
+//! Creation runs in three phases:
 //!
-//! 1. **Compute layout** ([`layout::ChunkLayout`]): determine the physical
-//!    placement of system, metadata, and data chunks across devices. Metadata
-//!    uses DUP (single device) or RAID1/RAID1C3/RAID1C4 (multi-device); data
-//!    uses SINGLE or RAID0.
+//! 1. **Bootstrap** — write the four always-present trees (Root,
+//!    Extent, Chunk, Dev) plus the superblock to disk via raw
+//!    `pwrite`. Uses [`tree::LeafBuilder`] / [`treebuilder::TreeBuilder`]
+//!    to construct in-memory leaves, [`layout::ChunkLayout`] to
+//!    decide chunk geometry, and [`layout::BlockLayout`] to assign
+//!    static addresses for the bootstrap blocks. The result is the
+//!    minimum on-disk state that the transaction crate's
+//!    `Filesystem::open` will accept.
 //!
-//! 2. **Build tree blocks** ([`tree::LeafBuilder`]): construct 8-9 leaf nodes
-//!    (root, extent, chunk, dev, fs, csum, free-space, data-reloc, and
-//!    optionally block-group tree). Each tree is populated with the items
-//!    serialized by the functions in [`items`].
+//! 2. **Post-bootstrap** ([`post_bootstrap`]) — reopen the bootstrap
+//!    image with [`btrfs_transaction::Filesystem`], start a
+//!    transaction, and create the always-present empty trees the
+//!    bootstrap omits: block-group tree (when enabled), FS tree
+//!    (with inode 256 + ".." `INODE_REF` + `ROOT_ITEM` patches),
+//!    csum tree, data-reloc tree, quota tree (when enabled),
+//!    free-space tree (when enabled), UUID tree. Commit + sync.
 //!
-//! 3. **Build superblock** ([`btrfs_disk::superblock::Superblock`]): construct
-//!    the superblock with root pointers, device info, feature flags, and the
-//!    `sys_chunk_array` bootstrap, then serialize via `to_bytes()`.
+//! 3. **Rootdir population** ([`rootdir::walk_to_transaction`]) —
+//!    only for `--rootdir`. Reopen the freshly-built empty
+//!    filesystem, start a transaction, walk the source directory
+//!    depth-first, and emit `INODE_ITEM` / `DIR_ITEM` / `DIR_INDEX`
+//!    / `INODE_REF` / `XATTR_ITEM` / inline-or-regular `EXTENT_DATA`
+//!    records via the transaction crate's high-level helpers. Handles
+//!    `--subvol`, `--reflink` (FICLONERANGE), `--shrink`, and
+//!    `--inode-flags`. Commit + sync.
 //!
-//! 4. **Write to disk** ([`write::pwrite_all`]): write each tree block to its
-//!    physical location(s) — DUP/RAID1 blocks are written to multiple stripes.
-//!    Superblocks are written to all mirror offsets (64K, 64M, 256G) on all
-//!    devices. Checksums ([`write::ChecksumType`]) are computed per-block.
+//! Phase 1 is the only piece that still hand-builds tree blocks;
+//! migrating it would require a `Filesystem::create` primitive in
+//! the transaction crate. Phases 2 and 3 are the steady-state
+//! shape: every modification goes through the same `Transaction`
+//! pipeline as the rest of the codebase.
 //!
 //! ## Supported features
 //!
-//! - Single and multi-device (up to N devices)
-//! - Metadata profiles: SINGLE, DUP, RAID1, RAID1C3, RAID1C4
-//! - Data profiles: SINGLE, DUP, RAID0, RAID1, RAID1C3, RAID1C4
-//! - Checksum algorithms: CRC32C, xxhash64, SHA256, `BLAKE2b`
-//! - Free-space-tree, block-group-tree feature flags
+//! - Single and multi-device
+//! - All RAID profiles: SINGLE, DUP, RAID0, RAID1, RAID1C3, RAID1C4,
+//!   RAID10, RAID5, RAID6 (for both metadata and data)
+//! - All four checksum algorithms: CRC32C, xxhash64, SHA-256, BLAKE-2b
+//! - Quota (`-O quota`) and simple quota (`-O squota`)
+//! - Free-space-tree and block-group-tree feature flags
 //! - Device validation (mounted check, existing FS detection, TRIM)
+//! - `--rootdir` with subvolumes, reflink, shrink, inode flags, and
+//!   zlib / zstd / LZO compression
 
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]

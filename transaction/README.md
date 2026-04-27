@@ -152,10 +152,19 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
   mirror the `size` update into the matching `ROOT_ITEM`'s
   embedded inode so `btrfs check`'s root-tree consistency check
   passes.
+- **`Transaction::link_subvol_entry(tree, parent, subvol_id,
+  name, dir_index, time)`**: like `link_dir_entry` but for the
+  parent's entry pointing at a subvolume root — `DIR_ITEM` +
+  `DIR_INDEX` with a `ROOT_ITEM` location, no `INODE_REF`
+  (subvol parent linkage uses `ROOT_REF` / `ROOT_BACKREF` in the
+  root tree instead). Pair with `insert_root_ref`.
 - **`Transaction::set_xattr(tree, ino, name, value)`**: insert an
   `XATTR_ITEM` at `(ino, XATTR_ITEM, name_hash(name))` carrying
   `(name, value)`. Same on-disk format as `DIR_ITEM` but with
   `FT_XATTR` and a non-empty value.
+- **`Transaction::set_inode_nlink(tree, ino, nlink)`**: in-place
+  patch of the inode's `nlink` field. Used by mkfs's hardlink
+  fixup pass.
 - **`try_compress_regular(data, algorithm, sectorsize)`**: variant
   for the regular-extent write path. For LZO produces the
   per-sector framing format
@@ -163,6 +172,36 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
   with sector-boundary padding and an early-exit heuristic that
   abandons after 4 sectors if the framed buffer is already past
   3 sectors. For zlib and zstd delegates to `try_compress`.
+
+### Whole-tree creation and conversion
+
+- **`Transaction::create_empty_tree(tree_id)`**: allocate one
+  metadata block, initialise it as an empty level-0 leaf with the
+  inherited fsid and chunk_tree_uuid, register the new
+  `(tree_id -> bytenr)` mapping, and insert a `ROOT_ITEM` into
+  the root tree. Foundation primitive for whole-tree creation
+  (FS, csum, FST, BGT, UUID, quota, user subvolumes). Refuses
+  bootstrap ids 0..=3.
+- **`Transaction::insert_root_ref(parent_root, child_root,
+  dirid, sequence, name)`**: insert paired `ROOT_REF` (parent →
+  child) and `ROOT_BACKREF` (child → parent) records for a
+  subvolume linkage.
+- **`Transaction::set_root_readonly(tree_id)`**: OR
+  `RootItemFlags::RDONLY` into a `ROOT_ITEM`'s flags. Used by
+  `mkfs --rootdir --subvol ro:`.
+- **`Transaction::set_default_subvol(subvol_id)`**: upsert the
+  `"default"` `DIR_ITEM` under `BTRFS_ROOT_TREE_DIR_OBJECTID`
+  (id 6). Used by `mkfs --rootdir --subvol default:`.
+- **`Transaction::set_device_total_bytes(devid, new_total)`**:
+  patch a device's `DEV_ITEM.total_bytes` in the chunk tree and
+  mirror into the superblock's embedded `dev_item`. Used by
+  `mkfs --rootdir --shrink` and `rescue fix-device-size`.
+- **`convert::convert_to_free_space_tree`** /
+  **`convert::convert_to_block_group_tree`**: top-level
+  conversions invoked by `btrfs-tune`. Per-step helpers
+  `convert::seed_free_space_tree` and
+  `convert::create_block_group_tree` are also exposed and used
+  by mkfs's `post_bootstrap`.
 
 ### Free space tree
 
@@ -195,20 +234,23 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## What's not yet implemented
 
-- **RAID0 / RAID5 / RAID6 striped writes**: `BlockReader::write_block`
-  fans out to every stripe's device for replication profiles
-  (SINGLE / DUP / RAID1 / RAID1C3 / RAID1C4 / RAID10 mirror pairs)
-  via `Filesystem::open_multi`, but for RAID0 / RAID5 / RAID6 a
-  single buffer that spans more than one `stripe_len` would need
-  per-stripe slicing. Tree blocks (always nodesize ≤ stripe_len)
-  fit in one stripe slot; data extents larger than `stripe_len`
-  do not. Defer until there's a concrete consumer.
+- **Striped writes larger than `stripe_len` for RAID0 / RAID5 /
+  RAID6 data extents**: `BlockReader::write_block` routes
+  per-stripe via the chunk cache's `plan_write` and handles every
+  RAID profile correctly (parity-aware for RAID5 / RAID6, mirror
+  pairs for RAID10), but a single buffer that spans more than
+  one row would need per-stripe slicing in the executor. Tree
+  blocks (always nodesize ≤ stripe_len) fit in one row; data
+  extents larger than `stripe_len` do not. Defer until there's a
+  concrete consumer.
 - **New SYSTEM chunk allocation**: if no existing SYSTEM block
   group has free space, `ensure_in_sys_chunk_array` cannot carve
   out a new one. Bails cleanly.
-- **Multi-device replication for chunk tree COW**: tested only
-  on single-device filesystems.
 - **Bitmap-layout free space tree**: refused with a clear error.
+- **`Filesystem::create`**: a from-scratch primitive to replace
+  mkfs's hand-built bootstrap. Would let mkfs delete its
+  remaining `LeafBuilder` / `TreeBuilder` / `BlockLayout` /
+  `build_*` machinery.
 
 ## Testing
 

@@ -405,14 +405,11 @@ where
 /// Walk `rootdir` depth-first and apply each entry to an open
 /// filesystem via the transaction crate.
 ///
-/// Mirrors the inode-numbering, hardlink, xattr, and subvolume
-/// semantics of [`walk_directory`] (which produces hand-built items
-/// for mkfs's legacy bootstrap pipeline) but emits items via
-/// [`Transaction::create_inode`] / [`link_dir_entry`] /
-/// [`set_xattr`] / [`write_file_data`] / [`link_subvol_entry`] /
-/// [`insert_root_ref`] so the filesystem can be reopened, populated,
-/// and committed without ever touching the hand-built `tree.rs` /
-/// `treebuilder.rs` machinery.
+/// Emits items via [`Transaction::create_inode`] / [`link_dir_entry`]
+/// / [`set_xattr`] / [`write_file_data`] / [`link_subvol_entry`] /
+/// [`insert_root_ref`], so the filesystem can be reopened, populated,
+/// and committed using only the transaction crate's B-tree
+/// search/insert/commit pipeline — no hand-built tree blocks.
 ///
 /// `subvol_args` declares which subdirectories of `rootdir` should
 /// become separate subvolumes (with optional `ro` / `default`

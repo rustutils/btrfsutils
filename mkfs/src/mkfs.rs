@@ -1,7 +1,20 @@
 //! # Mkfs: orchestrate filesystem creation
 //!
-//! Builds all tree blocks and the superblock, then writes them to disk.
-//! This is the Rust equivalent of `make_btrfs()` in the C reference.
+//! Top-level entry points for creating a btrfs filesystem. See the
+//! crate-level docs for the three-phase pipeline (bootstrap +
+//! [`crate::post_bootstrap`] + [`crate::rootdir::walk_to_transaction`])
+//! and which phase each entry point invokes.
+//!
+//! - [`make_btrfs`]: bootstrap + post-bootstrap. Produces a valid
+//!   empty filesystem.
+//! - [`make_btrfs_with_rootdir`]: also runs rootdir population on
+//!   top.
+//!
+//! Hand-built tree-block construction in this module (the
+//! `build_root_tree` / `build_extent_tree` / `build_chunk_tree` /
+//! `build_dev_tree` / `build_superblock_with_params` family) is
+//! the only piece of the pipeline that does not yet go through the
+//! transaction crate.
 
 use crate::{
     items,
@@ -685,22 +698,11 @@ fn compute_shrunk_size(cfg: &MkfsConfig) -> Result<u64> {
 
 /// Create a btrfs filesystem populated from a source directory.
 ///
-/// # Errors
-///
-/// Returns an error if validation fails, the device is too small, or I/O fails.
-///
-/// # Panics
-///
-/// Panics if internal consistency checks fail (e.g. extent tree block count
-/// changes after convergence).
-/// Create a btrfs filesystem populated from a source directory.
-///
-/// Validates basic geometry, then delegates to
-/// [`make_btrfs_with_rootdir_via_transaction`], which builds an empty
-/// filesystem (via [`make_btrfs`] + `post_bootstrap`) and populates the
-/// FS tree from `rootdir` via the transaction crate. Handles every
-/// `--rootdir` flag: `--subvol`, `--shrink`, `--reflink`, and
-/// `--inode-flags`.
+/// Validates basic geometry, then builds an empty filesystem via
+/// [`make_btrfs`] (which also runs `post_bootstrap` to materialise
+/// the always-present trees) and populates the FS tree from
+/// `rootdir` via the transaction crate. Handles every `--rootdir`
+/// flag: `--subvol`, `--shrink`, `--reflink`, and `--inode-flags`.
 ///
 /// # Errors
 ///

@@ -3,16 +3,25 @@
 //! Helpers for tracking per-block-group byte range deltas during a
 //! transaction and applying them to the free space tree (FST).
 //!
-//! Stage F1 (this module) introduces the data types and the pure
-//! coalescing/cancellation helpers used to accumulate ranges that were
-//! allocated and freed during a single transaction. Stage F2 will add
-//! the pure "apply delta to free-range list" function. Stage F3 wires
-//! the result into the on-disk FST update path inside the commit
-//! convergence loop.
+//! Three layers, all wired together by `Transaction::commit`'s
+//! convergence loop:
 //!
-//! The shape of a "range" in this module is `(start, length)` in bytes,
-//! both `u64`. Ranges always live within a single block group and the
-//! `start` is the absolute logical address (not block-group relative).
+//! 1. Pure data types and coalescing/cancellation helpers
+//!    ([`Range`], [`BlockGroupRangeDeltas`]) accumulate the
+//!    allocated and freed ranges produced during a transaction.
+//!    Add / drop pairs to the same range cancel.
+//! 2. The pure delta-apply step folds those deltas into a
+//!    per-block-group free-range list.
+//! 3. The on-disk FST update step (driven from
+//!    `Transaction::update_free_space_tree`) deletes and
+//!    re-inserts the matching `FREE_SPACE_EXTENT` items and
+//!    bumps `FREE_SPACE_INFO.extent_count`. Bitmap-layout block
+//!    groups are refused with a clear error.
+//!
+//! The shape of a "range" in this module is `(start, length)` in
+//! bytes, both `u64`. Ranges always live within a single block
+//! group and `start` is the absolute logical address (not
+//! block-group relative).
 
 use std::collections::BTreeMap;
 

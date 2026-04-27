@@ -1,7 +1,13 @@
 //! # Multi-leaf tree builder
 //!
-//! Packs sorted items into btrfs tree blocks (leaves + internal nodes).
-//! Used by `--rootdir` when a tree has too many items for a single leaf.
+//! Packs sorted items into btrfs tree blocks (leaves + internal
+//! nodes). Used by mkfs's bootstrap path (the four always-present
+//! trees in [`crate::mkfs::make_btrfs`]) when a tree has too many
+//! items for a single leaf. Post-bootstrap and `--rootdir` go
+//! through the transaction crate, which has its own search/insert/
+//! split pipeline; this module is bootstrap-only and would be
+//! deletable if the bootstrap migrated to a `Filesystem::create`
+//! transaction-crate primitive.
 
 use crate::tree::{Key, LeafBuilder, LeafHeader, NodeBuilder, NodeHeader};
 use uuid::Uuid;

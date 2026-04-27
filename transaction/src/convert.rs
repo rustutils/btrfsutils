@@ -1,9 +1,25 @@
 //! # Whole-tree conversion operations
 //!
 //! Builds new global trees from existing extent-tree state and flips
-//! the matching `compat_ro` superblock bits. Provides
-//! [`convert_to_free_space_tree`] and
-//! [`convert_to_block_group_tree`].
+//! the matching `compat_ro` superblock bits. Provides:
+//!
+//! - [`convert_to_free_space_tree`]: top-level conversion called by
+//!   `btrfs-tune --convert-to-free-space-tree`. Creates the FST
+//!   root, seeds it with `FREE_SPACE_INFO` + `FREE_SPACE_EXTENT`
+//!   items derived from the extent tree, sets the
+//!   `FREE_SPACE_TREE` + `FREE_SPACE_TREE_VALID` `compat_ro` bits,
+//!   and zeros `cache_generation`.
+//! - [`convert_to_block_group_tree`]: top-level conversion called
+//!   by `btrfs-tune --convert-to-block-group-tree`. Creates the
+//!   BGT root, copies every `BLOCK_GROUP_ITEM` from the extent
+//!   tree into BGT, deletes the originals from the extent tree,
+//!   and sets the `BLOCK_GROUP_TREE` `compat_ro` bit.
+//! - [`seed_free_space_tree`] / [`create_block_group_tree`]:
+//!   per-step helpers extracted from the above. Used by mkfs's
+//!   `post_bootstrap` to materialise the same trees as part of a
+//!   single transaction over a freshly-bootstrapped image. Both
+//!   are per-block-group (resp. per-key) idempotent so they can
+//!   be re-run after a partial application.
 
 use crate::{
     allocation,

@@ -1,10 +1,10 @@
 //! # Read-only extent-tree walker for whole-tree conversions
 //!
-//! Provides a callback-style scanner over allocated extents inside a
-//! single block group, plus a pure free-range derivation helper. Used
-//! by the upcoming free-space-tree and block-group-tree conversion
-//! paths to compute per-block-group free ranges from the extent
-//! tree.
+//! Provides a callback-style scanner over allocated extents inside
+//! a single block group, plus a pure free-range derivation helper.
+//! Used by [`crate::convert::seed_free_space_tree`] and the
+//! `convert_to_*` paths to compute per-block-group free ranges
+//! from the extent tree.
 
 use crate::{
     filesystem::Filesystem,
