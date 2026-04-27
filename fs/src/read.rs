@@ -123,12 +123,26 @@ fn decompress(
             Ok(out)
         }
         CompressionType::Zstd => {
-            zstd::bulk::decompress(data, out_len).map_err(|e| {
+            // btrfs slices each compressed extent into independent
+            // 128 KiB frames; `bulk::decompress` rejects the trailing
+            // bytes after the first frame. The streaming decoder
+            // handles concatenated frames and ignores trailing
+            // sector padding.
+            let mut decoder =
+                zstd::stream::read::Decoder::new(data).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("zstd decoder init failed: {e}"),
+                    )
+                })?;
+            let mut out = vec![0u8; out_len];
+            decoder.read_exact(&mut out).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("zstd decompression failed: {e}"),
                 )
-            })
+            })?;
+            Ok(out)
         }
         CompressionType::Lzo => {
             decompress_lzo(data, out_len, sector_size as usize)
@@ -276,9 +290,14 @@ pub(crate) fn read_file_with_map<R: io::Read + io::Seek>(
         match (&rec.item.extent_type, &rec.item.body) {
             (
                 FileExtentType::Inline,
-                FileExtentBody::Inline { inline_size },
+                FileExtentBody::Inline { inline_size: _ },
             ) => {
-                let ext_end = ext_start + *inline_size as u64;
+                // For inline extents `inline_size` is the on-disk
+                // payload length (i.e. the compressed size for
+                // compressed extents). The *logical* extent length
+                // is always `ram_bytes`, which is what the read
+                // range math must clamp against.
+                let ext_end = ext_start + rec.item.ram_bytes;
                 let read_start = file_offset.max(ext_start);
                 let read_end = req_end.min(ext_end);
                 if read_start >= read_end {

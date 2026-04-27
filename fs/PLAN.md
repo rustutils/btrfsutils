@@ -180,26 +180,35 @@ instances), benchmarks under `fs/benches/`. The two-test cache suite
 (`fs/tests/cache.rs`) verifies effectiveness directly via the stats
 API rather than via timing.
 
-### F4 — Compression test sweep
+### F4 — Compression test sweep ✅
 
-**Scope:**
-- Build fixture images using `mkfs.btrfs --rootdir --compress` for
-  each of `zlib`, `zstd`, `lzo`.
-- Test cases per algorithm: inline compressed (small file ≤4 KiB),
-  regular compressed (single-extent 1 MiB), regular compressed
-  (multi-extent 16 MiB), highly-compressible (zeros), incompressible
-  (random bytes).
-- Edge cases: read with offset inside a compressed extent, partial
-  read at EOF, read straddling two compressed extents.
+Done. 33 tests in `fs/tests/compression.rs` (11 per algorithm × 3
+algorithms via `compression_suite!` macro). Per-algorithm fixture
+built once via `mkfs.btrfs --rootdir --compress <algo>` and shared
+across the suite via `OnceLock`.
 
-**Test plan:**
-- Each combination as a separate `#[tokio::test]` in
-  `fs/tests/compression.rs`.
-- Likely shakes out at least one bug in `decompress_lzo` — its
-  per-sector framing has known edge cases.
+Coverage per algorithm:
+- inline compressed extent (full read + partial-with-offset)
+- regular compressed extent on highly-compressible 1 MiB zeros
+  (full + partial-offset that lands inside a 128 KiB chunk)
+- regular extent on 1 MiB pseudo-random bytes (incompressible —
+  exercises the "compress flag set, but extent says None" path)
+- 16 MiB multi-extent file with a per-MiB byte pattern (full +
+  straddling read across both an inter-extent boundary and a 128 KiB
+  internal compression-chunk boundary + last-byte read)
+- read at EOF / past EOF returns empty
 
-**Out of scope:** new compression algorithms. zlib, zstd, lzo only —
-matching what btrfs supports.
+Bugs the sweep caught:
+- zstd: `bulk::decompress` rejects trailing bytes after the first
+  zstd frame, so multi-frame compressed extents (anything > 128 KiB
+  uncompressed) failed. Switched to the streaming decoder.
+- inline compressed extents: the read range math was clamped against
+  `inline_size` (on-disk compressed length) rather than `ram_bytes`
+  (logical length), so any read of a compressed inline extent
+  returned a slice too short. Fixed.
+
+LZO had no new bugs — `decompress_lzo` survived the sweep with all
+its per-sector framing edge cases handled correctly.
 
 ### F5 — Multi-subvolume traversal
 

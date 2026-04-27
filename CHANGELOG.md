@@ -73,6 +73,23 @@ All notable changes to this project will be documented in this file.
   `&TreeBlock`. All ripple sites in `cli/`, `tune/`, `fs/`,
   `mkfs/`, `transaction/`, and the integration tests updated.
 
+### Fixed
+
+- `btrfs-fs`: zstd-compressed extents on multi-chunk files now
+  decompress correctly. Btrfs splits each compressed extent into
+  independent 128 KiB frames; `zstd::bulk::decompress` rejects
+  trailing bytes after the first frame. Switched to the streaming
+  decoder (`zstd::stream::read::Decoder`) which handles concatenated
+  frames and trailing sector padding. Surfaced by the F4 compression
+  sweep — every zstd test on `pattern_16m.bin` was failing.
+- `btrfs-fs`: inline compressed extents now read correctly.
+  `inline_size` is the on-disk (compressed) payload length, but the
+  read range math was using it as the logical extent length, so any
+  read of a compressed inline extent returned a slice that was too
+  short. Fixed to clamp against `ram_bytes` (the uncompressed length)
+  instead. Surfaced by the F4 sweep on the inline file with all
+  three algorithms.
+
 ## 0.12.0
 
 ### Removed
