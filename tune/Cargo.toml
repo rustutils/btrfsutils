@@ -8,6 +8,11 @@ repository.workspace = true
 homepage.workspace = true
 categories = ["command-line-utilities", "filesystem"]
 keywords = ["btrfs", "filesystem", "tune", "linux", "storage"]
+rust-version = "1.88"
+
+# Linux-only (transitively pulls in btrfs-uapi).
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
 
 [lib]
 name = "btrfs_tune"

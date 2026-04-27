@@ -10,6 +10,13 @@ readme = "README.md"
 categories = ["command-line-utilities", "filesystem"]
 keywords = ["btrfs", "filesystem", "cli", "linux", "storage"]
 default-run = "btrfs"
+rust-version = "1.89"
+
+# `mkfs` / `tune` / `multicall` features gate subcommand modules; build
+# with --all-features so they all appear in docs. Linux-only.
+[package.metadata.docs.rs]
+all-features = true
+targets = ["x86_64-unknown-linux-gnu"]
 
 [[bin]]
 name = "btrfs"

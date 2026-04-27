@@ -9,6 +9,11 @@ homepage.workspace = true
 readme = "README.md"
 categories = ["command-line-utilities", "filesystem"]
 keywords = ["btrfs", "filesystem", "mkfs", "linux", "storage"]
+rust-version = "1.88"
+
+# Linux-only (uses xattr libc calls + transitively btrfs-uapi).
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
 
 [lib]
 name = "btrfs_mkfs"

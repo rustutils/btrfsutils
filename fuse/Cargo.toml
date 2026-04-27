@@ -7,6 +7,11 @@ repository.workspace = true
 homepage.workspace = true
 description = "Userspace FUSE driver for btrfs, built on btrfs-disk."
 readme = "README.md"
+rust-version = "1.87"
+
+# Linux-only (depends on `fuser`, which targets FUSE on Linux).
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
 
 [[bin]]
 name = "btrfs-fuse"

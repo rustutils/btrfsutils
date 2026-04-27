@@ -11,6 +11,11 @@ categories = ["filesystem", "os::linux-apis"]
 keywords = ["btrfs", "ioctl", "filesystem", "linux", "sysfs"]
 autobenches = false
 autotests = false
+rust-version = "1.88"
+
+# Linux-only crate (uses `linux/types.h` directly + ioctls).
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
 
 [[test]]
 name = "tests"

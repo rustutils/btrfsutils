@@ -9,6 +9,14 @@ description = "Btrfs send stream parser and receive operations"
 readme = "README.md"
 categories = ["filesystem", "parser-implementations"]
 keywords = ["btrfs", "filesystem", "send", "receive", "stream"]
+rust-version = "1.85.1"
+
+# `receive` feature pulls in btrfs-uapi (Linux-only) and contains the
+# ReceiveContext API; build with --all-features and a Linux target so
+# both halves of the crate appear in docs.
+[package.metadata.docs.rs]
+all-features = true
+targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
 crc32c = { workspace = true }

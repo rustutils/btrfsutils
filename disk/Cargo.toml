@@ -9,6 +9,7 @@ description = "Platform-independent parsing and writing of btrfs on-disk structu
 readme = "README.md"
 categories = ["filesystem", "parser-implementations"]
 keywords = ["btrfs", "filesystem", "parser", "userspace"]
+rust-version = "1.85.1"
 
 [dependencies]
 bitflags = { workspace = true }

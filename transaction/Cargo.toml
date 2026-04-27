@@ -9,6 +9,7 @@ description = "Userspace transaction infrastructure for modifying btrfs filesyst
 readme = "README.md"
 categories = ["filesystem"]
 keywords = ["btrfs", "filesystem", "transaction", "userspace"]
+rust-version = "1.88"
 
 [dependencies]
 btrfs-disk = { workspace = true }

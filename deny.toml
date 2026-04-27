@@ -39,6 +39,12 @@ ignore = true
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# `btrfs-test-utils` is a workspace-internal, dev-only crate
+# (`publish = false`); its workspace declaration has no `version`
+# so cargo strips it from published manifests. That makes it look
+# like a wildcard requirement to cargo-deny, but only for path
+# deps that never hit a registry — allow those.
+allow-wildcard-paths = true
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
