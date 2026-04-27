@@ -114,7 +114,7 @@ check:
     # cargo-msrv's verify subcommand reads `rust-version` from each
     # workspace member's Cargo.toml and tries `cargo +<that-version>
     # check`. Skip dev-only / non-published crates (test-utils, gen).
-    for member in disk uapi transaction stream mkfs cli tune fuse; do
+    for member in disk uapi transaction stream mkfs cli tune fs fuse; do
       cargo msrv verify --manifest-path "${member}/Cargo.toml"
     done
 

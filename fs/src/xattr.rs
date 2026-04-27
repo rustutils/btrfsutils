@@ -15,7 +15,7 @@ use btrfs_disk::{
 use std::{io, mem};
 
 /// Return all xattr names for `oid`.
-pub fn list_xattrs<R: io::Read + io::Seek>(
+pub(crate) fn list_xattrs<R: io::Read + io::Seek>(
     reader: &mut BlockReader<R>,
     fs_tree_root: u64,
     oid: u64,
@@ -50,7 +50,7 @@ pub fn list_xattrs<R: io::Read + io::Seek>(
 /// Returns `None` if the xattr does not exist. Multiple entries can share
 /// the same `XATTR_ITEM` key (hash collision), so all packed entries are
 /// scanned for an exact name match.
-pub fn get_xattr<R: io::Read + io::Seek>(
+pub(crate) fn get_xattr<R: io::Read + io::Seek>(
     reader: &mut BlockReader<R>,
     fs_tree_root: u64,
     oid: u64,

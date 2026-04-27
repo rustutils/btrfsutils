@@ -18,17 +18,9 @@ name = "btrfs-fuse"
 path = "src/main.rs"
 
 [dependencies]
-btrfs-disk = { workspace = true }
+btrfs-fs = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 fuser = { version = "0.17" }
-libc = { workspace = true }
-flate2 = { workspace = true }
-zstd = { workspace = true }
-lzokay = { workspace = true }
-
-[dev-dependencies]
-btrfs-test-utils = { workspace = true }
-tempfile = { workspace = true }

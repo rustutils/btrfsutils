@@ -1,21 +1,22 @@
 # btrfs-fuse
 
-A userspace FUSE driver for btrfs, built on top of the `btrfs-disk` crate.
+A userspace FUSE driver for btrfs.
 
 > This crate is **experimental** and should not be used for anything you
 > care about. It should be functional, and being read-only it should
 > not corrupt your data.
 
 `btrfs-fuse` lets you mount a btrfs image file or block device read-only
-without kernel btrfs support. All on-disk parsing, tree walks, and
-decompression happen in Rust userspace; the kernel only sees a generic
-FUSE mount.
+without kernel btrfs support. All filesystem semantics live in
+[`btrfs-fs`]; this crate is the thin `fuser::Filesystem` adapter on top
+(inode translation, `Stat` → `FileAttr` mapping, mount glue).
 
-It also doubles as the canonical integration test harness for the
-`btrfs-disk` library — every filesystem operation exercises the parser
-end-to-end, against images produced by real `mkfs.btrfs`.
+If you want to embed a btrfs reader in your own code without going
+through FUSE, depend on [`btrfs-fs`] directly.
 
 Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
+
+[`btrfs-fs`]: https://docs.rs/btrfs-fs
 
 ## What's implemented
 
@@ -57,33 +58,18 @@ on the system see the mount.
 
 ### As a library
 
-The crate exposes `BtrfsFuse` and an operation layer of inherent methods
-(`lookup_entry`, `get_attr`, `read_dir`, `read_symlink`, `read_data`,
-`list_xattrs`, `get_xattr`, `stat_fs`) that return plain `io::Result`
-values and do not depend on `fuser`. You can embed the driver in your
-own code, drive it from tests, or swap in a different FUSE
-implementation.
-
-```rust
-use btrfs_fuse::BtrfsFuse;
-use std::fs::File;
-
-let file = File::open("image.img")?;
-let fs = BtrfsFuse::open(file)?;
-
-let (ino, inode) = fs.lookup_entry(1, b"hello.txt")?.unwrap();
-let data = fs.read_data(ino, 0, inode.size as u32)?;
-println!("{}", String::from_utf8_lossy(&data));
-```
+`BtrfsFuse` is a `fuser::Filesystem` impl ready to hand to
+`fuser::mount2`. It carries no inherent operation methods — those live
+on [`btrfs_fs::Filesystem`][`btrfs-fs`], which is what you should
+depend on for embedding.
 
 ## Testing
 
-Integration tests build a fresh btrfs image per test run using
-`mkfs.btrfs --rootdir` and drive the operation layer directly, so they
-are unprivileged and run under plain `cargo test`:
+Read-path integration tests live in the [`btrfs-fs`] crate (the FUSE
+adapter has no filesystem logic to test on its own). Run them with:
 
 ```sh
-cargo test -p btrfs-fuse
+cargo test -p btrfs-fs
 ```
 
 Requires `mkfs.btrfs` (from `btrfs-progs`) on `$PATH`.

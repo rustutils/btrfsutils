@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `btrfs-fs`: new crate exposing a high-level read-only filesystem
+  API on top of `btrfs-disk`: `Filesystem<R>` with `lookup`, `readdir`,
+  `read`, `readlink`, `getattr`, `xattr_get`/`xattr_list`, and
+  `statfs`. FUSE-independent — drives the `btrfs-fuse` mount and any
+  other embedder. Inodes are modelled as `(SubvolId, ino)` to leave
+  room for multi-subvolume traversal.
+
+### Changed
+
+- `btrfs-fuse` shrinks to a thin `fuser::Filesystem` adapter on top
+  of `btrfs-fs`. The 19 read-path integration tests move with the
+  logic to `fs/tests/basic.rs`. The fuse public library API
+  (`BtrfsFuse::lookup_entry` and friends) is removed; new embedders
+  should depend on `btrfs-fs` directly. The `read.rs`, `xattr.rs`,
+  `dir.rs`, and `stat.rs` modules — and the dependencies on
+  `flate2`/`zstd`/`lzokay`/`btrfs-disk`/`libc` — are gone from
+  `fuse/`.
+
 ## 0.12.0
 
 ### Removed

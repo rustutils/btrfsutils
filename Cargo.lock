@@ -193,21 +193,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "btrfs-fs"
+version = "0.12.0"
+dependencies = [
+ "btrfs-disk",
+ "btrfs-test-utils",
+ "flate2",
+ "libc",
+ "lzokay",
+ "tempfile",
+ "zstd",
+]
+
+[[package]]
 name = "btrfs-fuse"
 version = "0.12.0"
 dependencies = [
  "anyhow",
- "btrfs-disk",
- "btrfs-test-utils",
+ "btrfs-fs",
  "clap",
  "env_logger",
- "flate2",
  "fuser",
- "libc",
  "log",
- "lzokay",
- "tempfile",
- "zstd",
 ]
 
 [[package]]

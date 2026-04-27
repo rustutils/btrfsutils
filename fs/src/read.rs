@@ -153,7 +153,7 @@ fn decompress(
 /// Symlink targets are stored as inline `EXTENT_DATA` items, typically
 /// uncompressed. `sector_size` is used if the (unusual) case of a compressed
 /// inline symlink is encountered.
-pub fn read_symlink<R: io::Read + io::Seek>(
+pub(crate) fn read_symlink<R: io::Read + io::Seek>(
     reader: &mut BlockReader<R>,
     fs_tree_root: u64,
     oid: u64,
@@ -213,7 +213,7 @@ pub fn read_symlink<R: io::Read + io::Seek>(
 /// `file_size`. Inline, regular (compressed and uncompressed), and prealloc
 /// extents are all handled. Sparse holes return zeros.
 #[allow(clippy::too_many_lines)] // inherently complex: 4 extent variants × range math
-pub fn read_file<R: io::Read + io::Seek>(
+pub(crate) fn read_file<R: io::Read + io::Seek>(
     reader: &mut BlockReader<R>,
     fs_tree_root: u64,
     oid: u64,

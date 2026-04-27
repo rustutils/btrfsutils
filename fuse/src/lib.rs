@@ -1,13 +1,11 @@
-//! `btrfs-fuse` library: a userspace btrfs driver split into a plain-Rust
-//! operation layer and a thin `fuser::Filesystem` adapter.
+//! `btrfs-fuse` library: a thin `fuser::Filesystem` adapter on top of
+//! the [`btrfs_fs`] crate.
 //!
-//! The inherent methods on [`BtrfsFuse`] (`lookup_entry`, `get_attr`,
-//! `read_dir`, `read_symlink`, `read_data`, `list_xattrs`, `get_xattr`,
-//! `stat_fs`) return plain `std::io::Result` values and can be driven
-//! directly from tests and other embedders without ever going through
-//! the FUSE protocol. The [`fuser::Filesystem`] trait impl lives in the
-//! same file as those methods and is a narrow adapter that maps the
-//! `io::Result` / `Option` returns to the appropriate `Reply*` calls.
+//! All filesystem semantics (lookup, readdir, read, xattr, etc.) live in
+//! [`btrfs_fs`]. This crate adds the FUSE protocol mapping: inode-number
+//! translation, [`btrfs_fs::Stat`] → `fuser::FileAttr` conversion, and
+//! the `fuser::Filesystem` trait impl. Embedders that don't need FUSE
+//! should depend on [`btrfs_fs`] directly.
 
 #![warn(clippy::pedantic)]
 #![allow(
@@ -16,11 +14,7 @@
     clippy::module_name_repetitions
 )]
 
-pub mod dir;
 pub mod fs;
 pub mod inode;
-pub mod read;
-pub mod stat;
-pub mod xattr;
 
-pub use fs::{BtrfsFuse, StatfsInfo};
+pub use fs::BtrfsFuse;
