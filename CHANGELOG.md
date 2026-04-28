@@ -6,6 +6,20 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-fs`: `Filesystem::send(snapshot, output) -> Result<output>`
+  generates a v1 send stream describing the snapshot and writes it
+  to any `Write` (typically a pipe to `btrfs receive` or a backup
+  file). Tier 1 of the send roadmap: full sends only (no parent
+  comparison), no clone sources, no encoded-write passthrough. The
+  walker emits per-inode `Mkfile`/`Mkdir`/`Symlink`/`Mknod`/`Mkfifo`
+  /`Mksock`, `SetXattr` for each xattr, `Write` chunks (capped at
+  48 KiB to fit v1's u16 length field), `Truncate`, then
+  `Chown`/`Chmod`/`Utimes`. Hardlinks beyond the first reference
+  emit `Link` rather than re-creating the inode. Subvolume
+  crossings are skipped — caller invokes `send` per subvolume.
+  Output is decompressed (compression passthrough lands in tier 3
+  alongside v2 `EncodedWrite`).
+
 - `btrfs-stream`: `StreamWriter<W>` encodes `StreamCommand` values
   back into the on-the-wire TLV-framed format produced by kernel
   `btrfs send`. Mirror of `StreamReader`: every command variant

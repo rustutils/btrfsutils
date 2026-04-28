@@ -204,6 +204,7 @@ name = "btrfs-fs"
 version = "0.12.0"
 dependencies = [
  "btrfs-disk",
+ "btrfs-stream",
  "btrfs-test-utils",
  "flate2",
  "libc",

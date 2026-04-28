@@ -21,12 +21,13 @@ use crate::{
 use btrfs_disk::{
     items::{
         DeviceItem, DirItem, FileExtentBody, InodeExtref, InodeItem, InodeRef,
-        RootItem, RootItemFlags, RootRef,
+        RootItem, RootItemFlags, RootRef, Timespec as DiskTimespec,
     },
     reader::{BlockReader, Traversal, filesystem_open, tree_walk},
     superblock::Superblock,
     tree::{KeyType, TreeBlock},
 };
+use btrfs_stream::{StreamCommand, StreamWriter, Timespec as StreamTimespec};
 use std::{
     collections::BTreeMap,
     io, mem,
@@ -45,6 +46,18 @@ const ROOT_DIR_OBJECTID: u64 = 256;
 /// `BTRFS_LAST_FREE_OBJECTID` — upper bound of the user-subvolume id
 /// range. Anything above is reserved for system trees (UUID, etc.).
 const LAST_FREE_OBJECTID: u64 = u64::MAX - 256;
+
+/// Stream version emitted by [`Filesystem::send`]. v1 is the
+/// conservative pick — every byte goes through plain `WRITE`, no
+/// encoded passthrough, no clone refs. Maximum compatibility with
+/// receivers in the wild.
+const SEND_STREAM_VERSION: u32 = 1;
+
+/// Maximum bytes per `WRITE` command on the v1 stream. The TLV
+/// length field is `u16`, so a strict upper bound is 65 535 bytes;
+/// we leave headroom for the path/offset attributes plus the
+/// framed-command overhead. 48 KiB is what the kernel uses.
+const SEND_WRITE_CHUNK_BYTES: usize = 48 * 1024;
 
 /// Whether `id` names a subvolume tree (the default `FS_TREE` plus
 /// the user-allocatable range). Used to filter system trees out of
@@ -549,6 +562,41 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         spawn_blocking(move || this.read_blocking(ino, offset, size)).await
     }
 
+    /// Generate a v1 send stream describing `snapshot` and write it
+    /// to `output`. Tier 1 of the send roadmap: full sends only
+    /// (no `parent`), no clone sources, no encoded-write
+    /// passthrough.
+    ///
+    /// The stream begins with a `SUBVOL` command, then walks the
+    /// subvolume tree path-first emitting per-inode creation
+    /// commands (`Mkfile` / `Mkdir` / `Symlink` / `Mknod` / `Mkfifo`
+    /// / `Mksock`), `SetXattr` for each xattr, `Write` chunks for
+    /// regular file contents, and `Truncate` / `Chmod` / `Chown` /
+    /// `Utimes` to finalise. Terminates with `End`.
+    ///
+    /// Hardlinks beyond the first reference become `Link` commands
+    /// rather than re-creating the inode. Subvolume crossings
+    /// (`DirItem` whose `location.key_type == ROOT_ITEM`) are
+    /// skipped — caller must run `send` again per subvolume.
+    ///
+    /// Encodes paths as UTF-8 (lossy on invalid byte sequences).
+    /// Real btrfs filenames are arbitrary bytes; full-fidelity
+    /// non-UTF-8 support can come later if a real workload needs
+    /// it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subvolume isn't found, any tree
+    /// read fails, or the underlying writer fails.
+    pub async fn send<W: io::Write + Send + 'static>(
+        &self,
+        snapshot: SubvolId,
+        output: W,
+    ) -> io::Result<W> {
+        let this = self.clone();
+        spawn_blocking(move || this.send_blocking(snapshot, output)).await
+    }
+
     /// Find the next hole or data region in `ino` at or after
     /// `offset`. Mirrors `lseek(fd, offset, SEEK_HOLE)` /
     /// `lseek(fd, offset, SEEK_DATA)` semantics.
@@ -824,6 +872,216 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             size,
             blksize,
         )
+    }
+
+    fn send_blocking<W: io::Write>(
+        &self,
+        snapshot: SubvolId,
+        output: W,
+    ) -> io::Result<W> {
+        let info = self
+            .list_subvolumes_blocking()?
+            .into_iter()
+            .find(|s| s.id == snapshot)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("subvolume {} not found", snapshot.0),
+                )
+            })?;
+
+        let mut writer = StreamWriter::new(output, SEND_STREAM_VERSION)?;
+
+        // The SUBVOL command names the receive-side directory. We use
+        // the subvolume's recorded name; for the default `FS_TREE`
+        // (no name) fall back to a synthetic identifier so receive
+        // has something to mkdir with.
+        let subvol_path = if info.name.is_empty() {
+            format!("subvol-{}", info.id.0)
+        } else {
+            String::from_utf8_lossy(&info.name).into_owned()
+        };
+        writer.write_command(&StreamCommand::Subvol {
+            path: subvol_path,
+            uuid: info.uuid,
+            ctransid: info.ctransid,
+        })?;
+
+        // Walk the subvolume tree starting at the root directory.
+        // `seen` tracks inodes we've already created so a second
+        // `INODE_REF` for the same inode emits `Link` instead of a
+        // duplicate creation. Stores the first emitted path so the
+        // `Link` target is reachable.
+        let root = Inode {
+            subvol: snapshot,
+            ino: ROOT_DIR_OBJECTID,
+        };
+        let mut seen: BTreeMap<u64, String> = BTreeMap::new();
+        seen.insert(ROOT_DIR_OBJECTID, String::new());
+        self.send_dir_recursive(&mut writer, root, "", &mut seen)?;
+
+        writer.write_command(&StreamCommand::End)?;
+        writer.finish()
+    }
+
+    fn send_dir_recursive<W: io::Write>(
+        &self,
+        writer: &mut StreamWriter<W>,
+        dir: Inode,
+        dir_path: &str,
+        seen: &mut BTreeMap<u64, String>,
+    ) -> io::Result<()> {
+        // Skip `.` and `..` (offsets 0 and 1) — those are synthetic.
+        let entries = self.readdir_blocking(dir, 1)?;
+        let mut subdirs: Vec<(Inode, String)> = Vec::new();
+        for entry in entries {
+            // Skip the synthetic `.` / `..` slots.
+            if entry.name == b"." || entry.name == b".." {
+                continue;
+            }
+            // Subvolume crossings are out of scope for tier 1: the
+            // child subvolume is a separate tree and would need its
+            // own SUBVOL/SNAPSHOT command. Caller can re-invoke
+            // send() on each subvol they want.
+            if entry.ino.subvol != dir.subvol {
+                continue;
+            }
+            let entry_name = String::from_utf8_lossy(&entry.name).into_owned();
+            let entry_path = if dir_path.is_empty() {
+                entry_name
+            } else {
+                format!("{dir_path}/{entry_name}")
+            };
+
+            // Hardlink case: we've already emitted the inode under
+            // its first path. Just attach a Link and move on.
+            if let Some(first_path) = seen.get(&entry.ino.ino) {
+                writer.write_command(&StreamCommand::Link {
+                    path: entry_path.clone(),
+                    target: first_path.clone(),
+                })?;
+                continue;
+            }
+            let item =
+                self.read_inode_item_blocking(entry.ino)?.ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("inode {} item missing", entry.ino.ino),
+                    )
+                })?;
+            seen.insert(entry.ino.ino, entry_path.clone());
+
+            self.send_create_command(writer, &entry, &entry_path, &item)?;
+            self.send_xattrs(writer, entry.ino, &entry_path)?;
+            if entry.kind == FileKind::RegularFile {
+                self.send_file_data(writer, entry.ino, &entry_path, item.size)?;
+                writer.write_command(&StreamCommand::Truncate {
+                    path: entry_path.clone(),
+                    size: item.size,
+                })?;
+            }
+            send_metadata(writer, &entry_path, &item)?;
+
+            // Defer recursion until after we've finished this
+            // directory's own entries — keeps the per-dir command
+            // ordering cleaner.
+            if entry.kind == FileKind::Directory {
+                subdirs.push((entry.ino, entry_path));
+            }
+        }
+        for (subdir_ino, subdir_path) in subdirs {
+            self.send_dir_recursive(writer, subdir_ino, &subdir_path, seen)?;
+        }
+        Ok(())
+    }
+
+    fn send_create_command<W: io::Write>(
+        &self,
+        writer: &mut StreamWriter<W>,
+        entry: &Entry,
+        path: &str,
+        item: &InodeItem,
+    ) -> io::Result<()> {
+        let cmd = match entry.kind {
+            FileKind::RegularFile => {
+                StreamCommand::Mkfile { path: path.into() }
+            }
+            FileKind::Directory => StreamCommand::Mkdir { path: path.into() },
+            FileKind::Symlink => {
+                let target =
+                    self.readlink_blocking(entry.ino)?.ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("symlink {} target missing", entry.ino.ino),
+                        )
+                    })?;
+                StreamCommand::Symlink {
+                    path: path.into(),
+                    target: String::from_utf8_lossy(&target).into_owned(),
+                }
+            }
+            FileKind::NamedPipe => StreamCommand::Mkfifo { path: path.into() },
+            FileKind::Socket => StreamCommand::Mksock { path: path.into() },
+            FileKind::BlockDevice | FileKind::CharDevice => {
+                StreamCommand::Mknod {
+                    path: path.into(),
+                    mode: u64::from(item.mode),
+                    rdev: item.rdev,
+                }
+            }
+        };
+        writer.write_command(&cmd)
+    }
+
+    fn send_xattrs<W: io::Write>(
+        &self,
+        writer: &mut StreamWriter<W>,
+        ino: Inode,
+        path: &str,
+    ) -> io::Result<()> {
+        for name in self.xattr_list_blocking(ino)? {
+            let Some(data) = self.xattr_get_blocking(ino, &name)? else {
+                continue;
+            };
+            writer.write_command(&StreamCommand::SetXattr {
+                path: path.into(),
+                name: String::from_utf8_lossy(&name).into_owned(),
+                data,
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Emit `Write` commands covering `[0, size)` of `ino` in
+    /// chunks that fit comfortably in v1's u16 TLV length field
+    /// (we cap at [`SEND_WRITE_CHUNK_BYTES`] to leave headroom for
+    /// the path/offset attributes). `read_blocking` materialises
+    /// holes and prealloc as zeros and decompresses any compressed
+    /// extents, so `data` is always plain bytes.
+    fn send_file_data<W: io::Write>(
+        &self,
+        writer: &mut StreamWriter<W>,
+        ino: Inode,
+        path: &str,
+        size: u64,
+    ) -> io::Result<()> {
+        let mut offset = 0u64;
+        while offset < size {
+            let remaining = size - offset;
+            #[allow(clippy::cast_possible_truncation)]
+            let chunk = remaining.min(SEND_WRITE_CHUNK_BYTES as u64) as u32;
+            let data = self.read_blocking(ino, offset, chunk)?;
+            if data.is_empty() {
+                break;
+            }
+            writer.write_command(&StreamCommand::Write {
+                path: path.into(),
+                offset,
+                data,
+            })?;
+            offset += u64::from(chunk);
+        }
+        Ok(())
     }
 
     fn seek_hole_data_blocking(
@@ -1286,6 +1544,47 @@ fn lookup_in_dir<R: io::Read + io::Seek>(
         }
     })?;
     Ok(found)
+}
+
+/// Convert a btrfs on-disk [`DiskTimespec`] into the
+/// [`StreamTimespec`] shape carried by send-stream `Utimes`
+/// commands. Both types are `(sec: u64, nsec: u32)` — separate
+/// types for type-system hygiene rather than wire-level
+/// difference.
+fn to_stream_timespec(t: &DiskTimespec) -> StreamTimespec {
+    StreamTimespec {
+        sec: t.sec,
+        nsec: t.nsec,
+    }
+}
+
+/// Emit the trailing `Chown`/`Chmod`/`Utimes` triple every inode
+/// gets after creation. Free function rather than a method since
+/// it doesn't touch the [`Filesystem`] state — only forwards
+/// fields from the inode item we've already loaded.
+fn send_metadata<W: io::Write>(
+    writer: &mut StreamWriter<W>,
+    path: &str,
+    item: &InodeItem,
+) -> io::Result<()> {
+    writer.write_command(&StreamCommand::Chown {
+        path: path.into(),
+        uid: u64::from(item.uid),
+        gid: u64::from(item.gid),
+    })?;
+    writer.write_command(&StreamCommand::Chmod {
+        path: path.into(),
+        // Strip the file-type bits; receive applies these as
+        // permission/setuid/setgid/sticky only.
+        mode: u64::from(item.mode & 0o7777),
+    })?;
+    writer.write_command(&StreamCommand::Utimes {
+        path: path.into(),
+        atime: to_stream_timespec(&item.atime),
+        mtime: to_stream_timespec(&item.mtime),
+        ctime: to_stream_timespec(&item.ctime),
+    })?;
+    Ok(())
 }
 
 /// Join path components with `/` separators (no leading or trailing
