@@ -1,3 +1,6 @@
+<img class="banner-light" alt="btrfsutils" src="branding/banner-light.svg">
+<img class="banner-dark" alt="btrfsutils" src="branding/banner-dark.svg">
+
 # Introduction
 
 btrfsutils is a Rust implementation of the btrfs filesystem utilities. It

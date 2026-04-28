@@ -2,3 +2,15 @@
 table {
     width: 100%;
 }
+
+/* Theme-aware banner: swap variants when mdBook's theme class changes. */
+.banner-dark { display: none; }
+.banner-light { display: block; }
+
+html.navy .banner-light,
+html.coal .banner-light,
+html.ayu  .banner-light { display: none; }
+
+html.navy .banner-dark,
+html.coal .banner-dark,
+html.ayu  .banner-dark { display: block; }
