@@ -348,15 +348,23 @@ chooses what each ioctl returns. Pair the two so the round trip
 through libc → kernel → FUSE → uapi is self-healing.
 
 **Signal.** For each ioctl that needs retry but can't get it, the
-FUSE driver returns `ENOTSUP` (`EOPNOTSUPP`) up front instead of
-attempting `IoctlOutcome::Retry`. This is honest — we genuinely
-don't support the indirected form on this fd — and matches the
-kernel's idiom for "valid op, this endpoint can't do it"
-(`fallocate`, `FS_IOC_FIEMAP`, etc.). Distinct from `EIO` (real
-disk error) and `ENOTTY` (unknown ioctl number).
+FUSE driver returns `ENOPROTOOPT` up front instead of attempting
+`IoctlOutcome::Retry`. The semantic fit is "we recognise this
+ioctl, just not in this protocol form" — i.e. not the
+indirected/variable-size variant. The pragmatic reason for
+`ENOPROTOOPT` specifically (vs. the more obvious `ENOTSUP`):
+nothing else in the btrfs ioctl surface ever returns it, and
+neither does the VFS for an unsupported op on the wrong fs type,
+so it functions as a private channel. If uapi sees it from one of
+these specific ioctls, that's overwhelmingly *our* FUSE driver
+speaking — we don't risk falling back on a generic
+"unsupported op" error from the kernel or another driver.
+(`ENOTSUP` would also work; the choice is for clarity, not
+correctness — the v1 fallback would surface a real error anyway
+if the underlying fs weren't btrfs.)
 
 **Fallback.** Each `btrfs-uapi` wrapper for a restricted-on-FUSE
-ioctl catches `ENOTSUP` from its first ioctl call and re-runs
+ioctl catches `ENOPROTOOPT` from its first ioctl call and re-runs
 the operation through composition of v1-/fixed-size ioctls that
 the FUSE driver does support. The fallback path is a normal Rust
 function over the existing wrappers — no new ioctl interfaces.
@@ -400,12 +408,12 @@ function over the existing wrappers — no new ioctl interfaces.
   need this.
 
 **Optional widening.** Other FUSE-btrfs implementations (none
-exist today) wouldn't return `ENOTSUP` — the kernel rejects
+exist today) wouldn't return `ENOPROTOOPT` — the kernel rejects
 their retry response with `EIO` instead. If we ever care about
-that case, widen the fallback trigger to `ENOTSUP || EIO`,
+that case, widen the fallback trigger to `ENOPROTOOPT || EIO`,
 accepting that genuine disk errors on those specific ioctls would
 also trigger the fallback (low risk; the fallback would then
-itself fail).
+itself fail with a meaningful error).
 
 **Effect on the fuser dependency.** With F6.4 in place, our CLI
 never issues the broken ioctls against our FUSE mount, so our
