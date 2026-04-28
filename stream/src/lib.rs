@@ -47,6 +47,8 @@
     )
 )]
 
+mod consts;
+mod send;
 mod stream;
 
 #[cfg(feature = "receive")]
@@ -56,4 +58,5 @@ mod verity;
 
 #[cfg(feature = "receive")]
 pub use receive::ReceiveContext;
+pub use send::StreamWriter;
 pub use stream::{StreamCommand, StreamError, StreamReader, Timespec};

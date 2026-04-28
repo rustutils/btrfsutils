@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-stream`: `StreamWriter<W>` encodes `StreamCommand` values
+  back into the on-the-wire TLV-framed format produced by kernel
+  `btrfs send`. Mirror of `StreamReader`: every command variant
+  (v1+v2+v3) round-trips through write → parse cleanly. Handles the
+  v2+ `BTRFS_SEND_A_DATA` quirk (no length field, extends to end of
+  payload) so `Write` / `EncodedWrite` commands can carry payloads
+  beyond the v1 64 KiB cap. CRC32C uses the same raw (init=0)
+  variant the parser checks. Wire-format constants moved to a new
+  `consts` module shared between encoder and parser.
+
 - `btrfs-cli`: `btrfs fuse <IMAGE> <MOUNTPOINT> [OPTIONS]` subcommand
   behind a new opt-in `fuse` cargo feature. Mirrors the standalone
   `btrfs-fuse` binary one-for-one, sharing the same argument struct
