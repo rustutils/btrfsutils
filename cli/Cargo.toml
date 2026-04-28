@@ -12,8 +12,9 @@ keywords = ["btrfs", "filesystem", "cli", "linux", "storage"]
 default-run = "btrfs"
 rust-version = "1.89"
 
-# `mkfs` / `tune` / `multicall` features gate subcommand modules; build
-# with --all-features so they all appear in docs. Linux-only.
+# `mkfs` / `tune` / `fuse` / `multicall` features gate subcommand
+# modules; build with --all-features so they all appear in docs.
+# Linux-only.
 [package.metadata.docs.rs]
 all-features = true
 targets = ["x86_64-unknown-linux-gnu"]
@@ -25,6 +26,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 btrfs-disk = { workspace = true }
+btrfs-fuse = { workspace = true, optional = true }
 btrfs-mkfs = { workspace = true, optional = true }
 btrfs-stream = { workspace = true, features = ["receive"] }
 btrfs-transaction = { workspace = true }
@@ -48,6 +50,7 @@ zstd = { workspace = true }
 
 [features]
 default = ["mkfs", "tune"]
+fuse = ["dep:btrfs-fuse"]
 mkfs = ["dep:btrfs-mkfs"]
 tune = ["dep:btrfs-tune"]
 multicall = []

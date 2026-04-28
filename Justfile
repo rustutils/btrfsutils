@@ -109,6 +109,7 @@ check:
 
     cargo check --features mkfs
     cargo check --features tune
+    cargo check --features fuse
 
     # Verify each crate's declared `rust-version` actually compiles.
     # cargo-msrv's verify subcommand reads `rust-version` from each

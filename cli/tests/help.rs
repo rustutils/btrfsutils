@@ -32,6 +32,8 @@ fn collect_subcommands(
     let name = if prefix.is_empty() {
         #[allow(unused_mut)]
         let mut name = "toplevel".to_string();
+        #[cfg(feature = "fuse")]
+        name.push_str("_fuse");
         #[cfg(feature = "mkfs")]
         name.push_str("_mkfs");
         #[cfg(feature = "tune")]

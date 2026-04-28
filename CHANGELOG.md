@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-cli`: `btrfs fuse <IMAGE> <MOUNTPOINT> [OPTIONS]` subcommand
+  behind a new opt-in `fuse` cargo feature. Mirrors the standalone
+  `btrfs-fuse` binary one-for-one, sharing the same argument struct
+  and mount logic via the new public `btrfs_fuse::args::MountArgs`
+  and `btrfs_fuse::run::run_mount` items. Standalone binary stays
+  for `mount.fuse.btrfs` / fstab-style integrations. Feature is
+  opt-in for now since the FUSE driver is still experimental — build
+  with `cargo build --features fuse` (or `--all-features`) to
+  include it.
+
 - `btrfs-fs`: `CacheConfig` struct and `Filesystem::open_with_caches`
   / `Filesystem::open_subvol_with_caches` constructors that let
   embedders override the default cache sizes (4096 tree blocks, 4096

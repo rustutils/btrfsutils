@@ -14,8 +14,10 @@
     clippy::module_name_repetitions
 )]
 
+pub mod args;
 pub mod fs;
 pub mod inode;
 pub mod ioctl;
+pub mod run;
 
 pub use fs::BtrfsFuse;

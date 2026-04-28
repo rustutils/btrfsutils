@@ -207,6 +207,8 @@ pub enum Command {
     Check(CheckCommand),
     Device(DeviceCommand),
     Filesystem(FilesystemCommand),
+    #[cfg(feature = "fuse")]
+    Fuse(btrfs_fuse::args::MountArgs),
     #[command(alias = "inspect-internal")]
     Inspect(InspectCommand),
     #[cfg(feature = "mkfs")]
@@ -223,6 +225,13 @@ pub enum Command {
     Subvolume(SubvolumeCommand),
     #[cfg(feature = "tune")]
     Tune(btrfs_tune::args::Arguments),
+}
+
+#[cfg(feature = "fuse")]
+impl Runnable for btrfs_fuse::args::MountArgs {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
+        btrfs_fuse::run::run_mount(self)
+    }
 }
 
 #[cfg(feature = "mkfs")]
@@ -246,6 +255,8 @@ impl CommandGroup for Command {
             Command::Check(cmd) => cmd,
             Command::Device(cmd) => cmd,
             Command::Filesystem(cmd) => cmd,
+            #[cfg(feature = "fuse")]
+            Command::Fuse(cmd) => cmd,
             Command::Inspect(cmd) => cmd,
             #[cfg(feature = "mkfs")]
             Command::Mkfs(cmd) => cmd,

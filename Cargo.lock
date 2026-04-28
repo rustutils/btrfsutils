@@ -159,6 +159,7 @@ version = "0.12.0"
 dependencies = [
  "anyhow",
  "btrfs-disk",
+ "btrfs-fuse",
  "btrfs-mkfs",
  "btrfs-stream",
  "btrfs-test-utils",
