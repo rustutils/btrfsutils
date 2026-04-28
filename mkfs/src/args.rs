@@ -17,8 +17,14 @@ const HEADING_FEATURES: &str = "Features";
 const HEADING_IDENTITY: &str = "Identity";
 const HEADING_ROOTDIR: &str = "Rootdir population";
 
+/// Create a BTRFS filesystem on a device or multiple devices
 #[derive(Parser, Debug)]
-#[command(name = "mkfs.btrfs", version)]
+#[command(
+    name = "mkfs.btrfs",
+    version,
+    arg_required_else_help = true,
+    max_term_width = 100
+)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Arguments {
     // ── Block layout ────────────────────────────────────────────────

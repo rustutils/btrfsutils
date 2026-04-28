@@ -2,7 +2,7 @@
 source: cli/tests/help.rs
 expression: text
 ---
-Userspace FUSE driver for btrfs, built on btrfs-disk.
+Mount a btrfs image or block device read-only via FUSE
 
 Usage: fuse [OPTIONS] <IMAGE> <MOUNTPOINT>
 
@@ -21,42 +21,50 @@ Options:
           Allow other users to access the mount
 
       --subvol <SUBVOL>
-          Mount the named subvolume as the root of the FUSE filesystem. The path
-          is interpreted relative to the filesystem root, e.g. `--subvol
-          home/snapshots/2025-01-01`. Mutually exclusive with `--subvolid`
+          Mount the named subvolume as the root of the FUSE filesystem.
+          
+          The path is interpreted relative to the filesystem root, e.g.
+          `--subvol home/snapshots/2025-01-01`. Mutually exclusive with
+          `--subvolid`.
 
       --subvolid <SUBVOLID>
-          Mount the subvolume with this tree id. Use the value reported by
-          `btrfs subvolume list`. Mutually exclusive with `--subvol`
+          Mount the subvolume with this tree id.
+          
+          Use the value reported by `btrfs subvolume list`. Mutually exclusive
+          with `--subvol`.
 
       --no-default-permissions
           Don't ask the kernel to enforce file mode/uid/gid permissions against
-          the calling user. By default the FUSE mount uses `default_permissions`
-          so a non-root mounter can't read root- owned files in the image —
-          matching kernel btrfs semantics. Pass this flag to bypass that check,
-          e.g. when inspecting an image whose stored ownership doesn't match
-          your local UIDs
+          the calling user.
+          
+          By default the FUSE mount uses `default_permissions` so a non-root
+          mounter can't read root- owned files in the image — matching kernel
+          btrfs semantics. Pass this flag to bypass that check, e.g. when
+          inspecting an image whose stored ownership doesn't match your local
+          UIDs.
 
       --cache-tree-blocks <CACHE_TREE_BLOCKS>
-          Number of tree blocks to cache (~16 KiB each). Default 4096 (~64 MiB).
+          Number of tree blocks to cache (~16 KiB each).
+          
           Set to 1 to effectively disable; large values trade RAM for fewer disk
-          reads on tree walks
+          reads on tree walks.
           
           [default: 4096]
 
       --cache-inodes <CACHE_INODES>
-          Number of parsed inode items to cache. Default 4096
+          Number of parsed inode items to cache
           
           [default: 4096]
 
       --cache-extent-maps <CACHE_EXTENT_MAPS>
-          Number of per-inode extent maps to cache. Default 1024. Each map is
-          one entry per `EXTENT_DATA` item in the file
+          Number of per-inode extent maps to cache.
+          
+          Each map is one entry per `EXTENT_DATA` item in the file.
           
           [default: 1024]
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 
   -V, --version
           Print version

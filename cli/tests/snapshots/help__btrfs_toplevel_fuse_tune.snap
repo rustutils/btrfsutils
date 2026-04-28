@@ -21,7 +21,6 @@ Commands:
   filesystem  Overall filesystem tasks and information
   fuse        Mount a btrfs image or block device read-only via FUSE
   inspect     Query various internal filesystem information
-  mkfs        Create a BTRFS filesystem on a device or multiple devices
   property    Modify properties of filesystem objects
   qgroup      Manage quota groups
   quota       Manage filesystem quota settings

@@ -9,8 +9,10 @@ const HEADING_UUID: &str = "UUID";
 const HEADING_SEEDING: &str = "Seeding";
 const HEADING_CONVERT: &str = "Format conversions";
 
-/// Modify btrfs filesystem parameters on an unmounted device by writing
-/// directly to the on-disk superblock and tree structures.
+/// Modify btrfs filesystem parameters and features on an unmounted device.
+///
+/// These commands work by by writing directly to the on-disk superblock
+/// and tree structures.
 ///
 /// Operations are grouped into feature flags, UUID changes, and seeding.
 /// Only one group may be used per invocation. The legacy feature flags
@@ -20,7 +22,12 @@ const HEADING_CONVERT: &str = "Format conversions";
 /// optional but are now enabled by default on all new filesystems created
 /// by mkfs.btrfs. They exist for upgrading old filesystems in place.
 #[derive(Parser, Debug)]
-#[command(version, name = "btrfs-tune")]
+#[command(
+    version,
+    name = "btrfs-tune",
+    arg_required_else_help = true,
+    max_term_width = 100
+)]
 #[command(group = ArgGroup::new("uuid_change")
     .args(["metadata_uuid", "set_metadata_uuid", "random_uuid", "set_uuid"])
     .conflicts_with_all(["extref", "skinny_metadata", "no_holes", "seeding"]))]

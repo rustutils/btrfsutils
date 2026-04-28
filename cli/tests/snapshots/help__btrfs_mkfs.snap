@@ -2,6 +2,8 @@
 source: cli/tests/help.rs
 expression: text
 ---
+Create a BTRFS filesystem on a device or multiple devices
+
 Usage: mkfs [OPTIONS] <DEVICES>...
 
 Arguments:

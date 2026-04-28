@@ -30,8 +30,8 @@ Commands:
   scrub       Verify checksums of data and metadata
   send        Send the subvolume(s) to stdout
   subvolume   Create, delete, list, and manage btrfs subvolumes and snapshots
-  tune        Modify btrfs filesystem parameters on an unmounted device by
-              writing directly to the on-disk superblock and tree structures
+  tune        Modify btrfs filesystem parameters and features on an unmounted
+              device
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -57,7 +57,7 @@ Global options:
           [possible values: debug, info, warn, error]
 
       --format <FORMAT>
-          If supported, print subcommand output in that format
+          If supported, print subcommand output in that format. [env:
+          BTRFS_OUTPUT_FORMAT]
           
-          [env: BTRFS_OUTPUT_FORMAT=]
           [possible values: text, json, modern]

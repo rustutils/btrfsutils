@@ -106,7 +106,12 @@ pub enum Level {
 /// the specific filesystem.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
-#[clap(version, infer_subcommands = true, arg_required_else_help = true)]
+#[clap(
+    version,
+    infer_subcommands = true,
+    arg_required_else_help = true,
+    max_term_width = 100
+)]
 pub struct Arguments {
     #[clap(flatten)]
     pub global: GlobalOptions,

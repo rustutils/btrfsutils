@@ -2,8 +2,10 @@
 source: cli/tests/help.rs
 expression: text
 ---
-Modify btrfs filesystem parameters on an unmounted device by writing directly to
-the on-disk superblock and tree structures.
+Modify btrfs filesystem parameters and features on an unmounted device.
+
+These commands work by by writing directly to the on-disk superblock and tree
+structures.
 
 Operations are grouped into feature flags, UUID changes, and seeding. Only one
 group may be used per invocation. The legacy feature flags (-r, -x, -n) can be
