@@ -47,7 +47,7 @@ uuid = { workspace = true }
 zstd = { workspace = true }
 
 [features]
-default = []
+default = ["mkfs", "tune"]
 mkfs = ["dep:btrfs-mkfs"]
 tune = ["dep:btrfs-tune"]
 multicall = []
