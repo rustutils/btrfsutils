@@ -30,4 +30,16 @@ typedef __u16 __be16;
 typedef __u32 __be32;
 typedef __u64 __be64;
 
+/* btrfs_tree.h uses __DECLARE_FLEX_ARRAY for trailing flex members.
+ * The kernel exposes this via <linux/stddef.h>, which on Linux is
+ * pulled in transitively from <linux/types.h>.  On other platforms
+ * we provide it here so the same headers compile unchanged. */
+#ifndef __DECLARE_FLEX_ARRAY
+#define __DECLARE_FLEX_ARRAY(TYPE, NAME) \
+    struct { \
+        struct { } __empty_ ## NAME; \
+        TYPE NAME[]; \
+    }
+#endif
+
 #endif /* _LINUX_TYPES_H */

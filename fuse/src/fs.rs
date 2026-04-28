@@ -426,7 +426,12 @@ impl FuserFilesystem for BtrfsFuse {
                         reply.error(Errno::ERANGE);
                     }
                 }
-                Ok(None) => reply.error(Errno::ENODATA),
+                Ok(None) => {
+                    #[cfg(target_os = "linux")]
+                    reply.error(Errno::ENODATA);
+                    #[cfg(not(target_os = "linux"))]
+                    reply.error(Errno::ENOENT);
+                },
                 Err(e) => {
                     log::warn!(
                         "getxattr ino={fuse_ino} name={}: {e}",
