@@ -4,6 +4,41 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `btrfs-fs`: `CacheConfig` struct and `Filesystem::open_with_caches`
+  / `Filesystem::open_subvol_with_caches` constructors that let
+  embedders override the default cache sizes (4096 tree blocks, 4096
+  inodes, 1024 extent maps). `CacheConfig::no_cache()` provides the
+  minimum-viable single-entry caches for benchmarking the cold path
+  or memory-constrained embedders. Existing `Filesystem::open` /
+  `Filesystem::open_subvol` continue to use the defaults.
+- `btrfs-fs`: `Filesystem::forget(Inode)` evicts a single inode from
+  both the inode and extent-map caches. Embedders that observe
+  inode-level invalidation events can call this to release memory
+  ahead of LRU eviction.
+- `btrfs-fuse`: `init` callback negotiates kernel capabilities at
+  mount time. Currently opts into `FUSE_AUTO_INVAL_DATA` (kernel
+  page-cache invalidation when `getattr` reports changes) and
+  `FUSE_SPLICE_READ` / `FUSE_SPLICE_WRITE` (zero-copy data path).
+  `FUSE_DO_READDIRPLUS` will land in the follow-up commit that adds
+  the `readdirplus` callback.
+- `btrfs-fuse`: `forget` callback wired through to
+  `Filesystem::forget`. The default `batch_forget` impl in fuser
+  iterates over each `ForgetOne` and calls `forget`, so we don't
+  override `batch_forget` separately.
+- `btrfs-fuse`: `BtrfsFuse::open_with_caches` /
+  `BtrfsFuse::open_subvol_with_caches` constructors mirroring the
+  `btrfs-fs` additions.
+- `btrfs-fuse` CLI: `--cache-tree-blocks N` (default 4096),
+  `--cache-inodes N` (default 4096), `--cache-extent-maps N`
+  (default 1024), and `--no-default-permissions` to bypass the
+  kernel's per-file mode/uid/gid checks. Default behaviour now
+  enables the kernel `default_permissions` mount option so the FUSE
+  mount enforces stored ownership the way kernel btrfs does;
+  `--no-default-permissions` opts out for image-inspection scenarios
+  where stored UIDs don't match the local system.
+
 ### Changed
 
 - `btrfs-uapi`: new `tree_search_auto` runs `BTRFS_IOC_TREE_SEARCH_V2`

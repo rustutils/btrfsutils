@@ -43,6 +43,51 @@ pub(crate) const INODE_CACHE_DEFAULT_ENTRIES: usize = 4096;
 /// Default extent-map cache capacity in entries.
 pub(crate) const EXTENT_MAP_CACHE_DEFAULT_ENTRIES: usize = 1024;
 
+/// Capacities for the three caches a [`crate::Filesystem`] holds.
+/// Pass to [`crate::Filesystem::open_with_caches`] /
+/// [`crate::Filesystem::open_subvol_with_caches`] to override the
+/// defaults — useful for memory-constrained embedders or
+/// benchmarking the cold path.
+///
+/// All three values must be `> 0`; the underlying LRU caches reject
+/// zero-capacity construction. Use [`CacheConfig::no_cache`] for the
+/// minimum-viable single-entry caches.
+#[derive(Debug, Clone, Copy)]
+pub struct CacheConfig {
+    /// Number of tree blocks to cache (~16 KiB each on default
+    /// nodesize). Default: 4096 (~64 MiB).
+    pub tree_blocks: usize,
+    /// Number of parsed inode items to cache. Default: 4096.
+    pub inodes: usize,
+    /// Number of per-inode extent maps to cache. Default: 1024.
+    pub extent_maps: usize,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            tree_blocks: TREE_BLOCK_CACHE_DEFAULT_ENTRIES,
+            inodes: INODE_CACHE_DEFAULT_ENTRIES,
+            extent_maps: EXTENT_MAP_CACHE_DEFAULT_ENTRIES,
+        }
+    }
+}
+
+impl CacheConfig {
+    /// Smallest viable configuration: each cache holds a single
+    /// entry. Useful for benchmarking the cold path or when the
+    /// embedder wants to disable caching entirely. The LRU
+    /// implementations reject `0`, so this is the actual floor.
+    #[must_use]
+    pub fn no_cache() -> Self {
+        Self {
+            tree_blocks: 1,
+            inodes: 1,
+            extent_maps: 1,
+        }
+    }
+}
+
 /// Live counters for an [`LruTreeBlockCache`]. Useful for tests,
 /// benchmarks, and embedders who want to expose cache hit ratios via
 /// metrics.
@@ -140,8 +185,9 @@ impl InodeCache {
         self.inner.lock().unwrap().put(ino, item);
     }
 
-    /// Drop a single entry. Hooked up once write ops land (F9+).
-    #[allow(dead_code)]
+    /// Drop a single entry. Wired to FUSE `forget` so the kernel's
+    /// reference-count signal frees memory ahead of LRU eviction;
+    /// also called by upcoming write ops (F9+) for invalidation.
     pub(crate) fn invalidate(&self, ino: Inode) {
         self.inner.lock().unwrap().pop(&ino);
     }
@@ -188,8 +234,9 @@ impl ExtentMapCache {
         self.inner.lock().unwrap().put(ino, map);
     }
 
-    /// Drop a single entry. Hooked up once write ops land (F9+).
-    #[allow(dead_code)]
+    /// Drop a single entry. Wired to FUSE `forget` so the kernel's
+    /// reference-count signal frees memory ahead of LRU eviction;
+    /// also called by upcoming write ops (F9+) for invalidation.
     pub(crate) fn invalidate(&self, ino: Inode) {
         self.inner.lock().unwrap().pop(&ino);
     }

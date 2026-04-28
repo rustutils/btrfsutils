@@ -9,7 +9,7 @@
 #![allow(clippy::missing_errors_doc, clippy::module_name_repetitions)]
 
 use anyhow::{Context, Result, anyhow};
-use btrfs_fs::{Filesystem, SubvolId, SubvolInfo};
+use btrfs_fs::{CacheConfig, Filesystem, SubvolId, SubvolInfo};
 use btrfs_fuse::BtrfsFuse;
 use clap::Parser;
 use fuser::{Config, MountOption, SessionACL};
@@ -43,6 +43,26 @@ struct Args {
     /// by `btrfs subvolume list`. Mutually exclusive with `--subvol`.
     #[arg(long, conflicts_with = "subvol")]
     subvolid: Option<u64>,
+    /// Don't ask the kernel to enforce file mode/uid/gid permissions
+    /// against the calling user. By default the FUSE mount uses
+    /// `default_permissions` so a non-root mounter can't read root-
+    /// owned files in the image — matching kernel btrfs semantics.
+    /// Pass this flag to bypass that check, e.g. when inspecting an
+    /// image whose stored ownership doesn't match your local UIDs.
+    #[arg(long)]
+    no_default_permissions: bool,
+    /// Number of tree blocks to cache (~16 KiB each). Default 4096
+    /// (~64 MiB). Set to 1 to effectively disable; large values
+    /// trade RAM for fewer disk reads on tree walks.
+    #[arg(long, default_value_t = 4096)]
+    cache_tree_blocks: usize,
+    /// Number of parsed inode items to cache. Default 4096.
+    #[arg(long, default_value_t = 4096)]
+    cache_inodes: usize,
+    /// Number of per-inode extent maps to cache. Default 1024.
+    /// Each map is one entry per `EXTENT_DATA` item in the file.
+    #[arg(long, default_value_t = 1024)]
+    cache_extent_maps: usize,
 }
 
 fn main() -> Result<()> {
@@ -57,24 +77,33 @@ fn main() -> Result<()> {
         None
     };
 
+    let caches = CacheConfig {
+        tree_blocks: args.cache_tree_blocks,
+        inodes: args.cache_inodes,
+        extent_maps: args.cache_extent_maps,
+    };
+
     let file = File::open(&args.image)
         .with_context(|| format!("opening {}", args.image.display()))?;
     let fs = match target_subvol {
-        Some(id) => BtrfsFuse::open_subvol(file, id)
+        Some(id) => BtrfsFuse::open_subvol_with_caches(file, id, caches)
             .with_context(|| format!("opening subvolume {}", id.0))?,
-        None => {
-            BtrfsFuse::open(file).context("bootstrapping btrfs filesystem")?
-        }
+        None => BtrfsFuse::open_with_caches(file, caches)
+            .context("bootstrapping btrfs filesystem")?,
     };
 
     // `Config` is `#[non_exhaustive]`, so we can't use a struct literal even
     // with `..default()` from outside the crate; mutate fields instead.
     let mut config = Config::default();
-    config.mount_options = vec![
+    let mut mount_options = vec![
         MountOption::RO,
         MountOption::FSName("btrfs-fuse".to_string()),
         MountOption::Subtype("btrfs".to_string()),
     ];
+    if !args.no_default_permissions {
+        mount_options.push(MountOption::DefaultPermissions);
+    }
+    config.mount_options = mount_options;
     config.acl = if args.allow_other {
         SessionACL::All
     } else {

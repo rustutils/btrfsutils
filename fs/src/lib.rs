@@ -40,7 +40,7 @@ pub use btrfs_disk::{
     items::{DeviceItem, RootRef},
     superblock::Superblock,
 };
-pub use cache::{CacheStats, LruTreeBlockCache};
+pub use cache::{CacheConfig, CacheStats, LruTreeBlockCache};
 pub use dir::{Entry, FileKind};
 pub use filesystem::{
     Filesystem, Inode, SearchFilter, SearchItem, StatFs, SubvolId, SubvolInfo,

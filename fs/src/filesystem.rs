@@ -12,12 +12,8 @@
 //! embedders bring their own.
 
 use crate::{
-    Entry, FileKind, Stat,
-    cache::{
-        EXTENT_MAP_CACHE_DEFAULT_ENTRIES, ExtentMapCache,
-        INODE_CACHE_DEFAULT_ENTRIES, InodeCache, LruTreeBlockCache,
-        TREE_BLOCK_CACHE_DEFAULT_ENTRIES,
-    },
+    CacheConfig, Entry, FileKind, Stat,
+    cache::{ExtentMapCache, InodeCache, LruTreeBlockCache},
     dir, read,
     stat::to_system_time,
     xattr,
@@ -216,18 +212,22 @@ struct Inner<R: io::Read + io::Seek + Send + 'static> {
 
 impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     /// Bootstrap the filesystem from a reader over an image or block
-    /// device.
+    /// device, with default cache sizes.
     ///
     /// This is sync because the heavy work happens during the bootstrap
     /// (chunk tree walk, root tree walk) and only runs once. Embedders
     /// that want non-blocking open can wrap the call in
     /// `tokio::task::spawn_blocking` themselves.
     pub fn open(reader: R) -> io::Result<Self> {
-        Self::open_inner(reader, SubvolId(FS_TREE_OBJECTID))
+        Self::open_inner(
+            reader,
+            SubvolId(FS_TREE_OBJECTID),
+            CacheConfig::default(),
+        )
     }
 
     /// Bootstrap the filesystem and select a non-default subvolume
-    /// as the [`Filesystem::root`].
+    /// as the [`Filesystem::root`], with default cache sizes.
     ///
     /// `subvol` must be the tree id of an existing subvolume — pass
     /// the value from a previously-listed [`SubvolInfo::id`], or use
@@ -235,10 +235,35 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     /// the id is unknown, `InvalidInput` if it's outside the
     /// subvolume id range.
     pub fn open_subvol(reader: R, subvol: SubvolId) -> io::Result<Self> {
-        Self::open_inner(reader, subvol)
+        Self::open_inner(reader, subvol, CacheConfig::default())
     }
 
-    fn open_inner(reader: R, default_subvol: SubvolId) -> io::Result<Self> {
+    /// Like [`Filesystem::open`] but with caller-chosen cache sizes.
+    /// Use [`CacheConfig::no_cache`] for benchmarking the cold path
+    /// or memory-constrained embedders; otherwise tune the
+    /// individual entries to match your workload.
+    pub fn open_with_caches(
+        reader: R,
+        cache_config: CacheConfig,
+    ) -> io::Result<Self> {
+        Self::open_inner(reader, SubvolId(FS_TREE_OBJECTID), cache_config)
+    }
+
+    /// Like [`Filesystem::open_subvol`] but with caller-chosen cache
+    /// sizes.
+    pub fn open_subvol_with_caches(
+        reader: R,
+        subvol: SubvolId,
+        cache_config: CacheConfig,
+    ) -> io::Result<Self> {
+        Self::open_inner(reader, subvol, cache_config)
+    }
+
+    fn open_inner(
+        reader: R,
+        default_subvol: SubvolId,
+        cache_config: CacheConfig,
+    ) -> io::Result<Self> {
         if !is_subvolume_id(default_subvol.0) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -269,7 +294,7 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         // erased `Arc<dyn TreeBlockCache>` (for the reader) — they
         // point at the same instance.
         let tree_block_cache =
-            Arc::new(LruTreeBlockCache::new(TREE_BLOCK_CACHE_DEFAULT_ENTRIES));
+            Arc::new(LruTreeBlockCache::new(cache_config.tree_blocks));
         fs.reader.set_cache(Some(tree_block_cache.clone()
             as Arc<dyn btrfs_disk::reader::TreeBlockCache>));
         Ok(Self {
@@ -280,10 +305,8 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
                 blksize,
                 reader: Mutex::new(fs.reader),
                 tree_block_cache,
-                inode_cache: InodeCache::new(INODE_CACHE_DEFAULT_ENTRIES),
-                extent_map_cache: ExtentMapCache::new(
-                    EXTENT_MAP_CACHE_DEFAULT_ENTRIES,
-                ),
+                inode_cache: InodeCache::new(cache_config.inodes),
+                extent_map_cache: ExtentMapCache::new(cache_config.extent_maps),
             }),
         })
     }
@@ -424,6 +447,17 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     #[must_use]
     pub fn blksize(&self) -> u32 {
         self.inner.blksize
+    }
+
+    /// Drop cached state for `ino` from both the inode and
+    /// extent-map caches. Embedders that observe inode-level
+    /// invalidation events (FUSE `forget`, manual cache pressure)
+    /// can call this to release memory ahead of LRU eviction.
+    /// Safe to call for an inode that's never been cached: it's a
+    /// no-op in that case.
+    pub fn forget(&self, ino: Inode) {
+        self.inner.inode_cache.invalidate(ino);
+        self.inner.extent_map_cache.invalidate(ino);
     }
 
     /// Look up a child of `parent` by name.

@@ -16,12 +16,12 @@ use crate::{
     ioctl::{self, IoctlOutcome},
 };
 use anyhow::{Context, Result};
-use btrfs_fs::{FileKind, Filesystem, Inode, Stat, SubvolId};
+use btrfs_fs::{CacheConfig, FileKind, Filesystem, Inode, Stat, SubvolId};
 use fuser::{
     Errno, FileAttr, FileHandle, FileType, Filesystem as FuserFilesystem,
-    Generation, INodeNo, IoctlFlags, LockOwner, OpenFlags, ReplyAttr,
-    ReplyData, ReplyDirectory, ReplyEntry, ReplyIoctl, ReplyStatfs, ReplyXattr,
-    Request,
+    Generation, INodeNo, InitFlags, IoctlFlags, KernelConfig, LockOwner,
+    OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyIoctl,
+    ReplyStatfs, ReplyXattr, Request,
 };
 use std::{ffi::OsStr, fs::File, io, os::unix::ffi::OsStrExt, time::Duration};
 use tokio::runtime::Runtime;
@@ -54,6 +54,23 @@ impl BtrfsFuse {
     /// [`btrfs_fs::Filesystem::list_subvolumes`].
     pub fn open_subvol(file: File, subvol: btrfs_fs::SubvolId) -> Result<Self> {
         Self::from_filesystem(Filesystem::open_subvol(file, subvol)?)
+    }
+
+    /// Like [`BtrfsFuse::open`] but with caller-chosen cache sizes.
+    pub fn open_with_caches(file: File, caches: CacheConfig) -> Result<Self> {
+        Self::from_filesystem(Filesystem::open_with_caches(file, caches)?)
+    }
+
+    /// Like [`BtrfsFuse::open_subvol`] but with caller-chosen cache
+    /// sizes.
+    pub fn open_subvol_with_caches(
+        file: File,
+        subvol: SubvolId,
+        caches: CacheConfig,
+    ) -> Result<Self> {
+        Self::from_filesystem(Filesystem::open_subvol_with_caches(
+            file, subvol, caches,
+        )?)
     }
 
     fn from_filesystem(fs: Filesystem<File>) -> Result<Self> {
@@ -115,6 +132,53 @@ fn to_file_attr(fuse_ino: u64, stat: &Stat) -> FileAttr {
 }
 
 impl FuserFilesystem for BtrfsFuse {
+    /// Negotiate kernel capabilities at mount time. We opt into the
+    /// extras that benefit a read-only filesystem; attribute caching
+    /// is left at the default since the underlying image is
+    /// immutable and the kernel can hold attributes indefinitely.
+    ///
+    /// - `FUSE_AUTO_INVAL_DATA` lets the kernel auto-invalidate page
+    ///   cache when our `getattr` reports a changed `mtime`/`size`,
+    ///   so callers see fresh data without explicit `O_DIRECT`.
+    /// - `FUSE_SPLICE_READ` / `FUSE_SPLICE_WRITE` enable zero-copy
+    ///   data transfer between FUSE and the kernel page cache.
+    ///
+    /// `FUSE_DO_READDIRPLUS` lands in the follow-up commit that
+    /// adds the `readdirplus` callback; advertising it before
+    /// implementing it would route the kernel through an `ENOSYS`
+    /// path and break directory listing.
+    ///
+    /// Capabilities the kernel doesn't advertise are silently
+    /// skipped; we don't fail the mount over a missing extra.
+    fn init(
+        &mut self,
+        _req: &Request,
+        config: &mut KernelConfig,
+    ) -> io::Result<()> {
+        for cap in [
+            InitFlags::FUSE_AUTO_INVAL_DATA,
+            InitFlags::FUSE_SPLICE_READ,
+            InitFlags::FUSE_SPLICE_WRITE,
+        ] {
+            // `add_capabilities` returns `Err` only when the kernel
+            // doesn't advertise the cap; gracefully drop it instead
+            // of failing the mount.
+            let _ = config.add_capabilities(cap);
+        }
+        Ok(())
+    }
+
+    /// Drop a single inode from our caches once the kernel says it
+    /// no longer references it. Without this we'd hold cached
+    /// `InodeItem`s and `ExtentMap`s until LRU eviction; with it,
+    /// they're freed eagerly so memory tracks the kernel's
+    /// working set. The default `batch_forget` impl in fuser
+    /// loops over each `ForgetOne` and calls this method, so we
+    /// don't override `batch_forget` separately.
+    fn forget(&self, _req: &Request, ino: INodeNo, _nlookup: u64) {
+        self.fs.forget(self.fuse_inode(ino.0));
+    }
+
     fn lookup(
         &self,
         _req: &Request,
