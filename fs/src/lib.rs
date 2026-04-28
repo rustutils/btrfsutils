@@ -36,7 +36,10 @@ mod xattr;
 pub mod dir;
 pub mod stat;
 
-pub use btrfs_disk::{items::DeviceItem, superblock::Superblock};
+pub use btrfs_disk::{
+    items::{DeviceItem, RootRef},
+    superblock::Superblock,
+};
 pub use cache::{CacheStats, LruTreeBlockCache};
 pub use dir::{Entry, FileKind};
 pub use filesystem::{

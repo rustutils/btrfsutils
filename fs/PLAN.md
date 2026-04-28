@@ -295,20 +295,50 @@ End-to-end CLI tests: `btrfs inspect-internal rootid <mount>` uses
 objectid=`BTRFS_FIRST_FREE_OBJECTID`) and now succeeds against our
 fuse mount, returning the default subvol id 5.
 
-### F6.3 — Variable-size ioctls (TREE_SEARCH landed, others pending)
+### F6.3 — Variable-size ioctls (TREE_SEARCH v1 + GET_SUBVOL_ROOTREF landed)
 
-`BTRFS_IOC_TREE_SEARCH` (v1, fixed-size 4096) and
-`BTRFS_IOC_TREE_SEARCH_V2` (variable-size, uses `ReplyIoctl::retry`)
-both implemented. `Filesystem::tree_search(filter, max_buf_size)`
-in `btrfs-fs` does the underlying tree walk with compound-key range
-filtering (matching kernel semantics). E2E: `btrfs subvolume list
-<fuse-mount>` works against the multi-subvol fixture.
+`BTRFS_IOC_TREE_SEARCH` (v1, fixed-size 4096) is implemented and is
+what the upstream `btrfs` CLI actually uses for `subvolume list`,
+giving us a working E2E path. `Filesystem::tree_search(filter,
+max_buf_size)` in `btrfs-fs` does the underlying tree walk with
+compound-key range filtering (matching kernel semantics).
 
-Still pending in this phase, also using the retry API:
-`BTRFS_IOC_LOGICAL_INO_V2`, `BTRFS_IOC_INO_PATHS`,
-`BTRFS_IOC_GET_SUBVOL_ROOTREF`. Each follows the same retry shape
-as TREE_SEARCH_V2 — read a small initial header, return retry with
-iovecs covering the full struct + buffer, then process.
+`BTRFS_IOC_GET_SUBVOL_ROOTREF` (fixed 4096) is implemented on top of
+`tree_search` against the root tree; pages through children in
+255-entry batches via `min_treeid` (matches the kernel ioctl).
+`Filesystem::ino_paths(subvol, objectid) -> Vec<Vec<u8>>` is
+exposed by `btrfs-fs` for embedders that want every hardlink path.
+
+`BTRFS_IOC_TREE_SEARCH_V2` has a handler that returns
+`IoctlOutcome::Retry`, but in practice it cannot complete — see
+the FUSE_IOCTL_RETRY restriction below. Same story for
+`BTRFS_IOC_INO_PATHS` and `BTRFS_IOC_LOGICAL_INO_V2`: not wired into
+dispatch since the retry round-trip can't happen from a normal
+libc `ioctl(2)` caller.
+
+**FUSE_IOCTL_RETRY restriction.** Linux's `fuse_do_ioctl` only
+accepts a `FUSE_IOCTL_RETRY` reply when the original request had
+`FUSE_IOCTL_UNRESTRICTED` set. The standard
+`fuse_file_ioctl` / `fuse_dir_ioctl` paths do not set that flag,
+so user-space ioctls reaching us via libc get rejected with
+`-EIO` after the first retry response — the kernel never re-issues
+the call. Confirmed locally and corroborated by the `xfbs/fuser`
+PR review. This means every variable-size btrfs ioctl that needs
+retry to extend past the cmd-encoded 14-bit size is blocked at
+the kernel boundary today.
+
+Unblock options:
+1. Get the kernel to relax the restriction (unlikely; security).
+2. Have the FUSE driver implement a CUSE-style init that opts the
+   fd into `FUSE_IOCTL_UNRESTRICTED`. Requires plumbing CUSE_INIT
+   in fuser (not implemented today; the upstream PR review noted
+   this as a separate gap).
+3. Skip fuser and roll our own FUSE protocol implementation that
+   sets up the fd as unrestricted from the start.
+
+Until one of those lands, ioctl coverage in `btrfs-fuse` stops at
+"fits in 14-bit cmd-encoded size" — which is enough for the 8 we
+have, but is the natural ceiling for this layer.
 
 ### F6.3-historical (blocker resolved)
 

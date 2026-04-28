@@ -24,8 +24,8 @@ use crate::{
 };
 use btrfs_disk::{
     items::{
-        DeviceItem, DirItem, InodeItem, InodeRef, RootItem, RootItemFlags,
-        RootRef,
+        DeviceItem, DirItem, InodeExtref, InodeItem, InodeRef, RootItem,
+        RootItemFlags, RootRef,
     },
     reader::{BlockReader, Traversal, filesystem_open, tree_walk},
     superblock::Superblock,
@@ -402,6 +402,22 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     ) -> io::Result<Option<Vec<u8>>> {
         let this = self.clone();
         spawn_blocking(move || this.ino_lookup_blocking(subvol, objectid)).await
+    }
+
+    /// Resolve every path in `subvol` that names `objectid`. A regular
+    /// inode has a single path; hard-linked files have one entry per
+    /// link, in unspecified order. Returns an empty vector for an
+    /// orphan inode (no `INODE_REF` / `INODE_EXTREF`).
+    ///
+    /// Each returned path is relative to the subvolume root, with no
+    /// leading slash.
+    pub async fn ino_paths(
+        &self,
+        subvol: SubvolId,
+        objectid: u64,
+    ) -> io::Result<Vec<Vec<u8>>> {
+        let this = self.clone();
+        spawn_blocking(move || this.ino_paths_blocking(subvol, objectid)).await
     }
 
     /// Filesystem sectorsize.
@@ -855,6 +871,62 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             io::ErrorKind::InvalidData,
             format!("INODE_REF chain for objectid {objectid} too deep"),
         ))
+    }
+
+    fn ino_paths_blocking(
+        &self,
+        subvol: SubvolId,
+        objectid: u64,
+    ) -> io::Result<Vec<Vec<u8>>> {
+        // The subvolume root has no INODE_REF; the empty path names it.
+        if objectid == ROOT_DIR_OBJECTID {
+            return Ok(vec![Vec::new()]);
+        }
+        let tree_root = self.tree_root_for(subvol)?;
+        // Collect all (parent_dirid, name) pairs in one tree walk.
+        // INODE_REF packs every link to the same parent dir into one
+        // item; INODE_EXTREF holds links whose name+parent pair didn't
+        // fit (typically across many parents), with the parent stored
+        // in the struct rather than the key offset.
+        let mut refs: Vec<(u64, Vec<u8>)> = Vec::new();
+        let mut reader = self.lock_reader();
+        for_each_item(&mut reader, tree_root, |key, data| {
+            if key.objectid != objectid {
+                return;
+            }
+            match key.key_type {
+                KeyType::InodeRef => {
+                    for iref in InodeRef::parse_all(data) {
+                        refs.push((key.offset, iref.name));
+                    }
+                }
+                KeyType::InodeExtref => {
+                    for eref in InodeExtref::parse_all(data) {
+                        refs.push((eref.parent, eref.name));
+                    }
+                }
+                _ => {}
+            }
+        })?;
+        drop(reader);
+
+        // For each (parent, name) prepend the parent's path. We reuse
+        // ino_lookup_blocking which re-acquires the reader lock, so it
+        // matters that the lock is released above.
+        let mut paths = Vec::with_capacity(refs.len());
+        for (parent, name) in refs {
+            let Some(parent_path) = self.ino_lookup_blocking(subvol, parent)?
+            else {
+                continue;
+            };
+            let mut p = parent_path;
+            if !p.is_empty() {
+                p.push(b'/');
+            }
+            p.extend_from_slice(&name);
+            paths.push(p);
+        }
+        Ok(paths)
     }
 
     fn list_subvolumes_blocking(&self) -> io::Result<Vec<SubvolInfo>> {

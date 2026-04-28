@@ -19,13 +19,25 @@
 //! - `BTRFS_IOC_GET_SUBVOL_INFO` (F6.1)
 //! - `BTRFS_IOC_DEV_INFO` (F6.2)
 //! - `BTRFS_IOC_INO_LOOKUP` (F6.2)
-//! - `BTRFS_IOC_TREE_SEARCH_V2` (F6.3, uses retry)
+//! - `BTRFS_IOC_TREE_SEARCH` (F6.3, fixed 4 KiB)
+//! - `BTRFS_IOC_TREE_SEARCH_V2` (F6.3, code path uses retry — see
+//!   note below; works only from callers that opt into
+//!   `FUSE_IOCTL_UNRESTRICTED`)
+//! - `BTRFS_IOC_GET_SUBVOL_ROOTREF` (F6.3, fixed 4 KiB)
 //!
-//! Still unimplemented (also need retry; pending follow-up
-//! commits): `BTRFS_IOC_LOGICAL_INO_V2`, `BTRFS_IOC_INO_PATHS`,
-//! `BTRFS_IOC_GET_SUBVOL_ROOTREF`.
+//! Not implemented over FUSE: `BTRFS_IOC_INO_PATHS` and
+//! `BTRFS_IOC_LOGICAL_INO_V2`. Both require `FUSE_IOCTL_RETRY`,
+//! which the Linux kernel only honours for ioctls issued with
+//! `FUSE_IOCTL_UNRESTRICTED` set. The standard libc `ioctl(2)` path
+//! the `btrfs` CLI takes does not set that flag, so a retry response
+//! is rejected with `-EIO` before the FUSE driver is re-entered.
+//! The same restriction means our `TREE_SEARCH_V2` retry handler is
+//! effectively unreachable in practice today; v1 (fits in the
+//! cmd-encoded 4 KiB) remains the working path. See
+//! `fs/PLAN.md` § F6.3 for next steps (kernel relaxation, CUSE
+//! init, or a custom FUSE protocol implementation).
 
-use btrfs_fs::{Filesystem, Inode, SearchFilter, SubvolId};
+use btrfs_fs::{Filesystem, Inode, RootRef, SearchFilter, SubvolId};
 use bytes::{Buf, BufMut};
 use fuser::{Errno, IoctlFlags, IoctlIovec};
 use std::fs::File;
@@ -92,6 +104,14 @@ const SEARCH_KEY_SIZE: usize = 104;
 /// when calculating `max_buf_size` budget.
 #[allow(dead_code)]
 const SEARCH_HEADER_SIZE: usize = 32;
+/// Size of `struct btrfs_ioctl_get_subvol_rootref_args`:
+/// `min_treeid`(8) + `rootref[255]`(255 * 16 = 4080) + `num_items`(1)
+/// + `align[7]`(7) = 4096 bytes. Fixed-size — no retry needed.
+const SUBVOL_ROOTREF_SIZE: u32 = 4096;
+/// `BTRFS_MAX_ROOTREF_BUFFER_NUM`: kernel cap on entries returned per
+/// `GET_SUBVOL_ROOTREF` call. Userspace pages through by setting
+/// `min_treeid` to the next id past the last returned one.
+const MAX_ROOTREF_BUFFER_NUM: usize = 255;
 
 pub const BTRFS_IOC_FS_INFO: u32 = ior(BTRFS_MAGIC, 31, FS_INFO_SIZE);
 pub const BTRFS_IOC_GET_FEATURES: u32 =
@@ -104,6 +124,8 @@ pub const BTRFS_IOC_TREE_SEARCH: u32 =
     iowr(BTRFS_MAGIC, 17, SEARCH_ARGS_V1_SIZE);
 pub const BTRFS_IOC_TREE_SEARCH_V2: u32 =
     iowr(BTRFS_MAGIC, 17, SEARCH_ARGS_V2_SIZE);
+pub const BTRFS_IOC_GET_SUBVOL_ROOTREF: u32 =
+    iowr(BTRFS_MAGIC, 61, SUBVOL_ROOTREF_SIZE);
 
 // ── handlers ──────────────────────────────────────────────────────
 
@@ -148,6 +170,9 @@ pub async fn dispatch(
         }
         BTRFS_IOC_TREE_SEARCH_V2 => {
             tree_search_v2(fs, target.subvol, arg, flags, in_data).await
+        }
+        BTRFS_IOC_GET_SUBVOL_ROOTREF => {
+            get_subvol_rootref(fs, target.subvol, in_data).await
         }
         _ => IoctlOutcome::Err(Errno::ENOTTY),
     }
@@ -471,6 +496,92 @@ async fn tree_search_v2(
     write_search_items(&mut out, &items);
     #[allow(clippy::cast_possible_truncation)]
     out.resize(total_len as usize, 0);
+    IoctlOutcome::Ok(out)
+}
+
+/// `BTRFS_IOC_GET_SUBVOL_ROOTREF`: list child subvolumes of the
+/// subvolume the ioctl was issued against, paged in chunks of up to
+/// 255 entries each.
+///
+/// Userspace fills in `min_treeid` (8 bytes at the start of the
+/// args struct) to begin or resume iteration. We walk `ROOT_REF`
+/// entries in the root tree where `objectid == current_subvol` and
+/// `offset >= min_treeid`, emit up to 255 `(treeid, dirid)` pairs,
+/// and update `min_treeid` to the next id past the last entry —
+/// callers that want full enumeration loop until `num_items < 255`.
+async fn get_subvol_rootref(
+    fs: &Filesystem<File>,
+    current_subvol: SubvolId,
+    in_data: &[u8],
+) -> IoctlOutcome {
+    if in_data.len() < SUBVOL_ROOTREF_SIZE as usize {
+        return IoctlOutcome::Err(Errno::EINVAL);
+    }
+    let min_treeid = u64::from_le_bytes(in_data[..8].try_into().unwrap());
+
+    // ROOT_REF_KEY = 156. We pull at most one extra so we know when
+    // there are more entries beyond the buffer cap (the kernel signals
+    // this via the updated `min_treeid` field on the next iteration).
+    let filter = SearchFilter {
+        tree_id: 1,
+        min_objectid: current_subvol.0,
+        max_objectid: current_subvol.0,
+        min_type: 156,
+        max_type: 156,
+        min_offset: min_treeid,
+        max_offset: u64::MAX,
+        min_transid: 0,
+        max_transid: u64::MAX,
+        #[allow(clippy::cast_possible_truncation)]
+        max_items: (MAX_ROOTREF_BUFFER_NUM as u32).saturating_add(1),
+    };
+    let items = match fs.tree_search(filter, usize::MAX).await {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!(
+                "ioctl GET_SUBVOL_ROOTREF subvol={}: {e}",
+                current_subvol.0,
+            );
+            return IoctlOutcome::Err(Errno::EIO);
+        }
+    };
+
+    // Compound-key search returns items whose compound (objectid,
+    // type, offset) lies in the configured range; with both objectid
+    // and type pinned, every returned item is the right shape, but
+    // belt-and-braces filter on the type just in case.
+    let mut entries: Vec<(u64, u64)> = Vec::new();
+    let mut next_min_treeid = min_treeid;
+    for item in items
+        .iter()
+        .filter(|it| it.objectid == current_subvol.0 && it.item_type == 156)
+    {
+        if entries.len() >= MAX_ROOTREF_BUFFER_NUM {
+            // Buffer full: the kernel sets min_treeid to the next id
+            // past the last included entry so the next call resumes
+            // there.
+            next_min_treeid = item.offset;
+            break;
+        }
+        let Some(rr) = RootRef::parse(&item.data) else {
+            continue;
+        };
+        entries.push((item.offset, rr.dirid));
+    }
+
+    let mut out: Vec<u8> = Vec::with_capacity(SUBVOL_ROOTREF_SIZE as usize);
+    out.put_u64_le(next_min_treeid);
+    for (treeid, dirid) in &entries {
+        out.put_u64_le(*treeid);
+        out.put_u64_le(*dirid);
+    }
+    // Pad the rest of the rootref array (up to 255 entries × 16 bytes).
+    out.resize(8 + MAX_ROOTREF_BUFFER_NUM * 16, 0);
+    #[allow(clippy::cast_possible_truncation)]
+    out.put_u8(entries.len() as u8);
+    // align[7]
+    out.resize(SUBVOL_ROOTREF_SIZE as usize, 0);
+    debug_assert_eq!(out.len(), SUBVOL_ROOTREF_SIZE as usize);
     IoctlOutcome::Ok(out)
 }
 

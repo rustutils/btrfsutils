@@ -149,6 +149,32 @@ All notable changes to this project will be documented in this file.
   reads `buf_size` from the initial 112-byte header, requests
   retry covering `arg..arg + 112 + buf_size`, then writes the
   populated key + items in the second call.
+- `btrfs-fuse`: `BTRFS_IOC_GET_SUBVOL_ROOTREF` (fixed 4096-byte
+  struct) on top of `Filesystem::tree_search`. Walks `ROOT_REF`
+  entries in the root tree where `objectid == current_subvol` and
+  `offset >= min_treeid`, emits up to 255 `(treeid, dirid)` pairs,
+  and updates `min_treeid` to the next id past the last entry so
+  callers can page through. Test verifies the multi-subvol fixture
+  reports its single child.
+- `btrfs-fs`: `Filesystem::ino_paths(subvol, objectid) -> Vec<Vec<u8>>`
+  resolves every path that names the given inode within its
+  subvolume — one entry per hardlink — by walking `INODE_REF` and
+  `INODE_EXTREF` and joining each parent's `ino_lookup` result with
+  the link name. Returns an empty vector for orphans.
+
+### Known limitations
+
+- Variable-size btrfs ioctls (`BTRFS_IOC_TREE_SEARCH_V2`,
+  `BTRFS_IOC_INO_PATHS`, `BTRFS_IOC_LOGICAL_INO_V2`) cannot complete
+  over our FUSE mount: Linux's `fuse_do_ioctl` only honours a
+  `FUSE_IOCTL_RETRY` reply when the original request set
+  `FUSE_IOCTL_UNRESTRICTED`, which standard `ioctl(2)` callers never
+  do. The `TREE_SEARCH_V2` handler stays in-tree (it'd work for any
+  caller that opts in), but `INO_PATHS` and `LOGICAL_INO_V2` aren't
+  wired into dispatch since they would unconditionally fail. v1
+  `TREE_SEARCH` (4096-byte fixed struct) is what the upstream
+  `btrfs` CLI actually uses, so end-to-end coverage is intact for
+  that path. See `fs/PLAN.md` § F6.3 for unblock options.
 - `btrfs-fuse`: F6.2 (fixed-size subset). Two more ioctl handlers:
   `BTRFS_IOC_DEV_INFO` (per-device geometry) and
   `BTRFS_IOC_INO_LOOKUP` (objectid → path resolution by walking

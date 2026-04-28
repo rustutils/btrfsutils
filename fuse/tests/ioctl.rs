@@ -32,6 +32,7 @@ const BTRFS_IOC_GET_SUBVOL_INFO: u32 = ioc_ior(0x94, 60, 504);
 const BTRFS_IOC_DEV_INFO: u32 = ioc_iowr(0x94, 30, 4096);
 const BTRFS_IOC_INO_LOOKUP: u32 = ioc_iowr(0x94, 18, 4096);
 const BTRFS_IOC_TREE_SEARCH: u32 = ioc_iowr(0x94, 17, 4096);
+const BTRFS_IOC_GET_SUBVOL_ROOTREF: u32 = ioc_iowr(0x94, 61, 4096);
 
 /// Wrapper around `libc::ioctl` for the read-only ioctls in F6.1.
 /// Returns the response bytes (length matches the ioctl's encoded
@@ -411,6 +412,44 @@ fn ioctl_ino_lookup_subvol_root_returns_empty_path() {
     assert_eq!(resolved_oid, 256);
     // Path field should start with NUL (empty path for the subvol root).
     assert_eq!(buf[16], 0, "subvol root should produce empty path");
+}
+
+// ── BTRFS_IOC_GET_SUBVOL_ROOTREF ──────────────────────────────────
+
+#[test]
+fn ioctl_get_subvol_rootref_lists_child_subvolumes() {
+    // Multi-subvol fixture: FS_TREE (5) is parent of one subvolume
+    // named `sub`. From the mount root the ioctl should report exactly
+    // one rootref entry pointing at it.
+    let m = MountedFuse::mount_with(
+        common::multi_subvol_fixture_path(),
+        &[],
+        "at_root.txt",
+    );
+    let mut input = vec![0u8; 4096];
+    // min_treeid = 0 (start from the beginning).
+    let buf = unsafe {
+        run_iowr_ioctl(m.path(), BTRFS_IOC_GET_SUBVOL_ROOTREF, input.clone())
+    }
+    .expect("GET_SUBVOL_ROOTREF ioctl");
+
+    let _next_min_treeid = u64::from_le_bytes(buf[..8].try_into().unwrap());
+    // num_items lives at offset 8 + 255*16 = 4088.
+    let num_items = buf[4088];
+    assert_eq!(
+        num_items, 1,
+        "expected exactly one child subvol, got {num_items}"
+    );
+    let treeid = u64::from_le_bytes(buf[8..16].try_into().unwrap());
+    let dirid = u64::from_le_bytes(buf[16..24].try_into().unwrap());
+    assert!(
+        treeid >= 256,
+        "child subvol id {treeid} should be in user range",
+    );
+    assert_eq!(dirid, 256, "child should sit in the parent's root dir");
+
+    // Quiet the unused warning on the input pre-fill helper.
+    input[0] = 0;
 }
 
 // ── unknown ioctl error ───────────────────────────────────────────
