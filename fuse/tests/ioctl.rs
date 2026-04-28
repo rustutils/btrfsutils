@@ -452,6 +452,88 @@ fn ioctl_get_subvol_rootref_lists_child_subvolumes() {
     input[0] = 0;
 }
 
+// ── tree_search_v2 → tree_search_auto fallback ────────────────────
+
+/// End-to-end coverage for the F6.4 fallback path: our FUSE driver
+/// can't serve `BTRFS_IOC_TREE_SEARCH_V2` (the kernel rejects the
+/// `FUSE_IOCTL_RETRY` round-trip needed for it), so the driver
+/// signals that with `ENOPROTOOPT` and `tree_search_auto` in the
+/// uapi crate transparently re-runs the search through v1.
+///
+/// Three assertions in one test:
+///
+/// 1. `tree_search_v2` directly → `Err(ENOPROTOOPT)`. Confirms the
+///    FUSE driver returns the agreed-upon signal.
+/// 2. `tree_search_auto` → `Ok` with results. Confirms the
+///    fallback fires and runs to completion through v1.
+/// 3. Items from `tree_search_auto` match items from a direct v1
+///    `tree_search`. Confirms semantic equivalence.
+#[test]
+fn tree_search_auto_falls_back_to_v1_on_fuse_mount() {
+    use btrfs_uapi::tree_search::{
+        Key, SearchFilter, tree_search, tree_search_auto, tree_search_v2,
+    };
+    use std::os::fd::AsFd;
+
+    // ROOT_ITEM_KEY is the natural test target — a handful per
+    // multi-subvol fixture, fits comfortably in v1's 4 KiB buffer.
+    let m = MountedFuse::mount_with(
+        common::multi_subvol_fixture_path(),
+        &[],
+        "at_root.txt",
+    );
+    let f = File::open(m.path()).expect("open mount root for ioctl");
+
+    let filter = SearchFilter {
+        tree_id: 1, // BTRFS_ROOT_TREE_OBJECTID
+        start: Key {
+            objectid: 0,
+            item_type: 132, // ROOT_ITEM_KEY
+            offset: 0,
+        },
+        end: Key {
+            objectid: u64::MAX,
+            item_type: 132,
+            offset: u64::MAX,
+        },
+        min_transid: 0,
+        max_transid: u64::MAX,
+    };
+
+    // 1) v2 directly: must surface ENOPROTOOPT from our driver.
+    let v2_err = tree_search_v2(f.as_fd(), filter.clone(), None, |_, _| Ok(()))
+        .expect_err("tree_search_v2 must fail on a FUSE mount");
+    assert_eq!(
+        v2_err,
+        nix::errno::Errno::ENOPROTOOPT,
+        "FUSE driver should signal ENOPROTOOPT for v2",
+    );
+
+    // 2) auto: must succeed via fallback to v1.
+    let mut auto_items: Vec<(u64, u32, u64)> = Vec::new();
+    tree_search_auto(f.as_fd(), filter.clone(), None, |hdr, _data| {
+        auto_items.push((hdr.objectid, hdr.item_type, hdr.offset));
+        Ok(())
+    })
+    .expect("tree_search_auto must succeed via v1 fallback");
+    assert!(
+        !auto_items.is_empty(),
+        "expected ≥ 1 ROOT_ITEM in the multi-subvol fixture",
+    );
+
+    // 3) Cross-check against a direct v1 walk.
+    let mut v1_items: Vec<(u64, u32, u64)> = Vec::new();
+    tree_search(f.as_fd(), filter, |hdr, _data| {
+        v1_items.push((hdr.objectid, hdr.item_type, hdr.offset));
+        Ok(())
+    })
+    .expect("tree_search v1 must succeed on a FUSE mount");
+    assert_eq!(
+        auto_items, v1_items,
+        "auto fallback should yield identical items to direct v1",
+    );
+}
+
 // ── unknown ioctl error ───────────────────────────────────────────
 
 #[test]

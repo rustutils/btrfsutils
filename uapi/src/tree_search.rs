@@ -15,13 +15,19 @@
 //!
 //! # Ioctl version
 //!
-//! This module provides two variants:
+//! This module provides three variants:
 //!
 //! - [`tree_search`] uses `BTRFS_IOC_TREE_SEARCH` (v1) with its fixed
 //!   3992-byte result buffer. Sufficient for all item types used by this crate.
 //! - [`tree_search_v2`] uses `BTRFS_IOC_TREE_SEARCH_V2` with a caller-chosen
 //!   buffer size. Useful when items may be larger than what v1 can return in a
 //!   single batch.
+//! - [`tree_search_auto`] tries v2 first and transparently falls back to v1
+//!   when the underlying driver doesn't support v2 — currently FUSE drivers
+//!   like our own `btrfs-fuse` (the indirected-buffer pattern can't survive
+//!   a FUSE round trip; signalled with `ENOPROTOOPT`) and very old kernels
+//!   that pre-date v2 (`ENOTTY` / `ENOSYS`). Use this when you don't care
+//!   which path runs, only that the search completes.
 
 use crate::raw::{
     btrfs_ioc_tree_search, btrfs_ioc_tree_search_v2, btrfs_ioctl_search_args,
@@ -429,6 +435,73 @@ pub fn tree_search_v2(
     }
 
     Ok(())
+}
+
+/// Try [`tree_search_v2`] first; if the driver can't serve v2,
+/// fall back to [`tree_search`] (v1) with the same filter and
+/// callback.
+///
+/// The fallback is triggered when v2's first ioctl returns one of:
+///
+/// - `ENOPROTOOPT`: our `btrfs-fuse` driver's signal that it
+///   doesn't support the indirected-buffer pattern v2 needs (the
+///   kernel's `FUSE_IOCTL_RETRY` path is restricted to ioctls
+///   issued with `FUSE_IOCTL_UNRESTRICTED`, which standard
+///   `ioctl(2)` callers never set). Picked specifically because
+///   no other path in the btrfs ioctl surface returns it.
+/// - `ENOTSUP` / `EOPNOTSUPP`: generic "op not supported on this
+///   endpoint", e.g. another FUSE-btrfs implementation.
+/// - `ENOTTY` / `ENOSYS`: very old kernels that pre-date v2
+///   (added in 3.18) returning "unknown ioctl" / "function not
+///   implemented".
+///
+/// **Safety against duplicate items.** v1 is only attempted when
+/// v2 errors *before* invoking the user callback. If v2 fails
+/// mid-walk (a transient condition we don't see in practice),
+/// the v2 error is propagated unchanged — re-running v1 from
+/// scratch would re-deliver items the caller already saw.
+///
+/// `buf_size` controls the v2 buffer size in bytes (default
+/// 64 KiB). It is ignored on the v1 fallback (v1 has a fixed
+/// 3992-byte buffer).
+///
+/// # Errors
+///
+/// Returns the v2 error if the callback was already invoked when
+/// it surfaced; the v1 error if v2 was unsupported and v1 also
+/// failed; or the callback's error if either path's callback
+/// returns one.
+#[allow(clippy::needless_pass_by_value)]
+pub fn tree_search_auto(
+    fd: BorrowedFd,
+    filter: SearchFilter,
+    buf_size: Option<usize>,
+    mut f: impl FnMut(&SearchHeader, &[u8]) -> nix::Result<()>,
+) -> nix::Result<()> {
+    let mut callback_invoked = false;
+    let v2_result =
+        tree_search_v2(fd, filter.clone(), buf_size, |hdr, data| {
+            callback_invoked = true;
+            f(hdr, data)
+        });
+
+    match v2_result {
+        Ok(()) => Ok(()),
+        Err(e) if !callback_invoked && is_v2_unsupported(e) => {
+            tree_search(fd, filter, f)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Errnos that signal the driver doesn't support v2 at all.
+/// Matches the cases enumerated in [`tree_search_auto`]'s docs.
+fn is_v2_unsupported(e: nix::errno::Errno) -> bool {
+    use nix::errno::Errno;
+    matches!(
+        e,
+        Errno::ENOPROTOOPT | Errno::ENOTSUP | Errno::ENOTTY | Errno::ENOSYS
+    )
 }
 
 fn fill_search_key(sk: &mut btrfs_ioctl_search_key, filter: &SearchFilter) {

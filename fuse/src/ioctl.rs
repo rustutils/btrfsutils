@@ -155,8 +155,13 @@ pub async fn dispatch(
     fs: &Filesystem<File>,
     target: Inode,
     cmd: u32,
-    arg: u64,
-    flags: IoctlFlags,
+    // `arg` and `flags` are part of the patched fuser callback
+    // signature for the now-defunct retry path; they're forwarded
+    // here for symmetry but no current handler uses them. Both go
+    // away in the follow-up commit that switches back to released
+    // fuser 0.17 (see fs/PLAN.md § F6.4).
+    _arg: u64,
+    _flags: IoctlFlags,
     in_data: &[u8],
 ) -> IoctlOutcome {
     match cmd {
@@ -168,9 +173,7 @@ pub async fn dispatch(
         BTRFS_IOC_TREE_SEARCH => {
             tree_search_v1(fs, target.subvol, in_data).await
         }
-        BTRFS_IOC_TREE_SEARCH_V2 => {
-            tree_search_v2(fs, target.subvol, arg, flags, in_data).await
-        }
+        BTRFS_IOC_TREE_SEARCH_V2 => tree_search_v2(),
         BTRFS_IOC_GET_SUBVOL_ROOTREF => {
             get_subvol_rootref(fs, target.subvol, in_data).await
         }
@@ -412,91 +415,24 @@ async fn tree_search_v1(
     IoctlOutcome::Ok(out)
 }
 
-/// `BTRFS_IOC_TREE_SEARCH_V2`: walk a tree and return items matching
-/// a compound `(objectid, type, offset)` key range.
+/// `BTRFS_IOC_TREE_SEARCH_V2`: cannot be served over FUSE.
 ///
-/// Two-call protocol:
+/// v2 needs the kernel's `FUSE_IOCTL_RETRY` round-trip to extend
+/// the result buffer past the 14-bit cmd-encoded size, but Linux
+/// only honours that retry response when the original request set
+/// `FUSE_IOCTL_UNRESTRICTED` — which standard `ioctl(2)` callers
+/// never do. Returning `ENOPROTOOPT` is our private signal to
+/// `btrfs-uapi`'s `tree_search_auto` wrapper, which catches it
+/// and falls back to v1 (fixed 4 KiB buffer, paginated). v1 is
+/// fully supported on this driver and matches v2's semantics.
 ///
-/// 1. **First call** (`flags` does not contain `FUSE_IOCTL_UNRESTRICTED`):
-///    `in_data` is just the 112-byte `btrfs_ioctl_search_args_v2`
-///    header — the kernel/FUSE only forwards what fits in the
-///    cmd-encoded size. We read `buf_size` from offset 104, then
-///    return `IoctlOutcome::Retry` describing iovecs that cover the
-///    full args header (input) and the args + buf area (output).
-/// 2. **Second call** (with `FUSE_IOCTL_UNRESTRICTED`): `in_data`
-///    is the 112-byte header. We parse the search key, run the
-///    search, and emit a `112 + buf_size`-byte response: updated
-///    header (with `nr_items` set to the actual count) followed by
-///    each item as a `btrfs_ioctl_search_header` + raw payload.
-async fn tree_search_v2(
-    fs: &Filesystem<File>,
-    current_subvol: SubvolId,
-    arg: u64,
-    flags: IoctlFlags,
-    in_data: &[u8],
-) -> IoctlOutcome {
-    if in_data.len() < SEARCH_ARGS_V2_SIZE as usize {
-        return IoctlOutcome::Err(Errno::EINVAL);
-    }
-    // buf_size lives at offset SEARCH_KEY_SIZE within the args
-    // struct (right after the 104-byte search_key).
-    let buf_size = u64::from_le_bytes(
-        in_data[SEARCH_KEY_SIZE..SEARCH_KEY_SIZE + 8]
-            .try_into()
-            .unwrap(),
-    );
-    let total_len = u64::from(SEARCH_ARGS_V2_SIZE) + buf_size;
-
-    if !flags.contains(IoctlFlags::FUSE_IOCTL_UNRESTRICTED) {
-        // First call: ask the kernel to re-issue with the full
-        // userspace buffer. Input we need = the args header only
-        // (the buf area is uninitialized output space). Output
-        // covers the entire range so we can write back both the
-        // updated header and the populated buf.
-        return IoctlOutcome::Retry {
-            in_iovs: vec![IoctlIovec {
-                base: arg,
-                len: u64::from(SEARCH_ARGS_V2_SIZE),
-            }],
-            out_iovs: vec![IoctlIovec {
-                base: arg,
-                len: total_len,
-            }],
-        };
-    }
-
-    // Second call: parse the search key and run the search.
-    let (filter, raw_key) = match parse_search_key(in_data, current_subvol) {
-        Ok(v) => v,
-        Err(o) => return o,
-    };
-
-    #[allow(clippy::cast_possible_truncation)]
-    let buf_size_usize = buf_size as usize;
-    let items = match fs.tree_search(filter, buf_size_usize).await {
-        Ok(v) => v,
-        Err(e) => {
-            log::warn!(
-                "ioctl TREE_SEARCH_V2 tree={} failed: {e}",
-                filter.tree_id,
-            );
-            return IoctlOutcome::Err(Errno::EIO);
-        }
-    };
-
-    #[allow(clippy::cast_possible_truncation)]
-    let mut out: Vec<u8> = Vec::with_capacity(total_len as usize);
-    write_search_key(
-        &mut out,
-        filter.tree_id,
-        &raw_key,
-        items.len(),
-        Some(buf_size),
-    );
-    write_search_items(&mut out, &items);
-    #[allow(clippy::cast_possible_truncation)]
-    out.resize(total_len as usize, 0);
-    IoctlOutcome::Ok(out)
+/// `ENOPROTOOPT` was picked over the more common `ENOTSUP` /
+/// `EOPNOTSUPP` because nothing else in the btrfs ioctl surface
+/// returns it, so it acts as a private channel: if uapi sees it
+/// here, it's overwhelmingly *us* speaking. See
+/// `fs/PLAN.md` § F6.4.
+fn tree_search_v2() -> IoctlOutcome {
+    IoctlOutcome::Err(Errno::ENOPROTOOPT)
 }
 
 /// `BTRFS_IOC_GET_SUBVOL_ROOTREF`: list child subvolumes of the

@@ -41,5 +41,7 @@ libc = { workspace = true }
 
 [dev-dependencies]
 btrfs-test-utils = { workspace = true }
+btrfs-uapi = { workspace = true }
+nix = { workspace = true }
 tempfile = { workspace = true }
 xattr = "1"
