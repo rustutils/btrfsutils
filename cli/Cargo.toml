@@ -26,6 +26,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 btrfs-disk = { workspace = true }
+btrfs-fs = { workspace = true }
 btrfs-fuse = { workspace = true, optional = true }
 btrfs-mkfs = { workspace = true, optional = true }
 btrfs-stream = { workspace = true, features = ["receive"] }
@@ -45,6 +46,7 @@ nix = { workspace = true }
 regex-lite = "0.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
 uuid = { workspace = true }
 zstd = { workspace = true }
 

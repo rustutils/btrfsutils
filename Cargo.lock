@@ -159,6 +159,7 @@ version = "0.12.0"
 dependencies = [
  "anyhow",
  "btrfs-disk",
+ "btrfs-fs",
  "btrfs-fuse",
  "btrfs-mkfs",
  "btrfs-stream",
@@ -181,6 +182,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "uuid",
  "zstd",
 ]

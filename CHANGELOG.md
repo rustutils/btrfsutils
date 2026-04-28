@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-cli`: `btrfs send --offline IMAGE [-f OUT]` generates a v1
+  send stream from an unmounted btrfs image without touching the
+  kernel `BTRFS_IOC_SEND` ioctl. Bypasses every constraint of the
+  ioctl path: no `CAP_SYS_ADMIN`, no kernel mount, no FUSE retry
+  restriction. Subvolume to send is selected with
+  `--offline-subvol PATH` or `--offline-subvolid ID` (defaults to
+  the default subvolume). Tier 1: incremental, clone sources,
+  `--no-data`, alternate protocol versions, and compressed-data
+  passthrough are not yet supported in offline mode and clap
+  rejects them.
+- `btrfs-fs`: `Filesystem::resolve_subvol_path(path) -> Option<SubvolId>`
+  walks the subvolume graph and resolves a slash-separated path
+  (relative to the FS root) to its tree id. Empty path / `"/"`
+  resolves to the default `FS_TREE`. Used by `btrfs send --offline`
+  and slated to replace the duplicated logic in `btrfs-fuse`'s
+  `--subvol` handling.
 - `btrfs-fs`: `Filesystem::send(snapshot, output) -> Result<output>`
   generates a v1 send stream describing the snapshot and writes it
   to any `Write` (typically a pipe to `btrfs receive` or a backup

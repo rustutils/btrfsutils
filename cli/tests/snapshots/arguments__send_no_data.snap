@@ -22,6 +22,9 @@ Arguments {
             no_data: true,
             proto: None,
             compressed_data: false,
+            offline: None,
+            offline_subvol: None,
+            offline_subvolid: None,
         },
     ),
 }

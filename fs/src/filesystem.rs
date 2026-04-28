@@ -71,7 +71,7 @@ fn is_subvolume_id(id: u64) -> bool {
 ///
 /// For the default subvolume this is `5` (`BTRFS_FS_TREE_OBJECTID`).
 /// Custom subvolumes use `256` and up.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SubvolId(pub u64);
 
 /// A filesystem-level inode reference: the subvolume it lives in plus
@@ -560,6 +560,34 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     ) -> io::Result<Vec<u8>> {
         let this = self.clone();
         spawn_blocking(move || this.read_blocking(ino, offset, size)).await
+    }
+
+    /// Resolve a slash-separated subvolume path (relative to the
+    /// filesystem root) to its [`SubvolId`]. Empty path / `"/"`
+    /// resolves to the default `FS_TREE` (`SubvolId(5)`).
+    ///
+    /// Walks the same `list_subvolumes` graph that
+    /// `btrfs subvolume list` uses, so any path the user could see
+    /// in that listing is resolvable here. Returns `Ok(None)` if
+    /// the path doesn't match any subvolume.
+    pub async fn resolve_subvol_path(
+        &self,
+        path: &str,
+    ) -> io::Result<Option<SubvolId>> {
+        let trimmed = path.trim_matches('/');
+        if trimmed.is_empty() {
+            return Ok(Some(SubvolId(FS_TREE_OBJECTID)));
+        }
+        let subvols = self.list_subvolumes().await?;
+        let by_id: BTreeMap<SubvolId, &SubvolInfo> =
+            subvols.iter().map(|s| (s.id, s)).collect();
+        let target = trimmed.as_bytes();
+        for s in &subvols {
+            if subvol_full_path(&by_id, s.id) == target {
+                return Ok(Some(s.id));
+            }
+        }
+        Ok(None)
     }
 
     /// Generate a v1 send stream describing `snapshot` and write it
@@ -1544,6 +1572,37 @@ fn lookup_in_dir<R: io::Read + io::Seek>(
         }
     })?;
     Ok(found)
+}
+
+/// Build the full slash-separated path (no leading slash) of
+/// subvolume `id` by walking its parent chain. The default
+/// `FS_TREE` has an empty path; user subvolumes accumulate name
+/// components from each ancestor. Used by
+/// [`Filesystem::resolve_subvol_path`].
+fn subvol_full_path(
+    by_id: &BTreeMap<SubvolId, &SubvolInfo>,
+    id: SubvolId,
+) -> Vec<u8> {
+    let mut components: Vec<Vec<u8>> = Vec::new();
+    let mut current = id;
+    while let Some(info) = by_id.get(&current) {
+        if !info.name.is_empty() {
+            components.push(info.name.clone());
+        }
+        match info.parent {
+            Some(parent) => current = parent,
+            None => break,
+        }
+    }
+    components.reverse();
+    let mut out: Vec<u8> = Vec::new();
+    for (i, c) in components.iter().enumerate() {
+        if i > 0 {
+            out.push(b'/');
+        }
+        out.extend_from_slice(c);
+    }
+    out
 }
 
 /// Convert a btrfs on-disk [`DiskTimespec`] into the

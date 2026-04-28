@@ -1051,6 +1051,87 @@ fn send_receive_roundtrip() {
     verify_test_data(Path::new(&format!("{received}/dir")), "file3.bin", 32768);
 }
 
+/// Offline send round-trip: build an unmounted btrfs image with
+/// `mkfs.btrfs --rootdir`, generate a v1 send stream from it via
+/// `btrfs send --offline`, feed the stream to a real `btrfs
+/// receive` on a separate kernel-mounted filesystem, and verify
+/// the received subvolume reproduces the source files. Tests the
+/// full encoder + walker + CLI wiring against a kernel receiver,
+/// which is the strictest correctness check we can run for tier 1
+/// send.
+#[test]
+#[ignore = "requires elevated privileges"]
+fn send_offline_round_trips_through_kernel_receive() {
+    use tempfile::TempDir;
+
+    // Build the source as a directory tree, then mkfs an image
+    // around it. Stays unprivileged on its own; the receive at
+    // the end is what needs root.
+    let src_td = TempDir::new().expect("tempdir for src");
+    let src = src_td.path().join("src");
+    fs::create_dir(&src).unwrap();
+    write_test_data(&src, "small.bin", 1024);
+    write_test_data(&src, "boundary.bin", 65536);
+    write_test_data(&src, "large.bin", 200_000);
+    fs::create_dir(src.join("dir")).unwrap();
+    write_test_data(&src.join("dir"), "nested.bin", 32768);
+    std::os::unix::fs::symlink("small.bin", src.join("link")).unwrap();
+
+    let img = src_td.path().join("source.img");
+    fs::File::create(&img)
+        .unwrap()
+        .set_len(128 * 1024 * 1024)
+        .unwrap();
+    btrfs_test_utils::run(
+        "mkfs.btrfs",
+        &[
+            "-f",
+            "--rootdir",
+            src.to_str().unwrap(),
+            img.to_str().unwrap(),
+        ],
+    );
+
+    // Generate the stream offline (no kernel mount, no privileges).
+    let stream_file = src_td.path().join("offline.stream");
+    btrfs_ok(&[
+        "send",
+        "--offline",
+        img.to_str().unwrap(),
+        "-f",
+        stream_file.to_str().unwrap(),
+    ]);
+    let stream_size = fs::metadata(&stream_file).unwrap().len();
+    assert!(stream_size > 0, "stream file should be non-empty");
+
+    // Receive into a fresh kernel-mounted btrfs and verify the
+    // file contents made it through unchanged.
+    let (_td_recv, mnt_recv) = single_mount();
+    let mp_recv = mnt_recv.path().to_str().unwrap();
+    btrfs_ok(&["receive", "-f", stream_file.to_str().unwrap(), mp_recv]);
+
+    // mkfs.btrfs --rootdir without --subvol puts everything into
+    // the default FS_TREE; our send uses "subvol-5" as the receive
+    // path since FS_TREE has no name.
+    let received = format!("{mp_recv}/subvol-5");
+    assert!(
+        Path::new(&received).is_dir(),
+        "received subvol not found at {received}",
+    );
+
+    verify_test_data(Path::new(&received), "small.bin", 1024);
+    verify_test_data(Path::new(&received), "boundary.bin", 65536);
+    verify_test_data(Path::new(&received), "large.bin", 200_000);
+    verify_test_data(
+        Path::new(&format!("{received}/dir")),
+        "nested.bin",
+        32768,
+    );
+    let link_target = fs::read_link(format!("{received}/link"))
+        .expect("symlink should be present");
+    assert_eq!(link_target.to_str(), Some("small.bin"));
+}
+
 #[test]
 #[ignore = "requires elevated privileges"]
 fn send_receive_incremental() {
