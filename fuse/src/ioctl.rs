@@ -39,7 +39,7 @@
 
 use btrfs_fs::{Filesystem, Inode, RootRef, SearchFilter, SubvolId};
 use bytes::{Buf, BufMut};
-use fuser::{Errno, IoctlFlags, IoctlIovec};
+use fuser::Errno;
 use std::fs::File;
 
 // ── ioctl number encoding ─────────────────────────────────────────
@@ -129,39 +129,21 @@ pub const BTRFS_IOC_GET_SUBVOL_ROOTREF: u32 =
 
 // ── handlers ──────────────────────────────────────────────────────
 
-/// Outcome of an ioctl dispatch: bytes to return to userspace,
-/// an [`Errno`] for the FUSE adapter to forward, or a
-/// `FUSE_IOCTL_RETRY` request describing the userspace iovecs the
-/// kernel should re-send the ioctl with.
+/// Outcome of an ioctl dispatch: bytes to return to userspace, or
+/// an [`Errno`] for the FUSE adapter to forward.
 pub enum IoctlOutcome {
     Ok(Vec<u8>),
     Err(Errno),
-    Retry {
-        in_iovs: Vec<IoctlIovec>,
-        out_iovs: Vec<IoctlIovec>,
-    },
 }
 
 /// Decode `cmd` and dispatch to the matching handler. Unknown ioctls
-/// produce `ENOTTY`, the standard "no such ioctl" return.
-///
-/// `arg` is the userspace pointer the ioctl was called with — used
-/// by handlers that respond with `FUSE_IOCTL_RETRY` (variable-size
-/// buffers). `flags` indicates whether this is the first call or
-/// the post-retry pass with `FUSE_IOCTL_UNRESTRICTED` set.
-/// `in_data` carries the input portion (`devid` for `DEV_INFO`,
+/// produce `ENOTTY`, the standard "no such ioctl" return. `in_data`
+/// carries the input portion (`devid` for `DEV_INFO`,
 /// `treeid`+`objectid` for `INO_LOOKUP`, etc.).
 pub async fn dispatch(
     fs: &Filesystem<File>,
     target: Inode,
     cmd: u32,
-    // `arg` and `flags` are part of the patched fuser callback
-    // signature for the now-defunct retry path; they're forwarded
-    // here for symmetry but no current handler uses them. Both go
-    // away in the follow-up commit that switches back to released
-    // fuser 0.17 (see fs/PLAN.md § F6.4).
-    _arg: u64,
-    _flags: IoctlFlags,
     in_data: &[u8],
 ) -> IoctlOutcome {
     match cmd {

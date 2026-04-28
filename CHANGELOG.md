@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- `btrfs-uapi`: new `tree_search_auto` runs `BTRFS_IOC_TREE_SEARCH_V2`
+  first and transparently falls back to `BTRFS_IOC_TREE_SEARCH` (v1)
+  when the underlying driver doesn't support v2. Triggers on
+  `ENOPROTOOPT` (our `btrfs-fuse` driver's signal — see below),
+  `ENOTSUP`/`EOPNOTSUPP`, and `ENOTTY`/`ENOSYS` (very old kernels
+  pre-dating v2). Fallback is only attempted when v2 errored before
+  invoking the user callback, so a transient mid-walk error can't
+  duplicate items.
+- `btrfs-fuse`: `BTRFS_IOC_TREE_SEARCH_V2` now returns `ENOPROTOOPT`
+  rather than attempting a `FUSE_IOCTL_RETRY` round-trip the kernel
+  won't honour for restricted ioctls. `tree_search_auto` in
+  `btrfs-uapi` recognises this signal and falls back to v1
+  transparently. `ENOPROTOOPT` was picked over `ENOTSUP` because
+  nothing else in the btrfs ioctl surface returns it, so it acts as
+  a private channel that can't be confused with generic
+  "unsupported op" errors. See `fs/PLAN.md` § F6.4.
+- `btrfs-fuse`: switched from the git pin on `xfbs/fuser` back to
+  `fuser = "0.17"` from crates.io. The patched `ReplyIoctl::retry`
+  API and the extra `arg: u64` parameter on `Filesystem::ioctl` are
+  no longer needed — F6.4's uapi-level fallback supplants the
+  kernel-side retry handshake. Companion changes: `publish = false`
+  removed from `fuse/Cargo.toml` so the crate can publish to
+  crates.io alongside the rest of the workspace, and the
+  corresponding `allow-git` entry in `deny.toml` is gone. The
+  `IoctlOutcome::Retry` variant is removed.
+
 ### Added
 
 - `btrfs-fs`: new crate exposing a high-level read-only filesystem

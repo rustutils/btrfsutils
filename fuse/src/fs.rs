@@ -346,9 +346,8 @@ impl FuserFilesystem for BtrfsFuse {
         _req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
-        flags: IoctlFlags,
+        _flags: IoctlFlags,
         cmd: u32,
-        arg: u64,
         in_data: &[u8],
         _out_size: u32,
         reply: ReplyIoctl,
@@ -357,13 +356,9 @@ impl FuserFilesystem for BtrfsFuse {
         let fs = self.fs.clone();
         let in_data = in_data.to_vec();
         self.runtime.spawn(async move {
-            match ioctl::dispatch(&fs, target, cmd, arg, flags, &in_data).await
-            {
+            match ioctl::dispatch(&fs, target, cmd, &in_data).await {
                 IoctlOutcome::Ok(data) => reply.ioctl(0, &data),
                 IoctlOutcome::Err(errno) => reply.error(errno),
-                IoctlOutcome::Retry { in_iovs, out_iovs } => {
-                    reply.retry(&in_iovs, &out_iovs);
-                }
             }
         });
     }
