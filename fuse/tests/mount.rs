@@ -37,6 +37,54 @@ fn read_root_listing() {
     }
 }
 
+/// Walks the directory and inspects each entry's `metadata` (kind,
+/// size, link target). On a mount where `FUSE_DO_READDIRPLUS` is
+/// negotiated, this drives the kernel through our `readdirplus`
+/// callback rather than falling back to per-entry `lookup`.
+/// Verifies that the attributes returned alongside the entry name
+/// agree with what an explicit `getattr` would return.
+#[test]
+fn read_root_listing_with_metadata() {
+    let m = MountedFuse::mount();
+    // Iterating with `DirEntry::file_type()` and `metadata()` is
+    // exactly what `ls -l` does; on Linux it triggers `getdents64`,
+    // which the kernel routes through `readdirplus` when the FUSE
+    // driver advertises support for it.
+    let mut by_name: std::collections::HashMap<String, fs::Metadata> =
+        Default::default();
+    for entry in fs::read_dir(m.path()).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let meta = entry.metadata().expect("metadata for entry");
+        by_name.insert(name, meta);
+    }
+
+    let hello = by_name.get("hello.txt").expect("hello.txt present");
+    assert!(hello.is_file());
+    assert_eq!(hello.len(), b"hello, world\n".len() as u64);
+
+    let large = by_name.get("large.bin").expect("large.bin present");
+    assert!(large.is_file());
+    assert_eq!(large.len(), 100_000);
+
+    let subdir = by_name.get("subdir").expect("subdir present");
+    assert!(subdir.is_dir());
+
+    // `DirEntry::metadata()` does NOT follow symlinks (it uses
+    // `fstatat(..., AT_SYMLINK_NOFOLLOW)`), so the readdirplus-emitted
+    // attr for `link` is the symlink itself. Cross-check that an
+    // explicit `fs::metadata` (which DOES follow) returns the file
+    // it points at.
+    let link_meta = by_name.get("link").expect("link present");
+    assert!(
+        link_meta.file_type().is_symlink(),
+        "DirEntry::metadata for `link` should report symlink",
+    );
+    let resolved = fs::metadata(m.path().join("link")).expect("follow symlink");
+    assert!(resolved.is_file(), "symlink should follow to a file");
+    assert_eq!(resolved.len(), b"hello, world\n".len() as u64);
+}
+
 #[test]
 fn read_small_file_contents() {
     let m = MountedFuse::mount();

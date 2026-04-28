@@ -20,8 +20,8 @@ use btrfs_fs::{CacheConfig, FileKind, Filesystem, Inode, Stat, SubvolId};
 use fuser::{
     Errno, FileAttr, FileHandle, FileType, Filesystem as FuserFilesystem,
     Generation, INodeNo, InitFlags, IoctlFlags, KernelConfig, LockOwner,
-    OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyIoctl,
-    ReplyStatfs, ReplyXattr, Request,
+    OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyDirectoryPlus,
+    ReplyEntry, ReplyIoctl, ReplyStatfs, ReplyXattr, Request,
 };
 use std::{ffi::OsStr, fs::File, io, os::unix::ffi::OsStrExt, time::Duration};
 use tokio::runtime::Runtime;
@@ -137,16 +137,14 @@ impl FuserFilesystem for BtrfsFuse {
     /// is left at the default since the underlying image is
     /// immutable and the kernel can hold attributes indefinitely.
     ///
+    /// - `FUSE_DO_READDIRPLUS` advertises that we serve `readdirplus`
+    ///   so the kernel coalesces `readdir + lookup-per-entry` into a
+    ///   single round trip — major speedup for `ls -l`.
     /// - `FUSE_AUTO_INVAL_DATA` lets the kernel auto-invalidate page
     ///   cache when our `getattr` reports a changed `mtime`/`size`,
     ///   so callers see fresh data without explicit `O_DIRECT`.
     /// - `FUSE_SPLICE_READ` / `FUSE_SPLICE_WRITE` enable zero-copy
     ///   data transfer between FUSE and the kernel page cache.
-    ///
-    /// `FUSE_DO_READDIRPLUS` lands in the follow-up commit that
-    /// adds the `readdirplus` callback; advertising it before
-    /// implementing it would route the kernel through an `ENOSYS`
-    /// path and break directory listing.
     ///
     /// Capabilities the kernel doesn't advertise are silently
     /// skipped; we don't fail the mount over a missing extra.
@@ -156,6 +154,7 @@ impl FuserFilesystem for BtrfsFuse {
         config: &mut KernelConfig,
     ) -> io::Result<()> {
         for cap in [
+            InitFlags::FUSE_DO_READDIRPLUS,
             InitFlags::FUSE_AUTO_INVAL_DATA,
             InitFlags::FUSE_SPLICE_READ,
             InitFlags::FUSE_SPLICE_WRITE,
@@ -265,6 +264,45 @@ impl FuserFilesystem for BtrfsFuse {
                     entry.offset,
                     to_file_type(entry.kind),
                     OsStr::from_bytes(&entry.name),
+                ) {
+                    break;
+                }
+            }
+            reply.ok();
+        });
+    }
+
+    fn readdirplus(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        _fh: FileHandle,
+        offset: u64,
+        mut reply: ReplyDirectoryPlus,
+    ) {
+        let dir_ino = self.fuse_inode(ino.0);
+        let fuse_ino = ino.0;
+        let fs = self.fs.clone();
+        self.runtime.spawn(async move {
+            let entries = match fs.readdirplus(dir_ino, offset).await {
+                Ok(v) => v,
+                Err(e) => {
+                    log::warn!(
+                        "readdirplus ino={fuse_ino} offset={offset}: {e}",
+                    );
+                    reply.error(Errno::EIO);
+                    return;
+                }
+            };
+            for (entry, stat) in entries {
+                let child_ino = inode::btrfs_to_fuse(entry.ino.ino);
+                if reply.add(
+                    INodeNo(child_ino),
+                    entry.offset,
+                    OsStr::from_bytes(&entry.name),
+                    &TTL,
+                    &to_file_attr(child_ino, &stat),
+                    Generation(0),
                 ) {
                     break;
                 }

@@ -17,12 +17,20 @@ All notable changes to this project will be documented in this file.
   both the inode and extent-map caches. Embedders that observe
   inode-level invalidation events can call this to release memory
   ahead of LRU eviction.
+- `btrfs-fs`: `Filesystem::readdirplus(dir, offset) -> Vec<(Entry, Stat)>`
+  pairs each directory entry with its `Stat` so callers don't need
+  a separate `getattr` per entry. Per-inode reads consult the
+  inode cache, so repeated calls over the same directory pay at
+  most one tree walk per inode across the working set.
+- `btrfs-fuse`: `readdirplus` callback wired through to
+  `Filesystem::readdirplus`, plus `FUSE_DO_READDIRPLUS` advertised
+  in `init`. The kernel now coalesces `readdir + lookup-per-entry`
+  into one round trip — major speedup for `ls -l`.
 - `btrfs-fuse`: `init` callback negotiates kernel capabilities at
-  mount time. Currently opts into `FUSE_AUTO_INVAL_DATA` (kernel
-  page-cache invalidation when `getattr` reports changes) and
-  `FUSE_SPLICE_READ` / `FUSE_SPLICE_WRITE` (zero-copy data path).
-  `FUSE_DO_READDIRPLUS` will land in the follow-up commit that adds
-  the `readdirplus` callback.
+  mount time. Currently opts into `FUSE_DO_READDIRPLUS` (see
+  above), `FUSE_AUTO_INVAL_DATA` (kernel page-cache invalidation
+  when `getattr` reports changes), and `FUSE_SPLICE_READ` /
+  `FUSE_SPLICE_WRITE` (zero-copy data path).
 - `btrfs-fuse`: `forget` callback wired through to
   `Filesystem::forget`. The default `batch_forget` impl in fuser
   iterates over each `ForgetOne` and calls `forget`, so we don't

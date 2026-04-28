@@ -497,6 +497,25 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         spawn_blocking(move || this.readdir_blocking(dir_ino, offset)).await
     }
 
+    /// Like [`Filesystem::readdir`] but pairs each [`Entry`] with its
+    /// [`Stat`] so callers don't need a separate `getattr` per entry.
+    /// The FUSE driver feeds this into the kernel's `READDIRPLUS`
+    /// path, which collapses `ls -l`-style listings into one round
+    /// trip.
+    ///
+    /// Entries that vanish between the directory walk and the stat
+    /// (effectively impossible on a read-only mount, but defended
+    /// for robustness) are dropped from the result rather than
+    /// erroring.
+    pub async fn readdirplus(
+        &self,
+        dir_ino: Inode,
+        offset: u64,
+    ) -> io::Result<Vec<(Entry, Stat)>> {
+        let this = self.clone();
+        spawn_blocking(move || this.readdirplus_blocking(dir_ino, offset)).await
+    }
+
     /// Read the target of a symbolic link.
     pub async fn readlink(&self, ino: Inode) -> io::Result<Option<Vec<u8>>> {
         let this = self.clone();
@@ -696,6 +715,27 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         dir_entries.sort_by_key(|e| e.offset);
         entries.extend(dir_entries);
         Ok(entries)
+    }
+
+    fn readdirplus_blocking(
+        &self,
+        dir_ino: Inode,
+        offset: u64,
+    ) -> io::Result<Vec<(Entry, Stat)>> {
+        let entries = self.readdir_blocking(dir_ino, offset)?;
+        let blksize = self.inner.blksize;
+        let mut out = Vec::with_capacity(entries.len());
+        for entry in entries {
+            // `read_inode_item_blocking` consults the inode cache
+            // first, so repeated `readdirplus` over the same dir
+            // pays at most one tree walk per inode across the
+            // working set.
+            if let Some(item) = self.read_inode_item_blocking(entry.ino)? {
+                let stat = Stat::from_inode(entry.ino, &item, blksize);
+                out.push((entry, stat));
+            }
+        }
+        Ok(out)
     }
 
     fn readlink_blocking(&self, ino: Inode) -> io::Result<Option<Vec<u8>>> {
