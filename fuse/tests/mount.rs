@@ -37,6 +37,41 @@ fn read_root_listing() {
     }
 }
 
+/// `large.bin` is a dense 100 KiB file (all `0x42`), so it has no
+/// holes. `SEEK_HOLE` from offset 0 should report the virtual hole
+/// at EOF (offset 100_000); `SEEK_DATA` from offset 0 should report
+/// 0 (the start of the file is data).
+#[test]
+fn lseek_seek_hole_data_on_dense_file() {
+    use std::os::fd::AsRawFd;
+
+    const SEEK_DATA: i32 = 3;
+    const SEEK_HOLE: i32 = 4;
+
+    let m = MountedFuse::mount();
+    let f = fs::File::open(m.path().join("large.bin")).expect("open large.bin");
+    let fd = f.as_raw_fd();
+
+    // SAFETY: fd is open and owned by `f` for the duration of these
+    // calls; SEEK_HOLE/SEEK_DATA are well-defined whence values on
+    // Linux.
+    let hole_off = unsafe { libc::lseek(fd, 0, SEEK_HOLE) };
+    assert_eq!(
+        hole_off, 100_000,
+        "SEEK_HOLE on a dense file should return file size",
+    );
+    let data_off = unsafe { libc::lseek(fd, 0, SEEK_DATA) };
+    assert_eq!(data_off, 0, "SEEK_DATA at offset 0 should return 0");
+
+    // SEEK_DATA past EOF must return -1 with errno = ENXIO.
+    let past_eof = unsafe { libc::lseek(fd, 200_000, SEEK_DATA) };
+    assert_eq!(past_eof, -1);
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ENXIO),
+    );
+}
+
 /// Walks the directory and inspects each entry's `metadata` (kind,
 /// size, link target). On a mount where `FUSE_DO_READDIRPLUS` is
 /// negotiated, this drives the kernel through our `readdirplus`

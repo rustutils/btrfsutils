@@ -17,6 +17,22 @@ All notable changes to this project will be documented in this file.
   both the inode and extent-map caches. Embedders that observe
   inode-level invalidation events can call this to release memory
   ahead of LRU eviction.
+- `btrfs-fs`: `Filesystem::seek_hole_data(ino, offset, whence)` mirrors
+  POSIX `lseek(SEEK_HOLE)` / `lseek(SEEK_DATA)` semantics. Walks the
+  cached `ExtentMap` to find the next hole/data transition, treating
+  both implicit (gaps with no `EXTENT_DATA` item) and explicit
+  (regular extent with `disk_bytenr == 0`) representations as holes.
+  Inline and prealloc extents are data. EOF is treated as a virtual
+  hole so `SEEK_HOLE` always succeeds within the file. Returns
+  `ENXIO` for `offset >= file_size`. New public `SeekHoleData` enum
+  wraps the whence value.
+- `btrfs-fuse`: `lseek` callback wired to `Filesystem::seek_hole_data`.
+  Translates the kernel's `SEEK_DATA` (3) / `SEEK_HOLE` (4) whence
+  values into the typed enum; other whences are rejected with
+  `EINVAL` (the kernel handles `SEEK_SET`/`CUR`/`END` in-kernel and
+  never forwards them to FUSE). Sparse-file-aware tools like
+  `tar --sparse`, `rsync --sparse`, and `cp --sparse` now work
+  correctly against the mount.
 - `btrfs-fs`: `Filesystem::readdirplus(dir, offset) -> Vec<(Entry, Stat)>`
   pairs each directory entry with its `Stat` so callers don't need
   a separate `getattr` per entry. Per-inode reads consult the

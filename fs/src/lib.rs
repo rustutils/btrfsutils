@@ -43,7 +43,8 @@ pub use btrfs_disk::{
 pub use cache::{CacheConfig, CacheStats, LruTreeBlockCache};
 pub use dir::{Entry, FileKind};
 pub use filesystem::{
-    Filesystem, Inode, SearchFilter, SearchItem, StatFs, SubvolId, SubvolInfo,
+    Filesystem, Inode, SearchFilter, SearchItem, SeekHoleData, StatFs,
+    SubvolId, SubvolInfo,
 };
 pub use stat::Stat;
 pub use uuid::Uuid;

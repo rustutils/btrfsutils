@@ -18,11 +18,11 @@ flate2 = { workspace = true }
 zstd = { workspace = true }
 lzokay = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
+libc = { workspace = true }
 lru = "0.18"
 uuid = { workspace = true }
 
 [dev-dependencies]
 btrfs-test-utils = { workspace = true }
 tempfile = { workspace = true }
-libc = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }

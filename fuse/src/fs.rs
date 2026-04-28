@@ -16,12 +16,14 @@ use crate::{
     ioctl::{self, IoctlOutcome},
 };
 use anyhow::{Context, Result};
-use btrfs_fs::{CacheConfig, FileKind, Filesystem, Inode, Stat, SubvolId};
+use btrfs_fs::{
+    CacheConfig, FileKind, Filesystem, Inode, SeekHoleData, Stat, SubvolId,
+};
 use fuser::{
     Errno, FileAttr, FileHandle, FileType, Filesystem as FuserFilesystem,
     Generation, INodeNo, InitFlags, IoctlFlags, KernelConfig, LockOwner,
     OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyDirectoryPlus,
-    ReplyEntry, ReplyIoctl, ReplyStatfs, ReplyXattr, Request,
+    ReplyEntry, ReplyIoctl, ReplyLseek, ReplyStatfs, ReplyXattr, Request,
 };
 use std::{ffi::OsStr, fs::File, io, os::unix::ffi::OsStrExt, time::Duration};
 use tokio::runtime::Runtime;
@@ -441,6 +443,66 @@ impl FuserFilesystem for BtrfsFuse {
         reply.statfs(
             s.blocks, s.bfree, s.bavail, 0, 0, s.bsize, s.namelen, s.frsize,
         );
+    }
+
+    /// `SEEK_HOLE` / `SEEK_DATA` support. The kernel only forwards
+    /// these whence values via `FUSE_LSEEK` — `SEEK_SET`,
+    /// `SEEK_CUR`, `SEEK_END` are handled in-kernel against the
+    /// file's current position and size, so we never see them here.
+    /// Other whence values get `EINVAL`.
+    fn lseek(
+        &self,
+        _req: &Request,
+        ino: INodeNo,
+        _fh: FileHandle,
+        offset: i64,
+        whence: i32,
+        reply: ReplyLseek,
+    ) {
+        let target = self.fuse_inode(ino.0);
+        let fuse_ino = ino.0;
+        let whence = match whence {
+            // libc::SEEK_DATA = 3, libc::SEEK_HOLE = 4 on Linux. We
+            // hardcode the values rather than depending on libc here
+            // since the integers are stable kernel ABI.
+            3 => SeekHoleData::Data,
+            4 => SeekHoleData::Hole,
+            _ => {
+                reply.error(Errno::EINVAL);
+                return;
+            }
+        };
+        let Ok(offset) = u64::try_from(offset) else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        let fs = self.fs.clone();
+        self.runtime.spawn(async move {
+            match fs.seek_hole_data(target, offset, whence).await {
+                Ok(pos) => {
+                    // Cap the response to i64::MAX since lseek
+                    // returns off_t (signed). File sizes that
+                    // exceed this are pathological and should fail.
+                    if let Ok(signed) = i64::try_from(pos) {
+                        reply.offset(signed);
+                    } else {
+                        reply.error(Errno::EOVERFLOW);
+                    }
+                }
+                Err(e) => {
+                    // ENXIO is the expected outcome for offset >=
+                    // file_size and for SEEK_DATA with no data
+                    // beyond the offset; don't spam logs for it.
+                    let raw = e.raw_os_error().unwrap_or(0);
+                    if raw != libc::ENXIO {
+                        log::warn!(
+                            "lseek ino={fuse_ino} offset={offset}: {e}",
+                        );
+                    }
+                    reply.error(Errno::from(e));
+                }
+            }
+        });
     }
 
     fn ioctl(

@@ -20,8 +20,8 @@ use crate::{
 };
 use btrfs_disk::{
     items::{
-        DeviceItem, DirItem, InodeExtref, InodeItem, InodeRef, RootItem,
-        RootItemFlags, RootRef,
+        DeviceItem, DirItem, FileExtentBody, InodeExtref, InodeItem, InodeRef,
+        RootItem, RootItemFlags, RootRef,
     },
     reader::{BlockReader, Traversal, filesystem_open, tree_walk},
     superblock::Superblock,
@@ -145,6 +145,20 @@ pub struct SearchItem {
     pub item_type: u32,
     pub offset: u64,
     pub data: Vec<u8>,
+}
+
+/// Whence value for [`Filesystem::seek_hole_data`]. Maps to the
+/// POSIX `SEEK_HOLE` / `SEEK_DATA` whence constants used by
+/// `lseek(2)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeekHoleData {
+    /// `SEEK_DATA`: return the offset of the start of the next data
+    /// region at or after the given offset.
+    Data,
+    /// `SEEK_HOLE`: return the offset of the start of the next hole
+    /// at or after the given offset. Always succeeds within the
+    /// file because EOF is treated as a virtual hole.
+    Hole,
 }
 
 /// Filesystem-wide statistics, returned by [`Filesystem::statfs`].
@@ -535,6 +549,36 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         spawn_blocking(move || this.read_blocking(ino, offset, size)).await
     }
 
+    /// Find the next hole or data region in `ino` at or after
+    /// `offset`. Mirrors `lseek(fd, offset, SEEK_HOLE)` /
+    /// `lseek(fd, offset, SEEK_DATA)` semantics.
+    ///
+    /// `SEEK_DATA` returns the offset of the next byte that is part
+    /// of a data region. Returns `Err(ENXIO)` if no data exists at
+    /// or after `offset` (e.g. `offset >= file_size`).
+    ///
+    /// `SEEK_HOLE` returns the offset of the next hole. EOF is
+    /// always considered a virtual hole, so this succeeds for any
+    /// `offset < file_size`. Returns `Err(ENXIO)` only when
+    /// `offset >= file_size`.
+    ///
+    /// Holes include both implicit (gaps with no `EXTENT_DATA` item)
+    /// and explicit (regular extent with `disk_bytenr == 0`)
+    /// representations. Inline and prealloc extents are treated as
+    /// data — matching kernel btrfs and POSIX convention.
+    pub async fn seek_hole_data(
+        &self,
+        ino: Inode,
+        offset: u64,
+        whence: SeekHoleData,
+    ) -> io::Result<u64> {
+        let this = self.clone();
+        spawn_blocking(move || {
+            this.seek_hole_data_blocking(ino, offset, whence)
+        })
+        .await
+    }
+
     /// List all xattr names for an inode.
     pub async fn xattr_list(&self, ino: Inode) -> io::Result<Vec<Vec<u8>>> {
         let this = self.clone();
@@ -780,6 +824,87 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             size,
             blksize,
         )
+    }
+
+    fn seek_hole_data_blocking(
+        &self,
+        ino: Inode,
+        offset: u64,
+        whence: SeekHoleData,
+    ) -> io::Result<u64> {
+        let item = self.read_inode_item_blocking(ino)?.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("inode {} not found", ino.ino),
+            )
+        })?;
+        let file_size = item.size;
+
+        // POSIX: any whence at or past EOF is ENXIO. Linux returns
+        // ENXIO for both SEEK_HOLE and SEEK_DATA in that case.
+        if offset >= file_size {
+            return Err(io::Error::from_raw_os_error(libc::ENXIO));
+        }
+
+        let tree_root = self.tree_root_for(ino.subvol)?;
+        let extent_map = self.extent_map_for(ino, tree_root)?;
+        let want_hole = matches!(whence, SeekHoleData::Hole);
+
+        // Walk records in file_pos order, classifying each region as
+        // data or hole. An implicit hole sits before any record whose
+        // file_pos > cursor; a regular extent with disk_bytenr == 0
+        // is an explicit hole; inline and prealloc count as data.
+        let mut cursor = 0u64;
+        for r in &extent_map.records {
+            // Implicit hole [cursor, r.file_pos).
+            if r.file_pos > cursor {
+                let hole_end = r.file_pos.min(file_size);
+                if hole_end > offset && want_hole {
+                    return Ok(offset.max(cursor));
+                }
+                cursor = hole_end;
+                if cursor >= file_size {
+                    break;
+                }
+            }
+            let body_len = match &r.item.body {
+                FileExtentBody::Inline { .. } => r.item.ram_bytes,
+                FileExtentBody::Regular { num_bytes, .. } => *num_bytes,
+            };
+            let r_start = r.file_pos.max(cursor);
+            let r_end = (r.file_pos + body_len).min(file_size);
+            if r_end <= r_start {
+                continue;
+            }
+            let r_is_hole = matches!(
+                &r.item.body,
+                FileExtentBody::Regular { disk_bytenr: 0, .. },
+            );
+            if r_end > offset && r_is_hole == want_hole {
+                return Ok(offset.max(r_start));
+            }
+            cursor = r_end;
+            if cursor >= file_size {
+                break;
+            }
+        }
+
+        // Past every record, the rest of the file (if any) is a
+        // trailing implicit hole. SEEK_HOLE additionally treats EOF
+        // itself as a virtual hole, so it always finds *something*
+        // for any offset within the file.
+        if want_hole {
+            if cursor < file_size && cursor > offset {
+                Ok(cursor)
+            } else if offset < file_size {
+                // No real hole found; report the virtual EOF hole.
+                Ok(file_size)
+            } else {
+                Err(io::Error::from_raw_os_error(libc::ENXIO))
+            }
+        } else {
+            Err(io::Error::from_raw_os_error(libc::ENXIO))
+        }
     }
 
     /// Build (or fetch from cache) the [`ExtentMap`] for `ino`.
