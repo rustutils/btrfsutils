@@ -327,7 +327,7 @@ PR review. This means every variable-size btrfs ioctl that needs
 retry to extend past the cmd-encoded 14-bit size is blocked at
 the kernel boundary today.
 
-Unblock options:
+Unblock options at the kernel layer:
 1. Get the kernel to relax the restriction (unlikely; security).
 2. Have the FUSE driver implement a CUSE-style init that opts the
    fd into `FUSE_IOCTL_UNRESTRICTED`. Requires plumbing CUSE_INIT
@@ -336,9 +336,104 @@ Unblock options:
 3. Skip fuser and roll our own FUSE protocol implementation that
    sets up the fd as unrestricted from the start.
 
-Until one of those lands, ioctl coverage in `btrfs-fuse` stops at
-"fits in 14-bit cmd-encoded size" — which is enough for the 8 we
-have, but is the natural ceiling for this layer.
+None of the kernel-layer fixes are pursuing this cycle; instead we
+route around the restriction at the userspace boundary — see F6.4.
+
+### F6.4 — uapi-level fallback for FUSE-restricted ioctls
+
+The kernel can't relax the retry restriction in our timeline, but
+we own both ends of the call: our `btrfs` CLI calls the broken
+ioctls through wrappers in `btrfs-uapi`, and our FUSE driver
+chooses what each ioctl returns. Pair the two so the round trip
+through libc → kernel → FUSE → uapi is self-healing.
+
+**Signal.** For each ioctl that needs retry but can't get it, the
+FUSE driver returns `ENOTSUP` (`EOPNOTSUPP`) up front instead of
+attempting `IoctlOutcome::Retry`. This is honest — we genuinely
+don't support the indirected form on this fd — and matches the
+kernel's idiom for "valid op, this endpoint can't do it"
+(`fallocate`, `FS_IOC_FIEMAP`, etc.). Distinct from `EIO` (real
+disk error) and `ENOTTY` (unknown ioctl number).
+
+**Fallback.** Each `btrfs-uapi` wrapper for a restricted-on-FUSE
+ioctl catches `ENOTSUP` from its first ioctl call and re-runs
+the operation through composition of v1-/fixed-size ioctls that
+the FUSE driver does support. The fallback path is a normal Rust
+function over the existing wrappers — no new ioctl interfaces.
+
+**Per-ioctl plan:**
+
+- `tree_search_v2(fd, filter, buf_size)` → on `ENOTSUP`, call
+  `tree_search` (v1) with the same filter. v1 paginates internally
+  with a 4 KiB buffer; semantics are identical, only slower.
+
+- `ino_paths(fd, inum)` → on `ENOTSUP`:
+  1. `lookup_path_rootid(fd)` to get the subvol id.
+  2. `tree_search` for `objectid=inum, type ∈ {INODE_REF=12,
+     INODE_EXTREF=13}`. For each ref extract `(parent_dirid,
+     name)` (`INODE_REF`'s parent is `key.offset`; `INODE_EXTREF`
+     stores it in the parsed struct).
+  3. For each parent: `BTRFS_IOC_INO_LOOKUP(parent)` → path
+     string (works on FUSE — fits in 4 KiB).
+  4. Concat `parent_path + "/" + name` per link.
+
+- `logical_ino` / `logical_ino_v2(fd, logical, ...)` → on
+  `ENOTSUP`:
+  1. `tree_search` on tree id 2 (extent tree) for
+     `objectid=logical, type ∈ {EXTENT_ITEM=168,
+     METADATA_ITEM=169}`.
+  2. Parse `EXTENT_ITEM` to enumerate inline backrefs
+     (`EXTENT_DATA_REF`, `SHARED_DATA_REF`).
+  3. Optionally walk standalone `EXTENT_DATA_REF_KEY=178` /
+     `SHARED_DATA_REF_KEY=184` keys for the same logical addr
+     when the inline backref pool is full.
+  4. For each `EXTENT_DATA_REF`, emit `(inum, offset, root)`.
+  5. `SHARED_DATA_REF` requires following the parent backref;
+     skipping initially is reasonable.
+  6. Needs an `ExtentItem` parser in `btrfs-disk` (likely a new
+     module).
+
+- `space_info` is the one read-side ioctl with no v1 fallback —
+  the chunk tree it summarises isn't reachable through any
+  fixed-size ioctl. Stays unsupported on FUSE for now; the user
+  can read the backing image directly via `btrfs-disk` if they
+  need this.
+
+**Optional widening.** Other FUSE-btrfs implementations (none
+exist today) wouldn't return `ENOTSUP` — the kernel rejects
+their retry response with `EIO` instead. If we ever care about
+that case, widen the fallback trigger to `ENOTSUP || EIO`,
+accepting that genuine disk errors on those specific ioctls would
+also trigger the fallback (low risk; the fallback would then
+itself fail).
+
+**Effect on the fuser dependency.** With F6.4 in place, our CLI
+never issues the broken ioctls against our FUSE mount, so our
+FUSE driver never needs `ReplyIoctl::retry`. The git pin on
+xfbs/fuser becomes unnecessary:
+
+- Drop the `tree_search_v2` retry handler from
+  `fuse/src/ioctl.rs` (no longer reachable from any consumer).
+- Drop the `arg: u64` parameter use everywhere — none of the
+  remaining handlers need it.
+- Switch `fuse/Cargo.toml` back to released `fuser = "0.17"`
+  from crates.io.
+- Drop the `allow-git` entry in `deny.toml`.
+- Re-enable `publish = true` on `btrfs-fuse`.
+
+**Test plan.** Each shim gets a uapi-level integration test that
+runs against our `btrfs-fuse` mount (currently fails with EIO;
+passes after the shim). A hidden env var
+`BTRFS_FORCE_FUSE_FALLBACK=1` lets the same test exercise the
+fallback path against a kernel mount, where it's the only path
+under test. Unit tests for the standalone parsers (extent-item
+backrefs in particular).
+
+**Recommended sequencing.** F6.4a: detection plumbing + `ENOTSUP`
+returns + `tree_search_v2` fallback (smallest, proves the
+pattern). F6.4b: `ino_paths` fallback (~50 lines). F6.4c:
+`logical_ino` fallback (~150 lines, needs extent-item backref
+parser; defer if not needed by any current CLI command).
 
 ### F6.3-historical (blocker resolved)
 
