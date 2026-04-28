@@ -1,4 +1,7 @@
-# btrfsutils
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/branding/banner-dark.svg">
+  <img alt="btrfsutils" src="docs/branding/banner-light.svg">
+</picture>
 
 An implementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs)
 utilities for creating, managing and inspecting btrfs filesystems, written in
