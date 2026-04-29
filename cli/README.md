@@ -33,17 +33,21 @@ Install the individual tools as separate binaries:
 cargo install btrfs-cli btrfs-mkfs btrfs-tune
 ```
 
-Or install a single `btrfs` binary with mkfs, tune, and multicall support:
+Or install a single `btrfs` binary with mkfs, tune, multicall, and
+fuse support:
 
 ```sh
-cargo install btrfs-cli --features mkfs,tune,multicall
+cargo install btrfs-cli --features mkfs,tune,multicall,fuse
 ```
 
-With the `mkfs` and `tune` features, `btrfs mkfs` and `btrfs tune` are
-available as subcommands. With the `multicall` feature, the binary also
-dispatches by program name: symlink or hardlink it to `mkfs.btrfs`,
-`btrfs-mkfs`, `btrfstune`, or `btrfs-tune` and it will behave as that
-tool directly.
+With the `mkfs`, `tune`, and `fuse` features, `btrfs mkfs`,
+`btrfs tune`, and `btrfs fuse` are available as subcommands. The
+`fuse` feature is opt-in (and not in the default set) because the
+FUSE driver is still experimental — see
+[`btrfs-fuse`](../fuse/README.md). With the `multicall` feature,
+the binary also dispatches by program name: symlink or hardlink it
+to `mkfs.btrfs`, `btrfs-mkfs`, `btrfstune`, or `btrfs-tune` and it
+will behave as that tool directly.
 
 ## What's implemented
 
@@ -58,12 +62,13 @@ tool directly.
 - **qgroup**: create, destroy, assign, remove, limit, show, clear-stale
 - **replace**: start, status, cancel
 - **scrub**: start, cancel, resume, status, limit
-- **send**: full and incremental, multi-subvolume, protocol v1/v2, --compressed-data, --no-data
+- **send**: full and incremental, multi-subvolume, protocol v1/v2, --compressed-data, --no-data, plus `--offline IMAGE` to generate a v1 send stream from an unmounted image with no privileges (tier 1: full sends only)
 - **receive**: v1/v2/v3 streams, encoded write with decompression fallback, --dump, --chroot
 - **rescue**: super-recover, zero-log, create-control-device, fix-device-size, fix-data-checksum, clear-uuid-tree, clear-space-cache (v1 and v2), clear-ino-cache
 - **restore**: file recovery from damaged/unmounted filesystems with metadata, xattrs, snapshots, compression, path filtering
 - **subvolume**: create, delete, snapshot, show, list, get-default, set-default, get-flags, set-flags, find-new, sync
 - **check**: read-only filesystem verification with 7 phases (superblock, tree structure, extent refs, chunk/block group, FS tree inodes, checksum tree, root refs)
+- **fuse** (opt-in `fuse` feature): mount a btrfs image or block device read-only via FUSE; mirrors the standalone `btrfs-fuse` binary's flag set
 
 ### Stubs (argument parsing only)
 
