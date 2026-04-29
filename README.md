@@ -89,6 +89,22 @@ This installation mode is useful in combination with building statically for
 `x86_64-unknown-linux-musl`, if you want a single portable binary to deploy to
 systems.
 
+### Pre-built packages
+
+`just package` produces release artifacts for `x86_64`, `aarch64`, and
+`riscv64gc` Linux musl targets:
+
+- `btrfsutils_<ver>_<arch>.deb` and `btrfsutils-<ver>-1.<arch>.rpm` —
+  install the multicall `btrfs` binary plus `mkfs.btrfs`, `btrfstune`,
+  `btrfs-mkfs`, `btrfs-tune` symlinks, man pages, and shell
+  completions
+- `btrfsutils-<arch>.tar.zst` — relocatable tarball with the binary,
+  symlinks, and docs
+- `btrfs-<arch>.zst` — bare zstd-compressed multicall binary
+
+Building requires `cargo-zigbuild`, `cargo-deb`, `cargo-generate-rpm`,
+and `zstd` on `PATH`. Output lands in `target/dist/`.
+
 ## Building
 
 Requires a Rust toolchain (edition 2024) and Linux kernel headers.

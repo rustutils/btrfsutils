@@ -115,6 +115,20 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Packaging: `just package` now cross-compiles statically-linked
+  release artifacts for `x86_64`, `aarch64`, and `riscv64gc` Linux
+  musl targets via `cargo-zigbuild`, then produces per-arch `.deb`
+  (via `cargo-deb`), `.rpm` (via `cargo-generate-rpm`), a
+  relocatable `.tar.zst` tarball, and a bare `.zst`-compressed
+  multicall binary. The packaged binary is built with
+  `--features mkfs,tune,fuse,multicall` so a single `btrfs`
+  binary covers all subcommands plus argv[0]-dispatched
+  `mkfs.btrfs` / `btrfstune` / `btrfs-mkfs` / `btrfs-tune`
+  symlinks. Replaces the previous nfpm-on-nix recipe; the nix
+  flake stays for the dev shell and `nix flake check`. Package
+  metadata moved into `[package.metadata.deb]` and
+  `[package.metadata.generate-rpm]` blocks in `cli/Cargo.toml`;
+  `nfpm.yaml` is removed.
 - `btrfs-uapi`: new `tree_search_auto` runs `BTRFS_IOC_TREE_SEARCH_V2`
   first and transparently falls back to `BTRFS_IOC_TREE_SEARCH` (v1)
   when the underlying driver doesn't support v2. Triggers on

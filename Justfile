@@ -119,19 +119,88 @@ check:
       cargo msrv verify --manifest-path "${member}/Cargo.toml"
     done
 
-# Build deb and rpm packages from the nix build output.
+# Cross-compile static musl release artifacts into target/dist/ for
+# every supported architecture. For each arch, produces:
+#   - btrfs-<arch>.zst         (raw multicall binary, zstd-compressed)
+#   - btrfsutils-<arch>.tar.zst (tarball: bin/btrfs + symlinks + docs)
+#   - btrfsutils_<ver>_<arch>.deb
+#   - btrfsutils-<ver>-1.<arch>.rpm
 #
-# Requires: nix, nfpm (available via `nix run nixpkgs#nfpm`)
+# Requires: cargo-zigbuild, cargo-deb, cargo-generate-rpm, zstd
 package:
     #!/usr/bin/env bash
     set -euo pipefail
-    nix build . -L
-    version=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[] | select(.name == "btrfs-cli") | .version')
-    mkdir -p target/package
-    VERSION="$version" nix run nixpkgs#nfpm -- package --packager deb --target target/package/
-    VERSION="$version" nix run nixpkgs#nfpm -- package --packager rpm --target target/package/
+
+    rm -rf target/dist
+    mkdir -p target/dist
+
+    # Generate man pages and shell completions once (arch-independent).
+    # The output goes to target/gen/ which is arch-shared; the just
+    # script copies it into target/<triple>/gen/ per arch so the
+    # cargo-deb / cargo-generate-rpm path substitution finds it.
+    cargo run --quiet --package btrfs-gen
+
+    for arch in x86_64 aarch64 riscv64gc; do
+      target="$arch-unknown-linux-musl"
+
+      # Build the multicall btrfs binary statically with all features.
+      cargo zigbuild \
+        --release \
+        --target "$target" \
+        --package btrfs-cli \
+        --features mkfs,tune,fuse,multicall
+
+      # Per-target symlinks dir for cargo-deb to scoop into /usr/bin/.
+      rm -rf "target/$target/symlinks"
+      mkdir -p "target/$target/symlinks"
+      for tool in mkfs.btrfs btrfs-mkfs btrfstune btrfs-tune; do
+        ln -s ./btrfs "target/$target/symlinks/$tool"
+      done
+
+      # Per-target gen/ dir so the cargo-deb `--target` path
+      # substitution (`target/release/` → `target/<triple>/release/`)
+      # resolves to a real path. cp instead of ln -s because cargo-deb
+      # follows symlinks but the assets list expects plain files.
+      rm -rf "target/$target/gen"
+      cp -r target/gen "target/$target/gen"
+
+      # .deb (cargo-deb takes the cargo crate name)
+      cargo deb \
+        --package btrfs-cli \
+        --target "$target" \
+        --no-build \
+        --output target/dist/
+
+      # .rpm (cargo-generate-rpm takes the manifest directory name,
+      # not the crate name — the two only line up by accident in
+      # most projects)
+      cargo generate-rpm \
+        --package cli \
+        --target "$target" \
+        --output target/dist/
+
+      # Standalone compressed binary.
+      cp "target/$target/release/btrfs" "target/dist/btrfs-$arch"
+      zstd --rm "target/dist/btrfs-$arch"
+
+      # Tarball: bin/btrfs + multicall symlinks + LICENSE + README +
+      # CHANGELOG. Staged into a per-arch directory so the tarball
+      # extracts cleanly into `btrfsutils-<arch>/`.
+      stage="target/dist/btrfsutils-$arch"
+      rm -rf "$stage"
+      mkdir -p "$stage/bin"
+      install -m 0755 "target/$target/release/btrfs" "$stage/bin/"
+      cp -P "target/$target/symlinks/"* "$stage/bin/"
+      install -m 0644 README.md "$stage/README.md"
+      install -m 0644 LICENSE.md "$stage/LICENSE.md"
+      install -m 0644 CHANGELOG.md "$stage/CHANGELOG.md"
+      tar -C target/dist -cf "target/dist/btrfsutils-$arch.tar" "btrfsutils-$arch"
+      rm -rf "$stage"
+      zstd --rm "target/dist/btrfsutils-$arch.tar"
+    done
+
     echo ""
-    ls -lh target/package/
+    ls -lh target/dist/
 
 branding:
   typst compile docs/branding/logo.typ docs/branding/logo.svg

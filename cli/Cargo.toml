@@ -61,3 +61,126 @@ multicall = []
 btrfs-test-utils = { workspace = true }
 insta = "1"
 tempfile = "3"
+
+# Debian package metadata. Consumed by `cargo deb` via `just package`,
+# which builds the binary statically with `cargo zigbuild` and the
+# `mkfs,tune,fuse,multicall` features enabled before invoking `cargo
+# deb --no-build`. Asset paths starting with `target/release/` are
+# rewritten to `target/<triple>/release/` when `--target` is passed.
+[package.metadata.deb]
+name = "btrfsutils"
+maintainer = "Patrick Elsen <pelsen@xfbs.net>"
+section = "admin"
+priority = "optional"
+depends = ""
+conflicts = "btrfs-progs"
+replaces = "btrfs-progs"
+provides = "btrfs-progs"
+extended-description = """
+A clean-room reimplementation of btrfs-progs in Rust. Ships the
+btrfs CLI as a single multicall binary with all inspection and
+management commands plus mkfs, tune, and an experimental userspace
+FUSE driver.
+"""
+assets = [
+  [
+    "target/release/btrfs",
+    "usr/bin/btrfs",
+    "0755",
+  ],
+  [
+    "target/release/../symlinks/*",
+    "usr/bin/",
+    "0755",
+  ],
+  [
+    "../README.md",
+    "usr/share/doc/btrfsutils/README",
+    "0644",
+  ],
+  [
+    "../LICENSE.md",
+    "usr/share/doc/btrfsutils/LICENSE",
+    "0644",
+  ],
+  [
+    "../CHANGELOG.md",
+    "usr/share/doc/btrfsutils/CHANGELOG",
+    "0644",
+  ],
+  [
+    "target/release/../gen/man/*.1",
+    "usr/share/man/man1/",
+    "0644",
+  ],
+  [
+    "target/release/../gen/completions/btrfs.bash",
+    "usr/share/bash-completion/completions/btrfs",
+    "0644",
+  ],
+  [
+    "target/release/../gen/completions/mkfs.btrfs.bash",
+    "usr/share/bash-completion/completions/mkfs.btrfs",
+    "0644",
+  ],
+  [
+    "target/release/../gen/completions/btrfs.fish",
+    "usr/share/fish/vendor_completions.d/btrfs.fish",
+    "0644",
+  ],
+  [
+    "target/release/../gen/completions/mkfs.btrfs.fish",
+    "usr/share/fish/vendor_completions.d/mkfs.btrfs.fish",
+    "0644",
+  ],
+  [
+    "target/release/../gen/completions/_btrfs",
+    "usr/share/zsh/vendor-completions/_btrfs",
+    "0644",
+  ],
+  [
+    "target/release/../gen/completions/_mkfs.btrfs",
+    "usr/share/zsh/vendor-completions/_mkfs.btrfs",
+    "0644",
+  ],
+]
+
+# RPM package metadata. cargo-generate-rpm does not support symlinks
+# in the assets array, so the multicall aliases (mkfs.btrfs etc.) are
+# created in post_install_script and removed in post_uninstall_script.
+[package.metadata.generate-rpm]
+name = "btrfsutils"
+license = "GPL-2.0-only"
+summary = "Rust reimplementation of the btrfs command-line tools"
+auto-req = "no"
+assets = [
+  { source = "target/release/btrfs", dest = "/usr/bin/btrfs", mode = "755" },
+  { source = "../README.md", dest = "/usr/share/doc/btrfsutils/README", mode = "644", doc = true },
+  { source = "../LICENSE.md", dest = "/usr/share/doc/btrfsutils/LICENSE", mode = "644", doc = true },
+  { source = "../CHANGELOG.md", dest = "/usr/share/doc/btrfsutils/CHANGELOG", mode = "644", doc = true },
+  { source = "target/release/../gen/man/*.1", dest = "/usr/share/man/man1/", mode = "644", doc = true },
+  { source = "target/release/../gen/completions/btrfs.bash", dest = "/usr/share/bash-completion/completions/btrfs", mode = "644" },
+  { source = "target/release/../gen/completions/mkfs.btrfs.bash", dest = "/usr/share/bash-completion/completions/mkfs.btrfs", mode = "644" },
+  { source = "target/release/../gen/completions/btrfs.fish", dest = "/usr/share/fish/vendor_completions.d/btrfs.fish", mode = "644" },
+  { source = "target/release/../gen/completions/mkfs.btrfs.fish", dest = "/usr/share/fish/vendor_completions.d/mkfs.btrfs.fish", mode = "644" },
+  { source = "target/release/../gen/completions/_btrfs", dest = "/usr/share/zsh/vendor-completions/_btrfs", mode = "644" },
+  { source = "target/release/../gen/completions/_mkfs.btrfs", dest = "/usr/share/zsh/vendor-completions/_mkfs.btrfs", mode = "644" },
+]
+post_install_script = """
+for t in mkfs.btrfs btrfs-mkfs btrfstune btrfs-tune; do
+    ln -sf btrfs /usr/bin/$t
+done
+"""
+post_uninstall_script = """
+if [ "$1" = 0 ]; then
+    for t in mkfs.btrfs btrfs-mkfs btrfstune btrfs-tune; do
+        rm -f /usr/bin/$t
+    done
+fi
+"""
+
+[package.metadata.generate-rpm.conflicts]
+"btrfs-progs" = "*"
+
+[package.metadata.generate-rpm.obsoletes]
+"btrfs-progs" = "*"
