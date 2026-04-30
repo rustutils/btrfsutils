@@ -115,6 +115,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `btrfs-fuse`: `fuse/src/run.rs` now delegates `--subvol PATH`
+  resolution to `Filesystem::resolve_subvol_path` instead of
+  reimplementing the subvolume-graph walk locally. Pure code dedup,
+  no behaviour change.
 - Packaging: `just package` now cross-compiles statically-linked
   release artifacts for `x86_64`, `aarch64`, and `riscv64gc` Linux
   musl targets via `cargo-zigbuild`, then produces per-arch `.deb`

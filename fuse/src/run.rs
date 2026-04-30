@@ -3,9 +3,9 @@
 
 use crate::{BtrfsFuse, args::MountArgs};
 use anyhow::{Context, Result, anyhow};
-use btrfs_fs::{CacheConfig, Filesystem, SubvolId, SubvolInfo};
+use btrfs_fs::{CacheConfig, Filesystem, SubvolId};
 use fuser::{Config, MountOption, SessionACL};
-use std::{collections::HashMap, fs::File, path::Path};
+use std::{fs::File, path::Path};
 
 /// Mount a btrfs image read-only via FUSE according to `args`.
 ///
@@ -73,74 +73,26 @@ pub fn run_mount(args: &MountArgs) -> Result<()> {
 }
 
 /// Resolve a slash-separated subvolume path (relative to the FS root)
-/// to its [`SubvolId`].
+/// to its [`SubvolId`] via [`Filesystem::resolve_subvol_path`].
 ///
-/// Opens the filesystem in a temporary capacity, calls
-/// [`Filesystem::list_subvolumes`], and matches the requested path
-/// against the full path each subvolume reaches by walking its
-/// parent chain. Empty path / `"/"` resolves to the default
-/// `FS_TREE`.
+/// Opens the image in a temporary capacity for the lookup; the FUSE
+/// mount itself reopens the file. (Collapsing to a single open would
+/// require threading a `Filesystem` into `BtrfsFuse::from_filesystem`
+/// — left as future work.)
 fn resolve_subvol_path(image: &Path, path: &str) -> Result<SubvolId> {
-    let trimmed = path.trim_matches('/');
-    if trimmed.is_empty() {
-        return Ok(SubvolId(5));
-    }
-
     let file = File::open(image)
         .with_context(|| format!("opening {}", image.display()))?;
     let fs = Filesystem::open(file)
         .context("bootstrapping btrfs filesystem to resolve --subvol")?;
 
-    // `list_subvolumes` is async; spin up a single-threaded runtime
-    // just for this lookup and tear it down afterwards.
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("creating temporary tokio runtime")?;
-    let subvols = runtime
-        .block_on(fs.list_subvolumes())
-        .context("listing subvolumes")?;
-
-    let by_id: HashMap<SubvolId, &SubvolInfo> =
-        subvols.iter().map(|s| (s.id, s)).collect();
-    let target = trimmed.as_bytes();
-    for s in &subvols {
-        if full_path_of(&by_id, s.id) == target {
-            return Ok(s.id);
-        }
-    }
-    Err(anyhow!(
-        "subvolume path {path:?} not found on {}",
-        image.display()
-    ))
-}
-
-/// Build the full path (slash-separated, no leading slash) for the
-/// subvolume `id` by walking its parent chain. The default `FS_TREE`
-/// has an empty path; user subvolumes accumulate `name` components
-/// from each ancestor.
-fn full_path_of(
-    by_id: &HashMap<SubvolId, &SubvolInfo>,
-    id: SubvolId,
-) -> Vec<u8> {
-    let mut components: Vec<Vec<u8>> = Vec::new();
-    let mut current = id;
-    while let Some(info) = by_id.get(&current) {
-        if !info.name.is_empty() {
-            components.push(info.name.clone());
-        }
-        match info.parent {
-            Some(parent) => current = parent,
-            None => break,
-        }
-    }
-    components.reverse();
-    let mut out: Vec<u8> = Vec::new();
-    for (i, c) in components.iter().enumerate() {
-        if i > 0 {
-            out.push(b'/');
-        }
-        out.extend_from_slice(c);
-    }
-    out
+    runtime
+        .block_on(fs.resolve_subvol_path(path))
+        .context("resolving subvolume path")?
+        .ok_or_else(|| {
+            anyhow!("subvolume path {path:?} not found on {}", image.display())
+        })
 }
