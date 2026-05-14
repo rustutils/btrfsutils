@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## v0.13.0
+## 0.13.0
 
 btrfsutils 0.13 is the read-side feature-completeness release: a new 
 `btrfs-fs` crate extracts the read-only filesystem API from `btrfs-fuse`
