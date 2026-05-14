@@ -1216,6 +1216,62 @@ fn property_list() {
     ]));
 }
 
+// ── reflink ──────────────────────────────────────────────────────────
+
+#[test]
+fn reflink_clone_whole_file() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "reflink",
+        "clone",
+        "/mnt/src.bin",
+        "/mnt/dst.bin"
+    ]));
+}
+
+#[test]
+fn reflink_clone_with_range() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "reflink",
+        "clone",
+        "-r",
+        "0:4096:8192",
+        "/mnt/src.bin",
+        "/mnt/dst.bin"
+    ]));
+}
+
+#[test]
+fn reflink_clone_multiple_ranges() {
+    insta::assert_debug_snapshot!(parse(&[
+        "btrfs",
+        "reflink",
+        "clone",
+        "-r",
+        "0:4k:0",
+        "-r",
+        "4k:4k:8k",
+        "/mnt/src.bin",
+        "/mnt/dst.bin"
+    ]));
+}
+
+#[test]
+fn reflink_clone_missing_target() {
+    insta::assert_snapshot!(parse_err(&[
+        "btrfs",
+        "reflink",
+        "clone",
+        "/mnt/src.bin"
+    ]));
+}
+
+#[test]
+fn reflink_clone_no_subcommand() {
+    insta::assert_snapshot!(parse_err(&["btrfs", "reflink"]));
+}
+
 // ── global options ───────────────────────────────────────────────────
 
 #[test]

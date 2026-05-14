@@ -73,6 +73,7 @@ pub mod inode;
 pub mod quota;
 #[allow(missing_docs)]
 pub mod raw;
+pub mod reflink;
 pub mod replace;
 pub mod scrub;
 pub mod send_receive;

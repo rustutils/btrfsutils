@@ -64,6 +64,7 @@ will behave as that tool directly.
 - **scrub**: start, cancel, resume, status, limit
 - **send**: full and incremental, multi-subvolume, protocol v1/v2, --compressed-data, --no-data, plus `--offline IMAGE` to generate a v1 send stream from an unmounted image with no privileges (tier 1: full sends only)
 - **receive**: v1/v2/v3 streams, encoded write with decompression fallback, --dump, --chroot
+- **reflink**: clone (lightweight file copy via `FICLONERANGE` — whole file or per-range, multiple `-r SRCOFF:LENGTH:DESTOFF` ranges in one invocation)
 - **rescue**: super-recover, zero-log, create-control-device, fix-device-size, fix-data-checksum, clear-uuid-tree, clear-space-cache (v1 and v2), clear-ino-cache
 - **restore**: file recovery from damaged/unmounted filesystems with metadata, xattrs, snapshots, compression, path filtering
 - **subvolume**: create, delete, snapshot, show, list, get-default, set-default, get-flags, set-flags, find-new, sync

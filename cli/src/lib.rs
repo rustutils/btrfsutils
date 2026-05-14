@@ -52,6 +52,7 @@ mod property;
 mod qgroup;
 mod quota;
 mod receive;
+mod reflink;
 mod replace;
 mod rescue;
 mod restore;
@@ -62,8 +63,8 @@ mod util;
 
 pub use crate::{
     balance::*, check::*, device::*, filesystem::*, inspect::*, property::*,
-    qgroup::*, quota::*, receive::*, replace::*, rescue::*, restore::*,
-    scrub::*, send::*, subvolume::*,
+    qgroup::*, quota::*, receive::*, reflink::*, replace::*, rescue::*,
+    restore::*, scrub::*, send::*, subvolume::*,
 };
 
 /// Output format for commands that support structured output.
@@ -222,6 +223,7 @@ pub enum Command {
     Qgroup(QgroupCommand),
     Quota(QuotaCommand),
     Receive(ReceiveCommand),
+    Reflink(ReflinkCommand),
     Replace(ReplaceCommand),
     Rescue(RescueCommand),
     Restore(RestoreCommand),
@@ -269,6 +271,7 @@ impl CommandGroup for Command {
             Command::Qgroup(cmd) => cmd,
             Command::Quota(cmd) => cmd,
             Command::Receive(cmd) => cmd,
+            Command::Reflink(cmd) => cmd,
             Command::Replace(cmd) => cmd,
             Command::Rescue(cmd) => cmd,
             Command::Restore(cmd) => cmd,

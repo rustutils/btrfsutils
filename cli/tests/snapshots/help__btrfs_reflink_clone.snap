@@ -1,0 +1,37 @@
+---
+source: cli/tests/help.rs
+expression: text
+---
+Lightweight file copy: data extents are shared between source and target instead
+of physically copied. Subsequent modifications are copy-on-write, so reading
+from the clone is fast and storage is only consumed once until the files
+diverge.
+
+With no -r flags, the entire source file is cloned to the target (which is
+created or truncated as needed). With one or more -r RANGESPEC flags, only those
+byte ranges are cloned into the target at the specified destination offsets and
+the existing target contents outside those ranges are preserved.
+
+RANGESPEC has three parts: SRCOFF:LENGTH:DESTOFF, where SRCOFF is the byte
+offset in the source file, LENGTH is the number of bytes (0 = up to
+end-of-source), and DESTOFF is the byte offset in the target file. All three
+values accept the size suffix k/m/g/t/p/e (case-insensitive). Offsets and length
+must be block-aligned (typically 4 KiB) except when the source range reaches
+end-of-file.
+
+Usage: clone [OPTIONS] <SOURCE> <TARGET>
+
+Arguments:
+  <SOURCE>
+          Source file (read)
+
+  <TARGET>
+          Target file (created if missing, truncated when no -r is given)
+
+Options:
+  -r, --range <RANGESPEC>
+          Reflink only this range: SRCOFF:LENGTH:DESTOFF. May be specified more
+          than once; ranges are processed in order
+
+  -h, --help
+          Print help (see a summary with '-h')

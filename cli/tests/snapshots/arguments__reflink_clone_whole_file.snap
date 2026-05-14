@@ -1,0 +1,24 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse(&[\"btrfs\", \"reflink\", \"clone\", \"/mnt/src.bin\", \"/mnt/dst.bin\"])"
+---
+Arguments {
+    global: GlobalOptions {
+        verbose: 0,
+        quiet: false,
+        dry_run: false,
+        log: None,
+        format: None,
+    },
+    command: Reflink(
+        ReflinkCommand {
+            subcommand: Clone(
+                ReflinkCloneCommand {
+                    ranges: [],
+                    source: "/mnt/src.bin",
+                    target: "/mnt/dst.bin",
+                },
+            ),
+        },
+    ),
+}

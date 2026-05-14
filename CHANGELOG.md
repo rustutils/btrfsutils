@@ -6,6 +6,21 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `btrfs-cli`: `btrfs reflink clone [-r SRCOFF:LENGTH:DESTOFF]... SRC DST`
+  performs lightweight file copies via the kernel's `FICLONERANGE`
+  ioctl: the destination gains extent references to the source's data,
+  no bytes are copied, and subsequent modifications are copy-on-write.
+  Without `-r` the whole source file is cloned into the (created or
+  truncated) target; with one or more `-r` flags only the specified
+  ranges are cloned and the surrounding target bytes are preserved.
+  Each range component (SRCOFF, LENGTH, DESTOFF) accepts the
+  k/m/g/t/p/e size suffix. The C reference in btrfs-progs ships a
+  stub that always returns `EOPNOTSUPP`; ours actually clones.
+- `btrfs-uapi`: `reflink::clone_range(src, src_off, length, dst, dst_off)`
+  wraps `BTRFS_IOC_CLONE_RANGE` (same ioctl encoding as the standard
+  VFS `FICLONERANGE`). A `length` of zero means "from `src_off` to
+  end-of-source", per the kernel ABI.
+
 - `btrfs-cli`: `btrfs send --offline IMAGE [-f OUT]` generates a v1
   send stream from an unmounted btrfs image without touching the
   kernel `BTRFS_IOC_SEND` ioctl. Bypasses every constraint of the

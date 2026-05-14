@@ -25,6 +25,8 @@ Commands:
   qgroup      Manage quota groups
   quota       Manage filesystem quota settings
   receive     Receive subvolumes from a stream
+  reflink     Toolbox for reflink operations: lightweight file copies that share
+              data extents instead of copying bytes
   replace     Replace a device in the filesystem
   rescue      Toolbox for specific rescue operations
   restore     Try to restore files from a damaged filesystem (unmounted)

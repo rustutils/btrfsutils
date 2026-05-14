@@ -1,0 +1,6 @@
+---
+source: cli/tests/arguments.rs
+expression: "parse_err(&[\"btrfs\", \"reflink\", \"clone\", \"/mnt/src.bin\"])"
+---
+error: the following required arguments were not provided:
+  <TARGET>

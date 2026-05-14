@@ -3238,3 +3238,119 @@ fn rescue_fix_data_checksum_repair() {
         "expected clean rescan after repair, got: {rescan}"
     );
 }
+
+// ── reflink clone ───────────────────────────────────────────────────
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn reflink_clone_whole_file_round_trip() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path();
+    let src = mp.join("source.bin");
+    let dst = mp.join("target.bin");
+
+    // 256 KiB of deterministic data, well above the 4 KiB block size
+    // so the kernel takes the regular-extent reflink path.
+    write_test_data(mp, "source.bin", 256 * 1024);
+
+    btrfs_ok(&[
+        "reflink",
+        "clone",
+        src.to_str().unwrap(),
+        dst.to_str().unwrap(),
+    ]);
+
+    let original = fs::read(&src).unwrap();
+    let clone = fs::read(&dst).unwrap();
+    assert_eq!(original, clone, "clone should be byte-identical to source");
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn reflink_clone_range_preserves_surrounding_bytes() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path();
+    let src = mp.join("source.bin");
+    let dst = mp.join("target.bin");
+
+    write_test_data(mp, "source.bin", 256 * 1024);
+    // Target starts with a different, easy-to-recognise pattern so
+    // we can confirm the surrounding bytes survive the partial
+    // reflink.
+    fs::write(&dst, vec![0xAAu8; 256 * 1024]).unwrap();
+
+    // Clone the middle 64 KiB of source into the middle 64 KiB of
+    // target. Both offsets must be sector-aligned.
+    btrfs_ok(&[
+        "reflink",
+        "clone",
+        "-r",
+        "65536:65536:65536",
+        src.to_str().unwrap(),
+        dst.to_str().unwrap(),
+    ]);
+
+    let original = fs::read(&src).unwrap();
+    let target = fs::read(&dst).unwrap();
+    assert_eq!(target.len(), 256 * 1024, "target size should be unchanged");
+
+    // Bytes 0..65536 still the original 0xAA filler.
+    assert!(
+        target[..65536].iter().all(|b| *b == 0xAA),
+        "leading bytes should be untouched"
+    );
+    // Bytes 65536..131072 should now match source's middle range.
+    assert_eq!(
+        &target[65536..131072],
+        &original[65536..131072],
+        "cloned range should match source"
+    );
+    // Trailing 0xAA bytes preserved.
+    assert!(
+        target[131072..].iter().all(|b| *b == 0xAA),
+        "trailing bytes should be untouched"
+    );
+}
+
+#[test]
+#[ignore = "requires elevated privileges"]
+fn reflink_clone_multiple_ranges_each_applied() {
+    let (_td, mnt) = single_mount();
+    let mp = mnt.path();
+    let src = mp.join("source.bin");
+    let dst = mp.join("target.bin");
+
+    write_test_data(mp, "source.bin", 256 * 1024);
+    fs::write(&dst, vec![0x55u8; 256 * 1024]).unwrap();
+
+    // Two disjoint ranges, the second one a different size mapping
+    // to a non-aligned-with-source destination.
+    btrfs_ok(&[
+        "reflink",
+        "clone",
+        "-r",
+        "0:4096:0",
+        "-r",
+        "8192:8192:16384",
+        src.to_str().unwrap(),
+        dst.to_str().unwrap(),
+    ]);
+
+    let original = fs::read(&src).unwrap();
+    let target = fs::read(&dst).unwrap();
+
+    assert_eq!(&target[..4096], &original[..4096], "first range mismatch");
+    assert!(
+        target[4096..16384].iter().all(|b| *b == 0x55),
+        "gap between ranges should be untouched"
+    );
+    assert_eq!(
+        &target[16384..24576],
+        &original[8192..16384],
+        "second range mismatch"
+    );
+    assert!(
+        target[24576..].iter().all(|b| *b == 0x55),
+        "trailing bytes should be untouched"
+    );
+}
