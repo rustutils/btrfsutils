@@ -455,12 +455,11 @@ where
     // matching the legacy walker's policy. Each --subvol arg gets a
     // unique tree id; the path-to-id mapping drives boundary
     // detection in the per-tree walker.
-    let mut next_subvol_id = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID);
+    let first_subvol_id = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID);
     let mut subvol_id_map: HashMap<PathBuf, (u64, SubvolType)> = HashMap::new();
-    for arg in subvol_args {
-        subvol_id_map
-            .insert(arg.path.clone(), (next_subvol_id, arg.subvol_type));
-        next_subvol_id += 1;
+    for (offset, arg) in subvol_args.iter().enumerate() {
+        let id = first_subvol_id + offset as u64;
+        subvol_id_map.insert(arg.path.clone(), (id, arg.subvol_type));
     }
 
     // Build the path → (nodatacow, nodatasum) lookup the legacy

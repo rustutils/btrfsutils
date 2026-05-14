@@ -549,7 +549,7 @@ impl ExtentBuffer {
 
         for i in 0..nritems {
             if self.key_ptr_blockptr(i) == 0 {
-                return Err(format!("check_node: slot {i} has blockptr 0",));
+                return Err(format!("check_node: slot {i} has blockptr 0"));
             }
         }
 

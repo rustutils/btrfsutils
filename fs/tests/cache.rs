@@ -6,7 +6,6 @@
 //!    re-uses tree blocks fetched by the first).
 
 use btrfs_fs::{Filesystem, LruTreeBlockCache};
-use btrfs_test_utils;
 use std::{
     fs::{self, File},
     path::{Path, PathBuf},

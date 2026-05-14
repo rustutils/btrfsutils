@@ -1625,10 +1625,7 @@ fn read_fst_extents(
     )
     .unwrap();
     let mut out = Vec::new();
-    loop {
-        let Some(leaf) = path.nodes[0].as_ref() else {
-            break;
-        };
+    while let Some(leaf) = path.nodes[0].as_ref() {
         let slot = path.slots[0];
         if slot >= leaf.nritems() as usize {
             if !search::next_leaf(fs, &mut path).unwrap() {
@@ -2389,10 +2386,7 @@ fn walk_tree_items(
         false,
     )
     .unwrap();
-    loop {
-        let Some(leaf) = path.nodes[0].as_ref() else {
-            break;
-        };
+    while let Some(leaf) = path.nodes[0].as_ref() {
         let slot = path.slots[0];
         if slot >= leaf.nritems() as usize {
             if !search::next_leaf(fs, &mut path).unwrap() {

@@ -212,8 +212,7 @@ fn compute_overall(
     };
 
     let free_statfs = nix::sys::statfs::statfs(path)
-        .map(|st| st.blocks_available() * st.block_size() as u64)
-        .unwrap_or(0);
+        .map_or(0, |st| st.blocks_available() * st.block_size() as u64);
 
     let multiple = has_multiple_profiles(spaces);
 

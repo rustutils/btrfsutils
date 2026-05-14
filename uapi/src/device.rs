@@ -479,7 +479,7 @@ pub fn compute_min_size(dev_extents: &[(u64, u64)]) -> u64 {
     }
 
     // Sort extents by descending end offset for the adjustment pass.
-    extents.sort_by(|a, b| b.end.cmp(&a.end));
+    extents.sort_by_key(|e| std::cmp::Reverse(e.end));
 
     adjust_min_size(&mut extents, &mut holes, &mut min_size);
 

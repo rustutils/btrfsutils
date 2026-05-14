@@ -8,21 +8,21 @@ pub fn print_report(
     scan: &ScanResult,
     result: &ReconstructionResult,
 ) {
-    println!("Chunk recovery scan for {}", device.display(),);
+    println!("Chunk recovery scan for {}", device.display());
     println!();
 
     // Phase 1 stats.
     println!("Phase 1: raw device scan");
-    println!("  Device size:          {}", human_bytes(scan.device_size),);
+    println!("  Device size:          {}", human_bytes(scan.device_size));
     println!(
         "  Bytes scanned:        {}",
         human_bytes(scan.bytes_scanned),
     );
-    println!("  Candidates checked:   {}", scan.candidates_checked,);
-    println!("  Valid tree blocks:     {}", scan.valid_blocks,);
-    println!("  Chunk tree leaves:    {}", scan.chunk_tree_leaves,);
-    println!("  Chunk records found:  {}", scan.chunk_records.len(),);
-    println!("  Device records found: {}", scan.dev_records.len(),);
+    println!("  Candidates checked:   {}", scan.candidates_checked);
+    println!("  Valid tree blocks:     {}", scan.valid_blocks);
+    println!("  Chunk tree leaves:    {}", scan.chunk_tree_leaves);
+    println!("  Chunk records found:  {}", scan.chunk_records.len());
+    println!("  Device records found: {}", scan.dev_records.len());
     println!();
 
     // Phase 2 stats.
@@ -31,7 +31,7 @@ pub fn print_report(
     if result.conflicts.is_empty() {
         println!("  Conflicts resolved:   0");
     } else {
-        println!("  Conflicts resolved:   {}", result.conflicts.len(),);
+        println!("  Conflicts resolved:   {}", result.conflicts.len());
         for conflict in &result.conflicts {
             print_conflict(conflict);
         }
@@ -40,14 +40,14 @@ pub fn print_report(
     if result.warnings.is_empty() {
         println!("  Warnings:             0");
     } else {
-        println!("  Warnings:             {}", result.warnings.len(),);
+        println!("  Warnings:             {}", result.warnings.len());
         for warning in &result.warnings {
             print_warning(warning);
         }
     }
 
-    println!("  Recovered chunks:     {}", result.chunks.len(),);
-    println!("  Recovered devices:    {}", result.devices.len(),);
+    println!("  Recovered chunks:     {}", result.chunks.len());
+    println!("  Recovered devices:    {}", result.devices.len());
     println!();
 
     // Chunk table.

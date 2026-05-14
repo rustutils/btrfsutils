@@ -450,18 +450,18 @@ pub fn qgroup_list(fd: BorrowedFd) -> nix::Result<QgroupList> {
                 let entry = builders.entry(hdr.offset).or_default();
                 parse_limit(entry, data);
             }
-            t if t == BTRFS_QGROUP_RELATION_KEY => {
+            t if t == BTRFS_QGROUP_RELATION_KEY
                 // The kernel stores two entries per relation:
                 //   (child, RELATION_KEY, parent)
                 //   (parent, RELATION_KEY, child)
                 // Only process the canonical form where objectid > offset,
                 // i.e. parent > child.
-                if hdr.objectid > hdr.offset {
-                    let parent = hdr.objectid;
-                    let child = hdr.offset;
-                    builders.entry(child).or_default().parents.push(parent);
-                    builders.entry(parent).or_default().children.push(child);
-                }
+                && hdr.objectid > hdr.offset =>
+            {
+                let parent = hdr.objectid;
+                let child = hdr.offset;
+                builders.entry(child).or_default().parents.push(parent);
+                builders.entry(parent).or_default().children.push(child);
             }
             _ => {}
         }

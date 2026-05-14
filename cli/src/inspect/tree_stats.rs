@@ -91,11 +91,10 @@ fn print_stats(
     println!("\tTotal seeks: {}", stats.total_seeks);
     println!("\t\tForward seeks: {}", stats.forward_seeks);
     println!("\t\tBackward seeks: {}", stats.backward_seeks);
-    let avg_seek = if stats.total_seeks > 0 {
-        stats.total_seek_len / stats.total_seeks
-    } else {
-        0
-    };
+    let avg_seek = stats
+        .total_seek_len
+        .checked_div(stats.total_seeks)
+        .unwrap_or(0);
     println!("\t\tAvg seek len: {}", fmt_size(avg_seek, fmt));
 
     // When no seeks occurred, the C reference sets total_clusters=1, min=0.
@@ -103,11 +102,10 @@ fn print_stats(
         if stats.min_cluster_size == u64::MAX {
             (1u64, 0u64, stats.max_cluster_size, 0u64)
         } else {
-            let avg = if stats.total_clusters > 0 {
-                stats.total_cluster_size / stats.total_clusters
-            } else {
-                0
-            };
+            let avg = stats
+                .total_cluster_size
+                .checked_div(stats.total_clusters)
+                .unwrap_or(0);
             (
                 stats.total_clusters,
                 stats.min_cluster_size,
@@ -133,7 +131,7 @@ fn print_stats(
         } else {
             let child_count =
                 stats.node_counts.get(i - 1).copied().unwrap_or(0);
-            let fanout = if count > 0 { child_count / count } else { 0 };
+            let fanout = child_count.checked_div(count).unwrap_or(0);
             println!("\t\tOn level {i}: {count:8}  (avg fanout {fanout})");
         }
     }

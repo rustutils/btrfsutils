@@ -385,7 +385,7 @@ async fn tree_search_v1(
     let items = match fs.tree_search(filter, SEARCH_ARGS_V1_BUF).await {
         Ok(v) => v,
         Err(e) => {
-            log::warn!("ioctl TREE_SEARCH tree={} failed: {e}", filter.tree_id,);
+            log::warn!("ioctl TREE_SEARCH tree={} failed: {e}", filter.tree_id);
             return IoctlOutcome::Err(Errno::EIO);
         }
     };

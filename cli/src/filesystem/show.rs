@@ -123,11 +123,9 @@ impl FilesystemShowCommand {
                 format!("failed to get device info for '{mount}'")
             })?;
 
-            let used_bytes = space_info(fd)
-                .map(|entries| {
-                    entries.iter().map(|e| e.used_bytes).sum::<u64>()
-                })
-                .unwrap_or(0);
+            let used_bytes = space_info(fd).map_or(0, |entries| {
+                entries.iter().map(|e| e.used_bytes).sum::<u64>()
+            });
 
             entries.push(FsEntry {
                 label,

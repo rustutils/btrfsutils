@@ -2672,10 +2672,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
             false,
         )?;
 
-        loop {
-            let Some(leaf) = path.nodes[0].as_ref() else {
-                break;
-            };
+        while let Some(leaf) = path.nodes[0].as_ref() {
             let slot = path.slots[0];
             if slot >= leaf.nritems() as usize {
                 if !search::next_leaf(fs_info, &mut path)? {
@@ -3426,10 +3423,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
                 path.slots[0] -= 1;
             }
 
-            'walk: loop {
-                let Some(leaf) = path.nodes[0].as_ref() else {
-                    break;
-                };
+            'walk: while let Some(leaf) = path.nodes[0].as_ref() {
                 let nritems = leaf.nritems() as usize;
                 if path.slots[0] >= nritems {
                     if !search::next_leaf(fs_info, &mut path)? {

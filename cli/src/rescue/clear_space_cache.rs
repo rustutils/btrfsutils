@@ -151,10 +151,7 @@ fn read_v1_cache_entry<R: Read + Write + Seek>(
     )
     .context("failed to search root tree for v1 cache extents")?;
 
-    'walk: loop {
-        let Some(leaf) = path.nodes[0].as_ref() else {
-            break;
-        };
+    'walk: while let Some(leaf) = path.nodes[0].as_ref() {
         let nritems = leaf.nritems() as usize;
         if path.slots[0] >= nritems {
             if !search::next_leaf(fs, &mut path).context("next_leaf failed")? {

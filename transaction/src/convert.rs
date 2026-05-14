@@ -541,10 +541,7 @@ fn collect_block_group_items<R: Read + Write + Seek>(
         false,
     )?;
 
-    loop {
-        let Some(leaf) = path.nodes[0].as_ref() else {
-            break;
-        };
+    while let Some(leaf) = path.nodes[0].as_ref() {
         let slot = path.slots[0];
         if slot >= leaf.nritems() as usize {
             if !next_leaf(fs_info, &mut path)? {

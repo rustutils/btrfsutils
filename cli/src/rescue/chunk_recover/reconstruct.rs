@@ -51,7 +51,7 @@ fn dedup_dev_items(
 
     let mut result = Vec::with_capacity(by_devid.len());
     for (devid, mut group) in by_devid {
-        group.sort_by(|a, b| b.generation.cmp(&a.generation));
+        group.sort_by_key(|c| std::cmp::Reverse(c.generation));
 
         if group.len() > 1 {
             let best = group[0];

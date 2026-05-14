@@ -203,49 +203,43 @@ fn process_extent_item(
         }
 
         // Standalone backref items: add to the count of the current extent.
-        KeyType::TreeBlockRef => {
-            if key.objectid == state.pending_bytenr {
-                state.pending_counted += 1;
-                // key.offset is the root objectid for standalone TreeBlockRef.
-                state
-                    .extent_backref_owners
-                    .entry(key.objectid)
-                    .or_default()
-                    .push(key.offset);
-            }
+        KeyType::TreeBlockRef if key.objectid == state.pending_bytenr => {
+            state.pending_counted += 1;
+            // key.offset is the root objectid for standalone TreeBlockRef.
+            state
+                .extent_backref_owners
+                .entry(key.objectid)
+                .or_default()
+                .push(key.offset);
         }
-        KeyType::SharedBlockRef | KeyType::ExtentOwnerRef => {
-            if key.objectid == state.pending_bytenr {
+        KeyType::SharedBlockRef | KeyType::ExtentOwnerRef
+            if key.objectid == state.pending_bytenr =>
+        {
+            state.pending_counted += 1;
+        }
+
+        KeyType::ExtentDataRef if key.objectid == state.pending_bytenr => {
+            // ExtentDataRef has a count field inside.
+            if let ItemPayload::ExtentDataRef(edr) =
+                parse_item_payload(key, data)
+            {
+                state.pending_counted += u64::from(edr.count);
+                state.data_bytes_referenced +=
+                    state.pending_length * u64::from(edr.count);
+            } else {
                 state.pending_counted += 1;
             }
         }
 
-        KeyType::ExtentDataRef => {
-            if key.objectid == state.pending_bytenr {
-                // ExtentDataRef has a count field inside.
-                if let ItemPayload::ExtentDataRef(edr) =
-                    parse_item_payload(key, data)
-                {
-                    state.pending_counted += u64::from(edr.count);
-                    state.data_bytes_referenced +=
-                        state.pending_length * u64::from(edr.count);
-                } else {
-                    state.pending_counted += 1;
-                }
-            }
-        }
-
-        KeyType::SharedDataRef => {
-            if key.objectid == state.pending_bytenr {
-                if let ItemPayload::SharedDataRef(sdr) =
-                    parse_item_payload(key, data)
-                {
-                    state.pending_counted += u64::from(sdr.count);
-                    state.data_bytes_referenced +=
-                        state.pending_length * u64::from(sdr.count);
-                } else {
-                    state.pending_counted += 1;
-                }
+        KeyType::SharedDataRef if key.objectid == state.pending_bytenr => {
+            if let ItemPayload::SharedDataRef(sdr) =
+                parse_item_payload(key, data)
+            {
+                state.pending_counted += u64::from(sdr.count);
+                state.data_bytes_referenced +=
+                    state.pending_length * u64::from(sdr.count);
+            } else {
+                state.pending_counted += 1;
             }
         }
 

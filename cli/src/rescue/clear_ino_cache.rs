@@ -179,10 +179,7 @@ fn collect_fs_tree_ids<R: Read + Write + Seek>(
     .context("failed to walk root tree for ROOT_ITEMs")?;
 
     let mut ids: Vec<u64> = Vec::new();
-    loop {
-        let Some(leaf) = path.nodes[0].as_ref() else {
-            break;
-        };
+    while let Some(leaf) = path.nodes[0].as_ref() {
         let nritems = leaf.nritems() as usize;
         if path.slots[0] >= nritems {
             if !search::next_leaf(fs, &mut path).context("next_leaf failed")? {
@@ -243,10 +240,7 @@ fn collect_for_objectid<R: Read + Write + Seek>(
         format!("failed to search tree {tree_id} for objectid {objectid:#x}")
     })?;
 
-    loop {
-        let Some(leaf) = path.nodes[0].as_ref() else {
-            break;
-        };
+    while let Some(leaf) = path.nodes[0].as_ref() {
         let nritems = leaf.nritems() as usize;
         if path.slots[0] >= nritems {
             if !search::next_leaf(fs, &mut path).context("next_leaf failed")? {

@@ -17,7 +17,7 @@ test *ARGS:
     unset BTRFS_OUTPUT_FORMAT
 
     # Build first so the user sees compile progress/warnings on stderr.
-    cargo test --all-features -- {{ARGS}}
+    cargo test --all-features -- {{ ARGS }}
 
     # Then extract the binary paths from the JSON output.
     mapfile -t binaries < <(
@@ -39,7 +39,7 @@ test *ARGS:
     failed=0
     for binary in "${binaries[@]}"; do
         sudo --preserve-env=LLVM_PROFILE_FILE,INSTA_WORKSPACE_ROOT \
-            "$binary" --ignored --test-threads=1 {{ARGS}} || failed=1
+            "$binary" --ignored --test-threads=1 {{ ARGS }} || failed=1
     done
 
     # anything that we might write when running tests, change back to us.
@@ -88,7 +88,7 @@ check:
     cargo deny check
     taplo check
     RUSTDOCFLAGS="-Dwarnings" cargo doc --no-deps
-    cargo clippy --all-features -- -Dwarnings
+    cargo +stable clippy --all-features -- -Dwarnings
 
     # Detect the host arch and check both libc variants. The musl
     # variant needs `<arch>-linux-musl-gcc` because zstd-sys / lzo-sys
@@ -203,12 +203,12 @@ package:
     ls -lh target/dist/
 
 branding:
-  typst compile docs/branding/logo.typ docs/branding/logo.svg
-  typst compile docs/branding/logo.typ docs/branding/logo.png --ppi 300
-  typst compile docs/branding/banner.typ docs/branding/banner-dark.svg  --input theme=dark
-  typst compile docs/branding/banner.typ docs/branding/banner-dark.png  --input theme=dark  --ppi 300
-  typst compile docs/branding/banner.typ docs/branding/banner-light.svg --input theme=light
-  typst compile docs/branding/banner.typ docs/branding/banner-light.png --input theme=light --ppi 300
+    typst compile docs/branding/logo.typ docs/branding/logo.svg
+    typst compile docs/branding/logo.typ docs/branding/logo.png --ppi 300
+    typst compile docs/branding/banner.typ docs/branding/banner-dark.svg  --input theme=dark
+    typst compile docs/branding/banner.typ docs/branding/banner-dark.png  --input theme=dark  --ppi 300
+    typst compile docs/branding/banner.typ docs/branding/banner-light.svg --input theme=light
+    typst compile docs/branding/banner.typ docs/branding/banner-light.png --input theme=light --ppi 300
 
 alias fmt := format
 alias lint := check
