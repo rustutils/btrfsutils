@@ -20,7 +20,6 @@ All notable changes to this project will be documented in this file.
   wraps `BTRFS_IOC_CLONE_RANGE` (same ioctl encoding as the standard
   VFS `FICLONERANGE`). A `length` of zero means "from `src_off` to
   end-of-source", per the kernel ABI.
-
 - `btrfs-cli`: `btrfs send --offline IMAGE [-f OUT]` generates a v1
   send stream from an unmounted btrfs image without touching the
   kernel `BTRFS_IOC_SEND` ioctl. Bypasses every constraint of the
@@ -35,8 +34,7 @@ All notable changes to this project will be documented in this file.
   walks the subvolume graph and resolves a slash-separated path
   (relative to the FS root) to its tree id. Empty path / `"/"`
   resolves to the default `FS_TREE`. Used by `btrfs send --offline`
-  and slated to replace the duplicated logic in `btrfs-fuse`'s
-  `--subvol` handling.
+  and by `btrfs-fuse`'s `--subvol` flag.
 - `btrfs-fs`: `Filesystem::send(snapshot, output) -> Result<output>`
   generates a v1 send stream describing the snapshot and writes it
   to any `Write` (typically a pipe to `btrfs receive` or a backup
@@ -50,7 +48,6 @@ All notable changes to this project will be documented in this file.
   crossings are skipped — caller invokes `send` per subvolume.
   Output is decompressed (compression passthrough lands in tier 3
   alongside v2 `EncodedWrite`).
-
 - `btrfs-stream`: `StreamWriter<W>` encodes `StreamCommand` values
   back into the on-the-wire TLV-framed format produced by kernel
   `btrfs send`. Mirror of `StreamReader`: every command variant
@@ -60,7 +57,6 @@ All notable changes to this project will be documented in this file.
   beyond the v1 64 KiB cap. CRC32C uses the same raw (init=0)
   variant the parser checks. Wire-format constants moved to a new
   `consts` module shared between encoder and parser.
-
 - `btrfs-cli`: `btrfs fuse <IMAGE> <MOUNTPOINT> [OPTIONS]` subcommand
   behind a new opt-in `fuse` cargo feature. Mirrors the standalone
   `btrfs-fuse` binary one-for-one, sharing the same argument struct
@@ -70,179 +66,21 @@ All notable changes to this project will be documented in this file.
   opt-in for now since the FUSE driver is still experimental — build
   with `cargo build --features fuse` (or `--all-features`) to
   include it.
-
-- `btrfs-fs`: `CacheConfig` struct and `Filesystem::open_with_caches`
-  / `Filesystem::open_subvol_with_caches` constructors that let
-  embedders override the default cache sizes (4096 tree blocks, 4096
-  inodes, 1024 extent maps). `CacheConfig::no_cache()` provides the
-  minimum-viable single-entry caches for benchmarking the cold path
-  or memory-constrained embedders. Existing `Filesystem::open` /
-  `Filesystem::open_subvol` continue to use the defaults.
-- `btrfs-fs`: `Filesystem::forget(Inode)` evicts a single inode from
-  both the inode and extent-map caches. Embedders that observe
-  inode-level invalidation events can call this to release memory
-  ahead of LRU eviction.
-- `btrfs-fs`: `Filesystem::seek_hole_data(ino, offset, whence)` mirrors
-  POSIX `lseek(SEEK_HOLE)` / `lseek(SEEK_DATA)` semantics. Walks the
-  cached `ExtentMap` to find the next hole/data transition, treating
-  both implicit (gaps with no `EXTENT_DATA` item) and explicit
-  (regular extent with `disk_bytenr == 0`) representations as holes.
-  Inline and prealloc extents are data. EOF is treated as a virtual
-  hole so `SEEK_HOLE` always succeeds within the file. Returns
-  `ENXIO` for `offset >= file_size`. New public `SeekHoleData` enum
-  wraps the whence value.
-- `btrfs-fuse`: `lseek` callback wired to `Filesystem::seek_hole_data`.
-  Translates the kernel's `SEEK_DATA` (3) / `SEEK_HOLE` (4) whence
-  values into the typed enum; other whences are rejected with
-  `EINVAL` (the kernel handles `SEEK_SET`/`CUR`/`END` in-kernel and
-  never forwards them to FUSE). Sparse-file-aware tools like
-  `tar --sparse`, `rsync --sparse`, and `cp --sparse` now work
-  correctly against the mount.
-- `btrfs-fs`: `Filesystem::readdirplus(dir, offset) -> Vec<(Entry, Stat)>`
-  pairs each directory entry with its `Stat` so callers don't need
-  a separate `getattr` per entry. Per-inode reads consult the
-  inode cache, so repeated calls over the same directory pay at
-  most one tree walk per inode across the working set.
-- `btrfs-fuse`: `readdirplus` callback wired through to
-  `Filesystem::readdirplus`, plus `FUSE_DO_READDIRPLUS` advertised
-  in `init`. The kernel now coalesces `readdir + lookup-per-entry`
-  into one round trip — major speedup for `ls -l`.
-- `btrfs-fuse`: `init` callback negotiates kernel capabilities at
-  mount time. Currently opts into `FUSE_DO_READDIRPLUS` (see
-  above), `FUSE_AUTO_INVAL_DATA` (kernel page-cache invalidation
-  when `getattr` reports changes), and `FUSE_SPLICE_READ` /
-  `FUSE_SPLICE_WRITE` (zero-copy data path).
-- `btrfs-fuse`: `forget` callback wired through to
-  `Filesystem::forget`. The default `batch_forget` impl in fuser
-  iterates over each `ForgetOne` and calls `forget`, so we don't
-  override `batch_forget` separately.
-- `btrfs-fuse`: `BtrfsFuse::open_with_caches` /
-  `BtrfsFuse::open_subvol_with_caches` constructors mirroring the
-  `btrfs-fs` additions.
-- `btrfs-fuse` CLI: `--cache-tree-blocks N` (default 4096),
-  `--cache-inodes N` (default 4096), `--cache-extent-maps N`
-  (default 1024), and `--no-default-permissions` to bypass the
-  kernel's per-file mode/uid/gid checks. Default behaviour now
-  enables the kernel `default_permissions` mount option so the FUSE
-  mount enforces stored ownership the way kernel btrfs does;
-  `--no-default-permissions` opts out for image-inspection scenarios
-  where stored UIDs don't match the local system.
-
-### Changed
-
-- `btrfs-fuse`: `fuse/src/run.rs` now delegates `--subvol PATH`
-  resolution to `Filesystem::resolve_subvol_path` instead of
-  reimplementing the subvolume-graph walk locally. Pure code dedup,
-  no behaviour change.
-- Packaging: `just package` now cross-compiles statically-linked
-  release artifacts for `x86_64`, `aarch64`, and `riscv64gc` Linux
-  musl targets via `cargo-zigbuild`, then produces per-arch `.deb`
-  (via `cargo-deb`), `.rpm` (via `cargo-generate-rpm`), a
-  relocatable `.tar.zst` tarball, and a bare `.zst`-compressed
-  multicall binary. The packaged binary is built with
-  `--features mkfs,tune,fuse,multicall` so a single `btrfs`
-  binary covers all subcommands plus argv[0]-dispatched
-  `mkfs.btrfs` / `btrfstune` / `btrfs-mkfs` / `btrfs-tune`
-  symlinks. Replaces the previous nfpm-on-nix recipe; the nix
-  flake stays for the dev shell and `nix flake check`. Package
-  metadata moved into `[package.metadata.deb]` and
-  `[package.metadata.generate-rpm]` blocks in `cli/Cargo.toml`;
-  `nfpm.yaml` is removed.
-- `btrfs-uapi`: new `tree_search_auto` runs `BTRFS_IOC_TREE_SEARCH_V2`
-  first and transparently falls back to `BTRFS_IOC_TREE_SEARCH` (v1)
-  when the underlying driver doesn't support v2. Triggers on
-  `ENOPROTOOPT` (our `btrfs-fuse` driver's signal — see below),
-  `ENOTSUP`/`EOPNOTSUPP`, and `ENOTTY`/`ENOSYS` (very old kernels
-  pre-dating v2). Fallback is only attempted when v2 errored before
-  invoking the user callback, so a transient mid-walk error can't
-  duplicate items.
-- `btrfs-fuse`: `BTRFS_IOC_TREE_SEARCH_V2` now returns `ENOPROTOOPT`
-  rather than attempting a `FUSE_IOCTL_RETRY` round-trip the kernel
-  won't honour for restricted ioctls. `tree_search_auto` in
-  `btrfs-uapi` recognises this signal and falls back to v1
-  transparently. `ENOPROTOOPT` was picked over `ENOTSUP` because
-  nothing else in the btrfs ioctl surface returns it, so it acts as
-  a private channel that can't be confused with generic
-  "unsupported op" errors. See `fs/PLAN.md` § F6.4.
-- `btrfs-fuse`: switched from the git pin on `xfbs/fuser` back to
-  `fuser = "0.17"` from crates.io. The patched `ReplyIoctl::retry`
-  API and the extra `arg: u64` parameter on `Filesystem::ioctl` are
-  no longer needed — F6.4's uapi-level fallback supplants the
-  kernel-side retry handshake. Companion changes: `publish = false`
-  removed from `fuse/Cargo.toml` so the crate can publish to
-  crates.io alongside the rest of the workspace, and the
-  corresponding `allow-git` entry in `deny.toml` is gone. The
-  `IoctlOutcome::Retry` variant is removed.
-
-### Added
-
 - `btrfs-fs`: new crate exposing a high-level read-only filesystem
   API on top of `btrfs-disk`: `Filesystem<R>` with `lookup`, `readdir`,
-  `read`, `readlink`, `getattr`, `xattr_get`/`xattr_list`, and
-  `statfs`. FUSE-independent — drives the `btrfs-fuse` mount and any
-  other embedder. Inodes are modelled as `(SubvolId, ino)` to leave
-  room for multi-subvolume traversal. The handle is `Clone` (cheap
+  `readdirplus`, `read`, `readlink`, `getattr`, `xattr_get` /
+  `xattr_list`, `statfs`, `seek_hole_data` (POSIX `SEEK_HOLE` /
+  `SEEK_DATA` over the cached extent map), `forget`, `tree_search`,
+  `dev_info`, `ino_lookup`, `ino_paths`, `list_subvolumes`,
+  `get_subvol_info`, `superblock`, and the `send` / `resolve_subvol_path`
+  helpers above. FUSE-independent — drives the `btrfs-fuse` mount
+  and any other embedder. Inodes are modelled as `(SubvolId, ino)`
+  so multi-subvolume traversal works. The handle is `Clone` (cheap
   `Arc` bump) and all operations are `async fn`, so multiple tokio
   tasks can drive the same filesystem concurrently. Sync I/O is
   wrapped in `tokio::task::spawn_blocking` so the runtime is never
-  blocked on disk reads. Future work (a native async I/O backend,
-  per-thread readers, lock-free cache hits) won't change the API.
-  `R: Read + Seek + Send + 'static` is the bound; for `File` and
-  `Cursor<Vec<u8>>` it's free.
-
-### Changed
-
-- `btrfs-fuse` shrinks to a thin `fuser::Filesystem` adapter on top
-  of `btrfs-fs`. The 19 read-path integration tests move with the
-  logic to `fs/tests/basic.rs`. The fuse public library API
-  (`BtrfsFuse::lookup_entry` and friends) is removed; new embedders
-  should depend on `btrfs-fs` directly. The `read.rs`, `xattr.rs`,
-  `dir.rs`, and `stat.rs` modules — and the dependencies on
-  `flate2`/`zstd`/`lzokay`/`btrfs-disk`/`libc` — are gone from
-  `fuse/`. The outer `Mutex<Filesystem<File>>` in `BtrfsFuse` is also
-  gone now that `Filesystem` is `&self`-callable.
-- `btrfs-fuse` carries an internal multi-thread tokio runtime. Each
-  FUSE callback spawns a task that owns the `Reply*` handle, awaits
-  the async filesystem op, and replies from the task — the FUSE
-  worker thread returns immediately, so concurrent FUSE callbacks
-  don't serialise on a single in-flight I/O.
-- `btrfs-fuse` integration tests: 10 unprivileged tests in
-  `fuse/tests/mount.rs` that spawn the `btrfs-fuse` binary, mount it
-  against a fixture image, and exercise the mounted filesystem
-  through ordinary POSIX calls (`std::fs`, `xattr` crate). Coverage:
-  mount/unmount lifecycle, root listing, file reads (small, large,
-  nested), `stat` (verifies the 1↔256 inode swap), readlink, xattr
-  get/list, and a 16-thread × 50-iteration concurrent-read stress
-  test that catches double-reply, dropped-reply, and deadlock bugs in
-  the spawn-task dispatch path. `MountedFuse` RAII guard handles
-  cleanup with lazy unmount so a panicked test doesn't wedge the
-  mountpoint.
-- `btrfs-disk`: pluggable tree-block cache via `TreeBlockCache`
-  trait. `BlockReader::read_tree_block` returns `Arc<TreeBlock>`,
-  consults the attached cache before disk, and populates on miss.
-  Trait is `Send + Sync` with `&self` methods (interior mutability)
-  so the cache is shareable across threads. `btrfs-disk` ships the
-  trait only — no LRU implementation, no extra deps; embedders
-  provide their own.
-- `btrfs-fs`: three-layer caching wired into `Filesystem`.
-  `LruTreeBlockCache` (the `TreeBlockCache` impl) plus inode and
-  per-inode extent-map caches. Default capacities: 4096 tree blocks
-  (~64 MiB), 4096 inodes, 1024 extent maps. `Filesystem::open`
-  builds and attaches the caches automatically.
-  `Filesystem::tree_block_cache_stats() -> CacheStats` exposes
-  hit/miss/insertion counters via lock-free atomics for tests,
-  benchmarks, and observability.
-
-### Changed
-
-- `btrfs-disk`: `BlockReader::read_tree_block` now returns
-  `Arc<TreeBlock>` instead of owning `TreeBlock`. Callers that
-  pattern-matched `match &block { ... }` need `match &*block`;
-  callers that consumed the block (e.g. `into_iter()`) borrow
-  instead (`iter()`). Internal `walk_stats` switched to
-  `&TreeBlock`. All ripple sites in `cli/`, `tune/`, `fs/`,
-  `mkfs/`, `transaction/`, and the integration tests updated.
-
+  blocked on disk reads. `R: Read + Seek + Send + 'static` is the
+  bound; for `File` and `Cursor<Vec<u8>>` it's free.
 - `btrfs-fs`: multi-subvolume traversal. `Filesystem::lookup` now
   detects subvolume crossings (a `DirItem` whose `location.key_type`
   is `ROOT_ITEM`) and returns an `Inode` carrying the new subvol id
@@ -250,115 +88,122 @@ All notable changes to this project will be documented in this file.
   follow into the new subvolume's tree automatically. `..` from a
   non-default subvolume root resolves via `ROOT_BACKREF` in the
   root tree, returning the directory in the parent subvolume that
-  contains the current one.
-- `btrfs-fs`: `Filesystem::list_subvolumes() -> Vec<SubvolInfo>`
-  walks the root tree and returns id, parent, name, ctime,
-  generation, and read-only flag for every subvolume (default
-  `FS_TREE` plus user subvolumes 256..LAST_FREE). System trees
-  (CSUM, UUID, BLOCK_GROUP, etc.) are filtered out.
-- `btrfs-fs`: `Filesystem::open_subvol(reader, SubvolId)` opens the
-  filesystem with a non-default subvolume as the
-  [`Filesystem::root`]. Validates the id is in the subvolume range
-  (errors `InvalidInput` otherwise) and that the tree exists in the
-  root tree (errors `NotFound` otherwise).
-- `btrfs-fs`: `Filesystem::default_subvol() -> SubvolId` getter for
-  embedders that need to know which subvolume `root()` points at.
-- `btrfs-fuse`: `--subvol PATH` and `--subvolid ID` CLI flags on the
-  `btrfs-fuse` binary mount the named subvolume as the FUSE root.
-  `--subvol PATH` resolves to a [`SubvolId`] by walking each
-  subvolume's parent chain to build a slash-separated full path,
-  matched against the user's argument. The two flags are mutually
-  exclusive; absent both, the default `FS_TREE` is used as before.
-  `BtrfsFuse::open_subvol(file, SubvolId)` is the new library entry
-  point.
-
-- `btrfs-fs`: `SubvolInfo` is now `#[non_exhaustive]` and gained
-  `dirid`, `otime`, `ctransid`, `otransid`, `uuid`, `parent_uuid`,
-  and `received_uuid` fields — everything `BTRFS_IOC_GET_SUBVOL_INFO`
-  needs. The default `FS_TREE` reports `dirid: 0` (no parent
-  directory).
-- `btrfs-fs`: `Filesystem::get_subvol_info(SubvolId)` returns
-  metadata for a single subvolume (filtered `list_subvolumes`).
-- `btrfs-fs`: `Filesystem::superblock() -> &Superblock` getter for
-  embedders/ioctl handlers that need format-level fields.
-  `Superblock` and `Uuid` are re-exported from the crate root.
-- `btrfs-fuse`: F6.1 ioctl plumbing. Implements the
-  `fuser::Filesystem::ioctl` callback and dispatches:
+  contains the current one. `Filesystem::open_subvol(reader, SubvolId)`
+  opens the filesystem with a non-default subvolume as the root,
+  `Filesystem::default_subvol() -> SubvolId` exposes which subvolume
+  `root()` points at, and `SubvolInfo` carries `dirid`, `otime`,
+  `ctransid`, `otransid`, `uuid`, `parent_uuid`, and `received_uuid`
+  — everything `BTRFS_IOC_GET_SUBVOL_INFO` needs.
+- `btrfs-fs`: `CacheConfig` struct and `Filesystem::open_with_caches`
+  / `Filesystem::open_subvol_with_caches` constructors that let
+  embedders override the default cache sizes (4096 tree blocks, 4096
+  inodes, 1024 extent maps). `CacheConfig::no_cache()` provides the
+  minimum-viable single-entry caches for benchmarking the cold path
+  or memory-constrained embedders. Existing `Filesystem::open` /
+  `Filesystem::open_subvol` continue to use the defaults.
+- `btrfs-disk`: pluggable tree-block cache via `TreeBlockCache`
+  trait. `BlockReader::read_tree_block` returns `Arc<TreeBlock>`,
+  consults the attached cache before disk, and populates on miss.
+  Trait is `Send + Sync` with `&self` methods (interior mutability)
+  so the cache is shareable across threads. `btrfs-disk` ships the
+  trait only — no LRU implementation, no extra deps; embedders
+  provide their own. `btrfs-fs` ships `LruTreeBlockCache` as the
+  default impl and exposes
+  `Filesystem::tree_block_cache_stats() -> CacheStats` (lock-free
+  hit/miss/insertion counters) for tests and benchmarks.
+- `btrfs-fuse`: btrfs ioctl support over the FUSE mount.
   `BTRFS_IOC_FS_INFO`, `BTRFS_IOC_GET_FEATURES`,
-  `BTRFS_IOC_GET_SUBVOL_INFO`. Each FUSE_IOCTL request runs in a
-  spawned tokio task that owns the `ReplyIoctl`, awaits the
-  filesystem call, and serialises the response into the kernel's
-  on-disk C struct layout (no bindgen types leak into the public
-  API). Unknown ioctls return `ENOTTY`. `fuse/src/ioctl.rs` re-derives
-  the ioctl numbers via const `_IOR` helpers since bindgen doesn't
-  expand the macro family.
-- `btrfs-fuse` now depends on a `fuser` git fork
-  ([xfbs/fuser PR](https://github.com/xfbs/fuser), pinned to commit
-  `37bfb7f`) carrying a `ReplyIoctl::retry(in_iovs, out_iovs)` API
-  plus a new `arg: u64` parameter on the `Filesystem::ioctl`
-  callback. This unblocks variable-size btrfs ioctls
-  (`TREE_SEARCH_V2`, `LOGICAL_INO_V2`, `INO_PATHS`,
-  `GET_SUBVOL_ROOTREF`) that exceed the 14-bit size field encoded
-  in the ioctl number. The git dep means `btrfs-fuse` is marked
-  `publish = false` until upstream merges and ships a release;
-  the other workspace crates publish normally because none depend
-  on `fuser`. `cargo deny`'s `allow-git` list explicitly permits
-  the fork URL.
-- `btrfs-fs`: `Filesystem::tree_search(filter, max_buf_size)`
-  walks any subvolume tree (or the root tree, id 1) and returns
-  matching items. Mirrors the kernel
-  `BTRFS_IOC_TREE_SEARCH_V2` semantics: items are returned where
-  the `(objectid, type, offset)` compound key falls in
-  `[min, max]` and the leaf generation falls in `[min_transid,
-  max_transid]`, capped by `max_items` and `max_buf_size`. New
-  public types `SearchFilter` and `SearchItem`.
-- `btrfs-fuse`: F6.3 lands `BTRFS_IOC_TREE_SEARCH` (v1, fixed
-  4096-byte struct, no retry needed) and `BTRFS_IOC_TREE_SEARCH_V2`
-  (variable-size, uses the new `ReplyIoctl::retry` API). Both
-  share parsing/serialisation helpers; v2's two-call protocol
-  reads `buf_size` from the initial 112-byte header, requests
-  retry covering `arg..arg + 112 + buf_size`, then writes the
-  populated key + items in the second call.
-- `btrfs-fuse`: `BTRFS_IOC_GET_SUBVOL_ROOTREF` (fixed 4096-byte
-  struct) on top of `Filesystem::tree_search`. Walks `ROOT_REF`
-  entries in the root tree where `objectid == current_subvol` and
-  `offset >= min_treeid`, emits up to 255 `(treeid, dirid)` pairs,
-  and updates `min_treeid` to the next id past the last entry so
-  callers can page through. Test verifies the multi-subvol fixture
-  reports its single child.
-- `btrfs-fs`: `Filesystem::ino_paths(subvol, objectid) -> Vec<Vec<u8>>`
-  resolves every path that names the given inode within its
-  subvolume — one entry per hardlink — by walking `INODE_REF` and
-  `INODE_EXTREF` and joining each parent's `ino_lookup` result with
-  the link name. Returns an empty vector for orphans.
+  `BTRFS_IOC_GET_SUBVOL_INFO`, `BTRFS_IOC_DEV_INFO`,
+  `BTRFS_IOC_INO_LOOKUP`, `BTRFS_IOC_TREE_SEARCH` (v1, fixed
+  4 KiB struct), `BTRFS_IOC_GET_SUBVOL_ROOTREF`, and
+  `BTRFS_IOC_TREE_SEARCH_V2` (returns `ENOPROTOOPT` so
+  `btrfs-uapi::tree_search_auto` transparently falls back to v1).
+  Each FUSE_IOCTL request runs in a spawned tokio task that owns
+  the `ReplyIoctl`, awaits the filesystem call, and serialises the
+  response into the kernel's C struct layout (no bindgen types
+  leak into the public API). Unknown ioctls return `ENOTTY`.
+- `btrfs-fuse`: `lseek` callback (POSIX `SEEK_HOLE` / `SEEK_DATA`),
+  `readdirplus` (kernel-side `readdir + lookup-per-entry`
+  coalescing — major speedup for `ls -l`), `init` (advertises
+  `FUSE_DO_READDIRPLUS`, `FUSE_AUTO_INVAL_DATA`,
+  `FUSE_SPLICE_READ`/`WRITE`), and `forget` (eager inode +
+  extent-map cache eviction) callbacks. `BtrfsFuse::open_with_caches`
+  / `BtrfsFuse::open_subvol_with_caches` constructors mirror the
+  `btrfs-fs` additions.
+- `btrfs-fuse` CLI: `--subvol PATH` / `--subvolid ID` mount a
+  specific subvolume as the FUSE root (mutually exclusive; absent
+  both, the default `FS_TREE` is used). `--cache-tree-blocks N`
+  (default 4096), `--cache-inodes N` (default 4096),
+  `--cache-extent-maps N` (default 1024), and
+  `--no-default-permissions` to bypass the kernel's per-file
+  mode/uid/gid checks. Default behaviour now enables the kernel
+  `default_permissions` mount option so the FUSE mount enforces
+  stored ownership the way kernel btrfs does;
+  `--no-default-permissions` opts out for image-inspection
+  scenarios where stored UIDs don't match the local system.
+- `btrfs-fuse` integration tests: 10 unprivileged tests in
+  `fuse/tests/mount.rs` that spawn the `btrfs-fuse` binary, mount
+  it against a fixture image, and exercise the mounted filesystem
+  through ordinary POSIX calls (`std::fs`, `xattr` crate).
+  Coverage: mount/unmount lifecycle, root listing, file reads
+  (small, large, nested), `stat` (verifies the 1↔256 inode swap),
+  readlink, xattr get/list, and a 16-thread × 50-iteration
+  concurrent-read stress test that catches double-reply,
+  dropped-reply, and deadlock bugs in the spawn-task dispatch path.
+  `MountedFuse` RAII guard handles cleanup with lazy unmount so a
+  panicked test doesn't wedge the mountpoint.
 
-### Known limitations
+### Changed
 
-- Variable-size btrfs ioctls (`BTRFS_IOC_TREE_SEARCH_V2`,
-  `BTRFS_IOC_INO_PATHS`, `BTRFS_IOC_LOGICAL_INO_V2`) cannot complete
-  over our FUSE mount: Linux's `fuse_do_ioctl` only honours a
-  `FUSE_IOCTL_RETRY` reply when the original request set
-  `FUSE_IOCTL_UNRESTRICTED`, which standard `ioctl(2)` callers never
-  do. The `TREE_SEARCH_V2` handler stays in-tree (it'd work for any
-  caller that opts in), but `INO_PATHS` and `LOGICAL_INO_V2` aren't
-  wired into dispatch since they would unconditionally fail. v1
-  `TREE_SEARCH` (4096-byte fixed struct) is what the upstream
-  `btrfs` CLI actually uses, so end-to-end coverage is intact for
-  that path. See `fs/PLAN.md` § F6.3 for unblock options.
-- `btrfs-fuse`: F6.2 (fixed-size subset). Two more ioctl handlers:
-  `BTRFS_IOC_DEV_INFO` (per-device geometry) and
-  `BTRFS_IOC_INO_LOOKUP` (objectid → path resolution by walking
-  the `INODE_REF` chain in the inode's subvolume tree).
-  `Filesystem::dev_info(devid)` and `Filesystem::ino_lookup(subvol,
-  objectid)` are the new public entry points. `DeviceItem` is
-  re-exported from `btrfs-fs`. Variable-size ioctls
-  (`TREE_SEARCH_V2`, `LOGICAL_INO_V2`, `INO_PATHS`,
-  `GET_SUBVOL_ROOTREF`) remain blocked on fuser 0.17 not exposing
-  `FUSE_IOCTL_RETRY` in its reply API — these all carry struct
-  buffers larger than the 14-bit size field encoded in the ioctl
-  number, so without retry support FUSE silently truncates them.
-  Will land after upstreaming the retry API to fuser, or by
-  forking.
+- Packaging: `just package` now cross-compiles statically-linked
+  release artifacts for `x86_64`, `aarch64`, and `riscv64gc` Linux
+  musl targets via `cargo-zigbuild`, then produces per-arch `.deb`
+  (via `cargo-deb`), `.rpm` (via `cargo-generate-rpm`), a
+  relocatable `.tar.zst` tarball, and a bare `.zst`-compressed
+  multicall binary. The packaged binary is built with
+  `--features mkfs,tune,fuse,multicall` so a single `btrfs` binary
+  covers all subcommands plus argv[0]-dispatched
+  `mkfs.btrfs` / `btrfstune` / `btrfs-mkfs` / `btrfs-tune`
+  symlinks. Replaces the previous nfpm-on-nix recipe; the nix
+  flake stays for the dev shell and `nix flake check`. Package
+  metadata moved into `[package.metadata.deb]` and
+  `[package.metadata.generate-rpm]` blocks in `cli/Cargo.toml`;
+  `nfpm.yaml` is removed.
+- CI: tagged builds run a new GitLab pipeline that lints, tests
+  (workspace minus `btrfs-fuse`, which hangs on shared runners),
+  packages via `just package`, and on a `vX.Y.Z` tag publishes a
+  GitLab release plus a mirrored GitHub release with every
+  artifact under `target/dist/` attached.
+- `btrfs-uapi`: new `tree_search_auto` runs `BTRFS_IOC_TREE_SEARCH_V2`
+  first and transparently falls back to `BTRFS_IOC_TREE_SEARCH` (v1)
+  when the underlying driver doesn't support v2. Triggers on
+  `ENOPROTOOPT` (our `btrfs-fuse` driver's signal), `ENOTSUP` /
+  `EOPNOTSUPP`, and `ENOTTY` / `ENOSYS` (very old kernels
+  pre-dating v2). Fallback is only attempted when v2 errored
+  before invoking the user callback, so a transient mid-walk error
+  can't duplicate items.
+- `btrfs-disk`: `BlockReader::read_tree_block` now returns
+  `Arc<TreeBlock>` instead of owning `TreeBlock`. Callers that
+  pattern-matched `match &block { ... }` need `match &*block`;
+  callers that consumed the block (e.g. `into_iter()`) borrow
+  instead (`iter()`). Internal `walk_stats` switched to
+  `&TreeBlock`. All ripple sites in `cli/`, `tune/`, `fs/`,
+  `mkfs/`, `transaction/`, and the integration tests updated.
+- `btrfs-fuse` shrinks to a thin `fuser::Filesystem` adapter on
+  top of `btrfs-fs`. The 19 read-path integration tests move with
+  the logic to `fs/tests/basic.rs`. The fuse public library API
+  (`BtrfsFuse::lookup_entry` and friends) is removed; new
+  embedders should depend on `btrfs-fs` directly. The `read.rs`,
+  `xattr.rs`, `dir.rs`, and `stat.rs` modules — and the
+  dependencies on `flate2` / `zstd` / `lzokay` / `btrfs-disk` /
+  `libc` — are gone from `fuse/`. The outer
+  `Mutex<Filesystem<File>>` in `BtrfsFuse` is also gone now that
+  `Filesystem` is `&self`-callable. `btrfs-fuse` carries an
+  internal multi-thread tokio runtime; each FUSE callback spawns a
+  task that owns the `Reply*` handle, awaits the async filesystem
+  op, and replies from the task — the FUSE worker thread returns
+  immediately, so concurrent FUSE callbacks don't serialise on a
+  single in-flight I/O.
 
 ### Fixed
 
@@ -368,23 +213,32 @@ All notable changes to this project will be documented in this file.
   open the right subvolume internally but every FUSE callback would
   ignore it and serve content from `FS_TREE` regardless. Surfaced
   by the new `--subvol` mount tests.
-
-### Fixed
-
 - `btrfs-fs`: zstd-compressed extents on multi-chunk files now
   decompress correctly. Btrfs splits each compressed extent into
   independent 128 KiB frames; `zstd::bulk::decompress` rejects
   trailing bytes after the first frame. Switched to the streaming
-  decoder (`zstd::stream::read::Decoder`) which handles concatenated
-  frames and trailing sector padding. Surfaced by the F4 compression
-  sweep — every zstd test on `pattern_16m.bin` was failing.
+  decoder (`zstd::stream::read::Decoder`) which handles
+  concatenated frames and trailing sector padding.
 - `btrfs-fs`: inline compressed extents now read correctly.
-  `inline_size` is the on-disk (compressed) payload length, but the
-  read range math was using it as the logical extent length, so any
-  read of a compressed inline extent returned a slice that was too
-  short. Fixed to clamp against `ram_bytes` (the uncompressed length)
-  instead. Surfaced by the F4 sweep on the inline file with all
-  three algorithms.
+  `inline_size` is the on-disk (compressed) payload length, but
+  the read range math was using it as the logical extent length,
+  so any read of a compressed inline extent returned a slice that
+  was too short. Fixed to clamp against `ram_bytes` (the
+  uncompressed length) instead.
+
+### Known limitations
+
+- Variable-size btrfs ioctls that need `FUSE_IOCTL_RETRY`
+  (`BTRFS_IOC_INO_PATHS`, `BTRFS_IOC_LOGICAL_INO_V2`,
+  `BTRFS_IOC_SPACE_INFO`, `BTRFS_IOC_ENCODED_READ`) cannot complete
+  over our FUSE mount: Linux's `fuse_do_ioctl` only honours a
+  retry reply when the original request set
+  `FUSE_IOCTL_UNRESTRICTED`, which standard `ioctl(2)` callers
+  never do. `BTRFS_IOC_TREE_SEARCH_V2` sidesteps the issue by
+  returning `ENOPROTOOPT`, which `btrfs-uapi::tree_search_auto`
+  catches and falls back to v1 transparently. The other
+  variable-size ioctls aren't wired into dispatch since they
+  would unconditionally fail.
 
 ## 0.12.0
 
