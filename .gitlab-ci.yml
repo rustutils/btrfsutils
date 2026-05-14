@@ -9,7 +9,7 @@
 #   release-github -> mirror release to github.com/rustutils/btrfsutils
 #   deploy   -> mdbook -> GitLab Pages (master only)
 #
-# Rust jobs run on rust:bookworm-slim (Debian + rustup); the toolchain
+# Rust jobs run on rust:slim-bookworm (Debian + rustup); the toolchain
 # pin in rust-toolchain.toml is picked up automatically on first
 # invocation. Debian rather than Alpine because bindgen needs to
 # dlopen libclang and musl rustc can't.
@@ -86,12 +86,12 @@ variables:
 # Base template for jobs that need a Rust toolchain. Debian (glibc)
 # rather than Alpine because bindgen needs to dlopen libclang at
 # build time and the Alpine musl rustc can't dlopen arbitrary shared
-# libs ("Dynamic loading not supported"). rust:bookworm-slim has
+# libs ("Dynamic loading not supported"). rust:slim-bookworm has
 # rustup already; we still override CARGO_HOME/RUSTUP_HOME into
 # $CI_PROJECT_DIR so the registry + per-pipeline toolchain land in
 # the cache scope.
 .rust:
-  image: rust:bookworm-slim
+  image: rust:slim-bookworm
   cache:
     - *cache-registry
   before_script:
