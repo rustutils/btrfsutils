@@ -135,7 +135,12 @@ test:
     # Unit tests only — integration tests (#[ignore]) need root for
     # loopback mount + privileged ioctls, which the shared runners
     # don't have. See TODO.md "job to run privileged tests".
-    - cargo test --workspace --all-features
+    #
+    # `btrfs-fuse` excluded because its tests spawn `btrfs-fuse` as
+    # a child and wait for the FUSE mount to surface — the FUSE-in-
+    # Docker interaction on the shared runners makes them hang.
+    # Runs locally via `cargo test -p btrfs-fuse`. See TODO.md.
+    - cargo test --workspace --all-features --exclude btrfs-fuse
     - sccache --show-stats || true
 
 package:

@@ -363,13 +363,6 @@ unsafe fn run_iowr_ioctl<P: AsRef<std::path::Path>>(
 }
 
 #[test]
-// Hangs on GitLab CI (x86_64 Debian) while passing locally
-// (aarch64 Fedora). Same 4096-byte _IOWR encoding as INO_LOOKUP /
-// GET_SUBVOL_ROOTREF which pass there, so the cause is environment-
-// specific (runner kernel? fusermount3 version?) rather than in
-// our handler. Skipped in CI until investigated; runnable locally
-// via `cargo test --ignored`.
-#[ignore = "hangs on GitLab CI runners — pending investigation"]
 fn ioctl_dev_info_for_devid_one_returns_uuid_and_sizes() {
     let m = MountedFuse::mount();
     // Build a 4096-byte input where devid=1 and uuid is left zero.
@@ -391,7 +384,6 @@ fn ioctl_dev_info_for_devid_one_returns_uuid_and_sizes() {
 }
 
 #[test]
-#[ignore = "hangs on GitLab CI runners — pending investigation"]
 fn ioctl_dev_info_unknown_devid_returns_enodev() {
     let m = MountedFuse::mount();
     let mut input = vec![0u8; 4096];
