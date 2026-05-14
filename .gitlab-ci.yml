@@ -9,8 +9,10 @@
 #   release-github -> mirror release to github.com/rustutils/btrfsutils
 #   deploy   -> mdbook -> GitLab Pages (master only)
 #
-# Rust jobs run on Alpine + rustup; the toolchain pin in
-# rust-toolchain.toml is picked up automatically on first invocation.
+# Rust jobs run on rust:bookworm-slim (Debian + rustup); the toolchain
+# pin in rust-toolchain.toml is picked up automatically on first
+# invocation. Debian rather than Alpine because bindgen needs to
+# dlopen libclang and musl rustc can't.
 
 stages:
   - lint
@@ -42,6 +44,10 @@ variables:
   # `cargo install --version` is a no-op when the cached install matches.
   CARGO_DEB_VERSION: "3.6.4"
   CARGO_GENERATE_RPM_VERSION: "0.20.0"
+  CARGO_ZIGBUILD_VERSION: "0.20.0"
+  # Bookworm's `zig` package is 0.10 (too old for cargo-zigbuild,
+  # which needs >=0.11); we download the upstream tarball instead.
+  ZIG_VERSION: "0.13.0"
   ALPINE_VERSION: "3.23"
 
 # Cache definitions, split by invalidation cadence. Composed per-job
@@ -77,17 +83,20 @@ variables:
         - .cargo/.crates.toml
         - .cargo/.crates2.json
 
-# Base template for jobs that need a Rust toolchain. Pulls stable
-# from rust-toolchain.toml + nightly for rustfmt (matches `just fmt`),
-# plus libclang for bindgen (uapi crate parses the kernel UAPI headers)
-# and linux-headers for the same.
+# Base template for jobs that need a Rust toolchain. Debian (glibc)
+# rather than Alpine because bindgen needs to dlopen libclang at
+# build time and the Alpine musl rustc can't dlopen arbitrary shared
+# libs ("Dynamic loading not supported"). rust:bookworm-slim has
+# rustup already; we still override CARGO_HOME/RUSTUP_HOME into
+# $CI_PROJECT_DIR so the registry + per-pipeline toolchain land in
+# the cache scope.
 .rust:
-  image: alpine:$ALPINE_VERSION
+  image: rust:bookworm-slim
   cache:
     - *cache-registry
   before_script:
-    - apk add --no-cache build-base bash git rustup sccache clang-dev linux-headers
-    - rustup-init -y --default-toolchain none --no-modify-path
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends git ca-certificates libclang-dev clang sccache
     - export PATH="$CARGO_HOME/bin:$PATH"
     # Read-only sccache fallback when the protected AWS credentials
     # are absent (i.e. on unprotected branches). NO_CREDENTIALS forces
@@ -95,7 +104,6 @@ variables:
     # silently fail. On protected refs, AWS_ACCESS_KEY_ID is set and
     # we leave it unset so sccache uses the credentials normally.
     - if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then export SCCACHE_S3_NO_CREDENTIALS=true; fi
-    - export LIBCLANG_PATH=/usr/lib
     - rustup show
 
 lint:
@@ -139,10 +147,20 @@ package:
       allow_failure: true
   before_script:
     - !reference [.rust, before_script]
-    - apk add --no-cache zig zstd just cargo-zigbuild
+    - apt-get install -y --no-install-recommends zstd just curl xz-utils
+    # Bookworm ships an older Zig; pull the upstream tarball for the
+    # version cargo-zigbuild expects.
+    - curl -sL "https://ziglang.org/download/$ZIG_VERSION/zig-linux-x86_64-$ZIG_VERSION.tar.xz" | tar xJ -C /opt
+    - export PATH="/opt/zig-linux-x86_64-$ZIG_VERSION:$PATH"
+    - cargo install --locked --version "$CARGO_ZIGBUILD_VERSION" cargo-zigbuild
     - cargo install --locked --version "$CARGO_DEB_VERSION" cargo-deb
     - cargo install --locked --version "$CARGO_GENERATE_RPM_VERSION" cargo-generate-rpm
+    # Ensure the rust-toolchain.toml channel has the musl targets the
+    # package script asks for (zigbuild adds the linker, cargo still
+    # needs the std crate for each target).
+    - rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl riscv64gc-unknown-linux-musl
   script:
+    - export PATH="/opt/zig-linux-x86_64-$ZIG_VERSION:$PATH"
     - just package
     - sccache --show-stats || true
   artifacts:
