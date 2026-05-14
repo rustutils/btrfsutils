@@ -506,9 +506,11 @@ fn parse_backup_root(r: &raw::btrfs_root_backup) -> BackupRoot {
 }
 
 fn parse_label(raw_label: &[std::os::raw::c_char; 256]) -> String {
-    // c_char is u8 on aarch64 Linux but i8 on x86_64; the cast is needed
-    // on the latter, so suppress the lint on platforms where it is a no-op.
-    #[allow(clippy::unnecessary_cast)]
+    // c_char is u8 on aarch64 Linux but i8 on x86_64. On aarch64 the
+    // cast is a no-op (unnecessary_cast); on x86_64 it's i8 → u8 which
+    // tickles cast_sign_loss. Silence both so the code compiles cleanly
+    // on either host.
+    #[allow(clippy::unnecessary_cast, clippy::cast_sign_loss)]
     let bytes: Vec<u8> = raw_label
         .iter()
         .take_while(|&&c| c != 0)
