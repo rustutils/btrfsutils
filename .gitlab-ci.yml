@@ -52,7 +52,7 @@ variables:
   # config and errors out as "cache type is not enabled" against the
   # rustutils-group bucket variables. Pull the upstream musl-static
   # release tarball — works fine on glibc Debian.
-  SCCACHE_VERSION: "0.14.2"
+  SCCACHE_VERSION: "0.15.0"
   ALPINE_VERSION: "3.23"
 
 # Cache definitions, split by invalidation cadence. Composed per-job
@@ -102,7 +102,7 @@ variables:
   before_script:
     - apt-get update -qq
     - apt-get install -y --no-install-recommends git ca-certificates libclang-dev clang curl
-    - curl -sL "https://github.com/mozilla/sccache/releases/download/v$SCCACHE_VERSION/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz" | tar xz -C /opt
+    - curl -fsSL "https://github.com/mozilla/sccache/releases/download/v$SCCACHE_VERSION/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz" | tar xz -C /opt
     - export PATH="/opt/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl:$CARGO_HOME/bin:$PATH"
     # Read-only sccache fallback when the protected AWS credentials
     # are absent (i.e. on unprotected branches). NO_CREDENTIALS forces
