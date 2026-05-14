@@ -11,12 +11,10 @@ These features from btrfs-progs are not yet implemented:
 - `btrfs check --repair` and related write-mode flags (`--init-csum-tree`,
   `--init-extent-tree`, etc.). Read-only checking works.
 - `btrfs check --mode lowmem` (currently only the default mode is supported).
-- `btrfs rescue chunk-recover`. Other write-mode rescue subcommands
-  (`fix-device-size`, `clear-space-cache`, `clear-uuid-tree`,
-  `clear-ino-cache`, `fix-data-checksum`) are implemented.
+- `btrfs balance start --background` daemonize path; balance runs in the
+  foreground.
 - `btrfs filesystem resize --offline`.
 - `btrfs-mkfs` zoned device support.
-- `btrfs-tune --convert-to-free-space-tree` and `--convert-to-block-group-tree`.
 
 ## What's added beyond btrfs-progs
 
@@ -35,3 +33,12 @@ These features are original additions not present in the C tools:
   unmounted device or image file.
 - `btrfs device stats --offline`: read device error statistics from the on-disk
   device tree without requiring a mounted filesystem.
+- `btrfs send --offline IMAGE`: generate a v1 send stream from an unmounted
+  btrfs image without touching the kernel ioctl. No `CAP_SYS_ADMIN`, no
+  mount needed. Tier 1 (full sends only).
+- `btrfs reflink clone [-r SRCOFF:LENGTH:DESTOFF]... SRC DST`: lightweight
+  file copy via `FICLONERANGE`. The btrfs-progs command of the same name
+  is a stub that returns `EOPNOTSUPP`; ours actually clones.
+- `btrfs fuse <IMAGE> <MOUNTPOINT>`: mount any btrfs image or block device
+  read-only via FUSE, embedded as a subcommand behind the opt-in `fuse`
+  cargo feature. Mirrors the standalone `btrfs-fuse` binary.

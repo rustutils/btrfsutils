@@ -65,15 +65,11 @@ will behave as that tool directly.
 - **send**: full and incremental, multi-subvolume, protocol v1/v2, --compressed-data, --no-data, plus `--offline IMAGE` to generate a v1 send stream from an unmounted image with no privileges (tier 1: full sends only)
 - **receive**: v1/v2/v3 streams, encoded write with decompression fallback, --dump, --chroot
 - **reflink**: clone (lightweight file copy via `FICLONERANGE` — whole file or per-range, multiple `-r SRCOFF:LENGTH:DESTOFF` ranges in one invocation)
-- **rescue**: super-recover, zero-log, create-control-device, fix-device-size, fix-data-checksum, clear-uuid-tree, clear-space-cache (v1 and v2), clear-ino-cache
+- **rescue**: super-recover, zero-log, create-control-device, fix-device-size, fix-data-checksum, clear-uuid-tree, clear-space-cache (v1 and v2), clear-ino-cache, chunk-recover (read-only scan/report by default, `--apply` writes the reconstructed chunk tree via the transaction crate)
 - **restore**: file recovery from damaged/unmounted filesystems with metadata, xattrs, snapshots, compression, path filtering
 - **subvolume**: create, delete, snapshot, show, list, get-default, set-default, get-flags, set-flags, find-new, sync
 - **check**: read-only filesystem verification with 7 phases (superblock, tree structure, extent refs, chunk/block group, FS tree inodes, checksum tree, root refs)
 - **fuse** (opt-in `fuse` feature): mount a btrfs image or block device read-only via FUSE; mirrors the standalone `btrfs-fuse` binary's flag set
-
-### Stubs (argument parsing only)
-
-- **rescue**: chunk-recover
 
 ### Notable missing flags
 

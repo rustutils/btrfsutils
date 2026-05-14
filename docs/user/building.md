@@ -51,3 +51,15 @@ Contributors who want to run the full lint sweep (`just check`) on a
 non-Nix machine may also need a host-arch musl cross-compiler — see
 the "Static checks" section of the
 [testing guide](../dev/testing.md) for setup instructions.
+
+## Cross-compiling release artifacts
+
+`just package` cross-compiles statically-linked release artifacts for
+all supported architectures into `target/dist/`. For each of `x86_64`,
+`aarch64`, and `riscv64gc` Linux musl, it produces a zstd-compressed
+multicall binary, a relocatable tarball, a `.deb`, and a `.rpm`.
+
+Requires `cargo-zigbuild`, `cargo-deb`, `cargo-generate-rpm`, `zstd`,
+and a Zig 0.11+ binary on `PATH`. The CI release pipeline uses the same
+recipe; running `just package` locally produces byte-identical
+artifacts to a tagged CI build (modulo timestamps).

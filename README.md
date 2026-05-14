@@ -17,16 +17,20 @@ Rust.
 
 This project contains low-level libraries for interacting with the btrfs kernel
 driver (`btrfs-uapi`), parsing and writing on-disk data structures
-(`btrfs-disk`), parsing and handling btrfs send streams (`btrfs-stream`), and
+(`btrfs-disk`), parsing and handling btrfs send streams (`btrfs-stream`),
 performing transactional read-write modifications to unmounted filesystems
-(`btrfs-transaction`). The goal for these is to be useful libraries that can
-be used in other projects to interact with btrfs filesystems programmatically.
+(`btrfs-transaction`), and a high-level read-only filesystem API on top of
+`btrfs-disk` that drives offline tools and the FUSE driver (`btrfs-fs`). The
+goal for these is to be useful libraries that can be used in other projects to
+interact with btrfs filesystems programmatically.
 
 It also contains high-level CLI crates (`btrfs-cli` for the `btrfs` utility,
-and `btrfs-mkfs` for the `mkfs.btrfs` utility, `btrfs-tune` for the `btrfstune`
-utility) that are compatible with the respective utilities from `btrfs-progs`.
-These aim to be drop-in replacements, but may be missing some advanced features
-or have a simpler implementation.
+`btrfs-mkfs` for the `mkfs.btrfs` utility, `btrfs-tune` for the `btrfstune`
+utility) that are compatible with the respective utilities from `btrfs-progs`,
+and `btrfs-fuse` — an experimental userspace FUSE driver that mounts a btrfs
+image or block device read-only without kernel btrfs support. The CLI tools
+aim to be drop-in replacements, but may be missing some advanced features or
+have a simpler implementation.
 
 ## Goals
 
@@ -46,8 +50,10 @@ This project is under active development. Most commands are fully implemented
 and produce output matching the C original.
 
 `btrfs check` is fully implemented with 7-phase read-only filesystem
-verification. `btrfs rescue` is implemented for every subcommand
-except `chunk-recover`, which remains a stub.
+verification. `btrfs rescue` is fully implemented, including
+`chunk-recover` (scan and reconstruct a damaged chunk tree by walking
+surviving on-disk leaves; `--apply` writes the reconstructed tree via
+`btrfs-transaction`).
 
 The `btrfs-transaction` crate provides COW-correct read-write access
 to unmounted filesystems, including delayed-ref bookkeeping, free

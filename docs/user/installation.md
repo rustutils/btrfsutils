@@ -1,18 +1,44 @@
 # Installation
 
 While these tools are still in their beta (pre-1.0 release) phase, you can
-already install them and try them out. Currently, the recommended way to
-install them is using Cargo, there are no binary builds to download.
+already install them and try them out.
+
+## Pre-built packages
+
+Each tagged release publishes statically-linked artifacts for `x86_64`,
+`aarch64`, and `riscv64gc` Linux musl targets on the [GitLab releases
+page](https://gitlab.com/rustutils/btrfsutils/-/releases) and mirrored to
+[GitHub](https://github.com/rustutils/btrfsutils/releases). Each release
+includes per-architecture:
+
+- `btrfsutils_<ver>_<arch>.deb` — Debian/Ubuntu package
+- `btrfsutils-<ver>-1.<arch>.rpm` — Fedora/RHEL/openSUSE package
+- `btrfsutils-<arch>.tar.zst` — relocatable tarball (extracts into
+  `btrfsutils-<arch>/{bin,README.md,LICENSE.md,CHANGELOG.md}`)
+- `btrfs-<arch>.zst` — bare zstd-compressed multicall binary
+
+The `.deb` and `.rpm` install a single `btrfs` multicall binary at
+`/usr/bin/btrfs` plus `mkfs.btrfs` / `btrfstune` / `btrfs-mkfs` / `btrfs-tune`
+symlinks that dispatch by `argv[0]`.
 
 ## Cargo
 
-If you have cargo installed, you can install the utilities with it.
+If you have cargo installed, you can install the utilities as separate
+binaries:
 
 ```sh
-cargo install btrfs-cli
-cargo install btrfs-tune
-cargo install btrfs-mkfs
+cargo install btrfs-cli btrfs-mkfs btrfs-tune
 ```
+
+Or install just `btrfs-cli` with `mkfs`, `tune`, `fuse`, and `multicall`
+embedded — produces a single binary that dispatches by `argv[0]`:
+
+```sh
+cargo install btrfs-cli --features mkfs,tune,fuse,multicall
+```
+
+Then symlink `mkfs.btrfs`, `btrfstune`, etc. to the installed `btrfs`
+binary.
 
 ## Nix
 

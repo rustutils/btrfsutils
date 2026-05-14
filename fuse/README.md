@@ -37,8 +37,7 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 - 8 btrfs ioctls: `FS_INFO`, `GET_FEATURES`, `GET_SUBVOL_INFO`,
   `DEV_INFO`, `INO_LOOKUP`, `TREE_SEARCH` (v1, fixed 4 KiB),
   `GET_SUBVOL_ROOTREF`, and `TREE_SEARCH_V2` (returns `ENOPROTOOPT`
-  so `btrfs-uapi::tree_search_auto` falls back to v1
-  transparently — see the F6.4 design note in `fs/PLAN.md`)
+  so `btrfs-uapi::tree_search_auto` falls back to v1 transparently)
 - Tunable cache sizes via `--cache-tree-blocks N`,
   `--cache-inodes N`, `--cache-extent-maps N`
 - Kernel `default_permissions` mount option enabled by default
@@ -50,7 +49,9 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 - Any write operation
 - Variable-size ioctls that need `FUSE_IOCTL_RETRY` (`INO_PATHS`,
   `LOGICAL_INO_V2`, `SPACE_INFO`, `ENCODED_READ`) — blocked at the
-  kernel boundary; see `fs/PLAN.md` § F6.4
+  kernel boundary: Linux's `fuse_do_ioctl` only honours retry
+  replies for ioctls issued with `FUSE_IOCTL_UNRESTRICTED`, which
+  standard `ioctl(2)` callers never set
 - `BTRFS_IOC_SEND` (kernel ioctl path); use `btrfs send --offline
   IMAGE` from `btrfs-cli` to generate send streams from images
 - RAID1/10/5/6 redundancy handling on degraded devices

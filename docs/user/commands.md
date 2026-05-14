@@ -94,12 +94,25 @@ Stream filesystem data between systems.
 
 | Command | Description |
 |---------|-------------|
-| `btrfs send <subvol>` | Send a subvolume as a stream |
+| `btrfs send <subvol>` | Send a subvolume as a stream (kernel ioctl path) |
+| `btrfs send --offline IMAGE` | Generate a v1 send stream from an unmounted image without root or the kernel ioctl |
 | `btrfs receive <path>` | Receive a stream into a directory |
 
-`btrfs send` supports full sends and incremental sends (`-p` parent, `-c` clone
-sources). `btrfs receive` supports v1, v2 (compressed data), and v3 (fs-verity)
-stream formats.
+`btrfs send` (online) supports full sends and incremental sends (`-p` parent,
+`-c` clone sources). The offline form is tier 1: full sends only — no parent,
+no clone sources, no compressed-data passthrough. `btrfs receive` supports v1,
+v2 (compressed data), and v3 (fs-verity) stream formats.
+
+## btrfs reflink
+
+Lightweight file copies that share data extents (copy-on-write).
+
+| Command | Description |
+|---------|-------------|
+| `btrfs reflink clone [-r SRCOFF:LENGTH:DESTOFF]... SRC DST` | Reflink the whole source file into `DST`, or specific ranges with one or more `-r` flags |
+
+Reads/writes after the clone are COW: storage is consumed once until the files
+diverge. `LENGTH=0` in a range spec means "from SRCOFF to end-of-source".
 
 ## btrfs inspect-internal
 
@@ -180,9 +193,7 @@ Emergency recovery tools for damaged filesystems.
 | `btrfs rescue clear-uuid-tree <dev>` | Drop the UUID tree so the kernel rebuilds it |
 | `btrfs rescue clear-space-cache <v1\|v2> <dev>` | Clear the v1 or v2 free space cache |
 | `btrfs rescue clear-ino-cache <dev>` | Remove leftover items from the deprecated inode cache |
-
-`btrfs rescue chunk-recover` has argument parsing scaffolded but is
-not yet implemented.
+| `btrfs rescue chunk-recover [--apply] <dev>` | Scan surviving on-disk leaves to reconstruct a damaged chunk tree (read-only report by default; `--apply` writes the reconstructed tree via `btrfs-transaction`) |
 
 ## btrfs-mkfs
 
@@ -216,6 +227,25 @@ btrfs-tune [options] <device>
 | `-M <uuid>` | Change fsid to a specific UUID (metadata_uuid mechanism) |
 | `-u` | Rewrite fsid to a random UUID (patches all tree blocks) |
 | `-U <uuid>` | Rewrite fsid to a specific UUID (patches all tree blocks) |
+
+## btrfs fuse / btrfs-fuse
+
+Read-only userspace FUSE driver. Mounts a btrfs image or block device without
+kernel btrfs support.
+
+| Command | Description |
+|---------|-------------|
+| `btrfs-fuse <IMAGE> <MOUNTPOINT>` | Mount the image read-only (standalone binary) |
+| `btrfs fuse <IMAGE> <MOUNTPOINT>` | Same, embedded as a subcommand behind the opt-in `fuse` cargo feature |
+
+Notable flags: `--subvol PATH` / `--subvolid ID` to mount a specific
+subvolume as the FUSE root; `--cache-tree-blocks N`, `--cache-inodes N`,
+`--cache-extent-maps N` to tune the three internal caches;
+`--no-default-permissions` to bypass per-file mode/uid/gid enforcement
+(useful when the stored UIDs don't match the local system).
+
+Experimental — see [`btrfs-fuse`'s README](https://github.com/rustutils/btrfsutils/blob/master/fuse/README.md)
+for the full feature matrix.
 
 ## Global flags
 
