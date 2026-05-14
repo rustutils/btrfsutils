@@ -29,7 +29,7 @@ resolver = "2"
 name = "btrfs"
 
 [workspace.package]
-version = "0.12.0"
+version = "0.13.0"
 edition = "2024"
 license = "GPL-2.0-only"
 repository = "https://github.com/rustutils/btrfsutils"
@@ -66,15 +66,15 @@ bindgen = "0.72.1"
 tokio = { version = "1", default-features = false }
 
 # internal crates
-btrfs-cli = { path = "cli", version = "0.12.0" }
-btrfs-disk = { path = "disk", version = "0.12.0" }
-btrfs-fs = { path = "fs", version = "0.12.0" }
-btrfs-fuse = { path = "fuse", version = "0.12.0" }
-btrfs-mkfs = { path = "mkfs", version = "0.12.0" }
-btrfs-stream = { path = "stream", version = "0.12.0" }
-btrfs-transaction = { path = "transaction", version = "0.12.0" }
-btrfs-tune = { path = "tune", version = "0.12.0" }
-btrfs-uapi = { path = "uapi", version = "0.12.0" }
+btrfs-cli = { path = "cli", version = "0.13.0" }
+btrfs-disk = { path = "disk", version = "0.13.0" }
+btrfs-fs = { path = "fs", version = "0.13.0" }
+btrfs-fuse = { path = "fuse", version = "0.13.0" }
+btrfs-mkfs = { path = "mkfs", version = "0.13.0" }
+btrfs-stream = { path = "stream", version = "0.13.0" }
+btrfs-transaction = { path = "transaction", version = "0.13.0" }
+btrfs-tune = { path = "tune", version = "0.13.0" }
+btrfs-uapi = { path = "uapi", version = "0.13.0" }
 
 # internal local crates (no version on these)
 btrfs-test-utils = { path = "util/testing" }

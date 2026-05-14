@@ -2,7 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v0.13.0
+
+btrfsutils 0.13 is the read-side feature-completeness release: a new 
+`btrfs-fs` crate extracts the read-only filesystem API from `btrfs-fuse`
+(multi-subvolume traversal, async, three-layer caching) and drives both 
+the matured FUSE driver and a new `btrfs send --offline IMAGE` that streams
+snapshots from unmounted images with no privileges. `btrfs-fuse` rounds 
+out POSIX coverage with `lseek SEEK_HOLE`/`SEEK_DATA`, `readdirplus`, 
+eager `forget`, and eight btrfs ioctls (with a `tree_search_auto` v2 to v1
+fallback so the kernel's `FUSE_IOCTL_RETRY` restriction doesn't bite),
+and now ships as both standalone `btrfs-fuse` and an opt-in `btrfs fuse`
+subcommand. `btrfs reflink clone` lands as a small bonus (the C reference
+is a stub that returns `EOPNOTSUPP`). And finally there's a real release
+pipeline: cross-compiled static musl `.deb`, `.rpm`, `.tar.zst`, bare-zstd
+artifacts for `x86_64`, `aarch64`, and `riscv64gc`, published to GitLab
+and mirrored to GitHub on every `vX.Y.Z` tag.
 
 ### Added
 
