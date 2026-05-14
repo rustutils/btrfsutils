@@ -427,14 +427,31 @@ fn apply_op<R: io::Read + io::Write + io::Seek>(
             // owned blocks are queued for drop+pin, and there are no
             // dirty in-memory blocks belonging to the tree. The harness
             // does not model the ROOT_ITEM delete or the drop sequence
-            // explicitly, so we approximate "clean" as "model state
-            // matches the last commit". Otherwise the in-memory state
-            // includes a COWed-but-unflushed tree root that
-            // `update_root_items` will refuse to update (because the
-            // tree is no longer in `fs.roots`), leaving a dangling
-            // EXTENT_ITEM and an orphan tree block.
-            let dirty_uncommitted = model.kv != model.committed_kv
+            // explicitly, so we approximate "clean" as:
+            //
+            //   - model state matches the last commit (no logical
+            //     mutations queued), AND
+            //   - the tree root bytenr matches the original snapshot
+            //     (no in-transaction COW pending).
+            //
+            // The second condition is the one Insert+Delete-within-a-
+            // single-transaction exercises: model.kv nets back to
+            // empty, but the tree leaf was COWed during the Insert
+            // and the new bytenr lives on in `fs.roots` with a pending
+            // add_ref that has no corresponding ROOT_ITEM to anchor it.
+            // Removing the tree in that state lets `flush_delayed_refs`
+            // free the original block (which `ROOT_ITEM[9]` still
+            // points at on disk) and commit an orphan METADATA_ITEM
+            // for the new block — exactly the
+            // "ref mismatch / no tree block found" failures
+            // `btrfs check` reports.
+            let model_dirty = model.kv != model.committed_kv
                 || !model.owned_blocks.is_empty();
+            let tree_root_cowed = fs
+                .changed_roots()
+                .iter()
+                .any(|(tid, _, _)| *tid == PLAYGROUND_TREE);
+            let dirty_uncommitted = model_dirty || tree_root_cowed;
             if !model.playground_removed && !dirty_uncommitted {
                 fs.remove_root(PLAYGROUND_TREE);
                 model.playground_removed = true;
