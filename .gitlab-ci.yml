@@ -1,15 +1,197 @@
+# GitLab CI for btrfsutils.
+#
+# Pipeline shape:
+#   lint     -> rustfmt + clippy + cargo doc warnings
+#   test     -> cargo test --workspace (unit tests; sudo-only integration
+#               tests stay manual-local until we have a privileged runner)
+#   package  -> just package (.deb / .rpm / tarball / raw-binary x 3 archs)
+#   release  -> GitLab release on tag, links package artifacts
+#   release-github -> mirror release to github.com/rustutils/btrfsutils
+#   deploy   -> mdbook -> GitLab Pages (master only)
+#
+# Rust jobs run on Alpine + rustup; the toolchain pin in
+# rust-toolchain.toml is picked up automatically on first invocation.
+
 stages:
-    - deploy
+  - lint
+  - test
+  - package
+  - release
+  - deploy
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+variables:
+  CARGO_HOME: $CI_PROJECT_DIR/.cargo
+  RUSTUP_HOME: $CI_PROJECT_DIR/.rustup
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  # sccache caches per-rustc-invocation outputs in the shared
+  # rustutils-cache S3 bucket on Hetzner. SCCACHE_BUCKET, _ENDPOINT,
+  # and _REGION come from the rustutils group's CI variables;
+  # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are protected, so only
+  # protected refs (master + version tags) can write to the cache.
+  # Unprotected branches fall through to anonymous reads (see .rust
+  # before_script). No key prefix — common deps (serde, tokio, ...) are
+  # shared across rustutils projects.
+  RUSTC_WRAPPER: sccache
+  # Pinned versions of cargo-installed packaging tools. Bump to upgrade;
+  # `cargo install --version` is a no-op when the cached install matches.
+  CARGO_DEB_VERSION: "3.6.4"
+  CARGO_GENERATE_RPM_VERSION: "0.20.0"
+  ALPINE_VERSION: "3.23"
+
+# Cache definitions, split by invalidation cadence. Composed per-job
+# via YAML anchors — extends:cache array merging is finicky in GitLab
+# CI, anchors are unambiguous.
+#
+# - registry: downloaded crate sources + index. Invalidates on
+#   Cargo.lock change. Small (~tens of MB), shared across all Rust jobs.
+# - bin: cargo-installed binaries (cargo-deb, cargo-generate-rpm).
+#   Invalidates on .gitlab-ci.yml change (where versions are pinned).
+#   Only the package job needs these.
+#
+# target/ is deliberately not cached — sccache handles per-rustc cache
+# hits across runs, which makes target/ reconstruction cheap. The 2GB
+# upload was eating a full minute per job (per git-lfs experience).
+#
+# .rustup is also not cached — rustup-init from apk + a fresh download
+# of the stable toolchain is ~30-60s, on par with what cache restore
+# would cost for ~300MB. Not worth the upload churn.
+.cache-defs:
+  cache:
+    - &cache-registry
+      key:
+        files: [Cargo.lock]
+      paths:
+        - .cargo/registry/cache
+        - .cargo/registry/index
+    - &cache-bin
+      key:
+        files: [.gitlab-ci.yml]
+      paths:
+        - .cargo/bin
+        - .cargo/.crates.toml
+        - .cargo/.crates2.json
+
+# Base template for jobs that need a Rust toolchain. Pulls stable
+# from rust-toolchain.toml + nightly for rustfmt (matches `just fmt`),
+# plus libclang for bindgen (uapi crate parses the kernel UAPI headers)
+# and linux-headers for the same.
+.rust:
+  image: alpine:$ALPINE_VERSION
+  cache:
+    - *cache-registry
+  before_script:
+    - apk add --no-cache build-base bash git rustup sccache clang-dev linux-headers
+    - rustup-init -y --default-toolchain none --no-modify-path
+    - export PATH="$CARGO_HOME/bin:$PATH"
+    # Read-only sccache fallback when the protected AWS credentials
+    # are absent (i.e. on unprotected branches). NO_CREDENTIALS forces
+    # anonymous mode — reads work against the public bucket, writes
+    # silently fail. On protected refs, AWS_ACCESS_KEY_ID is set and
+    # we leave it unset so sccache uses the credentials normally.
+    - if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then export SCCACHE_S3_NO_CREDENTIALS=true; fi
+    - export LIBCLANG_PATH=/usr/lib
+    - rustup show
+
+lint:
+  extends: .rust
+  stage: lint
+  script:
+    - rustup component add clippy
+    - rustup toolchain install nightly --component rustfmt --profile minimal
+    - cargo +nightly fmt --all --check
+    - RUSTDOCFLAGS="-Dwarnings" cargo doc --no-deps --workspace
+    - cargo clippy --workspace --all-features --all-targets -- -Dwarnings
+    - sccache --show-stats || true
+
+test:
+  extends: .rust
+  stage: test
+  script:
+    # Unit tests only — integration tests (#[ignore]) need root for
+    # loopback mount + privileged ioctls, which the shared runners
+    # don't have. See TODO.md "job to run privileged tests".
+    - cargo test --workspace --all-features
+    - sccache --show-stats || true
+
+package:
+  extends: .rust
+  stage: package
+  # Override the .rust cache list to add the bin cache, which only
+  # this job needs (cargo-deb, cargo-generate-rpm). YAML anchors keep
+  # the registry entry in sync with the .rust default.
+  cache:
+    - *cache-registry
+    - *cache-bin
+  rules:
+    # Auto on tags — feeds the release job.
+    - if: $CI_COMMIT_TAG
+      when: on_success
+    # Manual button on branch pushes so you can verify packaging
+    # without cutting a tag. allow_failure keeps the pipeline green
+    # when nobody clicks.
+    - when: manual
+      allow_failure: true
+  before_script:
+    - !reference [.rust, before_script]
+    - apk add --no-cache zig zstd just cargo-zigbuild
+    - cargo install --locked --version "$CARGO_DEB_VERSION" cargo-deb
+    - cargo install --locked --version "$CARGO_GENERATE_RPM_VERSION" cargo-generate-rpm
+  script:
+    - just package
+    - sccache --show-stats || true
+  artifacts:
+    paths:
+      - target/dist/
+    # Linked from the GitLab release page — keep indefinitely so the
+    # download links don't 404 once the default artifact expiry hits.
+    expire_in: never
+
+# Tag-only. scripts/release.rb reads the matching CHANGELOG block,
+# attaches every artifact under target/dist/ as a release asset link,
+# and shells out to release-cli. See the script for details.
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v?\d+\.\d+\.\d+(-[\w.]+)?$/
+  needs:
+    - job: package
+      artifacts: true
+  script:
+    - apk add --no-cache ruby
+    - ruby scripts/release.rb
+
+# Mirror release to github.com/<CI_PROJECT_PATH> via gh CLI. Independent
+# of the GitLab release above (different blast radius — a GitHub flake
+# shouldn't fail the GitLab side). Requires GITHUB_TOKEN as an org-level
+# protected variable on the rustutils group.
+release-github:
+  stage: release
+  image: alpine:$ALPINE_VERSION
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v?\d+\.\d+\.\d+(-[\w.]+)?$/
+  needs:
+    - job: package
+      artifacts: true
+  script:
+    - apk add --no-cache ruby github-cli
+    - ruby scripts/release_github.rb
 
 pages:
-    image: alpine
-    stage: deploy
-    script:
-        - apk add mdbook
-        - mdbook build
-        - mv target/book public
-    artifacts:
-        paths:
-            - public
-    only:
-        - master
+  image: alpine
+  stage: deploy
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - apk add mdbook
+    - mdbook build
+    - mv target/book public
+  artifacts:
+    paths:
+      - public
