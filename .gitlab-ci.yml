@@ -126,6 +126,11 @@ lint:
 test:
   extends: .rust
   stage: test
+  before_script:
+    - !reference [.rust, before_script]
+    # btrfs-fs basic tests shell out to mkfs.btrfs to build a
+    # backing image (no privileges needed — just a tool dep).
+    - apt-get install -y --no-install-recommends btrfs-progs
   script:
     # Unit tests only — integration tests (#[ignore]) need root for
     # loopback mount + privileged ioctls, which the shared runners
