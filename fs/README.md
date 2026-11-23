@@ -2,57 +2,58 @@
 
 High-level filesystem API on top of [`btrfs-disk`].
 
-> This crate is **experimental**. Read-only today. Write support is
+> This crate is **experimental**. It is read-only for now. Write support is
 > planned via [`btrfs-transaction`].
 
-`btrfs-fs` provides a `Filesystem` type with the operations a userspace
-driver needs — `lookup`, `readdir`, `readdirplus`, `read`, `readlink`,
-`getattr`, `xattr_get`, `xattr_list`, `statfs`, `lseek`
-(`SeekHoleData`), `tree_search`, `ino_lookup`, `ino_paths`,
-`resolve_subvol_path`, `forget`, `send`, plus subvolume metadata
-helpers — without depending on any FUSE crate. The same API drives the
-`btrfs-fuse` mount, the `btrfs send --offline` CLI path, and any other
-embedder (offline tools, tests, alternate FUSE bindings).
+`btrfs-fs` provides a `Filesystem` type with the operations a userspace driver
+needs, without depending on any FUSE crate:
 
-The handle is `Clone` (cheap `Arc` bump) and all operations are
-`async fn` running sync I/O via `tokio::task::spawn_blocking`, so
-multiple tokio tasks can drive the same filesystem concurrently.
+- `lookup`, `readdir`, `readdirplus`, `read`, `readlink`, `getattr`
+- `xattr_get`, `xattr_list`, `statfs`, `lseek` (`SeekHoleData`)
+- `tree_search`, `ino_lookup`, `ino_paths`, `resolve_subvol_path`
+- `forget`, `send`, and subvolume metadata helpers
+
+The same API drives the `btrfs-fuse` mount, `btrfs send --offline`, and any
+other embedder (offline tools, tests, alternate FUSE bindings).
+
+The handle is `Clone` (a cheap `Arc` bump). All operations are `async fn` and
+run sync I/O via `tokio::task::spawn_blocking`, so multiple tokio tasks can
+drive the same filesystem concurrently.
 
 Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## What's implemented
 
-- Multi-subvolume traversal (`Inode = (SubvolId, ino)`); auto-follow
-  on subvolume crossings; `..` walks `ROOT_BACKREF` for subvol roots
+- Multi-subvolume traversal (`Inode = (SubvolId, ino)`). Subvolume crossings
+  are followed automatically, and `..` on a subvolume root walks
+  `ROOT_BACKREF`.
 - Inline, regular, and prealloc extents (prealloc reads as zeros)
-- Sparse hole reads + `lseek SEEK_HOLE` / `SEEK_DATA` against the
-  cached extent map
-- `readdirplus` (cache-friendly per-entry `InodeItem` reads, paired
-  with each `Entry`)
+- Sparse hole reads, and `lseek SEEK_HOLE` and `SEEK_DATA` against the cached
+  extent map
+- `readdirplus`, which pairs each `Entry` with its `InodeItem` using
+  cache-friendly reads
 - zlib, zstd, and LZO decompression (btrfs per-sector LZO framing)
-- xattr enumeration and lookup (with hash-bucket scan for collisions)
-- POSIX-style `Stat` with all timestamps including btrfs `btime`
+- xattr enumeration and lookup (with a hash-bucket scan for collisions)
+- POSIX-style `Stat` with all timestamps, including btrfs `btime`
 - Three-layer cache (tree blocks, inodes, extent maps) sized via
-  `CacheConfig`; `forget(Inode)` evicts eagerly when an embedder
-  signals an inode is no longer referenced
-- `tree_search(filter, max_buf_size)` mirrors the kernel's
-  `BTRFS_IOC_TREE_SEARCH_V2` semantics (compound-key range filter)
-- `ino_lookup(subvol, objectid)` (single path) and
-  `ino_paths(subvol, objectid)` (every hardlink) for inode-to-path
-  resolution
-- Send tier 1: `Filesystem::send(snapshot, output)` generates a v1
-  send stream describing the snapshot. Full sends only — incremental,
-  clone sources, encoded-write passthrough are tier 2/3 (future)
+  `CacheConfig`. `forget(Inode)` evicts eagerly when an embedder signals that
+  an inode is no longer referenced.
+- `tree_search(filter, max_buf_size)` mirrors the semantics of the kernel's
+  `BTRFS_IOC_TREE_SEARCH_V2` (compound-key range filter)
+- Inode-to-path resolution: `ino_lookup(subvol, objectid)` returns a single
+  path, and `ino_paths(subvol, objectid)` returns every hardlink.
+- Full sends: `Filesystem::send(snapshot, output)` generates a v1 send stream
+  describing the snapshot.
 
 ## What's not yet implemented
 
 - Write path (planned: `Filesystem::transaction()` returning a handle
   backed by [`btrfs-transaction`])
-- Send tier 2 (incremental, `-p PARENT`)
-- Send tier 3 (v2 `EncodedWrite` passthrough for compressed extents)
-- True parallel I/O (currently a single internal mutex serialises
-  reader access; future `BlockReader` pool will lift this without
-  changing the public API)
+- Incremental sends (`-p PARENT`) and clone sources
+- v2 `EncodedWrite` passthrough for compressed extents in send
+- True parallel I/O. A single internal mutex serialises reader access for
+  now. A future `BlockReader` pool will lift this without changing the
+  public API.
 
 ## Usage
 
@@ -75,8 +76,8 @@ async fn main() -> std::io::Result<()> {
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE)
-or [MIT license](LICENSE-MIT) at your option.
+Licensed under either the [Apache License, Version 2.0](LICENSE-APACHE) or
+the [MIT license](LICENSE-MIT), at your option.
 
 [`btrfs-disk`]: https://docs.rs/btrfs-disk
 [`btrfs-transaction`]: https://docs.rs/btrfs-transaction

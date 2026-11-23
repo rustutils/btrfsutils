@@ -9,107 +9,99 @@ An implementation of the [btrfs-progs](https://github.com/kdave/btrfs-progs)
 utilities for creating, managing and inspecting btrfs filesystems, written in
 Rust.
 
-> Warning: some of the implemented functionality in this repository is
-> considered experimental. Specifically, the `btrfs-transaction` is
-> experimental, because it is based off a clean-room reimplementation, so it
-> may have edge cases that testing doesn't cover. Features which rely on it
-> (`btrfs-tune`, the `btrfs rescue` subcommands) are as well. 
+> Warning: parts of this project are experimental. `btrfs-transaction` is a
+> clean-room reimplementation of the btrfs write path and may have edge cases
+> that tests don't cover. Features built on it (`btrfs-tune`, the
+> `btrfs rescue` subcommands) are experimental too.
 
-This project contains low-level libraries for interacting with the btrfs kernel
-driver (`btrfs-uapi`), parsing and writing on-disk data structures
-(`btrfs-disk`), parsing and handling btrfs send streams (`btrfs-stream`),
-performing transactional read-write modifications to unmounted filesystems
-(`btrfs-transaction`), and a high-level read-only filesystem API on top of
-`btrfs-disk` that drives offline tools and the FUSE driver (`btrfs-fs`). The
-goal for these is to be useful libraries that can be used in other projects to
-interact with btrfs filesystems programmatically.
+The project provides libraries for:
 
-It also contains high-level CLI crates (`btrfs-cli` for the `btrfs` utility,
-`btrfs-mkfs` for the `mkfs.btrfs` utility, `btrfs-tune` for the `btrfstune`
-utility) that are compatible with the respective utilities from `btrfs-progs`,
-and `btrfs-fuse` — an experimental userspace FUSE driver that mounts a btrfs
-image or block device read-only without kernel btrfs support. The CLI tools
-aim to be drop-in replacements, but may be missing some advanced features or
-have a simpler implementation.
+- talking to the btrfs kernel driver (`btrfs-uapi`)
+- parsing and writing on-disk structures (`btrfs-disk`)
+- parsing and writing send streams (`btrfs-stream`)
+- modifying unmounted filesystems in transactions (`btrfs-transaction`)
+- reading filesystems through a high-level read-only API (`btrfs-fs`), which
+  drives the offline tools and the FUSE driver
+
+These are meant to be reused by other projects that work with btrfs.
+
+It also provides the command-line tools `btrfs` (`btrfs-cli`), `mkfs.btrfs`
+(`btrfs-mkfs`), and `btrfstune` (`btrfs-tune`), which are compatible with their
+btrfs-progs counterparts. They aim to be drop-in replacements but may lack some
+advanced features. `btrfs-fuse` is an experimental FUSE driver that mounts a
+btrfs image or block device read-only, without kernel btrfs support.
 
 ## Goals
 
-- **Drop-in compatibility.** The goal is for the output of every command to
-  match btrfs-progs exactly. Scripts, monitoring tools, and muscle memory all
-  work unchanged.
-- **Opt-in added features**. Pass `--format modern` or set `BTRFS_OUTPUT_FORMAT=modern`
-  to opt in to cleaner-looking output, progress bars, adaptive column widths.
-- **Reusable libraries.** Bring btrfs to Rust through the low-level crates
-  (`btrfs-uapi`, `btrfs-disk`, `btrfs-stream`, `btrfs-transaction`) that you
-  can use in your own code. Permissively licensed under MIT/Apache-2.0, and
-  written from scratch to be ergonomic.
+- **Drop-in compatibility.** Every command's output matches btrfs-progs
+  exactly. Scripts, monitoring tools, and muscle memory work unchanged.
+- **Opt-in extras.** Pass `--format modern` or set
+  `BTRFS_OUTPUT_FORMAT=modern` for cleaner output, progress bars, and adaptive
+  column widths.
+- **Reusable libraries.** The low-level crates (`btrfs-uapi`, `btrfs-disk`,
+  `btrfs-stream`, `btrfs-transaction`) are written from scratch, designed to be
+  ergonomic, and licensed MIT or Apache-2.0.
 
 ## Status
 
-This project is under active development. Most commands are fully implemented
-and produce output matching the C original.
+The project is under active development. Most commands are fully implemented
+and match the output of btrfs-progs.
 
-`btrfs check` is fully implemented with 7-phase read-only filesystem
-verification. `btrfs rescue` is fully implemented, including
-`chunk-recover` (scan and reconstruct a damaged chunk tree by walking
-surviving on-disk leaves; `--apply` writes the reconstructed tree via
-`btrfs-transaction`).
+`btrfs check` runs a 7-phase read-only verification. All `btrfs rescue`
+subcommands are implemented, including `chunk-recover`, which rebuilds a
+damaged chunk tree from surviving on-disk leaves. With `--apply` it writes the
+rebuilt tree through `btrfs-transaction`.
 
-The `btrfs-transaction` crate provides COW-correct read-write access
-to unmounted filesystems, including delayed-ref bookkeeping, free
-space tree updates, chunk tree COW, and full-tree conversions for
-the v2 free space tree and the block group tree. It backs the
-offline `btrfs filesystem resize`, the rescue commands, and the
-`btrfs-tune --convert-to-free-space-tree` /
-`--convert-to-block-group-tree` operations.
+`btrfs-transaction` provides copy-on-write access to unmounted filesystems.
+It handles delayed refs, free space tree updates, chunk tree COW, and
+conversion to the v2 free space tree and the block group tree. It backs
+offline `btrfs filesystem resize`, the rescue commands, and
+`btrfs-tune --convert-to-free-space-tree` and
+`--convert-to-block-group-tree`.
 
 ## Installation
 
-Currently, we provide three executables: `btrfs` (the main btrfs CLI, use it to
-configure and monitor btrfs filesystems), `btrfs-tune` (use it to modify feature flags, UUIDs, and seeding on unmounted filesystems),
-and `btrfs-mkfs` (use it to format drives as btrfs filesystems, or bootrap
-filesystem images from folder content).
+There are three executables:
 
-You can install the individual tools as separate binaries:
+- `btrfs` configures and monitors btrfs filesystems.
+- `btrfs-mkfs` formats devices, or builds filesystem images from a directory.
+- `btrfs-tune` changes feature flags, UUIDs, and seeding on unmounted
+  filesystems.
+
+Install them as separate binaries:
 
 ```sh
 cargo install btrfs-cli btrfs-mkfs btrfs-tune
 ```
 
-You can also install just the `btrfs` CLI tool, but embed the other binaries as
-subcommands, using the `mkfs` and `tune` features. The `multicall` feature
-means that you can use them busybox-style: symlink the binary to `mkfs.btrfs`,
-and it will run that tool by default.
+Or install only `btrfs` with the other tools embedded:
 
 ```sh
 cargo install btrfs-cli --features mkfs,tune,multicall
 ```
 
-With the `mkfs` and `tune` features, `btrfs mkfs` and `btrfs tune` are
-available as subcommands. With the `multicall` feature, the binary also
-dispatches by program name: symlink or hardlink it to `mkfs.btrfs`,
-`btrfs-mkfs`, `btrfstune`, or `btrfs-tune` and it will behave as that tool
-directly.
+The `mkfs` and `tune` features add the `btrfs mkfs` and `btrfs tune`
+subcommands. The `multicall` feature makes the binary dispatch on its program
+name, busybox-style: symlink or hardlink it to `mkfs.btrfs`, `btrfs-mkfs`,
+`btrfstune`, or `btrfs-tune` and it runs that tool.
 
-This installation mode is useful in combination with building statically for
-`x86_64-unknown-linux-musl`, if you want a single portable binary to deploy to
-systems.
+Combined with a static `x86_64-unknown-linux-musl` build, this gives a single
+portable binary.
 
 ### Pre-built packages
 
-`just package` produces release artifacts for `x86_64`, `aarch64`, and
+`just package` builds release artifacts for the `x86_64`, `aarch64`, and
 `riscv64gc` Linux musl targets:
 
-- `btrfsutils_<ver>_<arch>.deb` and `btrfsutils-<ver>-1.<arch>.rpm` —
-  install the multicall `btrfs` binary plus `mkfs.btrfs`, `btrfstune`,
-  `btrfs-mkfs`, `btrfs-tune` symlinks, man pages, and shell
-  completions
-- `btrfsutils-<arch>.tar.zst` — relocatable tarball with the binary,
-  symlinks, and docs
-- `btrfs-<arch>.zst` — bare zstd-compressed multicall binary
+- `btrfsutils_<ver>_<arch>.deb` and `btrfsutils-<ver>-1.<arch>.rpm`: the
+  multicall `btrfs` binary, symlinks for `mkfs.btrfs`, `btrfstune`,
+  `btrfs-mkfs`, and `btrfs-tune`, man pages, and shell completions.
+- `btrfsutils-<arch>.tar.zst`: a relocatable tarball with the binary,
+  symlinks, and docs.
+- `btrfs-<arch>.zst`: the bare multicall binary, zstd-compressed.
 
-Building requires `cargo-zigbuild`, `cargo-deb`, `cargo-generate-rpm`,
-and `zstd` on `PATH`. Output lands in `target/dist/`.
+This needs `cargo-zigbuild`, `cargo-deb`, `cargo-generate-rpm`, and `zstd` on
+`PATH`. Output goes to `target/dist/`.
 
 ## Building
 
@@ -122,12 +114,13 @@ cargo build --release
 The resulting binaries are `target/release/btrfs`, `target/release/btrfs-mkfs`,
 and `target/release/btrfs-tune`.
 
-You can also build this project using Nix. The output includes the `btrfs`
-binary, the `mkfs.btrfs` binary, and compressed man pages.
+To build with Nix:
 
 ```
 nix build
 ```
+
+The output includes the binaries and compressed man pages.
 
 ## Usage
 
@@ -135,7 +128,7 @@ nix build
 btrfs <command> [<args>]
 ```
 
-The command structure mirrors the original `btrfs` tool:
+Commands mirror the original `btrfs` tool:
 
 ```
 btrfs filesystem show
@@ -151,64 +144,55 @@ Most commands that talk to the kernel require root privileges or `CAP_SYS_ADMIN`
 | Folder | Description |
 |-------|-------------|
 | `uapi` | Safe Rust wrappers around btrfs kernel ioctls, sysfs, and procfs. Linux-only. |
-| `disk` | Platform-independent parsing and serialization of btrfs on-disk structures. Used by `cli` for dump-super/dump-tree and by `mkfs` for filesystem creation. |
-| `stream` | Send stream parser and receive operations. Platform-independent parser with optional Linux-only receive support. |
-| `transaction` | Transactional read-write access to unmounted filesystems. COW-correct tree edits, delayed-ref bookkeeping, free space tree and chunk tree updates, full-tree conversions. Platform-independent. |
-| `cli` | The command-line tool, built on top of `uapi`, `disk`, `stream`, and `transaction`. |
-| `mkfs` | Filesystem creation tool (`mkfs.btrfs`). Constructs on-disk B-tree nodes and writes them directly to block devices or image files. |
-| `tune` | Offline superblock tuning tool (`btrfstune`). Modifies feature flags, seeding, and filesystem UUIDs on unmounted devices. |
-| `fuse` *(experimental)* | Userspace FUSE driver (`btrfs-fuse`) built on `btrfs-disk`. Read-only mount of images and block devices, no kernel btrfs required. |
-| `util/gen` | Man page and shell completion generator. Uses `clap_mangen` and `clap_complete` to produce roff man pages and bash/zsh/fish/elvish completions. |
+| `disk` | Platform-independent parsing and serialization of btrfs on-disk structures. |
+| `stream` | Send stream parser and encoder. Optional Linux-only receive support. |
+| `transaction` | Transactional read-write access to unmounted filesystems: COW tree edits, delayed refs, free space tree and chunk tree updates, and full-tree conversions. Platform-independent. |
+| `cli` | The `btrfs` command-line tool. |
+| `mkfs` | Filesystem creation tool (`mkfs.btrfs`). Builds B-tree nodes and writes them directly to block devices or image files. |
+| `tune` | Offline superblock tuning tool (`btrfstune`). Changes feature flags, seeding, and filesystem UUIDs on unmounted devices. |
+| `fuse` *(experimental)* | Read-only userspace FUSE driver (`btrfs-fuse`) for images and block devices. Needs no kernel btrfs support. |
+| `util/gen` | Generates man pages and shell completions (bash, zsh, fish, elvish) with `clap_mangen` and `clap_complete`. |
 | `docs` | Documentation, rendered with mdBook. |
 
 ## Testing
 
-To run unit tests (this will not run any tests that require superuser
-privileges):
+Run the unit tests, which need no privileges:
 
 ```
 cargo test
 ```
 
-For the integration tests, due to the fact that they interact with the kernel
-and will test privileged operations (many tests create and mount a file-backed
-btrfs filesystem), they require superuser privileges. Because running
-`sudo cargo test` is generally a bad idea, this repository has a wrapper that
-will build tests (as your user), and then run only integration tests with
-`sudo`. This is the recommended way to run the entire test suite.
+The integration tests create and mount file-backed filesystems, so they need
+root. Rather than running `sudo cargo test`, use the wrapper, which builds the
+tests as your user and runs only the integration tests with `sudo`. This runs
+the full suite:
 
 ```
 just test
 ```
 
-You can generate a coverage report as well, assuming you have `cargo-llvm-cov`
-installed. This uses the same functionality as the `just test`.
+To generate a coverage report (needs `cargo-llvm-cov`):
 
 ```
 just coverage
 ```
 
-For more details on the test layout (unit vs. integration vs. snapshot tests,
-fixtures, the `cargo insta` workflow, and how the privileged harness is
-wired up), see the
-[testing guide](https://rustutils.gitlab.io/btrfsutils/dev/testing.html) in
-the developer docs.
+The [testing guide](https://rustutils.gitlab.io/btrfsutils/dev/testing.html)
+covers the test layout, fixtures, the `cargo insta` workflow, and the
+privileged harness.
 
 ## License
 
 The library crates (`btrfs-uapi`, `btrfs-disk`, `btrfs-stream`,
-`btrfs-transaction`) are original work that implement parsers for on-disk
-data structures, shims around kernel syscalls, parsers for the send stream
-wire protocol, and a clean-room transactional read-write engine for
-unmounted filesystems. They are licensed under either of
-[Apache License, Version 2.0](uapi/LICENSE-APACHE) or
-[MIT license](uapi/LICENSE-MIT) at your option. This license allows them
-be used easily in other Rust crates.
+`btrfs-transaction`) are original work. They are licensed under either the
+[Apache License, Version 2.0](uapi/LICENSE-APACHE) or the
+[MIT license](uapi/LICENSE-MIT), at your option, so other Rust crates can use
+them freely.
 
-The application crates (`btrfs-cli`, `btrfs-mkfs`, `btrfs-tune`) are inspired by the
+The application crates (`btrfs-cli`, `btrfs-mkfs`, `btrfs-tune`) follow the
 [btrfs-progs](https://github.com/kdave/btrfs-progs) C implementation and are
 licensed under the [GNU General Public License v2.0](LICENSE.md).
 
-Note: the kernel UAPI header files included in the repository for bindgen
-code generation are licensed separately under GPL-2.0 with the Linux syscall
-note exception, which permits their use by non-GPL userspace programs.
+The kernel UAPI headers included for bindgen are licensed separately under
+GPL-2.0 with the Linux syscall note exception, which permits their use by
+non-GPL userspace programs.

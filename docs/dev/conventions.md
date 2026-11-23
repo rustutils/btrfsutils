@@ -1,64 +1,63 @@
 # Conventions
 
-The goal is to write idiomatic Rust code that is consistent across the whole
-codebase. btrfsutils spans several crates with different roles (kernel
-interface wrappers, on-disk parsers, CLI tools) and each has its own patterns.
-Following these conventions makes it easier to navigate unfamiliar code and to
-understand what a function or type is responsible for at a glance.
+The goal is idiomatic Rust that is consistent across the codebase. The crates
+have different roles (kernel interface wrappers, on-disk parsers, CLI tools),
+and each has its own patterns. Following these conventions makes unfamiliar
+code easier to navigate and makes it clear at a glance what a function or type
+is responsible for.
 
-Where possible, lean on the Rust ecosystem rather than reinventing things:
-`uuid` for UUIDs, `bitflags` for flag sets, `nix` for syscalls and ioctls,
-`anyhow` for error context in the CLI. This keeps the code readable to anyone
-already familiar with those crates.
+Use the Rust ecosystem rather than reinventing things: `uuid` for UUIDs,
+`bitflags` for flag sets, `nix` for syscalls and ioctls, `anyhow` for error
+context in the CLI. This keeps the code readable to anyone who knows those
+crates.
 
 ## Naming
 
-Module names are usually generic nouns. For example, in the `uapi` crate,
-the ioctl call wrappers are organized by the thing they operate on, and
-live in modules like `filesystem`, `device`, `sync`. 
+Module names are usually generic nouns. In the `uapi` crate, for example, the
+ioctl wrappers are grouped by what they operate on, in modules like
+`filesystem`, `device`, and `sync`.
 
-For the `btrfs-cli` crate, the module naming structure matches the subcommand
-hierarchy. Meaning: the `btrfs subvolume create` command is implemented in
+In `btrfs-cli`, the module structure matches the subcommand hierarchy. For
+example, `btrfs subvolume create` is implemented in
 `cli/src/subvolume/create.rs`.
 
-Types are named with the general concept first: `SysfsBtrfs`,
-`BlockGroupFlags`, `BalanceArgs` — never `BtrfsSysfs`. 
+Types put the general concept first: `SysfsBtrfs`, `BlockGroupFlags`,
+`BalanceArgs`. Never `BtrfsSysfs`.
 
-Functions follow a `noun_verb` pattern: `label_get`, `label_set` — never
-`get_label`. Ioctl wrapper functions match the lowercased C macro name:
+Functions follow a `noun_verb` pattern: `label_get`, `label_set`. Never
+`get_label`. Ioctl wrappers match the lowercased C macro name:
 `btrfs_ioc_balance_v2`.
 
 Avoid abbreviations. For example, use `ChecksumType` instead of `CsumType`.
 
 ## Types
 
-Always prefer proper typed values. For example, use `Uuid` from the `uuid`
-crate, never `[u8; 16]`. In the CLI, if there is an argument that can take
-one of multiple options, don't represent it as a string, but instead create
-an enum and derive `clap::ValueEnum`.
+Always prefer typed values. For example, use `Uuid` from the `uuid` crate,
+never `[u8; 16]`. In the CLI, an argument that takes one of several options
+should be an enum deriving `clap::ValueEnum`, not a string.
 
-Null-terminated kernel strings (labels, device paths) use `CString`/`CStr`.
-Make sure that allocation and deallocation is handled properly.
+Null-terminated kernel strings (labels, device paths) use `CString` and
+`CStr`. Make sure allocation and deallocation are handled correctly.
 
-File descriptors passed to uapi functions use `BorrowedFd`. 
+File descriptors passed to uapi functions use `BorrowedFd`.
 
 Kernel flag fields use `bitflags!`, usually with a `Display` implementation so
 they can be formatted with `{}`.
 
 Complex argument structs (`BalanceArgs`, `DefragRangeArgs`) use the builder
-pattern with `new()`, chained setters, and `Default`. 
+pattern with `new()`, chained setters, and `Default`.
 
-Never expose bindgen types (`btrfs_ioctl_*`) in public uapi APIs, instead
-create idiomatic Rust structs.
+Never expose bindgen types (`btrfs_ioctl_*`) in public uapi APIs. Create
+idiomatic Rust structs instead.
 
 ## Error handling
 
-In `uapi/`, almost every function just performs a single syscall, so we return
-the raw `nix::Result<T>`. Where possible, list potential error codes and their
-meanings in the documentation comments.
+In `uapi/`, most functions perform a single syscall, so they return the raw
+`nix::Result<T>`. Where possible, list the possible error codes and their
+meanings in the doc comments.
 
-Map specific errnos to `Option` or a typed
-error at the call site where appropriate (`ENODEV` → `None`, etc.). 
+Map specific errnos to `Option` or a typed error at the call site where it
+makes sense (`ENODEV` → `None`, etc.).
 
 In `cli/`, `mkfs/`, and `tune/`, use `anyhow::Result<T>` and convert at the
 uapi boundary with `.with_context()`. Always include the relevant path or
@@ -66,46 +65,48 @@ resource in the error message.
 
 ## Constants
 
-All `BTRFS_*` constants are available via `crate::raw::*` in the `uapi` and
-`disk` crates. Unless you have a good reason to, import from `crate::raw` and
-don't define local copies. Size constants like `SZ_1M` that are not part of the
-btrfs UAPI headers are the exception; define those locally with a comment.
+All `BTRFS_*` constants are available through `crate::raw::*` in the `uapi`
+and `disk` crates. Import them from `crate::raw` and don't define local copies
+unless you have a good reason. Size constants like `SZ_1M` that are not part
+of the btrfs UAPI headers are the exception. Define those locally with a
+comment.
 
-There should not be any stray constants in the code. For example, use
-`std::mem::offset_of!()` or `std::mem::size_of!()` macros to compute offsets
-and sizes, and if there are any magic constants, give them a name.
+Avoid stray constants. Use `std::mem::offset_of!()` or `std::mem::size_of!()`
+to compute offsets and sizes, and give any remaining magic numbers a name.
 
-Don't redefine things that are already defined in `crate::raw::*`.
+Don't redefine anything that already exists in `crate::raw::*`.
 
 ## Parsing on-disk structures
 
-In `disk/` and `mkfs/`, use `bytes::Buf` for reading and `bytes::BufMut` for
-writing on-disk fields. Sequential `get_u64_le()` / `put_u64_le()` calls
-advance the cursor automatically, eliminating manual offset arithmetic. See the
-[Parsing](parsing.md) page for details.
+In `disk/` and `mkfs/`, use `bytes::Buf` to read and `bytes::BufMut` to write
+on-disk fields. Sequential `get_u64_le()` and `put_u64_le()` calls advance the
+cursor, so there is no manual offset arithmetic. See [Parsing](parsing.md) for
+details.
 
 In `uapi/`, tree search results are parsed with explicit offset-based LE
-readers (`read_le_u64`, `read_le_u32`) from `uapi/src/util.rs`, since those
-buffers are accessed at known offsets rather than sequentially.
+readers (`read_le_u64`, `read_le_u32`) from `uapi/src/util.rs`, because those
+buffers are read at known offsets rather than sequentially.
 
 ## Style
 
-Keep `unsafe` blocks as small as possible; non-trivial ones get a `// SAFETY:`
-comment. For packed structs, copy fields to locals before taking references to
-avoid misaligned reference UB. Use `escape_ascii()` when printing byte strings
-that may be non-UTF-8. Import symbols used more than once rather than
-qualifying them at every call site (single-use qualified paths are fine).
+Keep `unsafe` blocks as small as possible. Non-trivial ones get a
+`// SAFETY:` comment. For packed structs, copy fields to locals before taking
+references, to avoid misaligned reference UB. Use `escape_ascii()` when
+printing byte strings that may not be UTF-8. Import symbols used more than once
+rather than qualifying them at every call site. Single-use qualified paths are
+fine.
 
-Shared CLI helpers live in `cli/src/util.rs`, these include utilities to format
-sizes, bytes, time, and parse various types.
+Shared CLI helpers live in `cli/src/util.rs`. They format sizes, bytes, and
+times, and parse various argument types.
 
 ## Doc comments
 
-In `uapi/`, module-level docs start with a `#` heading describing the module's
-purpose. Function docs explain what the function does and why; the ioctl name is
-a parenthetical in the implementation, not the primary description.
+In `uapi/`, module-level docs start with a `#` heading that describes the
+module's purpose. Function docs explain what the function does and why. The
+ioctl name goes in a parenthetical or in the implementation, not in the main
+description.
 
-In `cli/`, don't put doc comments on subcommand enum variants — clap uses the
-variant doc in preference to the struct doc, forcing duplication. Don't use
-Markdown in clap struct doc comments: `wrap_help` reflows all text and destroys
+In `cli/`, don't put doc comments on subcommand enum variants. Clap prefers the
+variant doc over the struct doc, which forces duplication. Don't use Markdown
+in clap struct doc comments: `wrap_help` reflows all text and destroys the
 formatting. Use plain prose paragraphs instead.

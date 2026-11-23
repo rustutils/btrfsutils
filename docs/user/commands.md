@@ -1,7 +1,7 @@
 # Commands
 
-btrfsutils implements the same command structure as the upstream `btrfs` tool.
-Commands are organized into groups:
+btrfsutils uses the same command structure as the upstream `btrfs` tool.
+Commands are organized into groups.
 
 ## btrfs filesystem
 
@@ -88,7 +88,7 @@ Replace a device in a filesystem.
 | `btrfs replace status <path>` | Show replacement status |
 | `btrfs replace cancel <path>` | Cancel a running replacement |
 
-## btrfs send / receive
+## btrfs send and receive
 
 Stream filesystem data between systems.
 
@@ -98,10 +98,10 @@ Stream filesystem data between systems.
 | `btrfs send --offline IMAGE` | Generate a v1 send stream from an unmounted image without root or the kernel ioctl |
 | `btrfs receive <path>` | Receive a stream into a directory |
 
-`btrfs send` (online) supports full sends and incremental sends (`-p` parent,
-`-c` clone sources). The offline form is tier 1: full sends only — no parent,
-no clone sources, no compressed-data passthrough. `btrfs receive` supports v1,
-v2 (compressed data), and v3 (fs-verity) stream formats.
+Online `btrfs send` supports full and incremental sends (`-p` for a parent,
+`-c` for clone sources). The offline form supports only full sends: no parent,
+no clone sources, and no compressed-data passthrough. `btrfs receive` supports
+the v1, v2 (compressed data), and v3 (fs-verity) stream formats.
 
 ## btrfs reflink
 
@@ -111,8 +111,9 @@ Lightweight file copies that share data extents (copy-on-write).
 |---------|-------------|
 | `btrfs reflink clone [-r SRCOFF:LENGTH:DESTOFF]... SRC DST` | Reflink the whole source file into `DST`, or specific ranges with one or more `-r` flags |
 
-Reads/writes after the clone are COW: storage is consumed once until the files
-diverge. `LENGTH=0` in a range spec means "from SRCOFF to end-of-source".
+The clone shares storage with the source until either file is written, at
+which point the changed blocks are copied. `LENGTH=0` in a range spec means
+"from SRCOFF to the end of the source".
 
 ## btrfs inspect-internal
 
@@ -128,13 +129,13 @@ Low-level inspection tools.
 | `btrfs inspect-internal list-chunks <path>` | List all chunk allocations |
 | `btrfs inspect-internal dump-super <dev>` | Dump the superblock |
 | `btrfs inspect-internal dump-tree <dev>` | Dump raw B-tree contents |
-| `btrfs inspect-internal tree-stats <dev>` | Walk a B-tree and report node/leaf statistics |
+| `btrfs inspect-internal tree-stats <dev>` | Walk a B-tree and report node and leaf statistics |
 | `btrfs inspect-internal map-swapfile <path>` | Show physical extent map of a swapfile |
 
 `dump-super` and `dump-tree` read directly from a block device or image file and
 do not require a mounted filesystem or elevated privileges.
 
-## btrfs quota / qgroup
+## btrfs quota and qgroup
 
 Manage filesystem quotas.
 
@@ -162,7 +163,7 @@ Get and set filesystem object properties.
 | `btrfs property set <path> <name> <value>` | Set a property |
 | `btrfs property list <path>` | List available properties |
 
-Supported properties: `ro` (subvolumes), `label` (filesystem/device),
+Supported properties: `ro` (subvolumes), `label` (filesystem or device), and
 `compression` (inodes).
 
 ## btrfs restore
@@ -175,8 +176,14 @@ structures directly.
 | `btrfs restore <dev> <path>` | Restore files to a destination directory |
 | `btrfs restore -l <dev>` | List available tree roots |
 
-Supports regular files, directories, symlinks (`-S`), extended attributes (`-x`),
-metadata (owner/mode/times with `-m`), and compressed extents (zlib/zstd/lzo).
+It restores:
+
+- regular files and directories
+- symlinks (`-S`)
+- extended attributes (`-x`)
+- owner, mode, and timestamps (`-m`)
+- compressed extents (zlib, zstd, and lzo)
+
 Use `--path-regex` to filter restored files and `-s` to include snapshots.
 
 ## btrfs rescue
@@ -193,7 +200,7 @@ Emergency recovery tools for damaged filesystems.
 | `btrfs rescue clear-uuid-tree <dev>` | Drop the UUID tree so the kernel rebuilds it |
 | `btrfs rescue clear-space-cache <v1\|v2> <dev>` | Clear the v1 or v2 free space cache |
 | `btrfs rescue clear-ino-cache <dev>` | Remove leftover items from the deprecated inode cache |
-| `btrfs rescue chunk-recover [--apply] <dev>` | Scan surviving on-disk leaves to reconstruct a damaged chunk tree (read-only report by default; `--apply` writes the reconstructed tree via `btrfs-transaction`) |
+| `btrfs rescue chunk-recover [--apply] <dev>` | Rebuild a damaged chunk tree from surviving on-disk leaves. Reports only by default. `--apply` writes the rebuilt tree through `btrfs-transaction` |
 
 ## btrfs-mkfs
 
@@ -203,11 +210,16 @@ Create a new btrfs filesystem on a block device or image file.
 btrfs-mkfs [options] <device> [device...]
 ```
 
-Supports single-device and multi-device filesystems with all RAID profiles
-(SINGLE, DUP, RAID0, RAID1, RAID1C3, RAID1C4, RAID10, RAID5, RAID6), all
-four checksum algorithms (crc32c, xxhash, sha256, blake2b), quota and simple
-quota setup, custom nodesize/sectorsize, labels, UUIDs, feature flags, and
-directory population via `--rootdir`.
+It supports:
+
+- single-device and multi-device filesystems
+- all RAID profiles: SINGLE, DUP, RAID0, RAID1, RAID1C3, RAID1C4, RAID10,
+  RAID5, RAID6
+- all four checksum algorithms: crc32c, xxhash, sha256, blake2b
+- quota and simple quota setup
+- custom nodesize and sectorsize
+- labels, UUIDs, and feature flags
+- populating the filesystem from a directory with `--rootdir`
 
 ## btrfs-tune
 
@@ -222,13 +234,13 @@ btrfs-tune [options] <device>
 | `-r` | Enable extended inode refs (extref) |
 | `-x` | Enable skinny metadata extent refs |
 | `-n` | Enable no-holes feature |
-| `-S 0` / `-S 1` | Clear or set the seeding flag |
+| `-S 0`, `-S 1` | Clear or set the seeding flag |
 | `-m` | Change fsid to a random UUID (metadata_uuid mechanism) |
 | `-M <uuid>` | Change fsid to a specific UUID (metadata_uuid mechanism) |
 | `-u` | Rewrite fsid to a random UUID (patches all tree blocks) |
 | `-U <uuid>` | Rewrite fsid to a specific UUID (patches all tree blocks) |
 
-## btrfs fuse / btrfs-fuse
+## btrfs fuse and btrfs-fuse
 
 Read-only userspace FUSE driver. Mounts a btrfs image or block device without
 kernel btrfs support.
@@ -238,13 +250,16 @@ kernel btrfs support.
 | `btrfs-fuse <IMAGE> <MOUNTPOINT>` | Mount the image read-only (standalone binary) |
 | `btrfs fuse <IMAGE> <MOUNTPOINT>` | Same, embedded as a subcommand behind the opt-in `fuse` cargo feature |
 
-Notable flags: `--subvol PATH` / `--subvolid ID` to mount a specific
-subvolume as the FUSE root; `--cache-tree-blocks N`, `--cache-inodes N`,
-`--cache-extent-maps N` to tune the three internal caches;
-`--no-default-permissions` to bypass per-file mode/uid/gid enforcement
-(useful when the stored UIDs don't match the local system).
+Notable flags:
 
-Experimental — see [`btrfs-fuse`'s README](https://github.com/rustutils/btrfsutils/blob/master/fuse/README.md)
+- `--subvol PATH` or `--subvolid ID` mounts a specific subvolume as the FUSE
+  root.
+- `--cache-tree-blocks N`, `--cache-inodes N`, and `--cache-extent-maps N` tune
+  the three internal caches.
+- `--no-default-permissions` turns off per-file mode, UID, and GID checks.
+  This helps when the stored UIDs don't match the local system.
+
+This driver is experimental. See [`btrfs-fuse`'s README](https://github.com/rustutils/btrfsutils/blob/master/fuse/README.md)
 for the full feature matrix.
 
 ## Global flags
@@ -253,11 +268,10 @@ These flags are accepted by all `btrfs` commands:
 
 | Flag | Description |
 |------|-------------|
-| `-v` / `--verbose` | Increase verbosity (repeatable) |
-| `-q` / `--quiet` | Suppress non-error output |
-| `-f`, `--format` | Set the format, one of: text, json, modern |
+| `-v`, `--verbose` | Increase verbosity (repeatable) |
+| `-q`, `--quiet` | Suppress non-error output |
+| `-f`, `--format` | Set the output format: text, json, or modern |
 
 ## Output Format
 
-Many commands accept a `--format json` which will cause them to
-output JSON-formatte data.
+Many commands accept `--format json` to print JSON.

@@ -1,18 +1,18 @@
 # How Commands Work
 
-Every command in btrfsutils is implemented across two layers: a safe kernel
-interface wrapper in `btrfs-uapi`, and a CLI command in `btrfs-cli`. This page
-walks through a concrete example — `btrfs filesystem label` — to show how the
-two layers fit together and why the split exists.
+Every command is split across two layers: a safe kernel interface wrapper in
+`btrfs-uapi` and a CLI command in `btrfs-cli`. This page walks through
+`btrfs filesystem label` to show how the layers fit together and why they are
+split.
 
 ## The uapi layer
 
-The uapi layer lives in `uapi/src/`. Its job is to translate between Rust types
-and the raw kernel interfaces — allocating ioctl argument buffers, calling the
-ioctl, and converting the result into something the rest of the code can use
-without touching any `unsafe` code or bindgen types.
+The uapi layer lives in `uapi/src/`. It translates between Rust types and the
+raw kernel interfaces. It allocates ioctl argument buffers, calls the ioctl,
+and converts the result into something the rest of the code can use without
+`unsafe` code or bindgen types.
 
-For `btrfs filesystem label`, that looks like this (from `uapi/src/filesystem.rs`):
+For `btrfs filesystem label`, it looks like this (from `uapi/src/filesystem.rs`):
 
 ```rust
 pub fn label_get(fd: BorrowedFd) -> nix::Result<CString> {
@@ -36,15 +36,15 @@ pub fn label_set(fd: BorrowedFd, label: &CStr) -> nix::Result<()> {
 }
 ```
 
-The function signatures use `BorrowedFd` rather than a raw integer, `CString`
-rather than a byte array, and `nix::Result` rather than checking `errno` manually.
-The caller never sees `btrfs_ioctl_*` types. The `unsafe` is contained to the
-ioctl call itself, with surrounding logic that is safe and testable.
+The signatures use `BorrowedFd` rather than a raw integer, `CString` rather
+than a byte array, and `nix::Result` rather than manual `errno` checks. The
+caller never sees `btrfs_ioctl_*` types. The `unsafe` is confined to the ioctl
+call. The logic around it is safe and testable.
 
 ## The cli layer
 
-The CLI layer lives in `cli/src/`. Its job is to parse arguments, call the uapi
-function, and format the output. It never calls ioctls directly.
+The CLI layer lives in `cli/src/`. It parses arguments, calls the uapi
+function, and formats the output. It never calls ioctls directly.
 
 The same command in `cli/src/filesystem/label.rs`:
 
@@ -78,29 +78,27 @@ impl Runnable for FilesystemLabelCommand {
 }
 ```
 
-The struct derives `Parser` from clap — the field doc comments become the help
-text. `Runnable::run` handles the two cases (get and set) by opening the path,
-calling the appropriate uapi function, and either printing the result or reporting
-an error. Error messages include the path so the user knows which filesystem
+The struct derives clap's `Parser`, and the field doc comments become the help
+text. `Runnable::run` handles both cases (get and set). It opens the path,
+calls the matching uapi function, and either prints the result or reports an
+error. Error messages include the path so the user knows which filesystem
 failed.
 
 ## Why the split
 
-The separation keeps each layer focused and independently testable. The uapi
-layer can be tested with unit tests that mock the ioctl, or with integration
-tests that operate on a real filesystem, without any CLI machinery involved. The
-CLI layer can be tested with argument parsing snapshot tests (no filesystem
-needed at all) and help text snapshot tests.
+Each layer stays focused and can be tested on its own. The uapi layer can be
+tested with unit tests that mock the ioctl, or with integration tests on a real
+filesystem, without any CLI code. The CLI layer can be tested with snapshot
+tests for argument parsing and help text, which need no filesystem at all.
 
-It also keeps the library crates clean. Because `btrfs-uapi`, `btrfs-disk`, and
-`btrfs-stream` contain no CLI logic and no GPL-derived code, they can be licensed
-MIT/Apache-2.0 and used by other projects independently of the CLI tools.
+The split also keeps the library crates clean. `btrfs-uapi`, `btrfs-disk`, and
+`btrfs-stream` contain no CLI logic and no GPL-derived code, so they can be
+licensed MIT or Apache-2.0 and used by other projects without the CLI tools.
 
 ## Routing
 
-Each top-level command group has a router in `cli/src/` (e.g.
-`cli/src/filesystem.rs`) that defines a `FilesystemCommand` enum with a variant
-per subcommand. The `Runnable` implementation for the router matches on the
-variant and delegates to the subcommand's own `run` method. Adding a new
-subcommand means adding a variant to the enum, a `mod` declaration, and a `run`
-dispatch arm.
+Each top-level command group has a router in `cli/src/` (for example
+`cli/src/filesystem.rs`). It defines an enum such as `FilesystemCommand` with
+one variant per subcommand. The router's `Runnable` implementation matches on
+the variant and calls the subcommand's own `run` method. To add a subcommand,
+add a variant to the enum, a `mod` declaration, and a dispatch arm.

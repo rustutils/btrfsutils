@@ -1,30 +1,29 @@
 # Testing
 
-The goal for this project is to maintain a high test coverage, to make sure
-that these tools function correctly.
+The project aims for high test coverage to make sure the tools work correctly.
 
 ## Running tests
 
-Running the tests for this project is complicated by the fact that many btrfs
-operations talk directly to the kernel and require elevated privileges. 
+Many btrfs operations talk directly to the kernel and need elevated
+privileges, which makes running the tests more involved.
 
-You can run all non-privileged tests with regular `cargo test` commands. This
-will still build the privileged tests, but they are skipped.
+`cargo test` runs all unprivileged tests. It still builds the privileged
+tests but skips them.
 
 ```sh
 cargo test
 ```
 
-In order to run privileged tests, there is a `just` target that will build
-them, and run (only the test binaries, not `cargo` itself) using `sudo`.
-This is the recommended way to run the full test suite on this project.
+To run the privileged tests, use the `just test` target. It builds the tests
+and runs only the test binaries (not `cargo` itself) under `sudo`. This is the
+recommended way to run the full suite.
 
 ```sh
 just test
 ```
 
-You can build a coverage report (requires `cargo-llvm-cov`) of the full test
-suite similarly, using the `coverage` target.
+The `coverage` target builds a coverage report of the full suite. It requires
+`cargo-llvm-cov`.
 
 ```sh
 just coverage
@@ -33,88 +32,102 @@ just coverage
 
 ## Static checks
 
-Before committing, run `just check`. This wraps the formatter check
-(nightly `rustfmt`), `cargo deny`, `taplo` for `Cargo.toml` formatting,
-`cargo doc` (with `-Dwarnings`), `cargo clippy --all-features`,
-per-libc `cargo check` for the host arch, the optional CLI features,
-and `cargo msrv verify` against every publishable crate's declared
-`rust-version`.
+Run `just check` before committing. It runs:
 
-The host-arch detection means `just check` works on x86_64 and
-aarch64 alike. The musl half (`<host>-unknown-linux-musl`) needs a
-matching C cross-compiler on PATH, since the `zstd-sys` and
-`lzo-sys` build scripts compile C code:
+- the formatter check (nightly `rustfmt`)
+- `cargo deny`
+- `taplo` for `Cargo.toml` formatting
+- `cargo doc` with `-Dwarnings`
+- `cargo clippy --all-features`
+- `cargo check` for each libc on the host architecture
+- `cargo check` for the optional CLI features
+- `cargo msrv verify` against each publishable crate's declared `rust-version`
 
-- **Nix devshell** (`nix develop`) provides everything; you don't
-  need any of the steps below.
-- **Fedora aarch64**: `dnf install musl-gcc` ships `musl-gcc` as a
-  thin wrapper around the host gcc plus musl specs. `cc-rs` looks
-  for the target-prefixed `aarch64-linux-musl-gcc` name, so symlink
-  it once:
+Because it detects the host architecture, `just check` works on both x86_64
+and aarch64. The musl check (`<host>-unknown-linux-musl`) needs a matching C
+cross-compiler on PATH, because the `zstd-sys` and `lzo-sys` build scripts
+compile C code:
+
+- **Nix devshell** (`nix develop`) provides everything. You don't need any of
+  the steps below.
+- **Fedora aarch64**: `dnf install musl-gcc` installs `musl-gcc`, a thin
+  wrapper around the host gcc with musl specs. `cc-rs` looks for the
+  target-prefixed name `aarch64-linux-musl-gcc`, so create a symlink once:
 
   ```sh
   sudo ln -s /usr/bin/musl-gcc /usr/local/bin/aarch64-linux-musl-gcc
   ```
 
-  (or set `CC_aarch64_unknown_linux_musl=musl-gcc` and
-  `AR_aarch64_unknown_linux_musl=ar` if you prefer to avoid touching
-  `/usr/local/bin`.)
-- **Debian / Ubuntu**: `apt install musl-tools` (host arch) or one
-  of the `gcc-<arch>-linux-musl-cross` packages for cross builds;
-  same target-prefix handling applies if `cc-rs` doesn't pick it up
-  automatically.
+  To avoid touching `/usr/local/bin`, set
+  `CC_aarch64_unknown_linux_musl=musl-gcc` and
+  `AR_aarch64_unknown_linux_musl=ar` instead.
+- **Debian and Ubuntu**: `apt install musl-tools` for the host architecture,
+  or one of the `gcc-<arch>-linux-musl-cross` packages for cross builds. The
+  same target-prefix handling applies if `cc-rs` doesn't find the compiler on
+  its own.
 
 If the cross C compiler isn't on PATH, `just check` prints
-`skipping <triple> check: <prefix>-linux-musl-gcc not on PATH` and
-keeps going — only CI is expected to fail on a missing musl
-toolchain.
+`skipping <triple> check: <prefix>-linux-musl-gcc not on PATH` and continues.
+Only CI is expected to fail on a missing musl toolchain.
 
 ## Unit tests
 
-Unit tests live as `#[cfg(test)] mod tests` blocks within the module they test.
-They require no privileges and run with `cargo test`.
+Unit tests live in `#[cfg(test)] mod tests` blocks inside the module they
+test. They need no privileges and run with `cargo test`.
 
-Coverage spans all pure logic across the crates: LE readers, struct size
-assertions, tree search cursor arithmetic, stream parsing (all 22 v1 command
-types, CRC validation), superblock parsing, B-tree node parsing, size/time
-formatting, argument parsing helpers, balance filter parsing, and property
-classification.
+They cover the pure logic across the crates:
 
-When adding a new feature, add unit tests for any logic that doesn't require a
-real kernel or filesystem.
+- LE readers
+- struct size assertions
+- tree search cursor arithmetic
+- stream parsing (all 22 v1 command types, CRC validation)
+- superblock and B-tree node parsing
+- size and time formatting
+- argument parsing helpers
+- balance filter parsing
+- property classification
+
+When adding a feature, add unit tests for any logic that doesn't need a real
+kernel or filesystem.
 
 ## Integration tests
 
-Integration tests live in `uapi/tests/` and `cli/tests/commands/` and are marked:
+Integration tests live in `uapi/tests/` and `cli/tests/commands/` and are
+marked:
 
 ```rust
 #[ignore = "requires elevated privileges"]
 ```
 
-They are skipped by `cargo test` and run only via `just test`.
+`cargo test` skips them. They run only through `just test`.
 
 ### Fixture tests (`commands/fixture.rs`)
 
-Read-only snapshot tests against a pre-built filesystem image
+These are read-only snapshot tests against a pre-built filesystem image
 (`cli/tests/commands/fixture.img.gz`). The image has a fixed UUID, label, and
-subvolume layout, so output is fully deterministic. These tests cover all
-read-only commands: `filesystem df/show/usage/label/du`, `subvolume list/show`,
-`device stats/usage`, all `inspect-internal` commands, and `property get/list`.
+subvolume layout, so the output is fully deterministic. They cover all
+read-only commands:
 
-`dump-tree` and `dump-super` tests read the image file directly and do not
-require mounting, so they run without elevated privileges even within the
-privileged test suite.
+- `filesystem df`, `show`, `usage`, `label`, and `du`
+- `subvolume list` and `show`
+- `device stats` and `usage`
+- all `inspect-internal` commands
+- `property get` and `list`
+
+The `dump-tree` and `dump-super` tests read the image file directly without
+mounting it, so they don't need elevated privileges even though they are part
+of the privileged suite.
 
 ### Live tests (`commands/live.rs`)
 
-Tests that create and mutate real btrfs filesystems on loopback devices. These
-cover all mutating commands: subvolume create/delete/snapshot, send/receive,
-scrub, balance, device add/remove, quota, qgroup, label set, resize, defrag,
-replace, and more.
+These tests create and modify real btrfs filesystems on loopback devices. They
+cover all mutating commands, including subvolume create, delete, and snapshot,
+send and receive, scrub, balance, device add and remove, quota, qgroup, label
+set, resize, defrag, and replace.
 
 ### Test helpers
 
-`cli/tests/common.rs` provides RAII helpers that clean up automatically on drop:
+`cli/tests/common.rs` provides RAII helpers that clean up on drop:
 
 ```
 BackingFile → LoopbackDevice → Mount
@@ -132,10 +145,10 @@ Convenience functions:
 
 ## Snapshot testing with insta
 
-CLI output tests use [insta](https://insta.rs/) for snapshot testing. Snapshots
-live in `cli/tests/snapshots/` and are checked in to the repository.
+CLI output tests use [insta](https://insta.rs/) for snapshot testing.
+Snapshots live in `cli/tests/snapshots/` and are checked in to the repository.
 
-Four snapshot categories:
+There are four snapshot categories:
 
 | Pattern | Privileges | Description |
 |---------|-----------|-------------|
@@ -160,19 +173,20 @@ cargo insta review
 cargo insta accept --all
 ```
 
-After running privileged tests via `just test`, the Justfile fixes ownership of
-any root-owned snapshot files and sets `INSTA_WORKSPACE_ROOT` so snapshots land
-in the right directory.
+When privileged tests run through `just test`, the Justfile sets
+`INSTA_WORKSPACE_ROOT` so snapshots land in the right directory, and fixes the
+ownership of any root-owned snapshot files afterwards.
 
 ### Adding tests for a new subcommand
 
 1. **Argument parsing**: add cases to `cli/tests/arguments.rs` following the
    existing pattern.
-2. **Help text**: `cli/tests/help.rs` auto-discovers all subcommands by walking
-   the clap tree — no changes needed.
-3. **Read-only output**: if the fixture image has suitable content, add snapshot
-   tests to `commands/fixture.rs`.
-4. **Mutating commands**: add tests to `commands/live.rs` using the RAII helpers.
+2. **Help text**: `cli/tests/help.rs` finds all subcommands by walking the clap
+   tree. No changes needed.
+3. **Read-only output**: if the fixture image has suitable content, add
+   snapshot tests to `commands/fixture.rs`.
+4. **Mutating commands**: add tests to `commands/live.rs` using the RAII
+   helpers.
 
-Use the `snap!("description", output)` macro for snapshot tests — the description
-appears in the snapshot file header.
+Use the `snap!("description", output)` macro for snapshot tests. The
+description appears in the snapshot file header.

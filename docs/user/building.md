@@ -2,18 +2,18 @@
 
 ## Prerequisites
 
-You need a Rust toolchain matching the version in `rust-toolchain.toml` — running
-`rustup toolchain install` in the project directory will pick it up automatically.
-You also need `clang` and `libclang` for bindgen, which generates Rust bindings
-from the kernel UAPI headers at build time.
+You need the Rust toolchain named in `rust-toolchain.toml`. Running
+`rustup toolchain install` in the project directory installs it. You also need
+`clang` and `libclang` for bindgen, which generates Rust bindings from the
+kernel UAPI headers at build time.
 
-On Fedora/RHEL:
+On Fedora or RHEL:
 
 ```sh
 sudo dnf install clang
 ```
 
-On Debian/Ubuntu:
+On Debian or Ubuntu:
 
 ```sh
 sudo apt install clang libclang-dev
@@ -25,13 +25,12 @@ sudo apt install clang libclang-dev
 cargo build --release
 ```
 
-The resulting binaries are `target/release/btrfs`, `target/release/btrfs-mkfs`,
+This builds `target/release/btrfs`, `target/release/btrfs-mkfs`,
 and `target/release/btrfs-tune`.
 
 ## Building with Nix
 
-The project includes a Nix flake that provides a fully reproducible build with
-all dependencies pinned:
+The Nix flake gives a reproducible build with all dependencies pinned:
 
 ```sh
 nix build
@@ -40,26 +39,29 @@ nix build
 Outputs land in `result/bin/btrfs`, `result/bin/btrfs-mkfs`,
 `result/bin/btrfs-tune`, and `result/share/man/man1/`.
 
-To enter a development shell with all tools available (including nightly rustfmt,
-cargo-insta, and cargo-llvm-cov):
+To enter a development shell with all tools, including nightly rustfmt,
+cargo-insta, and cargo-llvm-cov:
 
 ```sh
 nix develop
 ```
 
-Contributors who want to run the full lint sweep (`just check`) on a
-non-Nix machine may also need a host-arch musl cross-compiler — see
-the "Static checks" section of the
-[testing guide](../dev/testing.md) for setup instructions.
+To run the full lint sweep (`just check`) outside Nix, you may also need a
+musl cross-compiler for the host architecture. See "Static checks" in the
+[testing guide](../dev/testing.md) for setup.
 
 ## Cross-compiling release artifacts
 
-`just package` cross-compiles statically-linked release artifacts for
-all supported architectures into `target/dist/`. For each of `x86_64`,
-`aarch64`, and `riscv64gc` Linux musl, it produces a zstd-compressed
-multicall binary, a relocatable tarball, a `.deb`, and a `.rpm`.
+`just package` cross-compiles statically linked release artifacts for all
+supported architectures into `target/dist/`. For each of `x86_64`, `aarch64`,
+and `riscv64gc` Linux musl, it produces:
 
-Requires `cargo-zigbuild`, `cargo-deb`, `cargo-generate-rpm`, `zstd`,
-and a Zig 0.11+ binary on `PATH`. The CI release pipeline uses the same
-recipe; running `just package` locally produces byte-identical
-artifacts to a tagged CI build (modulo timestamps).
+- a zstd-compressed multicall binary
+- a relocatable tarball
+- a `.deb`
+- a `.rpm`
+
+It requires `cargo-zigbuild`, `cargo-deb`, `cargo-generate-rpm`, `zstd`, and
+Zig 0.11 or later on `PATH`. The CI release pipeline uses the same recipe, so
+a local run produces artifacts identical to a tagged CI build, apart from
+timestamps.
