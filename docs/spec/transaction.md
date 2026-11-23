@@ -592,7 +592,61 @@ Each stripe (32 bytes):
 **Chunk-to-physical resolution:** For a logical address `L` within a chunk
 starting at `chunk_start` with a single stripe at device offset `phys`:
 `physical = phys + (L - chunk_start)`. RAID profiles use more complex
-mapping.
+mapping; see the next section.
+
+### RAID stripe routing
+
+Given a logical address `offset` inside a chunk with `stripe_len`
+(typically 65,536), `num_stripes`, and `sub_stripes`:
+
+1. **Row selection** (universal):
+
+   ```
+   stripe_nr     = offset / stripe_len
+   stripe_offset = offset % stripe_len
+   ```
+
+   `stripe_nr` is the row within the chunk; `stripe_offset` is the byte
+   offset within the row.
+
+2. **Per-profile column selection** (which device index in
+   `chunk.stripes` carries this row):
+
+   | Profile  | Columns carrying this row | Full-row write fan-out |
+   |----------|---------------------------|------------------------|
+   | SINGLE   | column 0                  | 1 device |
+   | DUP      | all `num_stripes` columns | `num_stripes` (= 2, both on same device) |
+   | RAID0    | `stripe_nr % num_stripes` | 1 device |
+   | RAID1*   | all `num_stripes` columns | `num_stripes` (mirroring) |
+   | RAID10   | `(stripe_nr % factor) * sub_stripes`, then `sub_stripes` mirrors of that pair, where `factor = num_stripes / sub_stripes` | `sub_stripes` (= 2) |
+   | RAID5/6  | data stripes + parity stripe(s) computed per row | `num_stripes` |
+
+3. **Within-row physical offset on each chosen device**:
+
+   ```
+   per_device_stripe_nr = stripe_nr / factor
+   physical = chunk.stripes[col].offset
+            + per_device_stripe_nr * stripe_len
+            + stripe_offset
+   ```
+
+   For SINGLE / DUP / RAID1*: `factor = 1`.
+   For RAID0: `factor = num_stripes`.
+   For RAID10: `factor = num_stripes / sub_stripes`.
+
+4. **Multi-row buffers**: a write of `len` bytes where `len >
+   (stripe_len - stripe_offset)` spans multiple rows. Each row gets its
+   own column selection and per-device offset; each row carries the
+   slice of the buffer corresponding to that row's bytes.
+
+For tree blocks, `nodesize <= stripe_len` always holds (default 16 KiB
+nodesize, 64 KiB stripe_len), so a tree block falls entirely in one row
+and never triggers buffer splitting. Buffer splitting applies only to
+data extents larger than `stripe_len - stripe_offset`.
+
+**Reads** can pick any one column from each row's set: every stripe in
+the row carries a valid copy for mirrored profiles, and the per-row
+column is uniquely determined for striped-only profiles.
 
 ### Device extent (48 bytes)
 

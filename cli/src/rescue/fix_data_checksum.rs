@@ -32,8 +32,8 @@ const EXTENT_CSUM_OBJECTID: u64 = raw::BTRFS_EXTENT_CSUM_OBJECTID as u64;
 /// Walks the csum tree, recomputes the CRC32C of every covered data
 /// block, and reports any mismatches. With `--mirror N`, mismatched
 /// csums are rewritten in place using the data from mirror N (only
-/// mirror 1 is currently supported, since multi-device write paths
-/// are not yet implemented).
+/// mirror 1 is currently supported; reading from a specific mirror
+/// of a multi-device filesystem is not yet wired up here).
 ///
 /// The device must not be mounted.
 #[derive(Parser, Debug)]
@@ -71,7 +71,7 @@ impl Runnable for RescueFixDataChecksumCommand {
             && m != 1
         {
             bail!(
-                "only mirror 1 is supported (multi-device write paths are not implemented)"
+                "only mirror 1 is supported (mirror selection across devices is not yet wired up)"
             );
         }
         let repair = !self.readonly && self.mirror.is_some();

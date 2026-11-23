@@ -404,7 +404,7 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     /// Currently single-device-only: returns the primary device's
     /// embedded `dev_item` from the superblock when `devid == 1`,
     /// `None` otherwise. Multi-device support would walk the dev
-    /// tree; landing alongside multi-device write support.
+    /// tree.
     #[must_use]
     pub fn dev_info(&self, devid: u64) -> Option<DeviceItem> {
         if self.inner.superblock.dev_item.devid == devid {
