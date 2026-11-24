@@ -3939,8 +3939,9 @@ impl<R: Read + Write + Seek> Transaction<R> {
             // Update FREE_SPACE_INFO extent_count for this block group.
             // For a simple allocation from the middle of an extent:
             // count changes by +1 (one extent becomes two) or -1 (exact match
-            // removes one) or 0 (trim from edge). Skipped for now: the
-            // kernel rebuilds this on mount when VALID is cleared.
+            // removes one) or 0 (trim from edge). Not done here. This
+            // helper is unused, and the commit path
+            // (`update_free_space_tree`) maintains extent_count itself.
         }
 
         Ok(())
@@ -4168,10 +4169,6 @@ fn find_alloc_region_after<R: Read + Write + Seek>(
     )))
 }
 
-/// Update one backup root slot in the superblock.
-///
-/// This is currently a placeholder. The full implementation needs to populate
-/// the backup root fields from the current tree root state.
 /// Populate one backup root slot from the current filesystem state.
 ///
 /// The superblock has 4 rotating backup root entries. On each commit, one

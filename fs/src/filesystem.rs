@@ -212,7 +212,7 @@ struct Inner<R: io::Read + io::Seek + Send + 'static> {
     /// Parsed primary-device superblock.
     superblock: Superblock,
     /// Map of tree id → (root block logical address, key offset).
-    /// Multi-subvolume support will look up additional entries here.
+    /// Holds every tree in the root tree, including all subvolumes.
     tree_roots: BTreeMap<u64, (u64, u64)>,
     /// Cached objectid of the default subvolume.
     default_subvol: SubvolId,
@@ -393,9 +393,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     /// Return the [`DeviceItem`] for `devid`, or `None` if no such
     /// device exists on this filesystem.
     ///
-    /// Single-device only: returns the primary device's embedded
-    /// `dev_item` from the superblock when `devid == 1`, `None`
-    /// otherwise. Multi-device support would walk the dev tree.
+    /// Single-device only: returns the superblock's embedded
+    /// `dev_item` when `devid` matches its id, `None` otherwise.
+    /// Multi-device support would walk the chunk tree's `DEV_ITEM`s.
     #[must_use]
     pub fn dev_info(&self, devid: u64) -> Option<DeviceItem> {
         if self.inner.superblock.dev_item.devid == devid {
@@ -1346,9 +1346,10 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         let tree_root = self.tree_root_for(subvol)?;
         // Collect all `(parent_dirid, name)` pairs in one tree walk.
         // `INODE_REF` packs every link from the same parent directory
-        // into one item. `INODE_EXTREF` holds links whose name and
-        // parent pair didn't fit (typically across many parents), with
-        // the parent stored in the item rather than the key offset.
+        // into one item keyed by the parent. `INODE_EXTREF` holds links
+        // that no longer fit in that item (many hardlinks in one
+        // directory). Its key offset is a name hash, so the parent is
+        // stored in the item.
         let mut refs: Vec<(u64, Vec<u8>)> = Vec::new();
         let mut reader = self.lock_reader();
         for_each_item(&mut reader, tree_root, |key, data| {
@@ -1393,9 +1394,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     fn list_subvolumes_blocking(&self) -> io::Result<Vec<SubvolInfo>> {
         let root_tree = self.inner.superblock.root;
         // Collect `ROOT_ITEM` (id → metadata) and `ROOT_BACKREF` (id →
-        // (parent, name)) in a single root tree walk. Each subvolume
-        // has at most one backref. If duplicates appear, the first
-        // wins.
+        // (parent, name)) in a single root tree walk. A subvolume can
+        // have several backrefs, one per referencing parent. The first
+        // (lowest parent id) wins.
         let mut roots: BTreeMap<u64, RootItem> = BTreeMap::new();
         let mut backrefs: BTreeMap<u64, (u64, RootRef)> = BTreeMap::new();
         let mut reader = self.lock_reader();

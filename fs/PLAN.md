@@ -40,10 +40,10 @@ embedder that reads or writes a btrfs filesystem without the kernel:
   model from the start, even before F5 implements crossing. FUSE adapters
   translate to a flat `u64` at the boundary.
 
-- **Cache hits go lock-free.** `Filesystem` operations use
-  `RwLock<LruCache<...>>` for shared read-side caches. Cache misses fall
-  back to a serialized I/O path. The split is internal: the `&self` API
-  stays the same as the cache layer evolves.
+- **Cache hits skip I/O.** Read-side caches are `Mutex<LruCache<...>>`,
+  locked only for the lookup (see F3). Cache misses fall back to a
+  serialized I/O path. The split is internal: the `&self` API stays the
+  same as the cache layer evolves.
 
 - **Happy path only.** No degraded RAID mounts and no partial-recovery
   modes. If `btrfs-disk` can open the filesystem, `btrfs-fs` operates on
@@ -82,6 +82,10 @@ From `btrfs-stream`:
 - `StreamReader` and TLV command and attribute encoding (used in F7 send)
 
 ## Crate structure (target)
+
+This is the planned layout. Today `Inode`, `SubvolId`, and `send` live in
+`filesystem.rs`, caches in `cache.rs`, and ioctl dispatch in
+`fuse/src/ioctl.rs`. The write path doesn't exist yet.
 
 ```
 fs/
@@ -309,12 +313,11 @@ kernel semantics.
 `btrfs-fs` exposes `Filesystem::ino_paths(subvol, objectid) ->
 Vec<Vec<u8>>` for embedders that want every hardlink path.
 
-`BTRFS_IOC_TREE_SEARCH_V2` has a handler that returns
-`IoctlOutcome::Retry`, but it cannot complete in practice because of the
-FUSE_IOCTL_RETRY restriction below. The same applies to
-`BTRFS_IOC_INO_PATHS` and `BTRFS_IOC_LOGICAL_INO_V2`. They are not wired
-into dispatch, since the retry round trip can't happen from a normal libc
-`ioctl(2)` caller.
+`BTRFS_IOC_TREE_SEARCH_V2` returns `ENOPROTOOPT`, and `btrfs-uapi` falls
+back to v1 (see F6.4). It can't be served directly because of the
+FUSE_IOCTL_RETRY restriction below. The same restriction applies to
+`BTRFS_IOC_INO_PATHS` and `BTRFS_IOC_LOGICAL_INO_V2`, which are not wired
+into dispatch and return `ENOTTY`.
 
 **FUSE_IOCTL_RETRY restriction.** Linux's `fuse_do_ioctl` accepts a
 `FUSE_IOCTL_RETRY` reply only when the original request had
@@ -347,8 +350,8 @@ dropped the patched `xfbs/fuser` git dependency. `btrfs-fuse` is back on
 the released `fuser = "0.17"` from crates.io and can be published again.
 
 The `ino_paths` and `logical_ino` fallbacks (F6.4b and F6.4c) are
-specified below but not implemented. Those ioctls return ENOPROTOOPT and
-have no userspace fallback yet.
+specified below but not implemented. Those ioctls return `ENOTTY` from
+the FUSE driver and have no userspace fallback yet.
 
 The kernel won't relax the retry restriction on our timeline, but we own
 both ends of the call. Our `btrfs` CLI calls the affected ioctls through
@@ -378,11 +381,12 @@ wrappers, with no new ioctl interfaces.
 
 **Per-ioctl plan:**
 
-- `tree_search_v2(fd, filter, buf_size)`: on `ENOTSUP`, call
-  `tree_search` (v1) with the same filter. v1 paginates internally with a
-  4 KiB buffer. Semantics are identical, only slower.
+- Tree search (shipped as `tree_search_auto`): tries v2 and, on
+  `ENOPROTOOPT`, `ENOTSUP`, `ENOTTY`, or `ENOSYS`, reruns the search with
+  v1. v1 paginates internally with a 4 KiB buffer. Semantics are
+  identical, only slower.
 
-- `ino_paths(fd, inum)`: on `ENOTSUP`:
+- `ino_paths(fd, inum)`: on `ENOPROTOOPT`:
   1. `lookup_path_rootid(fd)` to get the subvol id.
   2. `tree_search` for `objectid=inum, type ∈ {INODE_REF=12,
      INODE_EXTREF=13}`. For each ref, extract `(parent_dirid, name)`.
@@ -392,7 +396,7 @@ wrappers, with no new ioctl interfaces.
      string. This works on FUSE because it fits in 4 KiB.
   4. Join `parent_path + "/" + name` for each link.
 
-- `logical_ino` and `logical_ino_v2(fd, logical, ...)`: on `ENOTSUP`:
+- `logical_ino` and `logical_ino_v2(fd, logical, ...)`: on `ENOPROTOOPT`:
   1. `tree_search` on tree id 2 (extent tree) for `objectid=logical, type
      ∈ {EXTENT_ITEM=168, METADATA_ITEM=169}`.
   2. Parse `EXTENT_ITEM` to list its inline backrefs (`EXTENT_DATA_REF`,
@@ -417,30 +421,20 @@ trigger to `ENOPROTOOPT || EIO`. Genuine disk errors on those specific
 ioctls would then also trigger the fallback. The risk is low, because the
 fallback would itself fail with a meaningful error.
 
-**Effect on the fuser dependency.** With F6.4 in place, our CLI never
-issues the affected ioctls against our FUSE mount, so our FUSE driver
-never needs `ReplyIoctl::retry`. The git pin on xfbs/fuser is no longer
-needed:
-
-- Drop the `tree_search_v2` retry handler from `fuse/src/ioctl.rs`. No
-  consumer reaches it anymore.
-- Stop using the `arg: u64` parameter everywhere. None of the remaining
-  handlers need it.
-- Switch `fuse/Cargo.toml` back to the released `fuser = "0.17"` from
-  crates.io.
-- Drop the `allow-git` entry in `deny.toml`.
-- Re-enable `publish = true` on `btrfs-fuse`.
+**Effect on the fuser dependency.** With F6.4a in place, our FUSE driver
+never needs `ReplyIoctl::retry`. The retry handler is gone,
+`fuse/Cargo.toml` uses the released `fuser = "0.17"`, `deny.toml` has no
+`allow-git` entry, and `btrfs-fuse` is publishable again.
 
 **Test plan.** Each shim gets a uapi-level integration test that runs
-against our `btrfs-fuse` mount. It currently fails with EIO and passes
-once the shim lands. A hidden env var, `BTRFS_FORCE_FUSE_FALLBACK=1`, lets
-the same test exercise the fallback against a kernel mount, where it is
-the only path under test. The standalone parsers get unit tests, extent
+against our `btrfs-fuse` mount. It fails without the shim and passes
+with it. A hidden env var (proposed: `BTRFS_FORCE_FUSE_FALLBACK=1`) would
+let the same test exercise the fallback against a kernel mount. The standalone parsers get unit tests, extent
 item backrefs in particular.
 
 **Recommended sequencing:**
-- F6.4a: detection plumbing, `ENOTSUP` returns, and the `tree_search_v2`
-  fallback. Smallest, and proves the pattern.
+- F6.4a (done): detection plumbing, `ENOPROTOOPT` returns, and the
+  `tree_search_auto` fallback.
 - F6.4b: `ino_paths` fallback (~50 lines).
 - F6.4c: `logical_ino` fallback (~150 lines). Needs an extent item
   backref parser. Defer if no current CLI command needs it.
@@ -455,8 +449,9 @@ item backrefs in particular.
   with a variable-size inodes buffer.
 - `BTRFS_IOC_INO_PATHS`: inode → all paths (hardlink resolution), with a
   variable-size paths buffer.
-- `BTRFS_IOC_GET_SUBVOL_ROOTREF`: subvolume parent backrefs. A 69 KiB
-  fixed struct, but it still exceeds the 14-bit cap and needs retry.
+- `BTRFS_IOC_GET_SUBVOL_ROOTREF`: subvolume parent backrefs. Later found
+  to be a fixed 4 KiB struct that fits the 14-bit cap. It is implemented
+  without retry.
 - `BTRFS_IOC_LOGICAL_INO` (the older variant) and other admin ioctls whose
   buffers exceed 16 383 bytes.
 
@@ -549,8 +544,8 @@ route to the in-process path transparently. This unblocks
   task checks out a reader, runs its I/O, and returns the reader.
 - For `R != File` (test cursors and similar), a single mutex-protected
   reader remains.
-- Cache hits are already lock-free from F3. Misses now run in parallel on
-  different fds. `pread` on different fds is truly concurrent in the
+- Cache hits already skip the reader since F3. Misses now run in
+  parallel on different fds. `pread` on different fds is truly concurrent in the
   kernel.
 
 **Test plan:**

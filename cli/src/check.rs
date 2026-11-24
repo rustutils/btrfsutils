@@ -24,8 +24,12 @@ pub enum CheckMode {
 ///
 /// Verify the integrity of a btrfs filesystem by checking internal structures,
 /// extent trees, and data checksums. The filesystem must be unmounted before
-/// running this command. This is a potentially slow operation that requires
-/// CAP_SYS_ADMIN. Use --readonly to perform checks without attempting repairs.
+/// running this command. This can be a slow operation.
+///
+/// Checking is always read-only. --repair, --init-csum-tree,
+/// --init-extent-tree, --qgroup-report, and --subvol-extents are not yet
+/// supported and are rejected. --readonly, --mode, and --progress are
+/// accepted but have no effect.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown, clippy::struct_excessive_bools)]
 pub struct CheckCommand {

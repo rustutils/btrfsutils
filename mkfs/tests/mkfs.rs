@@ -87,8 +87,8 @@ fn test_config_n_devices(n: usize, per_device_bytes: u64) -> MkfsConfig {
     }
 }
 
-/// Minimum valid image size: system (5 MiB) + metadata DUP (2*32 MiB) + data (64 MiB) = 133 MiB.
-/// Use 256 MiB for comfortable headroom.
+/// Minimum valid image size is system (5 MiB) + metadata DUP (2*8 MiB) + data
+/// (8 MiB) = 29 MiB. Use 256 MiB for comfortable headroom.
 const MIN_SIZE: u64 = 256 * 1024 * 1024;
 
 /// Set the device path in the config and call make_btrfs.
@@ -184,9 +184,6 @@ fn mkfs_superblock_has_label() {
 fn mkfs_superblock_generation_increments_through_post_bootstrap() {
     // Bootstrap writes generation=1, then the post-bootstrap
     // transaction (UUID tree creation) commits at generation=2.
-    // For unsupported profiles (RAID0, RAID5, RAID10) post_bootstrap
-    // is a no-op, so the bootstrap generation stays at 1. This test
-    // uses the default DUP and SINGLE profiles, which are supported.
     let image = create_image(MIN_SIZE);
     let mut cfg = test_config(MIN_SIZE);
     make_btrfs_on(&image, &mut cfg);
@@ -527,7 +524,7 @@ fn raid6_metadata_uuid_tree_created_by_post_bootstrap() {
 
 #[test]
 fn mkfs_with_different_nodesize() {
-    // 64 KiB nodesize: still needs 133 MiB minimum for chunks.
+    // 64 KiB nodesize: the chunk minimum doesn't depend on nodesize.
     let size = MIN_SIZE;
     let image = create_image(size);
     let mut cfg = test_config(size);
@@ -644,8 +641,6 @@ fn mkfs_raid0_data_two_devices() {
     assert_eq!(sb.num_devices, 2);
 }
 
-// --- RAID1C3 tests (3 devices) ---
-
 #[test]
 fn mkfs_raid1c3_valid_superblocks() {
     let images: Vec<_> = (0..3).map(|_| create_image(MIN_SIZE)).collect();
@@ -691,8 +686,6 @@ fn mkfs_raid1c3_too_few_devices() {
         "expected layout/device error, got: {err}"
     );
 }
-
-// --- RAID1C4 tests (4 devices) ---
 
 #[test]
 fn mkfs_raid1c4_valid_superblocks() {
@@ -770,8 +763,6 @@ fn mount_raid1_metadata_and_data() {
     make_check_mount_verify(&mut cfg);
 }
 
-// --- RAID0 tests ---
-
 #[test]
 fn mkfs_raid0_metadata_two_devices() {
     let images: Vec<_> = (0..2).map(|_| create_image(MIN_SIZE)).collect();
@@ -827,8 +818,6 @@ fn mount_raid0_metadata_three_devices() {
     make_check_mount_verify(&mut cfg);
 }
 
-// --- RAID10 tests ---
-
 #[test]
 fn mkfs_raid10_four_devices() {
     let images: Vec<_> = (0..4).map(|_| create_image(MIN_SIZE)).collect();
@@ -874,8 +863,6 @@ fn mount_raid10_metadata_four_devices() {
     cfg.data_profile = Profile::Raid10;
     make_check_mount_verify(&mut cfg);
 }
-
-// --- RAID5/6 tests ---
 
 #[test]
 fn mkfs_raid5_two_devices() {
@@ -943,7 +930,6 @@ fn mount_raid6_three_devices() {
     make_check_mount_verify(&mut cfg);
 }
 
-// --- btrfs check tests for RAID profiles ---
 //
 // btrfs check reads a single device, so it can verify all profiles where
 // device 1 has all tree blocks (mirror metadata). For non-mirror metadata
@@ -1061,8 +1047,6 @@ fn check_squota() {
     make_and_check(&mut cfg);
 }
 
-// --- Quota and squota tests ---
-
 #[test]
 fn mkfs_quota_creates_valid_image() {
     let image = create_image(MIN_SIZE);
@@ -1163,7 +1147,6 @@ fn mount_squota() {
     make_check_mount_verify(&mut cfg);
 }
 
-// --- Deterministic image snapshot tests ---
 //
 // Create filesystem images with fixed UUIDs and timestamps, compress them,
 // and snapshot the compressed bytes. Any change to the on-disk format will
@@ -1239,7 +1222,7 @@ fn snapshot_no_block_group_tree() {
     insta::assert_binary_snapshot!(".img.gz", compressed);
 }
 
-// --- Privileged integration tests (mount) ---
+// Privileged integration tests (mount)
 //
 // These require root and loopback device support. Marked #[ignore].
 
@@ -1454,7 +1437,7 @@ fn mount_single_device_with_label() {
     make_check_mount_verify(&mut cfg);
 }
 
-// --- Validation tests (adapted from btrfs-progs mkfs-tests 003, 008) ---
+// Validation tests (adapted from btrfs-progs mkfs-tests 003, 008)
 
 /// Mixed mode requires equal nodesize and sectorsize (test 003).
 #[test]
@@ -1571,7 +1554,7 @@ fn large_sectorsize_64k_works() {
     assert_eq!(sb.nodesize, 65536);
 }
 
-// --- Nodesize and sectorsize combination tests (adapted from test 007) ---
+// Nodesize and sectorsize combination tests (adapted from test 007)
 
 /// Various valid nodesize >= sectorsize combos produce valid superblocks.
 #[test]
@@ -1600,7 +1583,7 @@ fn nodesize_sectorsize_combinations() {
     }
 }
 
-// --- Reserved 1M range test (adapted from test 013) ---
+// Reserved 1M range test (adapted from test 013)
 
 /// No device extent should start below 1 MiB (the reserved range).
 #[test]
@@ -1653,7 +1636,7 @@ fn first_dev_extent_above_reserved_1m() {
     }
 }
 
-// --- FS_TREE UUID and otime test (adapted from test 015) ---
+// FS_TREE UUID and otime test (adapted from test 015)
 
 /// The FS_TREE ROOT_ITEM should have a non-nil UUID and non-zero otime.
 #[test]
@@ -1705,7 +1688,7 @@ fn fs_tree_root_item_has_uuid_and_otime() {
     assert!(root_item.otime.sec > 0, "FS_TREE ROOT_ITEM otime is zero");
 }
 
-// --- Free-space-tree no bitmaps test (adapted from test 024) ---
+// Free-space-tree no bitmaps test (adapted from test 024)
 
 /// An empty filesystem's free-space-tree should have no FREE_SPACE_BITMAP items.
 #[test]
@@ -1747,8 +1730,6 @@ fn free_space_tree_no_bitmaps_on_empty_fs() {
         );
     }
 }
-
-// --- Root tree directory "default" DIR_ITEM tests ---
 
 /// Helper: find the "default" DIR_ITEM in the root tree and return its location key.
 fn find_default_dir_item(image_path: &Path) -> DirItem {
@@ -1843,8 +1824,6 @@ fn rootdir_default_subvol_dir_item_points_to_subvol() {
     );
     assert_eq!(dir_item.location.key_type, KeyType::RootItem);
 }
-
-// --- Subvolume tests ---
 
 /// Helper: create a rootdir image with subvolumes and return the image path.
 fn make_rootdir_image_with_subvols(
@@ -1999,8 +1978,6 @@ fn subvol_ro_has_rdonly_flag() {
     );
 }
 
-// --- Inode flags tests ---
-
 /// --inode-flags NODATACOW,NODATASUM:path should set the corresponding flags
 /// on the inode.
 #[test]
@@ -2108,8 +2085,6 @@ fn rootdir_inode_flags_nodatacow_nodatasum() {
         "normal.bin should not have NODATASUM flag"
     );
 }
-
-// --- Reflink tests ---
 
 /// --reflink should produce a valid filesystem image with file data intact.
 /// This test only runs if the temp directory supports FICLONERANGE.

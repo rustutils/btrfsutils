@@ -890,10 +890,11 @@ impl RootItem {
         }
     }
 
-    /// Serialize to the on-disk byte representation (496 bytes).
+    /// Serialize to the on-disk byte representation (439 bytes,
+    /// `sizeof(btrfs_root_item)`).
     ///
-    /// Starts with a 160-byte zeroed `inode_item`, followed by root item
-    /// fields, padded with zeros to 496 bytes total.
+    /// Starts with the 160-byte embedded `inode_item` from `inode_data`,
+    /// followed by the root item fields, padded with zeros to the full size.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(496);
@@ -1639,7 +1640,7 @@ impl BlockGroupItem {
 pub struct ChunkItem {
     /// Length of this chunk in bytes.
     pub length: u64,
-    /// Owner of this chunk (always `BTRFS_FIRST_CHUNK_TREE_OBJECTID`).
+    /// Owner of this chunk (always `BTRFS_EXTENT_TREE_OBJECTID`).
     pub owner: u64,
     /// Stripe length for striped profiles.
     pub stripe_len: u64,

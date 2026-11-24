@@ -509,7 +509,7 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
 /// image after sync. `opts.reflink` opens a separate set of
 /// writeable device handles and threads them into the walker so
 /// `FICLONERANGE` can clone source bytes into each stripe slot.
-/// Inode-flags still route to the legacy walker.
+/// `inode_flags` sets NODATACOW and NODATASUM on matching paths.
 #[allow(clippy::too_many_lines)]
 fn make_btrfs_with_rootdir_via_transaction(
     cfg: &MkfsConfig,
@@ -661,10 +661,8 @@ fn make_btrfs_with_rootdir_via_transaction(
 }
 
 /// Compute the smallest size the single device can be truncated to
-/// without losing any chunk data. Mirrors the legacy `--shrink`
-/// computation in `make_btrfs_with_rootdir`: walk the chunk layout
-/// to find the last physical byte used by any chunk, then align to
-/// sectorsize.
+/// without losing any chunk data. Walks the chunk layout to find the
+/// last physical byte used by any chunk, then aligns to sectorsize.
 fn compute_shrunk_size(cfg: &MkfsConfig) -> Result<u64> {
     debug_assert_eq!(cfg.devices.len(), 1);
     let dev = &cfg.devices[0];

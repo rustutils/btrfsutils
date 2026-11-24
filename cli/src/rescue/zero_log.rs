@@ -10,9 +10,9 @@ use std::{fs::OpenOptions, mem, path::PathBuf};
 /// Clear the tree log (usable if it's corrupted and prevents mount)
 ///
 /// The log tree is used for fsync durability. If it becomes corrupted it can
-/// prevent the filesystem from mounting. Clearing it forces a full fsync of
-/// all previously synced data on the next mount. No data is lost, only the
-/// durability guarantee of uncommitted fsyncs.
+/// prevent the filesystem from mounting. Clearing it discards the log, so
+/// changes that were fsynced after the last transaction commit are lost.
+/// Everything up to that commit is kept.
 ///
 /// The device must not be mounted.
 #[derive(Parser, Debug)]

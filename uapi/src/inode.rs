@@ -45,8 +45,9 @@ pub fn lookup_path_rootid(fd: BorrowedFd<'_>) -> nix::Result<u64> {
 
 /// Get the filesystem paths of inode `inum`.
 ///
-/// `fd` is open on a file or directory on a btrfs filesystem. Returns every
-/// path, relative to the filesystem root, that refers to the inode.
+/// `fd` is open on a file or directory on a btrfs filesystem. `inum` is
+/// looked up in the subvolume that contains `fd`. Returns every path,
+/// relative to that subvolume's root, that refers to the inode.
 ///
 /// # Errors
 ///
@@ -231,7 +232,7 @@ fn subvolid_resolve_sub(
     }
 
     // Search the root tree for this subvolume's ROOT_BACKREF_KEY items
-    // (type 156). The objectid is the subvolume ID, the offset is the parent
+    // (type 144). The objectid is the subvolume ID, the offset is the parent
     // subvolume ID, and the data is a btrfs_root_ref with the subvolume name.
     let mut found = false;
 

@@ -17,6 +17,9 @@
 //! - **Full fsid rewrite** (`-u`, `-U UUID`): rewrite the fsid in every
 //!   tree block header and device item on disk, with crash-safety via
 //!   `BTRFS_SUPER_FLAG_CHANGING_FSID`.
+//! - **Format conversions** (`--convert-to-free-space-tree`,
+//!   `--convert-to-block-group-tree`): build the free space tree or the
+//!   block group tree through the `btrfs-transaction` crate.
 //!
 //! # Stability
 //!

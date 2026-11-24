@@ -19,9 +19,9 @@
 //! - `BTRFS_IOC_DEV_INFO` (F6.2)
 //! - `BTRFS_IOC_INO_LOOKUP` (F6.2)
 //! - `BTRFS_IOC_TREE_SEARCH` (F6.3, fixed 4 KiB)
-//! - `BTRFS_IOC_TREE_SEARCH_V2` (F6.3, code path uses retry, see
-//!   the note below. Works only from callers that opt into
-//!   `FUSE_IOCTL_UNRESTRICTED`.)
+//! - `BTRFS_IOC_TREE_SEARCH_V2` (F6.4, always returns `ENOPROTOOPT`
+//!   so `btrfs-uapi`'s `tree_search_auto` falls back to v1, see the
+//!   note below)
 //! - `BTRFS_IOC_GET_SUBVOL_ROOTREF` (F6.3, fixed 4 KiB)
 //!
 //! Not implemented over FUSE: `BTRFS_IOC_INO_PATHS` and
@@ -30,11 +30,10 @@
 //! `FUSE_IOCTL_UNRESTRICTED` set. The standard libc `ioctl(2)` path
 //! the `btrfs` CLI takes does not set that flag, so a retry response
 //! is rejected with `-EIO` before the FUSE driver is re-entered.
-//! The same restriction makes the `TREE_SEARCH_V2` retry handler
-//! unreachable in practice. v1, which fits in the cmd-encoded 4 KiB,
-//! is the working path. See
-//! `fs/PLAN.md` § F6.3 for next steps (kernel relaxation, CUSE
-//! init, or a custom FUSE protocol implementation).
+//! The same restriction rules out `TREE_SEARCH_V2`. v1, which fits
+//! in the cmd-encoded 4 KiB, is the working path. See `fs/PLAN.md`
+//! § F6.3 and § F6.4 for next steps (kernel relaxation, CUSE init,
+//! a custom FUSE protocol implementation, or uapi-level fallbacks).
 
 use btrfs_fs::{Filesystem, Inode, RootRef, SearchFilter, SubvolId};
 use bytes::{Buf, BufMut};
@@ -164,10 +163,9 @@ fn fs_info(fs: &Filesystem<File>) -> IoctlOutcome {
     let sb = fs.superblock();
     let mut buf: Vec<u8> = Vec::with_capacity(FS_INFO_SIZE as usize);
 
-    // For a single-device image the highest devid is the one in the
-    // superblock's embedded `dev_item`. It isn't exposed on
-    // Superblock, but `num_devices` is the right ceiling too (devids
-    // are dense from 1).
+    // Report `num_devices` as the highest devid. This assumes devids
+    // are dense from 1, which holds unless a device was removed or
+    // replaced.
     let max_id = sb.num_devices.max(1);
 
     buf.put_u64_le(max_id);
@@ -267,8 +265,8 @@ fn write_timespec(buf: &mut Vec<u8>, t: std::time::SystemTime) {
 /// `BTRFS_IOC_DEV_INFO`: per-device geometry. Userspace passes the
 /// `devid` (or all-zero `uuid` to look up by id), and the kernel
 /// fills in `path`, `bytes_used`, and `total_bytes`. Only
-/// single-device images are supported, so any `devid != 1` (or
-/// unmatched uuid) returns `ENODEV`.
+/// single-device images are supported, so a `devid` other than the
+/// superblock's own device (or an unmatched uuid) returns `ENODEV`.
 fn dev_info(fs: &Filesystem<File>, in_data: &[u8]) -> IoctlOutcome {
     if in_data.len() < DEV_INFO_SIZE as usize {
         return IoctlOutcome::Err(Errno::EINVAL);

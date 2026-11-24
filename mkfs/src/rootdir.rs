@@ -452,8 +452,7 @@ where
     use uuid::Uuid;
 
     // Assign subvol IDs starting at BTRFS_FIRST_FREE_OBJECTID (256),
-    // matching the legacy walker's policy. Each --subvol arg gets a
-    // unique tree id. The path-to-id mapping drives boundary
+    // in argument order. Each --subvol arg gets a unique tree id. The path-to-id mapping drives boundary
     // detection in the per-tree walker.
     let first_subvol_id = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID);
     let mut subvol_id_map: HashMap<PathBuf, (u64, SubvolType)> = HashMap::new();
@@ -462,8 +461,8 @@ where
         subvol_id_map.insert(arg.path.clone(), (id, arg.subvol_type));
     }
 
-    // Build the path → (nodatacow, nodatasum) lookup the legacy
-    // walker maintains for `--inode-flags` matches. Paths in the
+    // Build the path → (nodatacow, nodatasum) lookup for
+    // `--inode-flags` matches. Paths in the
     // map are relative to `rootdir`, matching how the user passes
     // them on the command line.
     let inode_flags_map: HashMap<PathBuf, (bool, bool)> = inode_flags
@@ -606,8 +605,8 @@ where
     let mut next_ino: u64 = root_ino + 1; // 257
 
     // (host_dev, host_ino) -> btrfs_ino, for hardlink coalescing
-    // within this tree only. Hardlink maps are scoped per subvolume, as
-    // in the legacy walker. Cross-subvol hardlinks are out of scope.
+    // within this tree only. Hardlink maps are scoped per subvolume.
+    // Cross-subvol hardlinks are out of scope.
     let mut hardlink_map: HashMap<(u64, u64), u64> = HashMap::new();
     let mut nlink_count: HashMap<u64, u32> = HashMap::new();
     let mut dir_index_map: HashMap<u64, u64> = HashMap::new();

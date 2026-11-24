@@ -1,12 +1,12 @@
-//! # btrfs-stream: btrfs send stream parser and receive operations
+//! # btrfs-stream: btrfs send stream parser, encoder, and receive operations
 //!
 //! This crate handles the btrfs send stream format: a binary TLV protocol
 //! used by `btrfs send` and `btrfs receive` to serialize and replay filesystem
 //! changes between subvolume snapshots.
 //!
-//! ## Stream parsing (default, platform-independent)
+//! ## Stream parsing and encoding (default, platform-independent)
 //!
-//! The default feature set provides a zero-copy stream parser that works on
+//! The default feature set provides a stream parser and encoder that work on
 //! any platform:
 //!
 //! - [`StreamReader`] reads a btrfs send stream from any `impl Read`,
@@ -15,6 +15,8 @@
 //! - [`StreamCommand`] is an enum covering all v1, v2, and v3 command types
 //!   (subvol, snapshot, write, clone, encoded write, fallocate, enable
 //!   verity, and so on).
+//! - [`StreamWriter`] encodes [`StreamCommand`] values into a stream that
+//!   [`StreamReader`] and `btrfs receive` accept.
 //! - [`Timespec`] represents timestamps carried in the stream.
 //!
 //! ## Receive operations (feature `receive`, Linux-only)

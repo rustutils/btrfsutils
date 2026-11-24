@@ -4,13 +4,13 @@
 //!
 //! 1. A hand-crafted reproducer (`reproduces_clear_uuid_tree_hang`)
 //!    that drives the harness through the same sequence of operations
-//!    that `rescue clear-uuid-tree` performs. If this test hangs (or
-//!    times out via the watchdog), it is a tight reproducer for the
-//!    clear-uuid-tree commit hang.
+//!    that `rescue clear-uuid-tree` performs. It guards against a
+//!    regression of the clear-uuid-tree commit hang, which the
+//!    watchdog turns into a test failure.
 //!
 //! 2. A proptest entry point (`transaction_sequences_are_consistent`)
 //!    that generates random `Op` sequences and runs them through
-//!    `run_sequence_watchdogged`. The number of cases defaults to 10
+//!    `run_sequence_watchdogged`. The number of cases defaults to 100
 //!    (so the test stays fast on `cargo test`). Set the env var
 //!    `PROPTEST_CASES=N` for stress runs.
 
@@ -28,12 +28,9 @@ use test_strategy::Arbitrary;
 /// uuid tree's existing blocks), drop a ref on each one and pin it,
 /// remove the playground tree's root from `fs.roots`, then commit.
 ///
-/// This sequence was expected to hang. With an empty-commit
-/// short-circuit in place, the hang no longer reproduces, but the
-/// underlying bug surfaces as a different "parent transid wanted N
-/// found N-1" failure on a non-empty commit path. Until that second
-/// instance is fixed, this test is short-circuited so `cargo test`
-/// stays green. Delete the early return to re-enable.
+/// This sequence used to hang the commit. It now completes, and the
+/// test stays as a regression guard. A hang or any other failure
+/// fails the test.
 #[test]
 fn reproduces_clear_uuid_tree_hang() {
     let ops = vec![

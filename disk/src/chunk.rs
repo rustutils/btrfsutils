@@ -70,9 +70,11 @@ pub enum ChunkProfile {
     /// Striped mirrors. `num_stripes / sub_stripes` data groups, each
     /// mirrored `sub_stripes`-ways (always 2 in practice).
     Raid10,
-    /// Striped with parity (single parity device). Not yet handled.
+    /// Striped with one rotating parity column. Writes go through
+    /// [`WritePlan::Parity`]. Reads skip parity (no degraded reads).
     Raid5,
-    /// Striped with double parity. Not yet handled.
+    /// Striped with two rotating parity columns (P and Q). Handled like
+    /// RAID5.
     Raid6,
 }
 

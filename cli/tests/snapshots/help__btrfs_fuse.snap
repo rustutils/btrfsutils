@@ -15,7 +15,10 @@ Arguments:
 
 Options:
   -f, --foreground
-          Run in the foreground (do not daemonize)
+          Run in the foreground.
+          
+          The mount always runs in the foreground for now, so this flag has no
+          effect.
 
       --allow-other
           Allow other users to access the mount

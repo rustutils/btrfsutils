@@ -60,8 +60,8 @@ Offline mode:
           Path of the subvolume to send in --offline mode
           
           The path is slash-separated and relative to the filesystem root.
-          Defaults to the default subvolume (FS_TREE) when neither this nor
-          --offline-subvolid is set.
+          Defaults to the top-level subvolume (FS_TREE, id 5) when no subvolume
+          is given. The default set with subvolume set-default is not consulted.
 
       --offline-subvolid <OFFLINE_SUBVOLID>
           Tree id of the subvolume to send in --offline mode

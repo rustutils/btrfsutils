@@ -57,7 +57,7 @@ impl Default for TestFixture {
 }
 
 impl TestFixture {
-    /// Create a new 128 MiB btrfs filesystem image via `btrfs-mkfs`.
+    /// Create a new 256 MiB btrfs filesystem image via `btrfs-mkfs`.
     ///
     /// # Panics
     ///
@@ -95,9 +95,9 @@ impl TestFixture {
         Filesystem::open(file)
     }
 
-    /// Run `btrfs check --readonly` and panic if structural errors are found.
+    /// Run `btrfs check --readonly` and panic if it exits with an error.
     ///
-    /// Tolerates free space tree cache warnings (we clear VALID).
+    /// Warnings that leave the exit status at zero pass.
     pub fn assert_check(&self) {
         let output = Command::new("btrfs")
             .args(["check", "--readonly"])
@@ -628,8 +628,8 @@ pub fn run_sequence(ops: &[Op]) -> Result<(), Failure> {
         .open()
         .map_err(|e| Failure::Other(format!("open: {e}")))?;
 
-    // Our btrfs-mkfs doesn't create a UUID tree (tree 9), which the
-    // harness uses as its playground. Create it before starting.
+    // The harness uses the UUID tree (tree 9) as its playground. Our
+    // btrfs-mkfs creates it, but create it here if the image lacks one.
     if fs.root_bytenr(PLAYGROUND_TREE).is_none() {
         let mut setup = Transaction::start(&mut fs)
             .map_err(|e| Failure::Other(format!("setup start: {e}")))?;

@@ -652,8 +652,6 @@ mod tests {
         );
     }
 
-    // --- set_metadata_uuid tests ---
-
     /// Helper to make a superblock with a known fsid.
     fn make_test_superblock_with_fsid(fsid: Uuid) -> [u8; 4096] {
         let mut sb = make_test_superblock();
@@ -778,8 +776,6 @@ mod tests {
             "expected seed error, got: {err}"
         );
     }
-
-    // --- change_uuid tests ---
 
     /// Create a real btrfs filesystem image using mkfs, returning the image
     /// bytes.

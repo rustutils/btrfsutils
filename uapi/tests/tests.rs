@@ -4,7 +4,7 @@
 //! skipped automatically unless the test is run with `--include-ignored`.
 //!
 //! To run:
-//!   just test-privileged
+//!   just test
 
 // Test code uses C-string literals, byte casts, and small idioms that
 // pedantic clippy flags but that are intentional here.

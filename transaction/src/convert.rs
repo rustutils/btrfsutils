@@ -5,21 +5,21 @@
 //!
 //! - [`convert_to_free_space_tree`]: top-level conversion called by
 //!   `btrfs-tune --convert-to-free-space-tree`. Creates the FST
-//!   root, seeds it with `FREE_SPACE_INFO` + `FREE_SPACE_EXTENT`
+//!   root, seeds it with `FREE_SPACE_INFO` and `FREE_SPACE_EXTENT`
 //!   items derived from the extent tree, sets the
-//!   `FREE_SPACE_TREE` + `FREE_SPACE_TREE_VALID` `compat_ro` bits,
+//!   `FREE_SPACE_TREE` and `FREE_SPACE_TREE_VALID` `compat_ro` bits,
 //!   and zeros `cache_generation`.
 //! - [`convert_to_block_group_tree`]: top-level conversion called
 //!   by `btrfs-tune --convert-to-block-group-tree`. Creates the
 //!   BGT root, copies every `BLOCK_GROUP_ITEM` from the extent
 //!   tree into BGT, deletes the originals from the extent tree,
 //!   and sets the `BLOCK_GROUP_TREE` `compat_ro` bit.
-//! - [`seed_free_space_tree`] / [`create_block_group_tree`]:
-//!   per-step helpers extracted from the above. Used by mkfs's
-//!   `post_bootstrap` to materialise the same trees as part of a
-//!   single transaction over a freshly-bootstrapped image. Both
-//!   are per-block-group (resp. per-key) idempotent so they can
-//!   be re-run after a partial application.
+//! - [`seed_free_space_tree`] and [`create_block_group_tree`]:
+//!   per-step helpers extracted from the above. mkfs's
+//!   `post_bootstrap` uses them to materialise the same trees as part
+//!   of a single transaction over a freshly-bootstrapped image. They
+//!   are idempotent per block group and per key respectively, so they
+//!   can be re-run after a partial application.
 
 use crate::{
     allocation,
@@ -146,7 +146,7 @@ pub fn convert_to_free_space_tree<R: Read + Write + Seek>(
 /// Intended for two callers:
 /// * [`convert_to_free_space_tree`] uses it as the populate step
 ///   right after `create_empty_tree(10)`.
-/// * mkfs's `post_bootstrap` will use it to seed an FST it just
+/// * mkfs's `post_bootstrap` uses it to seed an FST it just
 ///   created mid-transaction, so the immediately-following commit's
 ///   FST update step has entries to apply deltas to.
 ///
@@ -419,7 +419,7 @@ pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
 /// * [`convert_to_block_group_tree`] uses it as the body after
 ///   stricter precondition checks (refuses if BGT is already
 ///   enabled or a stale root is present).
-/// * mkfs's `post_bootstrap` will use it directly: bootstrap leaves
+/// * mkfs's `post_bootstrap` uses it directly: bootstrap leaves
 ///   BG items in the extent tree and sets the BGT flag, then this
 ///   helper materialises tree 11 and migrates the items in.
 ///

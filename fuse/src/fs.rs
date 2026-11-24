@@ -465,9 +465,8 @@ impl FuserFilesystem for BtrfsFuse {
         let target = self.fuse_inode(ino.0);
         let fuse_ino = ino.0;
         let whence = match whence {
-            // libc::SEEK_DATA = 3, libc::SEEK_HOLE = 4 on Linux. We
-            // hardcode the values rather than depending on libc here
-            // since the integers are stable kernel ABI.
+            // SEEK_DATA = 3 and SEEK_HOLE = 4 on Linux. The values are
+            // stable kernel ABI, so they're matched as literals.
             3 => SeekHoleData::Data,
             4 => SeekHoleData::Hole,
             _ => {

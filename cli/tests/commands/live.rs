@@ -27,8 +27,6 @@ use std::{
 };
 use tempfile::tempdir;
 
-// ── filesystem (assertions) ──────────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn filesystem_sync() {
@@ -339,8 +337,6 @@ fn tune_convert_to_bgt_requires_fst() {
     assert_ne!(code, 0, "BGT without FST should be rejected");
 }
 
-// ── filesystem resize error cases ────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn filesystem_resize_missing_args() {
@@ -358,8 +354,6 @@ fn filesystem_resize_invalid_size() {
     let (_, _, code) = btrfs(&["filesystem", "resize", "banana", mp]);
     assert_ne!(code, 0);
 }
-
-// ── filesystem defrag compression variants ──────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -391,8 +385,6 @@ fn filesystem_defrag_compress_zlib() {
     ]);
 }
 
-// ── filesystem defrag recursion ─────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn filesystem_defrag_recursion_with_subvol() {
@@ -415,8 +407,6 @@ fn filesystem_defrag_recursion_with_subvol() {
     verify_test_data(Path::new(mp), "root_file.bin", 65536);
     verify_test_data(Path::new(&subvol), "subvol_file.bin", 65536);
 }
-
-// ── filesystem df unit suffixes ─────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -463,8 +453,6 @@ fn filesystem_df_si() {
         "expected size suffix in --si output:\n{out}"
     );
 }
-
-// ── subvolume ────────────────────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -630,8 +618,6 @@ fn subvolume_get_set_flags() {
     );
 }
 
-// ── subvolume create -p (parent creation) ───────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_create_parents() {
@@ -654,8 +640,6 @@ fn subvolume_create_parents() {
         "expected nested subvol in list:\n{out}"
     );
 }
-
-// ── subvolume create failures ───────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -684,8 +668,6 @@ fn subvolume_create_over_file_fails() {
     let (_, _, code) = btrfs(&["subvolume", "create", &file]);
     assert_ne!(code, 0, "create over existing file should fail");
 }
-
-// ── subvolume create with mixed valid and invalid paths ─────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -739,8 +721,6 @@ fn subvolume_create_parents_mixed() {
     assert!(out.contains("sub3"), "expected flat in list:\n{out}");
 }
 
-// ── dry-run ─────────────────────────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn dry_run_subvolume_delete() {
@@ -765,8 +745,6 @@ fn dry_run_subvolume_delete() {
         "subvolume should be gone after real delete"
     );
 }
-
-// ── property ─────────────────────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -895,8 +873,6 @@ fn property_ro_no_change_when_already_set() {
     assert!(out.contains("false"), "expected ro=false:\n{out}");
 }
 
-// ── receive --chroot ─────────────────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn receive_chroot() {
@@ -922,8 +898,6 @@ fn receive_chroot() {
     assert!(Path::new(&received).is_dir(), "received subvol not found");
     verify_test_data(Path::new(&received), "data.bin", 8192);
 }
-
-// ── property force clear received_uuid ───────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -982,8 +956,6 @@ fn property_force_clear_received_uuid() {
         "expected nil received UUID after force, got: {recv_line}"
     );
 }
-
-// ── send and receive ─────────────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -1284,8 +1256,6 @@ fn send_receive_v2_compressed() {
     verify_test_data(Path::new(&received), "pattern.bin", 64 * 1024);
 }
 
-// ── send with parent and multiple subvolumes ────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn send_parent_multi_subvol() {
@@ -1331,8 +1301,6 @@ fn send_parent_multi_subvol() {
     verify_test_data(Path::new(&format!("{mp2}/snap3")), "added2.bin", 4096);
 }
 
-// ── scrub ────────────────────────────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn scrub_start_status() {
@@ -1348,8 +1316,6 @@ fn scrub_start_status() {
         "expected scrub status output:\n{out}"
     );
 }
-
-// ── device ───────────────────────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -1475,8 +1441,6 @@ fn device_add_enqueue() {
     );
 }
 
-// ── device scan and ready ────────────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn device_scan() {
@@ -1499,8 +1463,6 @@ fn device_ready() {
     let out = btrfs_ok(&["device", "ready", dev]);
     assert!(out.contains("ready"), "expected ready message:\n{out}");
 }
-
-// ── balance ──────────────────────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -1547,8 +1509,6 @@ fn balance_pause_not_running() {
     );
 }
 
-// ── balance without filters ──────────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn balance_without_filters_warns() {
@@ -1578,8 +1538,6 @@ fn balance_full_balance_flag() {
     btrfs_ok(&["balance", "start", "--full-balance", mp]);
 }
 
-// ── inspect-internal ─────────────────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_rootid() {
@@ -1599,8 +1557,6 @@ fn inspect_dump_super() {
     assert!(out.contains("[match]"), "expected magic match:\n{out}");
     assert!(out.contains("nodesize"), "expected nodesize:\n{out}");
 }
-
-// ── quota and qgroup ─────────────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -1741,8 +1697,6 @@ fn qgroup_limit() {
     btrfs_ok(&["quota", "disable", mp]);
 }
 
-// ── subvolume show with qgroup limits ────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn subvolume_show_qgroup_limit() {
@@ -1784,8 +1738,6 @@ fn subvolume_show_qgroup_limit() {
     btrfs_ok(&["quota", "disable", mp]);
 }
 
-// ── quota rescan ─────────────────────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn quota_rescan() {
@@ -1806,8 +1758,6 @@ fn quota_rescan() {
 
     btrfs_ok(&["quota", "disable", mp]);
 }
-
-// ── scrub limit and resume ───────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -1849,8 +1799,6 @@ fn scrub_resume_no_scrub() {
     assert!(code == 0 || code == 1, "unexpected exit code: {code}");
 }
 
-// ── balance resume ───────────────────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn balance_resume_not_running() {
@@ -1864,8 +1812,6 @@ fn balance_resume_not_running() {
         "expected not-in-progress error:\n{stderr}"
     );
 }
-
-// ── replace status (never started) ──────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -1882,8 +1828,6 @@ fn replace_status_never_started() {
     );
 }
 
-// ── device scan --forget ─────────────────────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn device_scan_forget_stale() {
@@ -1897,8 +1841,6 @@ fn device_scan_forget_stale() {
         "expected unregistered message:\n{out}"
     );
 }
-
-// ── subvolume create and delete with multiple paths ──────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -1923,8 +1865,6 @@ fn subvolume_create_multiple() {
     assert!(out.contains("multi2"), "expected multi2:\n{out}");
     assert!(out.contains("multi3"), "expected multi3:\n{out}");
 }
-
-// ── subvolume delete flags ───────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -2028,8 +1968,6 @@ fn subvolume_delete_verbose() {
     );
 }
 
-// ── replace start, status, and cancel ───────────────────────────────
-
 #[test]
 #[ignore = "requires elevated privileges"]
 fn replace_start_and_status() {
@@ -2075,8 +2013,6 @@ fn replace_cancel_not_running() {
         "expected no-op cancel message:\n{out}"
     );
 }
-
-// ── send and receive: special files ─────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -2454,8 +2390,6 @@ fn send_receive_fallocate() {
     assert!(hole.iter().all(|&b| b == 0), "punched hole should be zeros");
 }
 
-// ── mkfs --rootdir (end-to-end) ─────────────────────────────────────
-
 /// Create a directory with various file types, run our mkfs --rootdir,
 /// mount the resulting image, and verify all data is intact.
 #[test]
@@ -2829,8 +2763,6 @@ fn get_user_xattr(path: &Path, name: &str) -> Vec<u8> {
     buf.truncate(n as usize);
     buf
 }
-
-// ── rescue ──────────────────────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -3238,8 +3170,6 @@ fn rescue_fix_data_checksum_repair() {
         "expected clean rescan after repair, got: {rescan}"
     );
 }
-
-// ── reflink clone ───────────────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]

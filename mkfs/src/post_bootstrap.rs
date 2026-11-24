@@ -42,11 +42,11 @@
 //!
 //! ## Why a separate module
 //!
-//! mkfs's bootstrap (`tree.rs`, `treebuilder.rs`, and raw `pwrite`)
-//! is GPL-2.0 territory and was written looking at btrfs-progs.
-//! This module is the bridge to the MIT/Apache-licensed transaction
-//! crate: it opens the bootstrap image, runs a transaction against
-//! it, commits, and closes. Keeping the bridge in its own file
+//! mkfs's bootstrap (`tree.rs` and raw `pwrite`) is GPL-2.0 territory
+//! and was written looking at btrfs-progs. This module is the bridge
+//! to the MIT/Apache-licensed transaction crate: it opens the
+//! bootstrap image, runs a transaction against it, commits, and
+//! closes. Keeping the bridge in its own file
 //! makes the licensing boundary obvious.
 
 use crate::{args::Profile, mkfs::MkfsConfig};
@@ -206,16 +206,9 @@ pub fn run_transaction(
 /// Apply every post-bootstrap step in the supplied transaction.
 ///
 /// Each step is idempotent (creates a tree only if it isn't already
-/// present in the root tree), so the same `apply_in_transaction` works
-/// for both:
-///
-/// - the no-rootdir `make_btrfs` path, where mkfs's bootstrap omits
-///   trees that post-bootstrap will create (currently: UUID tree, FS
-///   tree, csum tree, data-reloc tree)
-/// - the `make_btrfs_with_rootdir` path, where mkfs creates the FS,
-///   csum, and data-reloc trees itself (because rootdir populates
-///   them with directory, extent, and csum items at bootstrap time), so
-///   the create-if-missing calls are no-ops
+/// present in the root tree). The bootstrap writes only the root,
+/// extent, chunk, and dev trees, so in practice every step creates
+/// its tree. `--rootdir` populates the result in a later transaction.
 fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
     fs: &mut Filesystem<R>,
     trans: &mut Transaction<R>,
@@ -223,34 +216,29 @@ fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
 ) -> Result<()> {
     let now = cfg.now_secs();
 
-    // The block-group tree (objectid 11) must come first. When
-    // post_bootstrap will run, mkfs's bootstrap leaves all
-    // BLOCK_GROUP_ITEM rows in the extent tree. Creating BGT and
-    // migrating the items must happen before any other allocation in
-    // this transaction so later BG updates go to BGT, not the extent
-    // tree.
+    // The block-group tree (objectid 11) must come first. mkfs's
+    // bootstrap leaves all BLOCK_GROUP_ITEM rows in the extent tree.
+    // Creating BGT and migrating the items must happen before any
+    // other allocation in this transaction so later BG updates go to
+    // BGT, not the extent tree.
     if cfg.has_block_group_tree() {
         ensure_block_group_tree(fs, trans)?;
     }
 
     // The FS tree (objectid 5) is the main user-visible tree:
     // subvolume root, root dir inode 256, dir entries, file inodes.
-    // For the no-rootdir path it's just the empty subvolume shape
-    // (root dir and ".." INODE_REF).
+    // Here it gets only the empty subvolume shape (root dir and ".."
+    // INODE_REF).
     ensure_fs_tree(fs, trans, now)?;
 
     // btrfs-progs creates the csum tree as an empty leaf at mkfs
-    // time. mkfs's no-rootdir path defers that to here so the
-    // tree allocation, ROOT_ITEM, and METADATA_ITEM go through the
-    // transaction crate. The rootdir path keeps creating it directly
-    // because it has csum items to insert at bootstrap time.
+    // time. mkfs defers that to here so the tree allocation,
+    // ROOT_ITEM, and METADATA_ITEM go through the transaction crate.
     ensure_empty_tree(fs, trans, u64::from(BTRFS_CSUM_TREE_OBJECTID), "csum")?;
 
     // The data-reloc tree (objectid -9, equivalent unsigned
     // 0xFFFFFFFF_FFFFFFF7) holds inode 256's INODE_ITEM and a
-    // ".." INODE_REF self-reference, like an empty subvolume. The
-    // no-rootdir path defers it to here instead of building it in the
-    // hand-built bootstrap.
+    // ".." INODE_REF self-reference, like an empty subvolume.
     ensure_data_reloc_tree(fs, trans)?;
 
     // The quota tree (objectid 8) is created when `-O quota` or
@@ -433,10 +421,6 @@ fn ensure_empty_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
 /// minimum on-disk shape `btrfs check` requires: an `INODE_ITEM` for
 /// the root directory (inode 256) and a self-pointing `INODE_REF`
 /// keyed `(256, INODE_REF, 256)` with `index=0` and `name=".."`.
-///
-/// This mirrors what mkfs's `build_root_dir_tree` produces for the
-/// data-reloc tree so a post-bootstrap-built tree is structurally
-/// equivalent to the legacy mkfs-built one.
 fn ensure_data_reloc_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
     fs: &mut Filesystem<R>,
     trans: &mut Transaction<R>,

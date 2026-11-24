@@ -8,9 +8,10 @@
 //!   offset (8), `num_bytes` (8).
 //!
 //! LZO framing: the on-disk data starts with a 4-byte LE total-size header,
-//! followed by sector-sized chunks, each prefixed with a 4-byte LE segment
-//! length. If fewer than 4 bytes remain before the next sector boundary, they
-//! are skipped. The sector size is the filesystem `sectorsize` field.
+//! followed by segments, each prefixed with a 4-byte LE segment length and
+//! holding at most one sector of uncompressed data. If fewer than 4 bytes
+//! remain before the next sector boundary, they are skipped. The sector size
+//! is the filesystem `sectorsize` field.
 
 use crate::cache::ExtentRecord;
 use btrfs_disk::{
@@ -25,9 +26,9 @@ const EXTENT_HEADER_SIZE: usize = 21;
 
 /// Decompress btrfs LZO format.
 ///
-/// On-disk layout: 4-byte LE total size, then per-sector segments, each a
-/// 4-byte LE length prefix followed by LZO1X compressed data. Segments are
-/// padded to `sector_size` boundaries.
+/// On-disk layout: 4-byte LE total size, then segments, each a 4-byte LE
+/// length prefix followed by LZO1X compressed data for at most one sector.
+/// A length prefix never straddles a `sector_size` boundary.
 fn decompress_lzo(
     data: &[u8],
     output_len: usize,

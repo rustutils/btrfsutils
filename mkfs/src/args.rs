@@ -2,22 +2,21 @@ use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 use uuid::Uuid;
 
-/// Create a btrfs filesystem.
-///
-/// mkfs.btrfs is used to create a btrfs filesystem on a single or multiple
-/// devices. The device is typically a block device but can be a file-backed
-/// image as well. Multiple devices are grouped by UUID of the filesystem.
-///
-/// The default block group profiles for data and metadata depend on the number
-/// of devices. For a single device the defaults are SINGLE for data and DUP
-/// for metadata. For multiple devices the defaults are SINGLE for data and
-/// RAID1 for metadata.
 const HEADING_LAYOUT: &str = "Block layout";
 const HEADING_FEATURES: &str = "Features";
 const HEADING_IDENTITY: &str = "Identity";
 const HEADING_ROOTDIR: &str = "Rootdir population";
 
 /// Create a BTRFS filesystem on a device or multiple devices
+///
+/// The device is typically a block device but can be a file-backed
+/// image as well. Multiple devices are grouped by UUID of the
+/// filesystem.
+///
+/// The default block group profiles for data and metadata depend on the
+/// number of devices. For a single device the defaults are SINGLE for
+/// data and DUP for metadata. For multiple devices the defaults are
+/// SINGLE for data and RAID1 for metadata.
 #[derive(Parser, Debug)]
 #[command(
     name = "mkfs.btrfs",
@@ -615,8 +614,6 @@ impl std::str::FromStr for CompressArg {
 mod tests {
     use super::*;
 
-    // --- SizeArg::from_str ---
-
     #[test]
     fn size_arg_bare_number() {
         assert_eq!("0".parse::<SizeArg>().unwrap(), SizeArg(0));
@@ -660,8 +657,6 @@ mod tests {
         assert!("17E".parse::<SizeArg>().is_err());
     }
 
-    // --- Profile::from_str (ValueEnum) ---
-
     #[test]
     fn profile_all_variants() {
         assert_eq!(Profile::from_str("single", true).unwrap(), Profile::Single);
@@ -695,8 +690,6 @@ mod tests {
         assert!(Profile::from_str("raid99", true).is_err());
     }
 
-    // --- Profile::Display round-trip ---
-
     #[test]
     fn profile_display_roundtrip() {
         let all = [
@@ -720,8 +713,6 @@ mod tests {
         }
     }
 
-    // --- Profile::block_group_flag ---
-
     #[test]
     fn profile_block_group_flag_single() {
         assert_eq!(Profile::Single.block_group_flag(), 0);
@@ -741,8 +732,6 @@ mod tests {
         );
     }
 
-    // --- Profile::num_stripes ---
-
     #[test]
     fn profile_num_stripes() {
         assert_eq!(Profile::Single.num_stripes(4), 1);
@@ -758,8 +747,6 @@ mod tests {
         assert_eq!(Profile::Raid10.num_stripes(5), 4);
         assert_eq!(Profile::Raid10.num_stripes(3), 2);
     }
-
-    // --- Profile::min_devices ---
 
     #[test]
     fn profile_min_devices() {
@@ -802,8 +789,6 @@ mod tests {
         assert_eq!(Profile::Raid6.nparity(), 2);
     }
 
-    // --- ChecksumArg::from_str ---
-
     #[test]
     fn checksum_all_names() {
         assert_eq!(
@@ -841,8 +826,6 @@ mod tests {
         assert!(ChecksumArg::from_str("md5", true).is_err());
     }
 
-    // --- ChecksumArg::Display round-trip ---
-
     #[test]
     fn checksum_display_roundtrip() {
         let all = [
@@ -860,8 +843,6 @@ mod tests {
             );
         }
     }
-
-    // --- FeatureArg::from_str ---
 
     #[test]
     fn feature_enable() {
@@ -899,8 +880,6 @@ mod tests {
     fn feature_unknown() {
         assert!("bogus".parse::<FeatureArg>().is_err());
     }
-
-    // --- Feature::Display round-trip ---
 
     #[test]
     fn feature_display_roundtrip() {

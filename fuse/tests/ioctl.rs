@@ -6,9 +6,8 @@
 //! kernel → fuser → BtrfsFuse → ioctl::dispatch → Filesystem, and the
 //! response back through the same path.
 //!
-//! F6.1 covers `BTRFS_IOC_FS_INFO`, `BTRFS_IOC_GET_FEATURES`, and
-//! `BTRFS_IOC_GET_SUBVOL_INFO`. F6.2 will add the variable-size
-//! ones (`TREE_SEARCH_V2` etc.).
+//! Covers every ioctl the driver implements, plus the
+//! `TREE_SEARCH_V2` to v1 fallback in `btrfs-uapi`.
 
 mod common;
 
@@ -34,7 +33,7 @@ const BTRFS_IOC_INO_LOOKUP: u32 = ioc_iowr(0x94, 18, 4096);
 const BTRFS_IOC_TREE_SEARCH: u32 = ioc_iowr(0x94, 17, 4096);
 const BTRFS_IOC_GET_SUBVOL_ROOTREF: u32 = ioc_iowr(0x94, 61, 4096);
 
-/// Wrapper around `libc::ioctl` for the read-only ioctls in F6.1.
+/// Wrapper around `libc::ioctl` for the `_IOR` ioctls.
 /// Returns the response bytes (length matches the ioctl's encoded
 /// size) on success.
 unsafe fn run_read_ioctl<P: AsRef<std::path::Path>>(

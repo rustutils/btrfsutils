@@ -14,8 +14,7 @@
 //! - Single-device: [`Filesystem::open`] takes a device or image
 //!   file open for reading and writing.
 //! - Multi-device: [`filesystem::Filesystem::open_multi`] takes a
-//!   `BTreeMap<devid, handle>`. Used by every multi-device tool
-//!   (mkfs, rescue, tune).
+//!   `BTreeMap<devid, handle>`. mkfs uses it.
 //!
 //! From there, [`Transaction::start`] opens a transaction.
 //! Mutations go through [`search::search_slot`] with

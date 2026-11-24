@@ -82,8 +82,9 @@ pub struct SendCommand {
     /// Path of the subvolume to send in --offline mode
     ///
     /// The path is slash-separated and relative to the filesystem root.
-    /// Defaults to the default subvolume (FS_TREE) when neither this nor
-    /// --offline-subvolid is set.
+    /// Defaults to the top-level subvolume (FS_TREE, id 5) when no
+    /// subvolume is given. The default set with subvolume set-default
+    /// is not consulted.
     #[clap(long = "offline-subvol", help_heading = HEADING_OFFLINE,
            requires = "offline")]
     offline_subvol: Option<String>,
@@ -243,7 +244,7 @@ impl SendCommand {
             Filesystem::open(file).context("bootstrapping btrfs filesystem")?;
 
         // Resolve the subvolume. Precedence: --offline-subvolid >
-        // --offline-subvol > positional path > default subvol.
+        // --offline-subvol > positional path > FS_TREE.
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -277,9 +278,9 @@ impl SendCommand {
                 format!("cannot create '{}'", path.display())
             })?)
         } else {
-            // `Stdout` itself isn't `Write` directly, but
-            // `Stdout::lock` is. Take the lock for the duration of
-            // the send so other threads don't interleave.
+            // `fs.send` writes from a blocking-pool thread and needs a
+            // `Send` writer. `StdoutLock` isn't `Send`, so buffer the
+            // unlocked `Stdout` instead.
             Box::new(io::BufWriter::new(io::stdout()))
         };
 

@@ -106,7 +106,8 @@ pub struct ReceiveContext {
     cur_subvol_path: Option<PathBuf>,
     /// UUID from the stream's SUBVOL/SNAPSHOT command (for `SET_RECEIVED_SUBVOL`).
     received_uuid: Option<uuid::Uuid>,
-    /// ctransid from the stream (for `SET_RECEIVED_SUBVOL`).
+    /// The stream's ctransid, stored as the received subvolume's stransid
+    /// (via `SET_RECEIVED_SUBVOL`).
     stransid: u64,
     /// Cached write fd. Keeps one file open so sequential writes to the same
     /// file don't reopen it.

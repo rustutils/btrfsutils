@@ -278,8 +278,6 @@ mod tests {
         RecordSource::ScannedLeaf { bytenr, generation }
     }
 
-    // --- DEV_ITEM dedup tests ---
-
     #[test]
     fn dev_item_single_record() {
         let records = vec![make_dev_record(1, 10, scanned(0, 10))];
@@ -336,8 +334,6 @@ mod tests {
         let result = dedup_dev_items(&records, &mut conflicts).unwrap();
         assert_eq!(result.len(), 1);
     }
-
-    // --- CHUNK_ITEM dedup tests ---
 
     #[test]
     fn chunk_item_single_record() {
@@ -401,8 +397,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // --- Overlap detection ---
-
     #[test]
     fn no_overlap_adjacent() {
         let chunks = vec![
@@ -420,8 +414,6 @@ mod tests {
         ];
         assert!(check_overlaps(&chunks).is_err());
     }
-
-    // --- Stripe-to-device validation ---
 
     #[test]
     fn dangling_stripe_ref() {
@@ -456,8 +448,6 @@ mod tests {
         check_stripe_refs(&chunks, &dev_ids, &mut warnings);
         assert!(warnings.is_empty());
     }
-
-    // --- Coverage check ---
 
     #[test]
     fn chunk_root_covered() {

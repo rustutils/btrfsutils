@@ -50,9 +50,11 @@ pub trait TreeBlockCache: Send + Sync {
 /// A block reader that resolves logical addresses through a chunk cache.
 ///
 /// Holds one I/O handle per device, keyed by `devid`. For single-device
-/// filesystems the map has a single entry. For RAID1, RAID1C3, RAID1C4,
-/// RAID10, and DUP, each stripe's `devid` (from the chunk cache) is used
-/// to look up the handle. SINGLE and DUP work with a one-entry map.
+/// filesystems the map has a single entry. Reads go through
+/// [`ChunkTreeCache::plan_read`](crate::chunk::ChunkTreeCache::plan_read),
+/// so every profile (SINGLE, DUP, RAID0, RAID1*, RAID10, RAID5, RAID6)
+/// routes each row to the right stripe. That stripe's `devid` selects the
+/// handle. SINGLE and DUP work with a one-entry map.
 pub struct BlockReader<R> {
     devices: BTreeMap<u64, R>,
     nodesize: u32,

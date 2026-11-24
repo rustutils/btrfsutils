@@ -9,13 +9,13 @@
 //!
 //! ## Safety
 //!
-//! All `unsafe` code is confined to the [`raw`] module, which contains
-//! bindgen-generated types from the kernel UAPI headers (`btrfs.h` and
-//! `btrfs_tree.h`) and `nix` ioctl macro declarations for every `BTRFS_IOC_*`
-//! call.
+//! The [`raw`] module contains bindgen-generated types from the kernel UAPI
+//! headers (`btrfs.h` and `btrfs_tree.h`) and `nix` ioctl macro declarations
+//! for every `BTRFS_IOC_*` call.
 //!
-//! Every other module wraps [`raw`] into a public API that is entirely safe,
-//! exposes no kernel types, and uses idiomatic Rust types throughout:
+//! The other modules call into [`raw`] from small internal `unsafe` blocks and
+//! wrap it in a public API that is entirely safe, exposes no kernel types, and
+//! uses idiomatic Rust types throughout:
 //! `BorrowedFd`, `Uuid`, `bitflags`, `SystemTime`, `CString`, and so on.
 //!
 //! ## Usage
@@ -31,9 +31,8 @@
 //!
 //! btrfs is Linux-only, and so is this crate. Some of the ioctls it uses are
 //! relatively recent. The crate targets modern kernels (5.x and later) and does
-//! not detect or work around missing ioctls on older kernels. It is only tested
-//! on `amd64`, but all architectures supported by the kernel (and Rust) should
-//! work.
+//! not detect or work around missing ioctls on older kernels. All
+//! architectures supported by the kernel (and Rust) should work.
 
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]

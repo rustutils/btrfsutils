@@ -214,7 +214,8 @@ pub struct EncodedReadResult {
     pub unencoded_len: u64,
     /// Offset within the unencoded data where the file content starts.
     pub unencoded_offset: u64,
-    /// Compression type (0 = none, 1 = zlib, 2 = lzo, 3 = zstd).
+    /// Compression type (0 = none, 1 = zlib, 2 = zstd, 3 to 7 = lzo with
+    /// 4K to 64K sectors).
     pub compression: u32,
     /// Encryption type (currently always 0).
     pub encryption: u32,

@@ -1,8 +1,8 @@
 //! # Layout: block address assignment for mkfs tree blocks
 //!
 //! The chunk tree block lives in the system chunk (at `SYSTEM_GROUP_OFFSET`).
-//! All other tree blocks (root, extent, dev, fs, csum, free-space, data-reloc)
-//! live in the metadata chunk and are written with DUP (two physical copies).
+//! All other bootstrap tree blocks (root, extent, dev) live in the metadata
+//! chunk and are written with the metadata profile.
 
 use crate::args::Profile;
 use btrfs_disk::raw;
@@ -52,37 +52,32 @@ impl TreeId {
         }
     }
 
-    /// Always-present tree blocks in the order they are laid out on
-    /// disk. Excludes the trees that may be deferred to post-bootstrap
-    /// (`Fs`, `Csum`, `DataReloc`) and the user-feature trees
-    /// (`FreeSpace`, `BlockGroup`, `Quota`), which are appended after
-    /// the base trees when present in mkfs's bootstrap. The
-    /// post-bootstrap-creatable trees are "optional" only in the
-    /// sense that mkfs may skip them when post-bootstrap will run and
-    /// create them instead. The final filesystem always has all of
-    /// them.
+    /// Tree blocks the bootstrap writes, in on-disk order. The other
+    /// trees (`Fs`, `Csum`, `DataReloc`, and the feature trees
+    /// `FreeSpace`, `BlockGroup`, `Quota`) are created by
+    /// post-bootstrap, so the final filesystem still has all of them.
     pub const ALL: [TreeId; 4] =
         [TreeId::Root, TreeId::Extent, TreeId::Chunk, TreeId::Dev];
 
     /// Always-present trees that get a `ROOT_ITEM` in the root tree.
     /// Excludes Root (can't reference itself), Chunk (handled by the
-    /// superblock's `chunk_root` pointer), and the optional trees
-    /// (`Fs`, `Csum`, `DataReloc`, `FreeSpace`, `BlockGroup`,
+    /// superblock's `chunk_root` pointer), and the trees post-bootstrap
+    /// creates (`Fs`, `Csum`, `DataReloc`, `FreeSpace`, `BlockGroup`,
     /// `Quota`).
     pub const ROOT_ITEM_TREES: [TreeId; 2] = [TreeId::Extent, TreeId::Dev];
 }
 
 /// The 3 always-present trees that live in the metadata chunk.
-/// Excludes `Chunk` (lives in the system chunk) and the trees that
-/// may or may not be present in mkfs's bootstrap (`Fs`, `Csum`,
-/// `DataReloc`, `FreeSpace`, `BlockGroup`, `Quota`).
+/// Excludes `Chunk` (lives in the system chunk) and the trees
+/// post-bootstrap creates (`Fs`, `Csum`, `DataReloc`, `FreeSpace`,
+/// `BlockGroup`, `Quota`).
 pub const NON_CHUNK_TREES: [TreeId; 3] =
     [TreeId::Root, TreeId::Extent, TreeId::Dev];
 
 /// Computed block layout for all mkfs tree blocks.
 ///
 /// The chunk tree block is placed at `SYSTEM_GROUP_OFFSET` (in the system
-/// chunk). The remaining 7 trees are placed sequentially starting at the
+/// chunk). The other trees are placed sequentially starting at the
 /// metadata chunk's logical address.
 pub struct BlockLayout {
     nodesize: u32,
@@ -160,11 +155,9 @@ impl BlockLayout {
     /// bootstrap (block-group-tree, free-space-tree, FS tree, csum
     /// tree, data-reloc tree, quota tree).
     ///
-    /// `has_fs_tree`, `has_csum_tree`, and `has_data_reloc_tree`
-    /// reflect whether mkfs's bootstrap creates these. They are true
-    /// for profiles post-bootstrap does not support (RAID5, RAID6) and
-    /// for the rootdir path, and false when post-bootstrap creates the
-    /// trees instead.
+    /// Each flag says whether mkfs's bootstrap writes that tree. Every
+    /// caller passes `false` today, because post-bootstrap creates all
+    /// of them.
     // Six booleans is more than clippy::fn_params_excessive_bools
     // would like, but each bool has a clear meaning and call sites
     // (in `make_btrfs` and `build_extent_tree`) read naturally.
@@ -247,10 +240,10 @@ pub struct ChunkDevice {
 impl ChunkLayout {
     /// Compute metadata and data chunk placement for the given devices.
     ///
-    /// For DUP metadata (single device): two stripes on device 1.
-    /// For RAID1 metadata (multi-device): one stripe on each of the first
-    /// two devices.
-    /// For SINGLE data: one stripe on device 1.
+    /// SINGLE places one stripe on device 1 and DUP places two. The
+    /// multi-device profiles place one stripe on each of the first
+    /// `num_stripes` devices. Metadata starts at `CHUNK_START`, and data
+    /// follows the metadata stripes on each device.
     ///
     /// Returns `None` if the devices are too small.
     ///
@@ -588,11 +581,12 @@ impl ChunkLayout {
     }
 }
 
-/// Dynamic block address allocator for rootdir mode.
+/// Dynamic block address allocator over the system and metadata chunks.
 ///
 /// Unlike `BlockLayout` which assigns a fixed address per `TreeId`,
-/// `BlockAllocator` hands out sequential addresses from the system and
-/// metadata chunks. This supports trees that need multiple blocks.
+/// `BlockAllocator` hands out sequential addresses, so a tree can span
+/// multiple blocks. mkfs no longer uses it: `--rootdir` allocates
+/// through the transaction crate.
 pub struct BlockAllocator {
     nodesize: u32,
     system_start: u64,
@@ -663,7 +657,6 @@ impl BlockAllocator {
     }
 
     /// Reset the allocator to reuse from the beginning.
-    /// Used during the convergence loop when block counts change.
     pub fn reset(&mut self) {
         self.next_system = self.system_start;
         self.next_meta = self.meta_start;

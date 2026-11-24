@@ -19,7 +19,8 @@ bitflags! {
     /// filesystem read-only.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct CompatRoFlags: u64 {
-        /// Free space is tracked via a dedicated B-tree instead of bitmaps.
+        /// Free space is tracked in a dedicated B-tree instead of the v1
+        /// space cache.
         const FREE_SPACE_TREE =
             crate::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE as u64;
         /// The free space tree has been fully built and is valid.

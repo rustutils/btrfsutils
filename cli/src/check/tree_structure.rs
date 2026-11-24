@@ -232,7 +232,7 @@ fn check_block(
                 results.btree_space_waste += nodesize - used;
             }
 
-            let _ = data; // data is available for item-level checks later
+            let _ = data; // item payloads are not checked here
         }
         TreeBlock::Node { ptrs, .. } => {
             if header.level == 0 {

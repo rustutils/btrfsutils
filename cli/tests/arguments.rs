@@ -26,8 +26,6 @@ fn parse_err(args: &[&str]) -> String {
         .join("\n")
 }
 
-// ── subvolume ────────────────────────────────────────────────────────
-
 #[test]
 fn subvolume_create() {
     insta::assert_debug_snapshot!(parse(&[
@@ -531,8 +529,6 @@ fn subvolume_sync_with_sleep() {
     ]));
 }
 
-// ── filesystem ───────────────────────────────────────────────────────
-
 #[test]
 fn filesystem_df() {
     insta::assert_debug_snapshot!(parse(&[
@@ -678,8 +674,6 @@ fn filesystem_mkswapfile_with_size() {
     ]));
 }
 
-// ── device ───────────────────────────────────────────────────────────
-
 #[test]
 fn device_add() {
     insta::assert_debug_snapshot!(parse(&[
@@ -767,8 +761,6 @@ fn device_ready() {
     ]));
 }
 
-// ── balance ──────────────────────────────────────────────────────────
-
 #[test]
 fn balance_start() {
     insta::assert_debug_snapshot!(parse(&[
@@ -816,8 +808,6 @@ fn balance_status() {
     ]));
 }
 
-// ── scrub ────────────────────────────────────────────────────────────
-
 #[test]
 fn scrub_start() {
     insta::assert_debug_snapshot!(parse(&["btrfs", "scrub", "start", "/mnt"]));
@@ -844,8 +834,6 @@ fn scrub_status() {
 fn scrub_resume() {
     insta::assert_debug_snapshot!(parse(&["btrfs", "scrub", "resume", "/mnt"]));
 }
-
-// ── inspect-internal ─────────────────────────────────────────────────
 
 #[test]
 fn inspect_rootid() {
@@ -941,8 +929,6 @@ fn inspect_dump_super_full_all() {
     ]));
 }
 
-// ── quota ────────────────────────────────────────────────────────────
-
 #[test]
 fn quota_enable() {
     insta::assert_debug_snapshot!(parse(&["btrfs", "quota", "enable", "/mnt"]));
@@ -978,8 +964,6 @@ fn quota_rescan_status() {
 fn quota_status() {
     insta::assert_debug_snapshot!(parse(&["btrfs", "quota", "status", "/mnt"]));
 }
-
-// ── qgroup ───────────────────────────────────────────────────────────
 
 #[test]
 fn qgroup_create() {
@@ -1063,8 +1047,6 @@ fn qgroup_clear_stale() {
     ]));
 }
 
-// ── replace ──────────────────────────────────────────────────────────
-
 #[test]
 fn replace_start() {
     insta::assert_debug_snapshot!(parse(&[
@@ -1092,8 +1074,6 @@ fn replace_cancel() {
         "btrfs", "replace", "cancel", "/mnt"
     ]));
 }
-
-// ── send ─────────────────────────────────────────────────────────────
 
 #[test]
 fn send_basic() {
@@ -1137,8 +1117,6 @@ fn send_missing_subvol() {
     insta::assert_snapshot!(parse_err(&["btrfs", "send"]));
 }
 
-// ── receive ──────────────────────────────────────────────────────────
-
 #[test]
 fn receive_basic() {
     insta::assert_debug_snapshot!(parse(&["btrfs", "receive", "/mnt/dest"]));
@@ -1159,8 +1137,6 @@ fn receive_from_file() {
 fn receive_dump() {
     insta::assert_debug_snapshot!(parse(&["btrfs", "receive", "--dump"]));
 }
-
-// ── property ─────────────────────────────────────────────────────────
 
 #[test]
 fn property_get() {
@@ -1216,8 +1192,6 @@ fn property_list() {
     ]));
 }
 
-// ── reflink ──────────────────────────────────────────────────────────
-
 #[test]
 fn reflink_clone_whole_file() {
     insta::assert_debug_snapshot!(parse(&[
@@ -1271,8 +1245,6 @@ fn reflink_clone_missing_target() {
 fn reflink_clone_no_subcommand() {
     insta::assert_snapshot!(parse_err(&["btrfs", "reflink"]));
 }
-
-// ── global options ───────────────────────────────────────────────────
 
 #[test]
 fn global_verbose() {

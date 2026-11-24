@@ -613,12 +613,12 @@ mod tests {
             4096,
             &[
                 (256, 1, 0),  // InodeItem
-                (256, 12, 0), // DirItem
-                (256, 84, 0), // DirIndex
+                (256, 12, 0), // InodeRef
+                (256, 84, 0), // DirItem
             ],
         );
 
-        // Search for type 12 (DirItem)
+        // Search for type 12 (InodeRef)
         let key = DiskKey {
             objectid: 256,
             key_type: KeyType::from_raw(12),

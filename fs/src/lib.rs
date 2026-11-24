@@ -1,18 +1,19 @@
 //! High-level filesystem API on top of `btrfs-disk`.
 //!
-//! [`Filesystem`] exposes the operations a userspace driver needs:
-//! `lookup`, `readdir`, `read`, `readlink`, `getattr`, `xattr_get`,
-//! `xattr_list`, and `statfs`. Each returns plain `std::io::Result`
-//! values and does not depend on any FUSE crate, so the same API
-//! drives the [`btrfs-fuse`] mount and other embedders (offline tools,
-//! tests, alternate FUSE bindings).
+//! [`Filesystem`] exposes the operations a userspace driver needs
+//! (`lookup`, `readdir`, `read`, `getattr`, xattrs, `seek_hole_data`,
+//! and so on) plus the reads behind the btrfs ioctls (`tree_search`,
+//! `ino_lookup`, subvolume listing) and offline `send`. Fallible ops
+//! return plain `std::io::Result` values and nothing depends on a FUSE
+//! crate, so the same API drives the [`btrfs-fuse`] mount and other
+//! embedders (offline tools, tests, alternate FUSE bindings).
 //!
 //! # Inode model
 //!
-//! [`Inode`] is the pair `(subvol, ino)`. For now only the default
-//! subvolume is exposed, but multi-subvolume support is the next phase
-//! and the API is shaped for it from the start. Callers that need a
-//! flat `u64` (e.g. FUSE) translate at the boundary.
+//! [`Inode`] is the pair `(subvol, ino)`. `lookup` follows subvolume
+//! crossings, so one handle can traverse every subvolume below the
+//! one it was opened on. Callers that need a flat `u64` (e.g. FUSE)
+//! translate at the boundary.
 //!
 //! # Status
 //!

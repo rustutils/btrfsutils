@@ -17,7 +17,10 @@ pub struct MountArgs {
     pub image: PathBuf,
     /// Mount point.
     pub mountpoint: PathBuf,
-    /// Run in the foreground (do not daemonize).
+    /// Run in the foreground.
+    ///
+    /// The mount always runs in the foreground for now, so this flag
+    /// has no effect.
     #[arg(short = 'f', long)]
     pub foreground: bool,
     /// Allow other users to access the mount.

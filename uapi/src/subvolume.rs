@@ -122,11 +122,11 @@ pub struct SubvolumeListItem {
     pub otransid: u64,
     /// Creation time.
     pub otime: SystemTime,
-    /// Subvolume name (the leaf name within its parent).
+    /// Subvolume path relative to the subvolume `fd` is open on.
     ///
-    /// Full path resolution relative to the filesystem root requires
-    /// `BTRFS_IOC_INO_LOOKUP` and is not yet implemented. This field contains
-    /// only the leaf name as stored in the root backref item.
+    /// `subvolume_list` resolves it with `BTRFS_IOC_INO_LOOKUP`. When that
+    /// lookup fails (e.g. without `CAP_SYS_ADMIN`), the path segment falls
+    /// back to the leaf name stored in the root backref item.
     pub name: String,
 }
 
@@ -583,7 +583,7 @@ fn ino_lookup_dir_path(
 }
 
 /// Resolve the `name` field of every item in `items` from a bare leaf name to
-/// the full path relative to the filesystem root.
+/// the full path relative to the subvolume `top_id`.
 ///
 /// For each subvolume we already have `parent_id`, `dir_id`, and the leaf name
 /// from the `ROOT_BACKREF` pass. A single `BTRFS_IOC_INO_LOOKUP` call per item
@@ -647,8 +647,8 @@ fn resolve_full_paths(
 /// Compute the full path for `root_id`, memoizing into `cache`.
 ///
 /// Walks the ancestor chain iteratively to avoid stack overflow on deep
-/// subvolume trees. Collects segments from the target up to the FS tree
-/// root, then joins them in reverse order.
+/// subvolume trees. Collects segments from the target up to `top_id` or the
+/// FS tree root, then joins them in reverse order.
 ///
 /// Cycle detection is included: `ROOT_BACKREF` entries can form mutual parent
 /// relationships (e.g. a snapshot stored inside the subvolume it was taken

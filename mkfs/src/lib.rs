@@ -1,9 +1,10 @@
 //! # Filesystem creation for btrfs
 //!
 //! Creates a new btrfs filesystem on one or more block devices or image
-//! files. Does not call any ioctls. Uses raw `pwrite` for the bootstrap
-//! and the `btrfs-transaction` crate's commit pipeline for everything
-//! else.
+//! files. Issues no btrfs ioctls, only `BLKGETSIZE64` and `BLKDISCARD`
+//! on block devices and `FICLONERANGE` for `--reflink`. Uses raw
+//! `pwrite` for the bootstrap and the `btrfs-transaction` crate's commit
+//! pipeline for everything else.
 //!
 //! ## How it works
 //!
@@ -16,9 +17,8 @@
 //!
 //! 1. **Bootstrap**: write the four always-present trees (Root,
 //!    Extent, Chunk, Dev) and the superblock to disk with raw
-//!    `pwrite`. Uses [`tree::LeafBuilder`] and [`treebuilder::TreeBuilder`]
-//!    to construct in-memory leaves, [`layout::ChunkLayout`] to
-//!    decide chunk geometry, and [`layout::BlockLayout`] to assign
+//!    `pwrite`. Uses [`tree::LeafBuilder`] to construct in-memory
+//!    leaves, [`layout::ChunkLayout`] to decide chunk geometry, and [`layout::BlockLayout`] to assign
 //!    static addresses for the bootstrap blocks. The result is the
 //!    minimum on-disk state that the transaction crate's
 //!    `Filesystem::open` will accept.

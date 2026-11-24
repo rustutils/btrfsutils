@@ -386,8 +386,8 @@ pub enum ObjectId {
     /// per-device physical stripe offsets for the `raid-stripe-tree`
     /// feature.
     RaidStripeTree,
-    /// The remap tree (objectid 13). Reserved for future use by the
-    /// extent-tree-v2 feature.
+    /// The remap tree (objectid 13). Holds details of addresses remapped
+    /// by relocation.
     RemapTree,
     /// Device statistics objectid (0). Used with `PERSISTENT_ITEM_KEY`
     /// to store per-device I/O error counters.

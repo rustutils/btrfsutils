@@ -72,7 +72,7 @@ pub fn find_our_mkfs() -> PathBuf {
     mkfs
 }
 
-/// A file created via `set_len` (fallocate). Drop removes the file.
+/// A sparse file created via `set_len` (ftruncate). Drop removes the file.
 pub struct BackingFile {
     path: PathBuf,
 }
@@ -145,8 +145,8 @@ impl BackingFile {
     /// Run our `btrfs-mkfs --rootdir` on this file.
     ///
     /// `mkfs_bin` is the path to the `btrfs-mkfs` binary, which the caller
-    /// must locate (typically via [`find_our_mkfs`] or
-    /// `env!("CARGO_BIN_EXE_btrfs")`).
+    /// must locate (typically via [`find_our_mkfs`], or via
+    /// `env!("CARGO_BIN_EXE_btrfs-mkfs")` inside the mkfs crate).
     pub fn mkfs_rootdir(
         &self,
         mkfs_bin: &Path,

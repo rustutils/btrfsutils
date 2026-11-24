@@ -4,6 +4,14 @@ expression: text
 ---
 Create a BTRFS filesystem on a device or multiple devices
 
+The device is typically a block device but can be a file-backed image as well.
+Multiple devices are grouped by UUID of the filesystem.
+
+The default block group profiles for data and metadata depend on the number of
+devices. For a single device the defaults are SINGLE for data and DUP for
+metadata. For multiple devices the defaults are SINGLE for data and RAID1 for
+metadata.
+
 Usage: mkfs [OPTIONS] <DEVICES>...
 
 Arguments:

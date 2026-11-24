@@ -204,8 +204,6 @@ mod tests {
         }
     }
 
-    // --- classify_object ---
-
     #[test]
     fn classify_regular_file() {
         let types = classify_object(&attrs(false, 1000, false, false));
@@ -276,8 +274,6 @@ mod tests {
         assert_eq!(types, vec![PropertyObjectType::Inode]);
     }
 
-    // --- property_names ---
-
     #[test]
     fn property_names_inode() {
         assert_eq!(property_names(PropertyObjectType::Inode), &["compression"]);
@@ -297,8 +293,6 @@ mod tests {
     fn property_names_device() {
         assert_eq!(property_names(PropertyObjectType::Device), &["label"]);
     }
-
-    // --- is_valid_property ---
 
     #[test]
     fn valid_property_ro_on_subvol() {
@@ -334,8 +328,6 @@ mod tests {
     fn invalid_property_unknown() {
         assert!(!is_valid_property(PropertyObjectType::Inode, "nosuch"));
     }
-
-    // --- property_description ---
 
     #[test]
     fn description_known_properties() {

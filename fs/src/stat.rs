@@ -44,7 +44,8 @@ impl Stat {
         #[allow(clippy::cast_possible_truncation)]
         let perm = (item.mode & 0o7777) as u16;
         #[allow(clippy::cast_possible_truncation)]
-        // rdev fits in 20 bits (major:12 + minor:8)
+        // The on-disk field is u64, but Linux device numbers fit in
+        // 32 bits.
         let rdev = item.rdev as u32;
         Self {
             ino,

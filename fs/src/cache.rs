@@ -192,7 +192,7 @@ impl InodeCache {
 }
 
 /// A single `EXTENT_DATA` item collected for a file. Has the shape the
-/// read path uses, so cache hits feed straight into `read::read_file`
+/// read path uses, so cache hits feed straight into `read::read_file_with_map`
 /// without re-parsing.
 #[derive(Clone)]
 pub(crate) struct ExtentRecord {

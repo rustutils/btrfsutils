@@ -262,8 +262,6 @@ pub fn print_json(key: &str, data: &impl Serialize) -> Result<()> {
 mod tests {
     use super::*;
 
-    // --- human_bytes ---
-
     #[test]
     fn human_bytes_zero() {
         assert_eq!(human_bytes(0), "0.00B");
@@ -299,8 +297,6 @@ mod tests {
         let s = human_bytes(u64::MAX);
         assert!(s.ends_with("PiB"), "expected PiB suffix, got: {s}");
     }
-
-    // --- parse_size_with_suffix ---
 
     #[test]
     fn parse_size_bare_number() {
@@ -343,8 +339,6 @@ mod tests {
         assert!(parse_size_with_suffix("10X").is_err());
     }
 
-    // --- parse_qgroupid ---
-
     #[test]
     fn parse_qgroupid_level0() {
         assert_eq!(parse_qgroupid("0/5").unwrap(), 5);
@@ -371,8 +365,6 @@ mod tests {
     fn parse_qgroupid_bad_subvolid() {
         assert!(parse_qgroupid("0/abc").is_err());
     }
-
-    // --- ParsedUuid ---
 
     #[test]
     fn parsed_uuid_clear() {
