@@ -9,9 +9,9 @@ High-level filesystem API on top of [`btrfs-disk`].
 needs, without depending on any FUSE crate:
 
 - `lookup`, `readdir`, `readdirplus`, `read`, `readlink`, `getattr`
-- `xattr_get`, `xattr_list`, `statfs`, `lseek` (`SeekHoleData`)
+- `xattr_get`, `xattr_list`, `statfs`, `seek_hole_data` (`SeekHoleData`)
 - `tree_search`, `ino_lookup`, `ino_paths`, `resolve_subvol_path`
-- `forget`, `send`, and subvolume metadata helpers
+- `forget`, `send`, `list_subvolumes`, `get_subvol_info`, `dev_info`
 
 The same API drives the `btrfs-fuse` mount, `btrfs send --offline`, and any
 other embedder (offline tools, tests, alternate FUSE bindings).
@@ -30,7 +30,7 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 - Inline, regular, and prealloc extents (prealloc reads as zeros)
 - Sparse hole reads, and `lseek SEEK_HOLE` and `SEEK_DATA` against the cached
   extent map
-- `readdirplus`, which pairs each `Entry` with its `InodeItem` using
+- `readdirplus`, which pairs each `Entry` with its `Stat` using
   cache-friendly reads
 - zlib, zstd, and LZO decompression (btrfs per-sector LZO framing)
 - xattr enumeration and lookup (with a hash-bucket scan for collisions)
@@ -76,8 +76,9 @@ async fn main() -> std::io::Result<()> {
 
 ## License
 
-Licensed under either the [Apache License, Version 2.0](LICENSE-APACHE) or
-the [MIT license](LICENSE-MIT), at your option.
+Licensed under either the
+[Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0) or
+the [MIT license](https://opensource.org/licenses/MIT), at your option.
 
 [`btrfs-disk`]: https://docs.rs/btrfs-disk
 [`btrfs-transaction`]: https://docs.rs/btrfs-transaction

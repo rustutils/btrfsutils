@@ -15,7 +15,7 @@ Manage and inspect mounted filesystems.
 | `btrfs filesystem du <path>` | Show disk usage including shared extents |
 | `btrfs filesystem sync <path>` | Sync the filesystem |
 | `btrfs filesystem defrag <path>` | Defragment a file or directory |
-| `btrfs filesystem resize <size> <path>` | Resize a mounted filesystem |
+| `btrfs filesystem resize <size> <path>` | Resize a mounted filesystem, or grow an unmounted one with `--offline` |
 | `btrfs filesystem label <path> [label]` | Get or set the filesystem label |
 | `btrfs filesystem mkswapfile <path>` | Create a swapfile |
 | `btrfs filesystem commit-stats <path>` | Show commit statistics |
@@ -46,7 +46,7 @@ Manage devices in a multi-device filesystem.
 |---------|-------------|
 | `btrfs device add <dev> <path>` | Add a device |
 | `btrfs device remove <dev> <path>` | Remove a device |
-| `btrfs device stats <path>` | Show per-device error statistics |
+| `btrfs device stats <path>` | Show per-device error statistics (`--offline` reads an unmounted device) |
 | `btrfs device scan [dev]` | Scan for btrfs devices |
 | `btrfs device ready <dev>` | Check if a multi-device filesystem is ready |
 | `btrfs device usage <path>` | Show per-device allocation details |
@@ -132,8 +132,9 @@ Low-level inspection tools.
 | `btrfs inspect-internal tree-stats <dev>` | Walk a B-tree and report node and leaf statistics |
 | `btrfs inspect-internal map-swapfile <path>` | Show physical extent map of a swapfile |
 
-`dump-super` and `dump-tree` read directly from a block device or image file and
-do not require a mounted filesystem or elevated privileges.
+`dump-super`, `dump-tree`, and `tree-stats` read directly from a block device
+or image file and do not require a mounted filesystem or elevated privileges.
+`list-chunks` and `min-dev-size` do the same with `--offline`.
 
 ## btrfs quota and qgroup
 
@@ -186,6 +187,21 @@ It restores:
 
 Use `--path-regex` to filter restored files and `-s` to include snapshots.
 
+## btrfs check
+
+Verify the structure of an unmounted filesystem.
+
+| Command | Description |
+|---------|-------------|
+| `btrfs check <dev>` | Run a read-only check of the filesystem |
+
+The check runs in 7 phases: superblock mirrors, tree structure, extent
+references, chunks and block groups, FS tree inodes, checksums, and root
+references. `--check-data-csum` also verifies data blocks. `--backup`,
+`--tree-root`, and `--chunk-root` help open a damaged filesystem. `--repair`,
+`--init-csum-tree`, `--init-extent-tree`, `--qgroup-report`, and
+`--subvol-extents` are not supported yet.
+
 ## btrfs rescue
 
 Emergency recovery tools for damaged filesystems.
@@ -221,6 +237,8 @@ It supports:
 - labels, UUIDs, and feature flags
 - populating the filesystem from a directory with `--rootdir`
 
+With the default `mkfs` cargo feature, it is also available as `btrfs mkfs`.
+
 ## btrfs-tune
 
 Modify btrfs filesystem parameters on an unmounted device.
@@ -239,6 +257,10 @@ btrfs-tune [options] <device>
 | `-M <uuid>` | Change fsid to a specific UUID (metadata_uuid mechanism) |
 | `-u` | Rewrite fsid to a random UUID (patches all tree blocks) |
 | `-U <uuid>` | Rewrite fsid to a specific UUID (patches all tree blocks) |
+| `--convert-to-free-space-tree` | Convert to the free space tree (v2 cache) |
+| `--convert-to-block-group-tree` | Convert to the block group tree |
+
+With the default `tune` cargo feature, it is also available as `btrfs tune`.
 
 ## btrfs fuse and btrfs-fuse
 
@@ -259,7 +281,7 @@ Notable flags:
 - `--no-default-permissions` turns off per-file mode, UID, and GID checks.
   This helps when the stored UIDs don't match the local system.
 
-This driver is experimental. See [`btrfs-fuse`'s README](https://github.com/rustutils/btrfsutils/blob/master/fuse/README.md)
+This driver is experimental. See [`btrfs-fuse`'s README](https://gitlab.com/rustutils/btrfsutils/-/blob/master/fuse/README.md)
 for the full feature matrix.
 
 ## Global flags
@@ -269,8 +291,10 @@ These flags are accepted by all `btrfs` commands:
 | Flag | Description |
 |------|-------------|
 | `-v`, `--verbose` | Increase verbosity (repeatable) |
-| `-q`, `--quiet` | Suppress non-error output |
-| `-f`, `--format` | Set the output format: text, json, or modern |
+| `-q`, `--quiet` | Print only errors |
+| `--dry-run` | Don't make changes, for commands that support it |
+| `--log <level>` | Set the log level: debug, info, warn, or error |
+| `--format <format>` | Set the output format: text, json, or modern. Also read from `BTRFS_OUTPUT_FORMAT` |
 
 ## Output Format
 

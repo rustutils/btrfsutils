@@ -27,7 +27,11 @@ All non-superseded btrfs ioctls are wrapped, plus several standard VFS ioctls:
   label, resize
 - **Quota**: enable, disable, rescan, rescan status and wait
 - **Qgroup**: create, destroy, assign, remove, limit, list, clear stale
-- **Tree search**: generic v1 and v2 with a callback-based cursor
+- **Inode resolution**: subvolume ID lookup, inode to paths, logical address
+  to inodes, subvolume ID to path
+- **Reflink**: clone range (FICLONERANGE)
+- **Tree search**: generic v1 and v2 with a callback-based cursor, and an
+  automatic v2-to-v1 fallback
 - **Features**: get and set feature flags, get supported features
 - **Defrag**: range defrag with compression options
 - **Dedupe**: file extent same (out-of-band dedup)

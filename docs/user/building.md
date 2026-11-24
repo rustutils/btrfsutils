@@ -26,7 +26,7 @@ cargo build --release
 ```
 
 This builds `target/release/btrfs`, `target/release/btrfs-mkfs`,
-and `target/release/btrfs-tune`.
+`target/release/btrfs-tune`, and `target/release/btrfs-fuse`.
 
 ## Building with Nix
 
@@ -36,8 +36,8 @@ The Nix flake gives a reproducible build with all dependencies pinned:
 nix build
 ```
 
-Outputs land in `result/bin/btrfs`, `result/bin/btrfs-mkfs`,
-`result/bin/btrfs-tune`, and `result/share/man/man1/`.
+Outputs land in `result/bin/` (`btrfs`, `btrfs-mkfs`, `btrfs-tune`, and
+`btrfs-fuse`) and `result/share/man/man1/`.
 
 To enter a development shell with all tools, including nightly rustfmt,
 cargo-insta, and cargo-llvm-cov:

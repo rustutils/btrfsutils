@@ -75,4 +75,4 @@ available.
 
 ## License
 
-Licensed under the [GNU General Public License v2.0](../LICENSE.md).
+Licensed under the [GNU General Public License v2.0](https://gitlab.com/rustutils/btrfsutils/-/blob/master/LICENSE.md).

@@ -9,6 +9,8 @@ can read raw bytes.
 
 Users in this project:
 
+- `btrfs-uapi` parses tree search results with its typed item parsers.
+- `btrfs-transaction` and `btrfs-fs` build their read and write paths on it.
 - `btrfs-cli` parses with it for commands like `dump-super`, `dump-tree`, and
   `restore`.
 - `btrfs-mkfs` uses the serialization side (raw constants, write helpers,
@@ -38,7 +40,8 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
   and Reed-Solomon over GF(2^8) with reduction polynomial 0x1D) in the
   `raid56` module.
 - **Block reader**: reads tree blocks by logical address and bootstraps the
-  full filesystem (superblock -> chunk tree -> root tree).
+  full filesystem (superblock -> chunk tree -> root tree), from one device or
+  several (`filesystem_open_multi`).
 - **Tree traversal**: BFS and DFS walks with visitor callbacks.
 - **Key types**: KeyType and ObjectId enums with Display formatting, and
   format_key for human-readable output.

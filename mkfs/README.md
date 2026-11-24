@@ -1,14 +1,16 @@
 # btrfs-mkfs
 
 A Rust implementation of `mkfs.btrfs`. It creates btrfs filesystems on block
-devices or image files, with no ioctls or mounted filesystem required.
+devices or image files, with no mounted filesystem required. The only ioctls
+it uses are the block device size and discard ioctls, and `FICLONERANGE` for
+`--reflink`.
 
 It works in three phases:
 
 1. A hand-built bootstrap writes the four trees that always exist (root,
    extent, chunk, dev) and the superblock with raw `pwrite`.
 2. `post_bootstrap` reopens the image with the
-   [`btrfs-transaction`](../transaction) crate and creates the other
+   [`btrfs-transaction`](https://gitlab.com/rustutils/btrfsutils/-/tree/master/transaction) crate and creates the other
    always-present trees (FS, csum, data-reloc, UUID, plus FST, BGT, and quota
    when those features are enabled).
 3. With `--rootdir`, a third transaction walks the source directory and
@@ -71,8 +73,9 @@ btrfs-mkfs -f /dev/sda1
 - Quota tree (`-O quota`) and simple quota tree (`-O squota`)
 - Free-space-tree and block-group-tree feature flags
 - Device validation: mounted check, existing filesystem detection, TRIM
-- Minimum device size enforcement (~133 MiB)
-- Default features: extref, skinny-metadata, no-holes, free-space-tree
+- Minimum device size enforcement (29 MiB for the default layout)
+- Default features: extref, skinny-metadata, no-holes, free-space-tree,
+  block-group-tree
 - `--rootdir` population: regular files (inline and regular extents up to
   1 MiB), directories, symlinks, hardlinks, xattrs, special files
 - `--rootdir` compression: zlib, zstd, LZO (per-sector framed format)
@@ -86,7 +89,7 @@ btrfs-mkfs -f /dev/sda1
 ## What's not yet implemented
 
 - Zoned device support
-- Mixed data and metadata mode (`-M`)
+- Mixed data and metadata mode (`-M` is accepted but ignored)
 
 ## License
 

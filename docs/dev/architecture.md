@@ -27,7 +27,7 @@ a parsed stream to a mounted filesystem through `btrfs-uapi`.
 top of `btrfs-disk`. It handles delayed refs, free space tree updates, chunk
 tree COW, and conversion to the v2 free space tree and the block group tree.
 It is platform-independent. It backs offline `btrfs filesystem resize`, the
-rescue commands, and the `btrfs-tune` conversions.
+rescue commands, the `btrfs-tune` conversions, and most of `btrfs-mkfs`.
 
 `btrfs-fs` is a high-level read-only filesystem API on top of `btrfs-disk`.
 Its `Filesystem<R>` handle offers POSIX-style operations (`lookup`, `readdir`,
@@ -38,9 +38,11 @@ operations are `async fn` and run sync I/O through `spawn_blocking`. The crate
 does not depend on FUSE. It drives the `btrfs-fuse` mount, the
 `btrfs send --offline` path, and any other embedder.
 
-`btrfs-mkfs` implements `mkfs.btrfs`. It builds B-tree nodes as raw byte
-buffers and writes them to a block device or image file with `pwrite`. It
-does not use ioctls.
+`btrfs-mkfs` implements `mkfs.btrfs`. It builds the bootstrap trees (root,
+extent, chunk, and dev) as raw byte buffers and writes them to a block device
+or image file with `pwrite`. It then reopens the image through
+`btrfs-transaction` to create the remaining trees and, with `--rootdir`, to
+populate the filesystem.
 
 `btrfs-tune` implements `btrfstune`. It changes superblock parameters (feature
 flags, seeding, filesystem UUIDs) on unmounted devices. A lightweight UUID change

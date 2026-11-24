@@ -42,8 +42,8 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 - Encoded write with `BTRFS_IOC_ENCODED_WRITE` and decompression fallback (zlib, zstd, lzo)
 - fs-verity enablement for v3 streams
 - Subvolume finalization (received UUID set and read-only flag)
-- Multi-stream support (continues after the END command)
-- Error counting with a configurable max-errors threshold
+- `StreamReader::into_inner` hands back the reader after an END command, so
+  a caller can parse several concatenated streams
 
 ## Testing
 
@@ -54,6 +54,9 @@ They need no privileges.
 ```sh
 cargo test -p btrfs-stream
 ```
+
+Integration tests in `tests/receive.rs` apply streams to a real filesystem.
+They need root and run through `just test`.
 
 ## License
 

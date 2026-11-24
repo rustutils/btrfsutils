@@ -12,14 +12,17 @@ provides three command-line tools:
 
 All three aim to be drop-in replacements for their
 [btrfs-progs](https://github.com/kdave/btrfs-progs) counterparts, with some
-extra features.
+extra features. A fourth tool, `btrfs-fuse`, is an experimental read-only
+FUSE driver that mounts a btrfs image or block device without kernel btrfs
+support.
 
 Most commands are fully implemented and match the output of the C reference.
 The project is pre-1.0 and not yet meant for production, but the implemented
 commands are thoroughly tested.
 
 It also provides library crates for the btrfs kernel APIs, the on-disk format,
-and the `btrfs send` stream format.
+the `btrfs send` stream format, transactional writes to unmounted filesystems,
+and a high-level read-only filesystem API.
 
 ## Source Code
 

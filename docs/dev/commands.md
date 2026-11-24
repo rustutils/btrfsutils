@@ -16,8 +16,8 @@ For `btrfs filesystem label`, it looks like this (from `uapi/src/filesystem.rs`)
 
 ```rust
 pub fn label_get(fd: BorrowedFd) -> nix::Result<CString> {
-    let mut buf = [0i8; BTRFS_LABEL_SIZE as usize];
-    unsafe { btrfs_ioc_get_fslabel(fd.as_raw_fd(), &mut buf) }?;
+    let mut buf = [0 as c_char; BTRFS_LABEL_SIZE as usize];
+    unsafe { btrfs_ioc_get_fslabel(fd.as_raw_fd(), &raw mut buf) }?;
     let cstr = unsafe { CStr::from_ptr(buf.as_ptr()) };
     Ok(cstr.to_owned())
 }
@@ -27,11 +27,11 @@ pub fn label_set(fd: BorrowedFd, label: &CStr) -> nix::Result<()> {
     if bytes.len() >= BTRFS_LABEL_SIZE as usize {
         return Err(nix::errno::Errno::EINVAL);
     }
-    let mut buf = [0i8; BTRFS_LABEL_SIZE as usize];
+    let mut buf = [0 as c_char; BTRFS_LABEL_SIZE as usize];
     for (i, &b) in bytes.iter().enumerate() {
         buf[i] = b as c_char;
     }
-    unsafe { btrfs_ioc_set_fslabel(fd.as_raw_fd(), &buf) }?;
+    unsafe { btrfs_ioc_set_fslabel(fd.as_raw_fd(), &raw const buf) }?;
     Ok(())
 }
 ```
@@ -58,7 +58,7 @@ pub struct FilesystemLabelCommand {
 }
 
 impl Runnable for FilesystemLabelCommand {
-    fn run(&self, _format: Format, _dry_run: bool) -> Result<()> {
+    fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
         match &self.new_label {
             None => {
@@ -79,7 +79,8 @@ impl Runnable for FilesystemLabelCommand {
 ```
 
 The struct derives clap's `Parser`, and the field doc comments become the help
-text. `Runnable::run` handles both cases (get and set). It opens the path,
+text. `Runnable::run` receives a `RunContext` with the global options (output
+format, dry run, quiet). It handles both cases (get and set). It opens the path,
 calls the matching uapi function, and either prints the result or reports an
 error. Error messages include the path so the user knows which filesystem
 failed.
@@ -98,7 +99,10 @@ licensed MIT or Apache-2.0 and used by other projects without the CLI tools.
 ## Routing
 
 Each top-level command group has a router in `cli/src/` (for example
-`cli/src/filesystem.rs`). It defines an enum such as `FilesystemCommand` with
-one variant per subcommand. The router's `Runnable` implementation matches on
-the variant and calls the subcommand's own `run` method. To add a subcommand,
-add a variant to the enum, a `mod` declaration, and a dispatch arm.
+`cli/src/filesystem.rs`). It defines a struct such as `FilesystemCommand` that
+wraps an enum such as `FilesystemSubcommand`, with one variant per subcommand.
+The struct implements `CommandGroup`, whose `leaf` method matches on the
+variant and returns the subcommand. A blanket `Runnable` implementation
+forwards `run`, `supported_formats`, and `supports_dry_run` to that leaf. To
+add a subcommand, add a variant to the enum, a `mod` declaration, and an arm
+in `leaf`.

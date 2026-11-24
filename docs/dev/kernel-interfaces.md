@@ -62,11 +62,15 @@ in `uapi/src/tree_search.rs` as a callback-based cursor:
 
 ```rust
 tree_search(fd, SearchFilter::for_type(tree_id, item_type), |hdr, data| {
-    // hdr: SearchHeader — objectid, offset, item_type, len (host byte order)
-    // data: &[u8] — raw on-disk item payload (little-endian)
+    // hdr: SearchHeader: objectid, offset, item_type, len (host byte order)
+    // data: &[u8]: raw on-disk item payload (little-endian)
     Ok(())
 })?;
 ```
+
+`tree_search_v2` uses `BTRFS_IOC_TREE_SEARCH_V2` with a larger buffer.
+`tree_search_auto` tries v2 first and falls back to v1 when the kernel (or the
+`btrfs-fuse` driver) reports v2 as unsupported. Both take the same callback.
 
 Common `SearchFilter` constructors:
 
@@ -117,5 +121,5 @@ objectids match the new minimum on every batch, and the search loops forever.
 
 Some data comes from sysfs rather than ioctls, such as scrub throughput limits
 and quota state. The `SysfsBtrfs` type in `uapi/src/sysfs.rs` gives typed
-access to `/sys/fs/btrfs/<uuid>/`. The filesystem UUID comes from `fs_info()`
+access to `/sys/fs/btrfs/<uuid>/`. The filesystem UUID comes from `filesystem_info()`
 (`BTRFS_IOC_FS_INFO`).

@@ -56,7 +56,8 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 - `BTRFS_IOC_SEND` (the kernel ioctl path). Use `btrfs send --offline IMAGE`
   from `btrfs-cli` to generate send streams from images.
 - RAID1, RAID10, RAID5, and RAID6 redundancy handling on degraded devices
-- The `--foreground=false` daemonize path (`-f` foreground works)
+- Daemonizing. The mount always runs in the foreground, and `-f` has no
+  effect.
 - `statfs` inode counts (reported as 0)
 
 ## Usage
@@ -111,15 +112,19 @@ embedding.
 ## Testing
 
 Read-path integration tests live in the [`btrfs-fs`] crate, since the FUSE
-adapter has no filesystem logic of its own. Run them with:
+adapter has no filesystem logic of its own. This crate's own tests in `tests/`
+mount a fixture image through the `btrfs-fuse` binary and exercise the FUSE
+operations and ioctls. Run both with:
 
 ```sh
-cargo test -p btrfs-fs
+cargo test -p btrfs-fs -p btrfs-fuse
 ```
 
-They require `mkfs.btrfs` (from `btrfs-progs`) on `$PATH`.
+They need no root, but they require `mkfs.btrfs` on `$PATH` to build the
+fixture images, and the FUSE tests need `fusermount`.
 
 ## License
 
-Licensed under either the [Apache License, Version 2.0](LICENSE-APACHE) or
-the [MIT license](LICENSE-MIT), at your option.
+Licensed under either the
+[Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0) or
+the [MIT license](https://opensource.org/licenses/MIT), at your option.

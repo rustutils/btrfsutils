@@ -77,7 +77,7 @@ test. They need no privileges and run with `cargo test`.
 
 They cover the pure logic across the crates:
 
-- LE readers
+- on-disk item parsing and serialization
 - struct size assertions
 - tree search cursor arithmetic
 - stream parsing (all 22 v1 command types, CRC validation)
@@ -92,14 +92,15 @@ kernel or filesystem.
 
 ## Integration tests
 
-Integration tests live in `uapi/tests/` and `cli/tests/commands/` and are
-marked:
+Privileged integration tests live in `uapi/tests/`, `cli/tests/commands/`,
+`mkfs/tests/`, `stream/tests/`, and `transaction/tests/`, and are marked:
 
 ```rust
 #[ignore = "requires elevated privileges"]
 ```
 
-`cargo test` skips them. They run only through `just test`.
+`cargo test` skips them. They run only through `just test`. The `btrfs-fs` and
+`btrfs-fuse` integration tests need no privileges and run with `cargo test`.
 
 ### Fixture tests (`commands/fixture.rs`)
 
@@ -127,35 +128,36 @@ set, resize, defrag, and replace.
 
 ### Test helpers
 
-`cli/tests/common.rs` provides RAII helpers that clean up on drop:
+The `btrfs-test-utils` crate in `util/testing/` (a dev-dependency, not
+published) provides RAII helpers that clean up on drop:
 
 ```
 BackingFile → LoopbackDevice → Mount
 ```
 
-Convenience functions:
+Each crate's `tests/common.rs` re-exports these and adds crate-local glue.
 
-| Function | Description |
-|----------|-------------|
-| `single_mount()` | 512 MiB single-device filesystem in a tempdir |
-| `deterministic_mount()` | Same, with a fixed UUID and label |
-| `fixture_mount()` | Mounts the pre-built fixture image read-only |
-| `write_test_data(path, n)` | Write deterministic byte-pattern files |
-| `verify_test_data(path, n)` | Verify previously written test data |
+| Function | Location | Description |
+|----------|----------|-------------|
+| `single_mount()` | `util/testing` | 512 MB single-device filesystem in a tempdir |
+| `deterministic_mount()` | `util/testing` | Same, with a fixed UUID and label |
+| `write_test_data(dir, name, size)` | `util/testing` | Write a file with a deterministic byte pattern |
+| `verify_test_data(dir, name, size)` | `util/testing` | Verify a file written by `write_test_data` |
+| `fixture_mount()` | `cli/tests/common.rs` | Mounts the pre-built fixture image read-only |
 
 ## Snapshot testing with insta
 
 CLI output tests use [insta](https://insta.rs/) for snapshot testing.
-Snapshots live in `cli/tests/snapshots/` and are checked in to the repository.
+Snapshots are checked in to the repository.
 
 There are four snapshot categories:
 
-| Pattern | Privileges | Description |
-|---------|-----------|-------------|
-| `arguments__*.snap` | none | Argument parsing output |
-| `help__*.snap` | none | Help text for every subcommand |
-| `commands__fixture__*.snap` | root | Read-only CLI output (fixture image) |
-| `commands__live__*.snap` | root | CLI output from live filesystem tests |
+| Pattern | Directory | Privileges | Description |
+|---------|-----------|------------|-------------|
+| `arguments__*.snap` | `cli/tests/snapshots/` | none | Argument parsing output |
+| `help__*.snap` | `cli/tests/snapshots/` | none | Help text for every subcommand |
+| `commands__fixture__*.snap` | `cli/tests/commands/snapshots/` | root | Read-only CLI output (fixture image) |
+| `commands__live__*.snap` | `cli/tests/commands/snapshots/` | root | CLI output from live filesystem tests |
 
 ### Snapshot workflow
 

@@ -9,10 +9,13 @@ gaps and the features btrfs-progs doesn't have.
 These btrfs-progs features are not implemented yet:
 
 - `btrfs check --repair` and related write-mode flags (`--init-csum-tree`,
-  `--init-extent-tree`, etc.). Read-only checking works.
+  `--init-extent-tree`), `--qgroup-report`, and `--subvol-extents`. Read-only
+  checking works.
 - `btrfs check --mode lowmem`. Only the default mode is supported.
 - `btrfs balance start --background`. Balance always runs in the foreground.
-- `btrfs filesystem resize --offline`.
+- `btrfs filesystem resize --enqueue`.
+- `btrfs filesystem show --all-devices`.
+- `btrfs rescue fix-data-checksum --interactive`.
 - `btrfs-mkfs` zoned device support.
 
 ## What's added beyond btrfs-progs

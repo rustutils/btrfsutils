@@ -18,14 +18,15 @@ architecture, a release includes:
 
 The `.deb` and `.rpm` install a single `btrfs` multicall binary at
 `/usr/bin/btrfs`, plus `mkfs.btrfs`, `btrfstune`, `btrfs-mkfs`, and
-`btrfs-tune` symlinks that dispatch on `argv[0]`.
+`btrfs-tune` symlinks that dispatch on `argv[0]`. The packaged binary is
+built with the `fuse` feature, so it also provides `btrfs fuse`.
 
 ## Cargo
 
 Install the tools as separate binaries:
 
 ```sh
-cargo install btrfs-cli btrfs-mkfs btrfs-tune
+cargo install btrfs-cli btrfs-mkfs btrfs-tune btrfs-fuse
 ```
 
 Or install only `btrfs-cli` with `mkfs`, `tune`, `fuse`, and `multicall`
@@ -60,5 +61,6 @@ See [Building from Source](building.md).
 
 btrfsutils runs on Linux. Most commands that work on a mounted filesystem
 require `CAP_SYS_ADMIN`: run them as root or grant the process that capability.
-The exceptions are `btrfs inspect-internal dump-super` and `dump-tree`, which
-only need read access to the block device or image file.
+The exceptions are commands that read a block device or image file directly,
+such as `btrfs inspect-internal dump-super`, `dump-tree`, and `tree-stats`.
+They only need read access to the device or file.

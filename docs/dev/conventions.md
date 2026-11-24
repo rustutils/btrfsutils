@@ -41,8 +41,9 @@ Null-terminated kernel strings (labels, device paths) use `CString` and
 
 File descriptors passed to uapi functions use `BorrowedFd`.
 
-Kernel flag fields use `bitflags!`, usually with a `Display` implementation so
-they can be formatted with `{}`.
+Kernel flag fields use `bitflags!`. Display formatting for them belongs in the
+CLI crate, not on the type, because different commands format the same flags
+differently.
 
 Complex argument structs (`BalanceArgs`, `DefragRangeArgs`) use the builder
 pattern with `new()`, chained setters, and `Default`.
@@ -71,7 +72,7 @@ unless you have a good reason. Size constants like `SZ_1M` that are not part
 of the btrfs UAPI headers are the exception. Define those locally with a
 comment.
 
-Avoid stray constants. Use `std::mem::offset_of!()` or `std::mem::size_of!()`
+Avoid stray constants. Use `std::mem::offset_of!()` or `std::mem::size_of()`
 to compute offsets and sizes, and give any remaining magic numbers a name.
 
 Don't redefine anything that already exists in `crate::raw::*`.
@@ -83,9 +84,9 @@ on-disk fields. Sequential `get_u64_le()` and `put_u64_le()` calls advance the
 cursor, so there is no manual offset arithmetic. See [Parsing](parsing.md) for
 details.
 
-In `uapi/`, tree search results are parsed with explicit offset-based LE
-readers (`read_le_u64`, `read_le_u32`) from `uapi/src/util.rs`, because those
-buffers are read at known offsets rather than sequentially.
+In `uapi/`, tree search callbacks receive the raw item payload. Parse it with
+the typed parsers in `btrfs_disk::items` (for example `ChunkItem::parse` or
+`RootItem::parse`) rather than reading fields at hand-written offsets.
 
 ## Style
 

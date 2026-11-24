@@ -16,6 +16,10 @@ The kernel call is `BTRFS_IOC_SEND`, which writes the stream to a file
 descriptor, usually the write end of a pipe. A reader thread on the other end
 copies the stream to a file or stdout.
 
+`btrfs send --offline IMAGE` skips the kernel. `btrfs-fs` walks the subvolume
+of an unmounted image and encodes a v1 stream with `btrfs-stream`'s
+`StreamWriter`. It supports full sends only.
+
 ## The stream format
 
 The stream is a header followed by a sequence of commands.
@@ -57,20 +61,21 @@ time from any `Read` source:
 use btrfs_stream::{StreamReader, StreamCommand};
 
 let mut reader = StreamReader::new(input)?; // reads and validates the header
-while let Some(command) = reader.read_command()? {
+while let Some(command) = reader.next_command()? {
     match command {
         StreamCommand::Subvol { path, uuid, ctransid } => { /* create subvolume */ }
-        StreamCommand::MkFile { path } => { /* create file */ }
+        StreamCommand::Mkfile { path } => { /* create file */ }
         StreamCommand::Write { path, offset, data } => { /* write data */ }
-        StreamCommand::Rename { path, path_to } => { /* rename */ }
+        StreamCommand::Rename { from, to } => { /* rename */ }
         StreamCommand::End => break,
-        // ... all 22+ command types
+        // ... the remaining v1, v2, and v3 command types
     }
 }
 ```
 
 `StreamReader::new` reads the stream header and returns an error if the magic
-is wrong or the version is unsupported. `read_command` returns `None` at EOF.
+is wrong or the version is not 1, 2, or 3. `next_command` returns `None` at
+EOF. `StreamWriter` is the matching encoder.
 
 ## Applying a stream with `btrfs-uapi`
 
@@ -105,15 +110,25 @@ For a complete receive implementation instead of building your own, enable the
 `receive` feature of `btrfs-stream` and use `ReceiveContext`:
 
 ```toml
-btrfs-stream = { version = "0.5", features = ["receive"] }
+btrfs-stream = { version = "0.13", features = ["receive"] }
 ```
 
 ```rust
-use btrfs_stream::ReceiveContext;
+use btrfs_stream::{ReceiveContext, StreamCommand, StreamReader};
 
-let mut ctx = ReceiveContext::new(destination_dir)?;
-ctx.receive(input_stream)?;
+let mut ctx = ReceiveContext::new(&destination_dir)?;
+let mut reader = StreamReader::new(input)?;
+while let Some(command) = reader.next_command()? {
+    if matches!(command, StreamCommand::End) {
+        break;
+    }
+    ctx.process_command(&command)?;
+}
+ctx.finish_subvol()?;
 ```
+
+`process_command` panics on `End`, so the caller handles it. `finish_subvol`
+sets the received UUID and makes the subvolume read-only.
 
 `ReceiveContext` handles all command types, including v2 encoded writes (with
 decompression fallback for zlib, zstd, and lzo) and v3 fs-verity. It caches

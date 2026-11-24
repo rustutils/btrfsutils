@@ -25,8 +25,8 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 ### Tree-block storage and COW
 
 - **`Filesystem`**: opens an image, resolves tree roots, reads tree blocks
-  via the chunk tree, and writes blocks back to all mirrors with correct
-  CRC32C checksums.
+  via the chunk tree, and writes blocks back to all mirrors with checksums of
+  the filesystem's checksum type.
 - **`ExtentBuffer`**: an in-memory tree block with leaf and node helpers for
   items, key and data offsets, and slot manipulation. Tracks dirty state and
   pending writes.
@@ -225,14 +225,6 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## What's not yet implemented
 
-- **Striped writes larger than `stripe_len` for RAID0, RAID5, and RAID6
-  data extents**: `BlockReader::write_block` routes each stripe via the
-  chunk cache's `plan_write` and handles every RAID profile correctly
-  (parity-aware for RAID5 and RAID6, mirror pairs for RAID10). A single
-  buffer that spans more than one row would need per-stripe slicing in the
-  executor, though. Tree blocks (always nodesize ≤ stripe_len) fit in one
-  row. Data extents larger than `stripe_len` do not. Deferred until there is
-  a concrete consumer.
 - **New SYSTEM chunk allocation**: if no existing SYSTEM block group has
   free space, `ensure_in_sys_chunk_array` cannot carve out a new one. It
   bails cleanly.
@@ -243,9 +235,9 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 
 ## Testing
 
-Unit tests cover the leaf manipulation primitives, balance logic, delayed
-ref merging, search and next_leaf, and the chunk array bootstrap helpers (in
-`btrfs-disk`).
+Unit tests cover the leaf manipulation primitives, split and balance logic,
+delayed ref merging, search and next_leaf, allocation, and free space tree
+updates.
 
 Integration tests build real filesystem images with `mkfs.btrfs`, run the
 full COW pipeline through `Transaction::commit`, and check the result two

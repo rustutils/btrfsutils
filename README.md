@@ -38,8 +38,8 @@ btrfs image or block device read-only, without kernel btrfs support.
 - **Opt-in extras.** Pass `--format modern` or set
   `BTRFS_OUTPUT_FORMAT=modern` for cleaner output, progress bars, and adaptive
   column widths.
-- **Reusable libraries.** The low-level crates (`btrfs-uapi`, `btrfs-disk`,
-  `btrfs-stream`, `btrfs-transaction`) are written from scratch, designed to be
+- **Reusable libraries.** The library crates (`btrfs-uapi`, `btrfs-disk`,
+  `btrfs-stream`, `btrfs-transaction`, `btrfs-fs`) are written from scratch, designed to be
   ergonomic, and licensed MIT or Apache-2.0.
 
 ## Status
@@ -55,33 +55,35 @@ rebuilt tree through `btrfs-transaction`.
 `btrfs-transaction` provides copy-on-write access to unmounted filesystems.
 It handles delayed refs, free space tree updates, chunk tree COW, and
 conversion to the v2 free space tree and the block group tree. It backs
-offline `btrfs filesystem resize`, the rescue commands, and
+offline `btrfs filesystem resize`, the rescue commands,
 `btrfs-tune --convert-to-free-space-tree` and
-`--convert-to-block-group-tree`.
+`--convert-to-block-group-tree`, and every `btrfs-mkfs` step after the
+bootstrap trees.
 
 ## Installation
 
-There are three executables:
+There are four executables:
 
 - `btrfs` configures and monitors btrfs filesystems.
 - `btrfs-mkfs` formats devices, or builds filesystem images from a directory.
 - `btrfs-tune` changes feature flags, UUIDs, and seeding on unmounted
   filesystems.
+- `btrfs-fuse` mounts a btrfs image or block device read-only through FUSE.
 
 Install them as separate binaries:
 
 ```sh
-cargo install btrfs-cli btrfs-mkfs btrfs-tune
+cargo install btrfs-cli btrfs-mkfs btrfs-tune btrfs-fuse
 ```
 
 Or install only `btrfs` with the other tools embedded:
 
 ```sh
-cargo install btrfs-cli --features mkfs,tune,multicall
+cargo install btrfs-cli --features mkfs,tune,fuse,multicall
 ```
 
-The `mkfs` and `tune` features add the `btrfs mkfs` and `btrfs tune`
-subcommands. The `multicall` feature makes the binary dispatch on its program
+The `mkfs`, `tune`, and `fuse` features add the `btrfs mkfs`, `btrfs tune`,
+and `btrfs fuse` subcommands. `mkfs` and `tune` are on by default. The `multicall` feature makes the binary dispatch on its program
 name, busybox-style: symlink or hardlink it to `mkfs.btrfs`, `btrfs-mkfs`,
 `btrfstune`, or `btrfs-tune` and it runs that tool.
 
@@ -94,7 +96,7 @@ portable binary.
 `riscv64gc` Linux musl targets:
 
 - `btrfsutils_<ver>_<arch>.deb` and `btrfsutils-<ver>-1.<arch>.rpm`: the
-  multicall `btrfs` binary, symlinks for `mkfs.btrfs`, `btrfstune`,
+  multicall `btrfs` binary (with `btrfs fuse`), symlinks for `mkfs.btrfs`, `btrfstune`,
   `btrfs-mkfs`, and `btrfs-tune`, man pages, and shell completions.
 - `btrfsutils-<arch>.tar.zst`: a relocatable tarball with the binary,
   symlinks, and docs.
@@ -112,7 +114,7 @@ cargo build --release
 ```
 
 The resulting binaries are `target/release/btrfs`, `target/release/btrfs-mkfs`,
-and `target/release/btrfs-tune`.
+`target/release/btrfs-tune`, and `target/release/btrfs-fuse`.
 
 To build with Nix:
 
@@ -146,11 +148,13 @@ Most commands that talk to the kernel require root privileges or `CAP_SYS_ADMIN`
 | `uapi` | Safe Rust wrappers around btrfs kernel ioctls, sysfs, and procfs. Linux-only. |
 | `disk` | Platform-independent parsing and serialization of btrfs on-disk structures. |
 | `stream` | Send stream parser and encoder. Optional Linux-only receive support. |
+| `fs` | High-level read-only filesystem API (`btrfs-fs`): lookup, readdir, read, xattrs, and offline send. Drives `btrfs-fuse` and `btrfs send --offline`. |
 | `transaction` | Transactional read-write access to unmounted filesystems: COW tree edits, delayed refs, free space tree and chunk tree updates, and full-tree conversions. Platform-independent. |
 | `cli` | The `btrfs` command-line tool. |
-| `mkfs` | Filesystem creation tool (`mkfs.btrfs`). Builds B-tree nodes and writes them directly to block devices or image files. |
+| `mkfs` | Filesystem creation tool (`mkfs.btrfs`). Writes the bootstrap trees directly to block devices or image files, then finishes through `btrfs-transaction`. |
 | `tune` | Offline superblock tuning tool (`btrfstune`). Changes feature flags, seeding, and filesystem UUIDs on unmounted devices. |
 | `fuse` *(experimental)* | Read-only userspace FUSE driver (`btrfs-fuse`) for images and block devices. Needs no kernel btrfs support. |
+| `util/testing` | Shared test fixtures (`btrfs-test-utils`): backing files, loopback devices, and mounts. Not published. |
 | `util/gen` | Generates man pages and shell completions (bash, zsh, fish, elvish) with `clap_mangen` and `clap_complete`. |
 | `docs` | Documentation, rendered with mdBook. |
 
@@ -184,7 +188,8 @@ privileged harness.
 ## License
 
 The library crates (`btrfs-uapi`, `btrfs-disk`, `btrfs-stream`,
-`btrfs-transaction`) are original work. They are licensed under either the
+`btrfs-transaction`, `btrfs-fs`) and the `btrfs-fuse` driver are original
+work. They are licensed under either the
 [Apache License, Version 2.0](uapi/LICENSE-APACHE) or the
 [MIT license](uapi/LICENSE-MIT), at your option, so other Rust crates can use
 them freely.

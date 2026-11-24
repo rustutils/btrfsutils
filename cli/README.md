@@ -11,8 +11,8 @@ command-line tool for inspecting and managing btrfs filesystems.
 > filesystems you care about.
 
 This crate builds the `btrfs` binary. Install it to manage btrfs filesystems.
-To build tools on top of btrfs, depend on `btrfs-uapi`, `btrfs-disk`, or
-`btrfs-stream` instead.
+To build tools on top of btrfs, depend on `btrfs-uapi`, `btrfs-disk`,
+`btrfs-stream`, `btrfs-transaction`, or `btrfs-fs` instead.
 
 ```text
 btrfs <command> [<subcommand>] [<args>]
@@ -27,7 +27,7 @@ Part of the [btrfsutils](https://github.com/rustutils/btrfsutils) project.
 Install the tools as separate binaries:
 
 ```sh
-cargo install btrfs-cli btrfs-mkfs btrfs-tune
+cargo install btrfs-cli btrfs-mkfs btrfs-tune btrfs-fuse
 ```
 
 Or install a single `btrfs` binary with mkfs, tune, multicall, and fuse
@@ -38,8 +38,9 @@ cargo install btrfs-cli --features mkfs,tune,multicall,fuse
 ```
 
 The `mkfs`, `tune`, and `fuse` features add the `btrfs mkfs`, `btrfs tune`,
-and `btrfs fuse` subcommands. `fuse` is not in the default set because the
-FUSE driver is still experimental (see [`btrfs-fuse`](../fuse/README.md)).
+and `btrfs fuse` subcommands. `mkfs` and `tune` are on by default. `fuse` is
+not, because the FUSE driver is still experimental (see
+[`btrfs-fuse`](https://gitlab.com/rustutils/btrfsutils/-/blob/master/fuse/README.md)).
 The `multicall` feature makes the binary dispatch on its program name:
 symlink or hardlink it to `mkfs.btrfs`, `btrfs-mkfs`, `btrfstune`, or
 `btrfs-tune` and it runs that tool.
@@ -49,9 +50,9 @@ symlink or hardlink it to `mkfs.btrfs`, `btrfs-mkfs`, `btrfstune`, or
 ### Fully implemented commands
 
 - **balance**: start, pause, cancel, resume, status (with filter string parsing)
-- **device**: add, remove (or delete), stats, scan, ready, usage
-- **filesystem**: df, du, show, sync, defrag, resize, label, usage, mkswapfile, commit-stats
-- **inspect-internal**: rootid, inode-resolve, logical-resolve, subvolid-resolve, min-dev-size, list-chunks, dump-super, dump-tree, tree-stats, map-swapfile
+- **device**: add, remove (or delete), stats (`--offline` reads an unmounted device), scan, ready, usage
+- **filesystem**: df, du, show, sync, defrag, resize (`--offline` grows an unmounted single-device image), label, usage, mkswapfile, commit-stats
+- **inspect-internal**: rootid, inode-resolve, logical-resolve, subvolid-resolve, min-dev-size, list-chunks, dump-super, dump-tree, tree-stats, map-swapfile. `min-dev-size` and `list-chunks` also work on unmounted images with `--offline`.
 - **property**: get, set, list (ro, label, compression)
 - **quota**: enable, disable, rescan, status
 - **qgroup**: create, destroy, assign, remove, limit, show, clear-stale
@@ -63,12 +64,21 @@ symlink or hardlink it to `mkfs.btrfs`, `btrfs-mkfs`, `btrfstune`, or
 - **rescue**: super-recover, zero-log, create-control-device, fix-device-size, fix-data-checksum, clear-uuid-tree, clear-space-cache (v1 and v2), clear-ino-cache, chunk-recover. chunk-recover only scans and reports by default. `--apply` writes the rebuilt chunk tree through the transaction crate.
 - **restore**: file recovery from damaged or unmounted filesystems, with metadata, xattrs, snapshots, compression, and path filtering
 - **subvolume**: create, delete, snapshot, show, list, get-default, set-default, get-flags, set-flags, find-new, sync
-- **check**: read-only filesystem verification in 7 phases (superblock, tree structure, extent refs, chunks and block groups, FS tree inodes, checksum tree, root refs)
+- **check**: read-only filesystem verification in 7 phases (superblock, tree structure, extent refs, chunks and block groups, FS tree inodes, checksum tree, root refs), with `--backup`, `--tree-root`, and `--chunk-root` for damaged filesystems
+- **mkfs**, **tune** (default `mkfs` and `tune` features): the `btrfs-mkfs` and `btrfs-tune` tools as subcommands
 - **fuse** (opt-in `fuse` feature): mount a btrfs image or block device read-only via FUSE. Takes the same flags as the standalone `btrfs-fuse` binary.
 
 ### Notable missing flags
 
-- `--offline`: filesystem resize
+These flags are accepted but return an error:
+
+- `balance start --background`
+- `check --repair`, `--init-csum-tree`, `--init-extent-tree`, `--qgroup-report`, `--subvol-extents`
+- `filesystem resize --enqueue`
+- `filesystem show --all-devices`
+- `rescue fix-data-checksum --interactive`
+
+`check --mode lowmem` is accepted but runs the same checks as the default mode.
 
 ## Testing
 

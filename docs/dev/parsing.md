@@ -14,7 +14,7 @@ superblock → sys_chunk_array → chunk tree → root tree
 ```
 
 The returned `OpenFilesystem` holds a `BlockReader` (which reads tree blocks by
-logical address) and a map of tree root locations. From there, `tree_walk`
+logical address), the parsed superblock, and a map of tree root locations. From there, `tree_walk`
 traverses any tree in BFS or DFS order and calls a visitor callback for each
 block:
 
@@ -22,8 +22,7 @@ block:
 let open = filesystem_open(file)?;
 let mut reader = open.reader;
 tree_walk(&mut reader, root_bytenr, Traversal::Bfs, &mut |block| {
-    // block: &TreeBlock — either a Node (internal) or Leaf
-    Ok(())
+    // block: &TreeBlock, either a Node (internal) or a Leaf
 })?;
 ```
 
@@ -65,30 +64,32 @@ For serialization, `BufMut` provides the inverse (`put_u64_le`, `put_slice`,
 etc.). There is no manual offset arithmetic, and reading past the end of the
 buffer panics instead of silently returning garbage.
 
-### `btrfs-uapi`: offset-based LE readers
+### `btrfs-uapi`: typed item parsers
 
-The `uapi` crate parses tree search results from the kernel, which are raw
-`&[u8]` buffers with fields at known offsets. It uses explicit offset-based
-helpers from `uapi/src/util.rs`:
+The `uapi` crate gets tree search results from the kernel as raw `&[u8]` item
+payloads. It depends on `btrfs-disk` and parses them with the same typed
+parsers:
 
 ```rust
-use btrfs_uapi::util::read_le_u64;
-use std::mem::offset_of;
+use btrfs_disk::items::ChunkItem;
 
-let size = read_le_u64(data, offset_of!(raw::btrfs_inode_item, size));
+if let Some(chunk) = ChunkItem::parse(data) {
+    // chunk.length, chunk.stripe_len, chunk.stripes, ...
+}
 ```
 
-Always derive offsets and sizes from the bindgen struct definitions with
+Where offsets are still needed, always derive offsets and sizes from the bindgen struct definitions with
 `std::mem::offset_of!` and `std::mem::size_of`. Never hard-code numeric byte
-offsets. The `field_size!(T, field)` macro (from `crate::util`) gives the size
-of a single field.
+offsets. The `field_size!(T, field)` macro (exported by `btrfs-uapi`) gives the
+size of a single field.
 
 ## Superblock mirrors
 
 btrfs writes up to three superblock copies at fixed offsets.
 `super_mirror_offset(n)` returns the byte offset of mirror `n` (0, 1, or 2).
-`read_superblock` reads a superblock from any seekable reader and validates
-its magic number and CRC.
+`read_superblock` reads and parses a superblock from any seekable reader. It
+does not validate it. `Superblock::magic_is_valid` checks the magic, and
+`superblock_is_valid` checks the magic and checksum of a raw buffer.
 
 ## Display logic belongs in `cli/`
 
