@@ -78,7 +78,9 @@ chunks are distributed across devices.
 
 Reading a btrfs filesystem from a raw device takes these steps:
 
-1. Read the superblock at offset 64 KiB (try mirrors if primary fails).
+1. Read the superblock at offset 64 KiB. `restore` falls back to mirrors
+   1 and 2 when the primary fails, and `check --super` selects a mirror
+   explicitly.
 2. Parse `sys_chunk_array` from the superblock to seed the chunk cache
    with system chunk mappings.
 3. Resolve `chunk_root` through the chunk cache to a physical address.
@@ -114,8 +116,11 @@ mirror 0:  64 KiB
 mirror i:  16 KiB << (12 * i)    for i > 0
 ```
 
-On read, all mirrors present on the device are checked, and the one with
-the highest valid generation is used.
+This project reads mirror 0 by default (`reader::filesystem_open`). Other
+mirrors are read only on request or as a fallback (see the bootstrap
+sequence above). `rescue super-recover` is the one command that compares
+all mirrors: it treats the valid copies with the highest generation as
+good and rewrites the rest from one of them.
 
 ### Binary layout
 
@@ -154,10 +159,13 @@ the highest valid generation is used.
 | `uuid_tree_generation` | 563 | 8 | Generation of UUID tree |
 | `metadata_uuid` | 571 | 16 | Metadata UUID (when `METADATA_UUID` incompat set) |
 | `nr_global_roots` | 587 | 8 | Number of global roots (extent-tree-v2) |
-| (reserved fields) | 595 | ... | Zero-filled up to `sys_chunk_array` |
-| `sys_chunk_array` | 800 | 2048 | Bootstrap chunk items |
-| `super_roots[4]` | 2848 | 672 | Four rotating backup root entries (168 bytes each) |
-| (padding) | 3520 | 576 | Zero-filled to 4096 bytes |
+| `remap_root` | 595 | 8 | Logical bytenr of remap tree root |
+| `remap_root_generation` | 603 | 8 | Generation of remap tree root |
+| `remap_root_level` | 611 | 1 | B-tree level of remap tree root |
+| `reserved` | 612 | 199 | Zero-filled |
+| `sys_chunk_array` | 811 | 2048 | Bootstrap chunk items |
+| `super_roots[4]` | 2859 | 672 | Four rotating backup root entries (168 bytes each) |
+| (padding) | 3531 | 565 | Zero-filled to 4096 bytes |
 
 Total: 4096 bytes (`BTRFS_SUPER_INFO_SIZE`).
 
@@ -170,8 +178,10 @@ pairs:
 ```
 For each entry:
   17 bytes   btrfs_disk_key     (objectid, type, offset) -- offset = logical addr
-  variable   btrfs_chunk        Chunk item (see Section 8.9)
+  variable   btrfs_chunk        Chunk item
 ```
+
+See [CHUNK_ITEM](#chunk_item-type-228) for the chunk item layout.
 
 The array is parsed sequentially until `sys_chunk_array_size` bytes are
 consumed. These entries typically hold the SYSTEM chunks that map the chunk
@@ -218,8 +228,8 @@ The checksum field (`csum`, bytes 0..31) covers bytes 32 through 4095
 A valid superblock has the magic number `_BHRfS_M` (hex
 `0x4D5F53665248425F`) at offset 64.
 
-A superblock is valid when both the magic and the checksum match. When
-several valid mirrors exist, the one with the highest `generation` is used.
+A superblock is valid when both the magic and the checksum match. See
+[Mirror locations](#mirror-locations) for which mirror this project reads.
 
 
 ## Tree Block Format
@@ -469,10 +479,14 @@ The meaning of the three key fields depends on the tree and item type.
 - `type` = CHUNK_ITEM
 - `offset` = logical byte address of the chunk
 
+The chunk tree also holds DEV_ITEMs: `objectid` =
+`BTRFS_DEV_ITEMS_OBJECTID` (1), `type` = DEV_ITEM, `offset` = device ID.
+
 **Device tree:**
-- `objectid` = device ID for DEV_EXTENT, `BTRFS_DEV_ITEMS_OBJECTID` (1) for DEV_ITEM
-- `type` = DEV_EXTENT or DEV_ITEM
-- `offset` = physical offset for DEV_EXTENT, device ID for DEV_ITEM
+- `objectid` = device ID for DEV_EXTENT, 0 for DEV_STATS and DEV_REPLACE
+- `type` = DEV_EXTENT, PERSISTENT_ITEM (DEV_STATS), or DEV_REPLACE
+- `offset` = physical offset for DEV_EXTENT, device ID for DEV_STATS,
+  0 for DEV_REPLACE
 
 **Checksum tree:**
 - `objectid` = `BTRFS_EXTENT_CSUM_OBJECTID`
@@ -486,9 +500,9 @@ The meaning of the three key fields depends on the tree and item type.
 - `offset` = block group length (for INFO) or extent length (for EXTENT and BITMAP)
 
 **UUID tree:**
-- `objectid` = upper 8 bytes of UUID interpreted as LE u64
+- `objectid` = UUID bytes 0..7 interpreted as LE u64
 - `type` = UUID_KEY_SUBVOL or UUID_KEY_RECEIVED_SUBVOL
-- `offset` = lower 8 bytes of UUID interpreted as LE u64
+- `offset` = UUID bytes 8..15 interpreted as LE u64
 
 **Quota tree:**
 - `objectid` = packed qgroupid `(level << 48) | subvolid`
@@ -586,7 +600,6 @@ The directory of all other trees. Contains:
 - `ROOT_BACKREF` for child-to-parent subvolume links
 - `ROOT_TREE_DIR` directory entry linking to the default subvolume
 - `TEMPORARY_ITEM` for balance status persistence
-- `PERSISTENT_ITEM` for device statistics and replace status
 
 ### Extent tree (objectid 2)
 
@@ -612,6 +625,8 @@ The chunk tree is bootstrapped from the superblock's `sys_chunk_array`.
 
 Tracks per-device physical extent allocations. Contains:
 - `DEV_EXTENT` for each allocated physical range on each device
+- `PERSISTENT_ITEM` (DEV_STATS) for per-device error counters
+- `DEV_REPLACE` for device replace status
 
 ### FS tree (objectid 5, 256+)
 
@@ -735,7 +750,7 @@ Each `btrfs_timespec` is 12 bytes:
 | 9 | `0x200` | `NOATIME` |
 | 10 | `0x400` | `DIRSYNC` |
 | 11 | `0x800` | `COMPRESS` |
-| 20 | `0x100000` | `ROOT_ITEM_INIT` |
+| 31 | `0x80000000` | `ROOT_ITEM_INIT` |
 
 ### INODE_REF (type 12)
 
@@ -1293,9 +1308,9 @@ key fully encodes the relationship.
 
 **Key:** `(upper_half_uuid, UUID_KEY_SUBVOL, lower_half_uuid)`
 
-Maps a UUID to one or more subvolume objectids. The UUID is split: the upper
-8 bytes are stored as a LE u64 in the objectid field, and the lower 8 bytes
-as a LE u64 in the offset field.
+Maps a UUID to one or more subvolume objectids. The UUID is split: bytes
+0..7 are read as a LE u64 into the objectid field, and bytes 8..15 as a LE
+u64 into the offset field.
 
 **Payload** (variable, array of u64):
 
@@ -1324,7 +1339,9 @@ Persists in-progress balance state across reboots.
 ### PERSISTENT_ITEM (type 249) / DEV_STATS
 
 **Key for device stats:** `(DEV_STATS_OBJECTID [0], PERSISTENT_ITEM, devid)`
-**Key for device replace:** `(DEV_REPLACE_OBJECTID, DEV_REPLACE, 0)`
+**Key for device replace:** `(DEV_REPLACE_DEVID [0], DEV_REPLACE, 0)`
+
+Both items live in the device tree.
 
 **Device stats payload** (40 bytes):
 
@@ -1569,7 +1586,7 @@ corruption or a torn write.
 
 ### Superblock flag: CHANGING_FSID
 
-The `BTRFS_SUPER_FLAG_CHANGING_FSID` flag (bit 2 of `flags`) is set during
+The `BTRFS_SUPER_FLAG_CHANGING_FSID` flag (bit 35 of `flags`) is set during
 an offline fsid rewrite. If the system crashes while the flag is set, the
 rewrite must be completed or rolled back on the next access. This makes the
 multi-block fsid change crash-safe.
@@ -1731,11 +1748,12 @@ read-only.
 ## Appendix F: Name Hashing
 
 Directory entries (`DIR_ITEM`) and extended attributes (`XATTR_ITEM`) are
-keyed by a CRC32C hash of the name. The hash uses raw CRC32C (see "Raw
-CRC32C" under Checksums) with seed `~0`:
+keyed by a CRC32C hash of the name. The hash uses raw CRC32C (see
+[Raw CRC32C](#raw-crc32c-hash-computations)) with seed `~1`
+(`btrfs_name_hash` in `disk/src/util.rs`):
 
 ```
-hash = raw_crc32c(0xFFFFFFFF, name_bytes)
+hash = raw_crc32c(0xFFFFFFFE, name_bytes)
 ```
 
 This hash is the key offset of the `DIR_ITEM`. If two names hash to the
@@ -1746,11 +1764,9 @@ single item.
 of a hash. This gives a deterministic iteration order that does not depend
 on name hashing.
 
-For `INODE_EXTREF`, the hash combines the parent inode number and name:
-
-```
-hash = raw_crc32c(raw_crc32c(0xFFFFFFFF, parent_ino_le_bytes), name_bytes)
-```
+For `INODE_EXTREF`, the key offset is a hash of the parent inode number and
+the name. This project reads `INODE_EXTREF` items but never computes that
+hash, so the exact formula is not covered here.
 
 
 ## Appendix G: Block Group and Chunk Relationship
@@ -1772,12 +1788,14 @@ Chunk (chunk tree)
         one per stripe, maps physical range back to the chunk
 ```
 
-**Allocation order:** mkfs creates chunks by:
-1. Choosing a physical region on each device (creating device extents)
-2. Assigning a logical address range (creating the chunk item)
-3. Creating a block group covering the logical range
-4. For the free space tree, creating a `FREE_SPACE_INFO` and initial
-   `FREE_SPACE_EXTENT` entries
+**Allocation order:** mkfs computes the whole chunk layout up front
+(`ChunkLayout` in `mkfs/src/layout.rs`), choosing a physical region on each
+device and a logical range for each chunk. The bootstrap then writes the
+`CHUNK_ITEM`s (chunk tree), `DEV_EXTENT`s (device tree), and
+`BLOCK_GROUP_ITEM`s (extent tree). The post-bootstrap transaction moves the
+block group items to the block group tree when that feature is on, and
+seeds the free space tree with `FREE_SPACE_INFO` and `FREE_SPACE_EXTENT`
+entries.
 
 **Consistency invariant:** For every chunk, there must be:
 - Exactly one `BLOCK_GROUP_ITEM` with matching logical offset and length
@@ -1802,18 +1820,24 @@ A modern btrfs filesystem created by `mkfs.btrfs` (or this project's
 **Compatible read-only features:**
 - `FREE_SPACE_TREE` (bit 0): free space tracking tree
 - `FREE_SPACE_TREE_VALID` (bit 1): free space tree is valid
+- `BLOCK_GROUP_TREE` (bit 3): block group items in their own tree
 
-These are the `extref`, `skinny-metadata`, `no-holes`, and
-`free-space-tree` features referenced in mkfs output.
+These are the `extref`, `skinny-metadata`, `no-holes`, `free-space-tree`,
+and `block-group-tree` features referenced in mkfs output
+(`MkfsConfig::default_incompat_flags` and `default_compat_ro_flags` in
+`mkfs/src/mkfs.rs`).
 
 **Default parameters:**
 - `nodesize` = 16384 (16 KiB)
 - `sectorsize` = 4096 (4 KiB), matching the device sector size
 - `stripesize` = 65536 (64 KiB)
 - `csum_type` = 0 (CRC32C)
-- Metadata profile: DUP (two copies on the same device)
+- Metadata profile: DUP (two copies on the same device) for one device,
+  RAID1 for several
 - Data profile: SINGLE (no redundancy)
-- System profile: DUP (for single-device) or RAID1 (for multi-device)
+- System profile: SINGLE. mkfs writes one 4 MiB system chunk at 1 MiB on
+  device 1 (`SYSTEM_GROUP_OFFSET` and `SYSTEM_GROUP_SIZE` in
+  `mkfs/src/layout.rs`) and does not convert it.
 
 
 ## Appendix I: Extent Reference Counting

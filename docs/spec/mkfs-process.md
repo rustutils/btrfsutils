@@ -1,82 +1,135 @@
 # mkfs.btrfs: filesystem creation process
 
 This document describes how `mkfs.btrfs` creates a new btrfs filesystem. It
-covers both the empty filesystem (`make_btrfs`) and population from a
-directory (`make_btrfs_with_rootdir`).
+covers the empty filesystem (`make_btrfs`) and population from a directory
+(`make_btrfs_with_rootdir`).
 
 ## Overview
 
-`mkfs.btrfs` builds B-tree nodes as raw byte buffers and writes them directly
-to a block device or image file with `pwrite`. It uses no kernel ioctls and
-does not mount anything. The result is a valid, mountable btrfs filesystem.
+`mkfs.btrfs` uses no kernel ioctls (apart from `BLKGETSIZE64`, `BLKDISCARD`,
+and `FICLONERANGE` for `--reflink`) and does not mount anything. Creation runs
+in up to three phases:
+
+1. **Bootstrap.** Hand-built tree blocks for the four always-present trees
+   (root, extent, chunk, dev) and the superblock are written with `pwrite`.
+   The result is the minimum on-disk state that the transaction crate's
+   `Filesystem::open` accepts.
+2. **Post-bootstrap.** The image is reopened with `btrfs_transaction`, and
+   one transaction creates every other tree (block-group, FS, csum,
+   data-reloc, quota, free-space, UUID) and commits.
+3. **Rootdir population** (`--rootdir` only). The image is reopened again,
+   and a second transaction walks the source directory and inserts its
+   contents. Then it commits.
+
+Phases 2 and 3 use the same `Transaction` pipeline as the rest of the
+codebase. The extent tree's self-reference problem (extent items for the
+extent tree's own blocks) is handled by the transaction commit's convergence
+loop, not by mkfs.
 
 The implementation spans several modules:
 
-- `mkfs/src/mkfs.rs`: orchestration: `make_btrfs` and `make_btrfs_with_rootdir`
-- `mkfs/src/layout.rs`: chunk layout computation and block address assignment
-- `mkfs/src/tree.rs`: `LeafBuilder` and `NodeBuilder` for individual blocks
-- `mkfs/src/treebuilder.rs`: `TreeBuilder` for multi-leaf trees
-- `mkfs/src/items.rs`: serializers for all on-disk item types
-- `mkfs/src/rootdir.rs`: directory walking, data writing, and compression
-- `mkfs/src/write.rs`: checksum computation and pwrite I/O
+- `mkfs/src/run.rs`: argument handling, device checks, TRIM, and dispatch
+- `mkfs/src/mkfs.rs`: `MkfsConfig`, `make_btrfs`, `make_btrfs_with_rootdir`,
+  and the bootstrap tree builders
+- `mkfs/src/layout.rs`: chunk layout and bootstrap block addresses
+- `mkfs/src/tree.rs`: `LeafBuilder` for individual leaf blocks
+- `mkfs/src/items.rs`: serializers for the bootstrap and quota items
+- `mkfs/src/post_bootstrap.rs`: the post-bootstrap transaction
+- `mkfs/src/rootdir.rs`: the `--rootdir` walker (`walk_to_transaction`)
+- `mkfs/src/write.rs`: `pwrite_all` and the `ChecksumType` re-export
 
-## Part 1: empty filesystem creation (make_btrfs)
+## Part 1: bootstrap (make_btrfs)
 
 ### Step 1: validation
 
-Before any I/O, the configuration is validated:
+`run.rs` checks the arguments before any I/O:
 
+- `nodesize` defaults to 16384, `sectorsize` to 4096.
 - `sectorsize` must be a power of 2 and >= 4096.
 - `nodesize` must be a power of 2, >= sectorsize, and <= 65536.
-- If the `mixed-bg` incompat feature is set, nodesize must equal sectorsize.
+- The label must be shorter than 256 bytes.
+- The device count must meet the profile minimum (`Profile::min_devices`):
+  1 for SINGLE and DUP, 2 for RAID0, RAID1, RAID5, and RAID10, 3 for RAID1C3
+  and RAID6, 4 for RAID1C4.
+- Each device size is rounded down to a multiple of sectorsize and must be at
+  least `minimum_device_size` (29 MiB, see Step 2).
+- A block device must not be mounted, and must not already hold a btrfs
+  superblock unless `-f` is given.
+
+Unless `--nodiscard` is given, each block device is fully discarded with
+`BLKDISCARD`. A discard failure is only a warning.
+
+`make_btrfs` repeats the sectorsize and nodesize checks, and also rejects:
+
+- the `mixed-bg` incompat feature with nodesize != sectorsize
+- quota and squota enabled together
 
 ### Step 2: chunk layout computation
 
-`ChunkLayout::new` computes the physical placement of three block groups on
-disk:
+`ChunkLayout::new` computes the placement of three block groups. Chunk sizes
+are derived from `total_bytes`, the sum over all devices.
+
+The default metadata profile is DUP on one device and RAID1 on several. The
+default data profile is SINGLE.
 
 #### System block group
 
 - Logical offset: 1 MiB (`SYSTEM_GROUP_OFFSET`).
 - Size: 4 MiB (`SYSTEM_GROUP_SIZE`).
-- Physical offset: same as logical (the system chunk is identity-mapped on device 1).
+- Physical offset: same as logical (identity mapping on device 1).
 - Profile: always SINGLE (one stripe on device 1).
 - Contains: the chunk tree block.
 
 #### Metadata block group
 
 - Logical offset: 5 MiB (`CHUNK_START` = system offset + system size).
-- Size: `clamp(total_bytes / 10, 32 MiB, 256 MiB)`, rounded down to 64 KiB
-  (`STRIPE_LEN`).
-- Profile: DUP on a single device (two physical stripes on device 1, placed
-  sequentially after the system group), or RAID1 on multiple devices (one
-  stripe per device at `CHUNK_START`).
-- Contains: all non-chunk tree blocks (root, extent, dev, FS, csum, free-space,
-  data-reloc, and optionally block-group tree).
+- Per-stripe size: `clamp(total_bytes / 10, 8 MiB, 256 MiB)`, rounded down to
+  64 KiB (`STRIPE_LEN`).
+- Logical size: per-stripe size times the profile's data stripe count (1 for
+  mirror profiles, all stripes for RAID0, half for RAID10, all minus parity for
+  RAID5 and RAID6).
+- Stripe placement by profile:
+  - SINGLE: one stripe on device 1 at `CHUNK_START`.
+  - DUP: two stripes on device 1, at `CHUNK_START` and
+    `CHUNK_START + meta_size`.
+  - RAID1, RAID1C3, RAID1C4: one stripe at `CHUNK_START` on each of the first
+    2, 3, or 4 devices.
+  - RAID0, RAID5, RAID6: one stripe at `CHUNK_START` on every device.
+  - RAID10: one stripe at `CHUNK_START` on every device, with the count
+    rounded down to an even number.
+- Contains: the root, extent, and dev tree blocks after bootstrap, and every
+  tree block the later transactions allocate.
 
 #### Data block group
 
-- Logical offset: metadata logical + metadata size.
-- Size: `clamp(total_bytes / 10, 64 MiB, 1 GiB)`, rounded down to `STRIPE_LEN`.
-- Profile: SINGLE (one stripe on device 1, after the last metadata stripe).
-- Contains: file data (empty for a freshly created filesystem).
+- Logical offset: metadata logical offset + metadata logical size.
+- Per-stripe size: `clamp(total_bytes / 10, 8 MiB, 1 GiB)`, rounded down to
+  `STRIPE_LEN`.
+- Stripe placement by profile:
+  - SINGLE: one stripe on device 1, after the last metadata stripe on that
+    device.
+  - DUP: two consecutive stripes on device 1, after the last metadata stripe.
+  - All other profiles: one stripe on each of the first N devices (N from
+    `Profile::num_stripes`), each after the last metadata stripe on that
+    device, or at `CHUNK_START` if the device has none.
+- Contains: file data (empty after phases 1 and 2).
 
 The layout checks that every stripe fits on its device. If one does not,
 `ChunkLayout::new` returns `None` and mkfs reports "device too small".
 
-The minimum device size is approximately 133 MiB: 5 MiB (system) + 64 MiB
-(2 x 32 MiB metadata DUP) + 64 MiB (data).
+`minimum_device_size` is 29 MiB: 5 MiB (system) + 16 MiB (2 x 8 MiB metadata
+DUP) + 8 MiB (data). It is a per-device precheck. Some layouts (for example
+DUP data) need more, and `ChunkLayout::new` rejects those.
 
 ### Step 3: block address assignment
 
-`BlockLayout` assigns a logical address to each tree block:
+`BlockLayout` assigns a fixed logical address to each bootstrap tree block:
 
 - **Chunk tree:** at `SYSTEM_GROUP_OFFSET` (1 MiB), in the system chunk.
-- **Root, Extent, Dev, FS, Csum, FreeSpace, DataReloc trees:** sequential
-  in the metadata chunk starting at `meta_logical`, spaced by `nodesize`.
-- **Block-group tree** (if enabled): the 8th block in the metadata chunk.
+- **Root, extent, dev trees:** sequential in the metadata chunk starting at
+  `meta_logical`, spaced by `nodesize` (`NON_CHUNK_TREES`).
 
-For example, with nodesize = 16384 and meta_logical = 5 MiB:
+For example, with nodesize = 16384:
 
 | Tree | Logical address |
 |------|----------------|
@@ -84,18 +137,17 @@ For example, with nodesize = 16384 and meta_logical = 5 MiB:
 | Root | 0x500000 (5 MiB) |
 | Extent | 0x504000 |
 | Dev | 0x508000 |
-| FS | 0x50C000 |
-| Csum | 0x510000 |
-| FreeSpace | 0x514000 |
-| DataReloc | 0x518000 |
-| BlockGroup | 0x51C000 (optional) |
+
+Blocks created later by the transaction crate get addresses from its
+allocator, not from `BlockLayout`.
 
 ### Step 4: tree block construction
 
-Each tree is built as a single leaf with `LeafBuilder`. Items must be pushed in
-strictly ascending key order. The builder tracks offsets: item descriptors grow
-forward from byte 101 (after the header), and item data grows backward from the
-end of the block.
+Each bootstrap tree is a single leaf built with `LeafBuilder`. Items are
+collected, sorted by key, and pushed in ascending order. Item descriptors grow
+forward from byte 101 (after the header), and item data grows backward from
+the end of the block. Every leaf has generation 1, and header flags
+`WRITTEN` with backref revision `MIXED_BACKREF_REV`.
 
 #### Tree block format
 
@@ -124,487 +176,302 @@ last descriptor and the first data payload is unused.
 
 #### Root tree contents
 
-The root tree contains a `ROOT_ITEM` (key type 132) for each tree that needs
-one. The root tree itself and the chunk tree are excluded. The root tree cannot
-reference itself, and the superblock's `chunk_root` pointer references the
-chunk tree. In practice, a ROOT_ITEM is still written for the chunk tree
-through the `ROOT_ITEM_TREES` list.
+- A 439-byte `ROOT_ITEM` for the extent tree and for the dev tree
+  (`ROOT_ITEM_TREES`). The root tree cannot reference itself, and the
+  superblock's `chunk_root` points at the chunk tree. Each ROOT_ITEM has
+  `bytenr` set to the tree's block, `root_dirid = 256`, `bytes_used =
+  nodesize`, `refs = 1`, `level = 0`, and an embedded inode with nlink 1 and
+  mode 040755.
+- The root tree directory (objectid 6): an `INODE_ITEM` (directory, nlink 1,
+  nbytes = nodesize), an `INODE_REF` named `..` pointing to itself, and a
+  `DIR_ITEM` named `default` whose location is `(5, ROOT_ITEM, u64::MAX)`, the
+  FS tree.
 
-Trees receiving a ROOT_ITEM: Extent, Dev, FS, Csum, FreeSpace, DataReloc, and
-optionally BlockGroup. Each ROOT_ITEM is 439 bytes and contains:
-
-- An embedded `btrfs_inode_item` (160 bytes) for the root directory.
-- Tree-specific fields: generation, root_dirid, bytenr (pointing to the tree's
-  block), byte_limit, bytes_used, refs, level.
-
-The FS tree's ROOT_ITEM gets extra initialization:
-- A deterministic UUID (derived by XOR-flipping the filesystem UUID).
-- `BTRFS_INODE_ROOT_ITEM_INIT` flag set in the embedded inode.
-- `inode.size = 3`, `inode.nbytes = nodesize`.
-- `ctime` and `otime` timestamps set to the creation time.
+The post-bootstrap transaction inserts the other ROOT_ITEMs.
 
 #### Extent tree contents
 
-The extent tree contains one `METADATA_ITEM` (or `EXTENT_ITEM` if skinny
-metadata is disabled) for each tree block. It also contains a
-`BLOCK_GROUP_ITEM` for each block group, unless the block-group tree is
-enabled, in which case block group items go there instead.
-
-Each metadata extent item is 24 bytes of `btrfs_extent_item` (refs,
-generation, flags) followed by a 9-byte inline `TREE_BLOCK_REF` (type byte and
-root objectid). With skinny metadata, the key is
-`(bytenr, METADATA_ITEM, level)`. Without skinny metadata, the key is
-`(bytenr, EXTENT_ITEM, nodesize)` and an extra 18-byte
-`btrfs_tree_block_info` is included.
-
-Block group items (24 bytes each) are keyed as `(logical_addr,
-BLOCK_GROUP_ITEM, chunk_size)` and contain the bytes used, chunk objectid, and
-profile flags.
-
-All items are collected, sorted by key, and then pushed to the leaf.
+- One `METADATA_ITEM` per bootstrap tree block (`TreeId::ALL`: root, extent,
+  chunk, dev), or an `EXTENT_ITEM` when skinny metadata is disabled. Each is
+  24 bytes of `btrfs_extent_item` (refs = 1, generation = 1,
+  flags = `TREE_BLOCK`) followed by a 9-byte inline `TREE_BLOCK_REF` (type
+  byte and owner root objectid). With skinny metadata the key is
+  `(bytenr, METADATA_ITEM, 0)`. Without it, the key is
+  `(bytenr, EXTENT_ITEM, nodesize)` and a zeroed 18-byte
+  `btrfs_tree_block_info` sits between the two parts.
+- One 24-byte `BLOCK_GROUP_ITEM` per block group, keyed
+  `(logical, BLOCK_GROUP_ITEM, logical_size)`. Used bytes: nodesize for
+  system, 3 x nodesize for metadata, 0 for data. These always start in the
+  extent tree. Post-bootstrap moves them when the block-group tree is
+  enabled.
 
 #### Chunk tree contents
 
-The chunk tree contains:
-
-1. **`DEV_ITEM`** entries for each device, keyed as `(DEV_ITEMS_OBJECTID,
-   DEV_ITEM, devid)`. Each contains the device's total bytes, bytes used,
-   sector size, and UUIDs.
-
-2. **`CHUNK_ITEM`** entries for each block group:
-   - System chunk: uses `sectorsize` for `io_align` and `io_width` (bootstrap
-     convention). One stripe on device 1.
-   - Metadata chunk: uses `STRIPE_LEN` (64 KiB) for `io_align` and
-     `io_width`. Two stripes for DUP, one per device for RAID1.
-   - Data chunk: uses `STRIPE_LEN` for `io_align` and `io_width`. One stripe
-     for SINGLE.
+1. **`DEV_ITEM`** per device, keyed `(DEV_ITEMS_OBJECTID, DEV_ITEM, devid)`,
+   with total bytes, bytes used (sum of that device's stripes), sectorsize for
+   `io_align`, `io_width`, and `sector_size`, the device UUID, and the fsid.
+2. **`CHUNK_ITEM`** per block group, keyed
+   `(FIRST_CHUNK_TREE_OBJECTID, CHUNK_ITEM, logical)`, owner = extent tree
+   objectid, `stripe_len = STRIPE_LEN`:
+   - System chunk: sectorsize for `io_align` and `io_width`, one stripe on
+     device 1.
+   - Metadata and data chunks: `STRIPE_LEN` for `io_align` and `io_width`,
+     `sub_stripes` 2 for RAID10 and 1 otherwise, stripes from Step 2.
 
 #### Dev tree contents
 
-The dev tree contains:
-
-1. **`PERSISTENT_ITEM`** (DEV_STATS) for each device: all five counters
-   zeroed (40 bytes).
-2. **`DEV_EXTENT`** items for each physical allocation:
-   - System chunk: device 1 at `SYSTEM_GROUP_OFFSET`.
-   - Metadata stripes: one or two entries per device.
-   - Data stripes: one entry per device.
-
-Items are sorted by key `(devid, DEV_EXTENT, physical_offset)`.
-
-#### FS tree contents
-
-Contains two items for the root directory inode (objectid 256):
-
-1. `INODE_ITEM`: directory mode 040755, nlink=1, nbytes=nodesize,
-   generation=1, timestamps set to creation time.
-2. `INODE_REF`: index=0, name=`..`, parent_ino=256 (the root directory
-   references itself).
-
-#### Csum tree
-
-Empty leaf (no items). Populated later if files are written.
-
-#### Free-space tree
-
-If the free-space-tree feature is enabled, this tree contains
-`FREE_SPACE_INFO` and `FREE_SPACE_EXTENT` items for each block group. Each
-block group gets:
-- One `FREE_SPACE_INFO` item with `extent_count=1`.
-- One `FREE_SPACE_EXTENT` item covering the unused portion of the block group
-  (from `used_bytes` to `group_size`).
-
-If the free-space-tree feature is disabled, this is an empty leaf.
-
-#### Data-reloc tree
-
-Same structure as the FS tree: root directory inode (objectid 256) with
-`INODE_ITEM` and `INODE_REF`.
-
-#### Block-group tree (optional)
-
-If the block-group-tree `compat_ro` feature is enabled, block group items go
-here instead of the extent tree. The tree contains three `BLOCK_GROUP_ITEM`
-entries (system, metadata, and data).
+1. **`PERSISTENT_ITEM`** (dev stats) per device, keyed
+   `(DEV_STATS_OBJECTID, PERSISTENT_ITEM, devid)`: five zeroed counters
+   (40 bytes).
+2. **`DEV_EXTENT`** per physical stripe, keyed
+   `(devid, DEV_EXTENT, physical_offset)`: one for the system chunk on device
+   1, and one per metadata and data stripe.
 
 ### Step 5: checksum computation
 
-After each tree block is built, `btrfs_disk::util::csum_tree_block` computes
-the checksum of bytes `CSUM_SIZE..nodesize` and writes it into the first bytes
-of the block:
-
-- **CRC32C:** 4 bytes (standard CRC32C via `crc32c::crc32c`).
-- **xxHash64:** 8 bytes.
-- **SHA-256:** 32 bytes.
-- **BLAKE2b-256:** 32 bytes.
-
-The remaining bytes of the 32-byte checksum field stay zero.
+`btrfs_disk::util::csum_tree_block` computes the checksum of bytes
+`32..nodesize` and writes it into the first bytes of the block. The rest of
+the 32-byte checksum field is zeroed. See [Checksums](#checksum-computation-writers).
 
 ### Step 6: writing to disk
 
 #### Tree blocks
 
-Each tree block is written to its physical locations with `pwrite_all`.
-`ChunkLayout::logical_to_physical` provides the logical-to-physical mapping:
+Each block is written with `pwrite_all` to every location returned by
+`ChunkLayout::logical_to_physical`:
 
-- System chunk blocks: one write at the logical address (identity mapping) on
-  device 1.
-- Metadata chunk blocks: one write per stripe. For DUP: two writes on device 1
-  at different offsets. For RAID1: one write per device.
-- Data chunk blocks: one write per stripe (typically one for SINGLE).
+- System chunk: device 1 at the logical address.
+- Mirror profiles (SINGLE, DUP, RAID1, RAID1C3, RAID1C4): one write per
+  stripe.
+- RAID10: one write to each device of the mirror pair that owns the offset.
+- RAID0, RAID5, RAID6: one write to the data stripe that owns the offset. The
+  bootstrap writes no parity.
 
 #### Superblocks
 
-The superblock is built with these fields:
+The bootstrap superblock has:
 
-- `magic`: `_BHRfS_M`
-- `root`: logical address of the root tree block
-- `chunk_root`: logical address of the chunk tree block
+- `magic`: `_BHRfS_M`, `generation` and `chunk_root_generation`: 1
+- `root`, `chunk_root`: the root and chunk tree block addresses, both level 0
 - `total_bytes`: sum across all devices
-- `bytes_used`: system used + metadata used (an empty filesystem uses no data)
-- `sectorsize`, `nodesize`, `leafsize` (= nodesize), `stripesize` (= sectorsize)
-- `num_devices`: device count
-- `incompat_flags`, `compat_ro_flags`: from configuration
-- `csum_type`: checksum algorithm
-- `cache_generation`: 0 if free-space-tree enabled, u64::MAX otherwise
-- `sys_chunk_array`: embedded copy of the system chunk (disk_key and
-  chunk_item bytes), so the kernel can bootstrap chunk mapping from the
-  superblock alone
+- `bytes_used`: 4 x nodesize (the four bootstrap blocks)
+- `sectorsize`, `nodesize`, `leafsize` (= nodesize), `stripesize`
+  (= sectorsize)
+- `num_devices`, `label`, `csum_type`
+- `incompat_flags`, `compat_ro_flags`: the final configured flags, even
+  though the FST and BGT trees do not exist yet
+- `cache_generation`: 0 if the free-space tree is enabled, `u64::MAX`
+  otherwise
+- `sys_chunk_array`: the system chunk's disk key and `CHUNK_ITEM`, so the
+  kernel can map the chunk tree from the superblock alone
 
-The `sys_chunk_array` is the bootstrap mechanism. It holds a serialized disk
-key followed by the system chunk item data (including stripe info), in a fixed
-2048-byte buffer within the superblock. The kernel reads this array first to
-locate the chunk tree block, then reads the chunk tree to find all other
-chunks.
+Each device gets its own copy with its `dev_item` (devid, device UUID, total
+and used bytes). It is written to each mirror that fits on the device:
 
-Each device gets its own superblock with device-specific fields (devid,
-dev_uuid, and that device's bytes_used). The superblock is written to every
-valid mirror location (up to 3):
+- Mirror 0: 64 KiB.
+- Mirror 1: 64 MiB.
+- Mirror 2: 256 GiB.
 
-- Mirror 0: byte offset 65536 (64 KiB). Always written.
-- Mirror 1: byte offset 67108864 (64 MiB). Written if device is large enough.
-- Mirror 2: byte offset 274877906944 (256 GiB). Written if device is large enough.
+All device files are then synced and closed, and `post_bootstrap::run` is
+called.
 
-After all writes, `fsync` is called on all device files.
+## Part 2: post-bootstrap transaction (post_bootstrap.rs)
 
-## Part 2: rootdir population (make_btrfs_with_rootdir)
+`post_bootstrap::run` reopens the devices with `Filesystem::open` (one
+device) or `Filesystem::open_multi` (several, keyed by the devid in each
+device's superblock). It starts one transaction, applies the steps below,
+commits, and syncs. Each step first checks whether the tree already exists
+and skips it if so.
 
-The `--rootdir` flag populates the new filesystem from a source directory on the
-host. This is much more complex than the empty case because:
+1. **Block-group tree** (objectid 11), if `BLOCK_GROUP_TREE` is set.
+   `convert::create_block_group_tree` creates the tree and moves every
+   `BLOCK_GROUP_ITEM` out of the extent tree. This runs first so later block
+   group updates in the same transaction go to the new tree.
+2. **FS tree** (objectid 5), via `create_subvolume_shape`: inode 256 as a
+   directory (mode 040755, nlink 1, nbytes = nodesize, all timestamps set to
+   the creation time, flag `INODE_ROOT_ITEM_INIT`), a `..` `INODE_REF` to
+   itself with index 0, and the ROOT_ITEM patched so `root_dirid = 256`, the
+   embedded inode matches the standalone one, `ctime` and `otime` are the
+   creation time, and `uuid` is the fsid with every byte XORed with 0xFF.
+3. **Csum tree** (objectid 7): empty leaf.
+4. **Data-reloc tree** (objectid -9): same shape as the FS tree, but with
+   zero timestamps, no `INODE_ROOT_ITEM_INIT`, and a nil UUID.
+5. **Quota tree** (objectid 8), if `-O quota` or `-O squota`. Items for
+   qgroup 0/5:
+   - `QGROUP_STATUS` at `(0, QGROUP_STATUS, 0)`: version 1, flags `ON` with
+     `INCONSISTENT` (quota) or `SIMPLE_MODE` (squota). Squota also writes
+     `enable_gen`, making the item 40 bytes instead of 32.
+   - `QGROUP_INFO` at `(0, QGROUP_INFO, 5)`: zeroed for quota. For squota,
+     referenced and exclusive are nodesize.
+   - `QGROUP_LIMIT` at `(0, QGROUP_LIMIT, 5)`: zeroed.
+6. **Free-space tree** (objectid 10), if `FREE_SPACE_TREE` is set. Created
+   empty, then `convert::seed_free_space_tree` adds `FREE_SPACE_INFO` and
+   `FREE_SPACE_EXTENT` items for every block group from the current extent
+   tree. The commit's free-space update applies the allocations made later in
+   the same transaction.
+7. **UUID tree** (objectid 9): empty leaf.
 
-1. The FS tree may need multiple leaf blocks (and internal nodes).
-2. File data must be written to the data chunk.
-3. The extent tree must reference both metadata blocks and data extents.
-4. The csum tree must contain checksums for all data.
-5. The extent tree must contain entries for its own blocks, creating a circular
-   dependency.
+The commit inserts extent items for every new tree block, rewrites the
+superblock (generation 2), and writes all mirrors.
 
-### Step 1: directory walk (walk_directory)
+## Part 3: rootdir population (make_btrfs_with_rootdir)
 
-`rootdir::walk_directory` traverses the source directory depth-first. It builds
-all FS tree items and identifies files that need data extents.
+`--rootdir` populates the new filesystem from a host directory.
+`make_btrfs_with_rootdir` checks sectorsize and nodesize, runs `make_btrfs`
+(phases 1 and 2), then reopens the devices, starts a new transaction, calls
+`rootdir::walk_to_transaction`, and commits (generation 3).
+
+`run.rs` validates the related options first:
+
+- `--subvol` and `--reflink` require `--rootdir`.
+- Every `--subvol` path must be a directory under the rootdir.
+- At most one subvolume can be `default` or `default-ro`. If one is, the
+  `DEFAULT_SUBVOL` incompat flag is set.
+- `--reflink` and `--compress` cannot be combined.
+
+### Directory walk
+
+`walk_one_tree_to_transaction` walks one tree (the FS tree or one subvolume)
+depth-first. Entries in each directory are sorted by name, so output is
+deterministic. Xattrs of the tree's root directory are applied to inode 256.
 
 #### Inode assignment
 
-Inode numbers are assigned sequentially starting at 257. Inode 256 is the root
-directory and is handled separately: its `INODE_ITEM` and `INODE_REF` are added
-during the merge phase.
+Inode numbers start at 257 in each tree. Inode 256 is the root directory that
+phase 2 (or `create_subvolume_shape` for a subvolume) already created.
 
-#### Hardlink detection
+#### Directory indexes
 
-For files with `nlink > 1`, the function tracks host `(dev, ino)` pairs in a
-`HashMap`. When a later directory entry refers to the same host inode:
-
-- The existing btrfs inode number is reused. No new one is assigned.
-- An `INODE_REF` is added (an extra reference from the new parent).
-- No new `INODE_ITEM` is created.
-- The nlink counter for that btrfs inode is incremented.
-
-After all entries are processed, `fixup_inode_nlink` patches the `nlink` field
-in the `INODE_ITEM` of every hardlinked inode.
+Each directory's `DIR_INDEX` counter starts at 2. Every entry, including
+hardlinks and subvolume entries, takes the next index in its parent.
 
 #### Per-entry processing
 
-Each directory entry (file, directory, symlink, or special file) produces:
+For a new inode:
 
-1. **DIR_ITEM** in the parent directory, keyed by name hash
-   (`crc32c(0xFFFFFFFE, name)`).
-2. **DIR_INDEX** in the parent directory, keyed by sequential index (starting
-   at 2 for each directory).
-3. **INODE_REF** for the new inode, pointing to the parent.
-4. **INODE_ITEM** with metadata copied from the host filesystem (uid, gid, mode,
-   timestamps, rdev for special files).
-5. **XATTR_ITEM** entries for each extended attribute on the host file (read
-   with `llistxattr` and `lgetxattr`).
+1. `create_inode` inserts the `INODE_ITEM`: uid, gid, mode, atime, ctime, and
+   mtime from the host, otime = creation time, nlink 1, rdev for character
+   and block devices, and the `--inode-flags` bits.
+2. `link_dir_entry` inserts `DIR_ITEM` (keyed by `crc32c(0xFFFFFFFE, name)`),
+   `DIR_INDEX`, and `INODE_REF`, and grows the parent directory's size by
+   `2 x name_len`.
+3. `set_xattr` inserts one `XATTR_ITEM` per host xattr (read with
+   `llistxattr` and `lgetxattr`). `ENOTSUP` and `ENODATA` are skipped.
 
-Type-specific items:
+Then, by type:
 
-- **Directories:** Push children onto the DFS stack in reverse, so they are
-  visited in order. Initialize the dir_index counter for the new directory.
-- **Symlinks:** Create an inline `FILE_EXTENT_ITEM` containing the link target
-  (never compressed).
-- **Regular files** with `size > 0`:
-  - If `size <= max_inline_data_size`: read the file, optionally compress it,
-    and create an inline `FILE_EXTENT_ITEM`.
-  - If `size > max_inline_data_size`: defer to the data writing phase. Record a
-    `FileAllocation` with the host path, btrfs inode, size, and NODATASUM flag.
-- **Special files** (FIFO, socket, char or block device): `INODE_ITEM` only, no extent.
+- **Directories:** children are pushed onto the stack in reverse so they are
+  visited in name order.
+- **Symlinks:** `insert_inline_extent` with the link target, uncompressed.
+- **Regular files with size > 0:** the whole file is read into memory and
+  passed to `Transaction::write_file_data`, or to the reflink path below.
+- **Empty files and special files** (FIFO, socket, character or block
+  device): `INODE_ITEM` only.
 
-#### Inline extent threshold
+#### Hardlinks
 
-The maximum inline data size is `min(sectorsize - 1, nodesize - 147)`. With
-the defaults (sectorsize=4096, nodesize=16384), this is 4095 bytes. Files at
-or below this size are stored directly in the tree leaf.
+For non-directories with `nlink > 1`, the walker maps the host
+`(dev, ino)` to the btrfs inode. A later entry for the same host inode gets
+only a `link_dir_entry` to the existing inode. After the walk,
+`set_inode_nlink` writes the counted link total for each such inode. The map
+is per tree, so hardlinks across subvolumes become separate inodes.
 
 #### Inode flags
 
-The `--inode-flags` argument sets `NODATACOW` and `NODATASUM` per path.
-`NODATACOW` implies `NODATASUM` for regular files. The flags are stored in the
-`INODE_ITEM` and control whether the data writing phase generates checksums.
+`--inode-flags` sets `NODATACOW` and `NODATASUM` per path, relative to the
+rootdir. `NODATACOW` implies `NODATASUM` for regular files. `NODATASUM`
+suppresses data checksums.
 
-#### Directory size fixup
+### File data (write_file_data)
 
-After the walk, `fixup_inode_size` sets the size field in each non-root
-directory's `INODE_ITEM` to the sum of `name_len * 2` over its `DIR_INDEX`
-entries (the btrfs convention for directory sizes).
+`Transaction::write_file_data` stores a file as:
 
-#### Inline nbytes fixup
+- **Inline extent**, if the data is at most `max_inline_data_size`, which is
+  `min(sectorsize - 1, nodesize - 147)` (4095 with the defaults). The
+  compression attempt is kept only if it shrinks the data. No data extent or
+  checksums.
+- **Regular extents** otherwise, in chunks of up to 1 MiB. Each chunk is
+  compressed if requested (zlib, zstd, or LZO in the per-sector framing) and
+  kept compressed only if smaller. `alloc_data_extent` finds space in a data
+  block group, writes the sector-padded bytes to all stripes, and queues the
+  data extent ref. The `EXTENT_DATA` item records `disk_num_bytes` (the
+  padded on-disk size), `num_bytes` and `ram_bytes` (the sector-aligned
+  logical size), and the compression type. Unless `NODATASUM`, the on-disk
+  bytes are read back and `insert_csums` adds per-sector checksums.
+  `INODE_ITEM.nbytes` grows by the aligned logical size.
 
-`fixup_inline_nbytes` patches the `nbytes` field of the `INODE_ITEM` for files
-with inline extents. For these, `nbytes` equals the inline data size (the
-bytes actually stored, which may be compressed).
+The commit creates the data `EXTENT_ITEM`s from the queued refs.
 
-#### Output
+### Reflink (--reflink)
 
-`walk_directory` returns a `RootdirPlan` containing:
-- `fs_items`: sorted list of all FS tree items (excluding root dir inode).
-- `file_extents`: list of `FileAllocation` entries for files needing data extents.
-- `data_bytes_needed`: total aligned data bytes needed in the data chunk.
-- `root_dir_nlink`, `root_dir_size`: root directory metadata.
+`reflink_file_to_transaction` replaces the byte copy. For each chunk of up to
+1 MiB, it reserves a data extent with `reserve_data_extent`, plans the
+physical placement, and calls `FICLONERANGE` from the source file into each
+device image at the planned offset. Then it inserts checksums (unless
+`NODATASUM`), an uncompressed `EXTENT_DATA`, and the `nbytes` update. The
+source and the image must be on the same filesystem. RAID5 and RAID6 chunks
+are rejected because parity would not be updated.
 
-### Step 2: data writing (write_file_data)
+### Subvolumes (--subvol)
 
-For each file in `plan.file_extents`, the function reads the host file in 1 MiB
-chunks (`MAX_EXTENT_SIZE`) and writes each chunk to the data block group.
+Subvolume IDs are assigned from 256 in `--subvol` argument order. When the
+walk reaches a subvolume directory, it calls `link_subvol_entry` in the
+parent (a `DIR_ITEM` and `DIR_INDEX` pointing to `(id, ROOT_ITEM, 0)`) and
+defers the subvolume. For each deferred subvolume:
 
-#### Per-extent processing
+1. `create_subvolume_shape` creates the tree with inode 256 and a random v4
+   UUID.
+2. `insert_root_ref` adds `ROOT_REF` and `ROOT_BACKREF` in the root tree.
+3. The subvolume's directory is walked into its own tree. Nested subvolumes
+   found there are deferred in turn.
+4. `ro` and `default-ro` subvolumes get `set_root_readonly`. `default` and
+   `default-ro` get `set_default_subvol`, which rewrites the root tree's
+   `default` `DIR_ITEM`.
 
-1. Read up to 1 MiB of raw data from the host file.
-2. Optionally try compression (zlib or zstd). If the compressed output is
-   smaller than the input, use it. Otherwise store the data uncompressed.
-3. Pad the (possibly compressed) data to sectorsize alignment.
-4. Compute the logical disk address: `data_logical + current_offset`.
-5. Write the padded data to all physical locations for this logical address.
-6. Compute per-sector checksums (skipped for NODATASUM files):
-   - For each sector in the padded data, compute the checksum using the
-     configured algorithm.
-   - Pack all checksums into a single `EXTENT_CSUM` item.
-7. Create a `FILE_EXTENT_ITEM` (regular type) in the FS tree items:
-   `disk_bytenr`, `disk_num_bytes` (aligned compressed size), `offset=0`,
-   `num_bytes` (logical file extent size), `ram_bytes` (uncompressed size),
-   compression type.
-8. Create an `EXTENT_ITEM` with inline `EXTENT_DATA_REF` in the extent tree
-   items: refs=1, generation=1, flags=DATA.
+### Shrink (--shrink)
 
-After all files are processed, `nbytes_updates` holds the total disk-allocated
-bytes per inode. `apply_nbytes_updates` patches these into the matching
-`INODE_ITEM` entries.
+Single device only. It is ignored with several devices.
 
-### Step 3: multi-leaf tree building (TreeBuilder)
+1. `compute_shrunk_size` takes the physical end of the system, metadata, and
+   data stripes on the device and rounds it up to sectorsize.
+2. Before the rootdir commit, `set_device_total_bytes` updates the device's
+   `DEV_ITEM`, and `superblock.total_bytes` is set to the same value.
+3. After the commit and sync, the image file is truncated with `set_len`.
 
-When a tree has more items than fit in one leaf, `TreeBuilder` splits them
-across multiple leaves and adds internal nodes to form a valid B-tree.
-
-#### Leaf packing
-
-Items are packed into leaves sequentially:
-1. Start a new leaf.
-2. For each item, check whether the leaf has room for the item descriptor
-   (25 bytes) and the item data. If not, finalize the current leaf and start a
-   new one.
-3. Record the first key of each leaf for parent node entries.
-
-#### Internal node construction
-
-If more than one leaf is produced:
-1. Create internal nodes at level 1, each pointing to up to
-   `(nodesize - 101) / 33` child blocks (33 bytes per key-pointer entry:
-   17 key + 8 blockptr + 8 generation).
-2. If more than one level-1 node is needed, create level-2 nodes, and so on.
-3. Repeat until a single root node remains.
-
-Node balancing: if the last node at a level would hold fewer than 1/4 of the
-maximum entries, the entries are split more evenly with the previous node to
-avoid a tiny remainder.
-
-#### Placeholder addresses
-
-All blocks are first built with `bytenr = 0` in the header. After address
-assignment, `TreeBuilder::assign_addresses` patches:
-- The `bytenr` field in each block's header (offset 48).
-- The `blockptr` field of each key-pointer entry in internal nodes (offset 17
-  from the entry start).
-
-### Step 4: the convergence loop
-
-This step solves the bootstrapping problem.
-
-#### The bootstrapping problem
-
-The extent tree must contain a `METADATA_ITEM` (or `EXTENT_ITEM`) for every
-tree block in the filesystem, including the extent tree's own blocks. But the
-number of extent tree blocks depends on how many items it holds, including its
-own self-referential entries. More extent tree blocks need more extent items,
-which may need even more blocks.
-
-#### Solution: iterate until stable
-
-`converge_extent_tree_block_count` computes the extent tree block count
-iteratively:
-
-1. Start with `extent_tree_block_count = 1`.
-2. Construct a trial set of all extent items:
-   - One `METADATA_ITEM` per tree block (chunk tree, root tree,
-     `extent_tree_block_count` extent tree blocks, dev tree, FS tree blocks,
-     csum tree blocks, free-space tree block, data-reloc tree blocks,
-     block-group tree block if applicable).
-   - All data extent items from the data writing phase.
-   - Block group items (if the block-group tree is not in use).
-3. Sort all trial items by key.
-4. Build the trial extent tree using `TreeBuilder::build` to determine how many
-   blocks it needs.
-5. If `trial.blocks.len() == extent_tree_block_count`, the count is stable.
-   Stop.
-6. Otherwise, set `extent_tree_block_count = trial.blocks.len()` and repeat.
-
-In practice this converges in 1-3 iterations. The count never decreases
-(adding self-referential items can only increase the block count), so
-convergence is guaranteed.
-
-### Step 5: address assignment
-
-Once the extent tree block count is known, `BlockAllocator` assigns real
-logical addresses in a fixed order:
-
-1. **Chunk tree:** allocate from the system chunk (`alloc_system`).
-2. **Root tree:** allocate from the metadata chunk (`alloc_metadata`).
-3. **Extent tree blocks** (count from convergence loop): sequential metadata
-   allocations.
-4. **Dev tree:** one metadata allocation.
-5. **FS tree blocks:** sequential metadata allocations.
-6. **Csum tree blocks:** sequential metadata allocations.
-7. **Free-space tree:** one metadata allocation (if enabled).
-8. **Data-reloc tree blocks:** sequential metadata allocations.
-9. **Block-group tree:** one metadata allocation (if enabled).
-
-`BlockAllocator` keeps separate bump pointers for the system chunk
-(`SYSTEM_GROUP_OFFSET` to `SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE`) and the
-metadata chunk (`meta_logical` to `meta_logical + meta_size`). It returns an
-error if either runs out of space.
-
-### Step 6: building the real extent tree
-
-With the real addresses known, the actual extent tree is built:
-
-1. Create `METADATA_ITEM` entries for every tree block using their real
-   addresses.
-2. Include all data extent items from the data writing phase.
-3. Include block group items (in the extent tree, or in the separate
-   block-group tree).
-4. Sort all items by key.
-5. Build with `TreeBuilder::build`.
-6. Assert that the block count matches the converged count. A mismatch means
-   the convergence loop has a bug.
-7. Assign addresses to extent tree blocks from the pre-allocated address list.
-
-### Step 7: building remaining trees
-
-With all addresses finalized:
-
-1. **FS tree:** `TreeBuilder::assign_addresses` patches bytenr fields with the
-   pre-allocated addresses.
-2. **Csum tree:** same.
-3. **Data-reloc tree:** same.
-4. **Chunk tree:** rebuilt as a single leaf with final device bytes_used values.
-5. **Dev tree:** rebuilt as a single leaf with final device extent information.
-6. **Free-space tree:** rebuilt with final used-byte counts for each block group.
-7. **Block-group tree:** rebuilt with final used-byte counts.
-8. **Root tree:** rebuilt with final tree root addresses and levels for all trees.
-
-The root tree is always a single leaf because it has few ROOT_ITEM entries
-(6-8 trees). It is built last because it needs the root address and level of
-every other tree.
-
-### Step 8: writing to disk
-
-All tree blocks are written in order:
-
-1. Single-leaf trees (chunk, root, dev): compute the checksum and write to all
-   physical locations.
-2. Multi-block trees (extent, FS, csum, data-reloc): for each block, compute
-   the checksum and write to all physical locations.
-3. Optional single-leaf trees (free-space, block-group): compute the checksum
-   and write.
-
-The `write_rootdir_trees` helper drives this.
-
-### Step 9: superblock
-
-The superblock is built with:
-- `root`: root tree address (from step 5).
-- `chunk_root`: chunk tree address (from step 5).
-- `bytes_used`: system_used + metadata_used + data_used.
-
-It is written to every mirror location on every device.
-
-### Step 10: shrink (optional)
-
-If `--shrink` is specified and there is a single device:
-
-1. Compute the physical end of the last chunk, across all metadata and data
-   stripes.
-2. Round up to sectorsize alignment.
-3. Create a new config with `total_bytes` set to the shrunk size.
-4. Rebuild the chunk tree and superblock with the reduced total_bytes
-   (so `DEV_ITEM.total_bytes` and `superblock.total_bytes` reflect the
-   actual image size).
-5. After all writes, truncate the image file to the shrunk size with
-   `set_len`.
-
-This produces a minimal image file suitable for distribution or flashing.
+The size covers the whole data block group, not only the bytes used in it.
 
 ## Item serialization (items.rs)
 
-All item serializers return a `Vec<u8>` ready for `LeafBuilder::push`. They
-use the `bytes::BufMut` trait for little-endian encoding and derive field
-positions from `std::mem::offset_of!` and `std::mem::size_of` on the bindgen
-structs.
+The serializers return a `Vec<u8>` for `LeafBuilder::push` or for raw
+inserts. They use `bytes::BufMut` for little-endian encoding and take field
+positions from `offset_of!` and `size_of` on the bindgen structs. Phases 2
+and 3 otherwise use the transaction crate's own item helpers.
 
-Key serializers and their sizes:
-
-| Function | Item type | Approximate size |
-|----------|-----------|-----------------|
+| Function | Item type | Size |
+|----------|-----------|------|
 | `root_item` | ROOT_ITEM | 439 bytes |
-| `extent_item` | EXTENT_ITEM/METADATA_ITEM | 33 bytes (skinny) or 51 bytes |
+| `extent_item` | EXTENT_ITEM or METADATA_ITEM | 33 bytes (skinny) or 51 bytes |
 | `block_group_item` | BLOCK_GROUP_ITEM | 24 bytes |
 | `dev_item` | DEV_ITEM | 98 bytes |
-| `chunk_item` | CHUNK_ITEM | 48 + 32*num_stripes bytes |
+| `chunk_item` | CHUNK_ITEM | 48 + 32 x num_stripes bytes |
 | `dev_extent` | DEV_EXTENT | 48 bytes |
 | `dev_stats_zeroed` | PERSISTENT_ITEM | 40 bytes |
-| `free_space_info` | FREE_SPACE_INFO | 8 bytes |
 | `inode_item_dir` | INODE_ITEM | 160 bytes |
-| `inode_item` | INODE_ITEM | 160 bytes |
 | `inode_ref` | INODE_REF | 10 + name_len bytes |
-| `dir_item` | DIR_ITEM/DIR_INDEX | 30 + name_len bytes |
-| `xattr_item` | XATTR_ITEM | 30 + name_len + value_len bytes |
-| `file_extent_inline` | FILE_EXTENT_ITEM | 21 + data_len bytes |
-| `file_extent_reg` | FILE_EXTENT_ITEM | 53 bytes |
-| `data_extent_item` | EXTENT_ITEM | 53 bytes |
+| `dir_item` | DIR_ITEM | 30 + name_len bytes |
+| `disk_key` | (sys_chunk_array key) | 17 bytes |
+| `qgroup_status` | QGROUP_STATUS | 32 bytes, or 40 with `enable_gen` |
+| `qgroup_info`, `qgroup_info_zeroed` | QGROUP_INFO | 40 bytes |
+| `qgroup_limit_zeroed` | QGROUP_LIMIT | 40 bytes |
+
+`items.rs` also has serializers that the current pipeline does not call
+(`inode_item`, `xattr_item`, `file_extent_inline`, `file_extent_reg`,
+`data_extent_item`, `free_space_info`, `root_ref`, `chunk_tree_root_item`).
 
 ## Checksum computation (write.rs)
 
-`ChecksumType` supports four algorithms. Each checksums the data portion
-(bytes 32..end) of tree blocks and superblocks:
+`ChecksumType` (from `btrfs_disk::superblock`) supports four algorithms. Each
+checksums bytes 32 to the end of tree blocks and superblocks:
 
 | Algorithm | On-disk type value | Output size | Implementation |
 |-----------|-------------------|-------------|----------------|
@@ -613,64 +480,9 @@ Key serializers and their sizes:
 | SHA-256 | 2 | 32 bytes | `sha2` crate |
 | BLAKE2b-256 | 3 | 32 bytes | `blake2` crate |
 
-`csum_tree_block` writes the computed hash into the first N bytes of the
-block's checksum field (32 bytes total), zero-filling the remaining bytes.
-
-Data block checksums (in the csum tree) use the same algorithm, computed per
+The hash fills the first N bytes of the 32-byte checksum field, and the rest
+is zeroed. Data checksums in the csum tree use the same algorithm, one per
 sector.
-
-## The bootstrapping problem in detail
-
-The bootstrapping problem is central to mkfs.
-
-### The circular dependency
-
-Consider a minimal filesystem with 8 tree blocks. The extent tree must contain
-8 `METADATA_ITEM` entries (one for each block, including itself). But what if
-those 8 entries do not fit in a single leaf?
-
-With skinny metadata (`METADATA_ITEM`, 33-byte payload), each item uses
-25 (descriptor) + 33 (data) = 58 bytes. A 16 KiB leaf has 16384 - 101 = 16283
-usable bytes, enough for 280 items. For an empty filesystem, the extent tree
-easily fits in one block.
-
-But with `--rootdir` populating thousands of files, the FS tree, csum tree, and
-extent tree can each grow to many blocks. If the FS tree has 100 blocks and
-there are 500 data extents, the extent tree might need several blocks itself,
-and each additional extent tree block requires another `METADATA_ITEM` entry
-in the extent tree.
-
-### Why pre-computing works
-
-The approach works because:
-
-1. **Addresses are independent of content.** Tree block addresses are assigned
-   by sequential bump allocation, so the address of each block depends only on
-   how many blocks precede it, not on the content of any block.
-
-2. **Block count is monotonically non-decreasing.** Adding self-referential
-   entries can only increase or maintain the block count, never decrease it.
-
-3. **The system is finite.** The metadata chunk can hold only so many blocks,
-   which bounds the iteration.
-
-4. **Content depends only on addresses and counts.** Once addresses are assigned,
-   every tree block's content is fully determined. There are no further
-   dependencies.
-
-The convergence loop relies on properties (1) and (2). It guesses a block
-count, computes trial content, and checks whether the trial needs the same
-number of blocks. If not, it tries again with the new count. Property (2)
-guarantees convergence: the count can only go up until it stabilizes.
-
-### Implementation detail
-
-Each trial uses placeholder addresses (sequential from `meta_logical`), not
-the final addresses. This is fine because the
-`TreeBuilder` only needs the item count and sizes to determine how many blocks
-are needed. The actual address values do not affect block count. After
-convergence, the real extent tree is built with the actual addresses from
-`BlockAllocator`.
 
 ## Default features
 
@@ -689,28 +501,30 @@ The default compat_ro feature flags are:
 - `BLOCK_GROUP_TREE`: separate tree for block group items
 
 Features can be enabled or disabled with `-O feature` or `-O ^feature`.
+Disabling `free-space-tree` also clears `block-group-tree`. RAID5 or RAID6 in
+either profile sets the `RAID56` incompat flag. `-O squota` sets
+`SIMPLE_QUOTA`. `-O zoned` and `-O raid-stripe-tree` are rejected.
 
 ## Multi-device support
 
-For multi-device filesystems, the chunk layout spreads stripes across devices:
+All profiles work on several devices: SINGLE, DUP, RAID0, RAID1, RAID1C3,
+RAID1C4, RAID10, RAID5, and RAID6, for metadata and data. Step 2 gives the
+stripe placement for each.
 
-- **RAID1 metadata:** one stripe per device at `CHUNK_START`.
-- **SINGLE data:** one stripe on device 1.
-
-Each device gets its own superblock with device-specific `devid`, `dev_uuid`,
-and `bytes_used`. The chunk tree contains a `DEV_ITEM` per device, and the dev
-tree contains `DEV_EXTENT` entries mapping physical allocations to chunks.
-
-`logical_to_physical` determines where each block is written:
-
-- System chunk blocks go to device 1 only.
-- Metadata blocks go to every metadata stripe device.
-- Data blocks go to every data stripe device.
+Devid N is the Nth device on the command line. Device 1 holds the system
+chunk. Each device gets its own superblock with its own `dev_item`. The chunk
+tree has a `DEV_ITEM` per device, and the dev tree has a `DEV_EXTENT` per
+stripe. Phases 2 and 3 open the devices with `Filesystem::open_multi`, whose
+writes go through `ChunkTreeCache::plan_write` and compute RAID5 and RAID6
+parity.
 
 ## Limitations
 
-Not yet implemented:
-- `--rootdir` with LZO compression (rejected at argument validation).
-- RAID0, RAID5, RAID6, and RAID10 profiles.
-- Zoned device support.
-- Mixed block group mode with `--rootdir`.
+- Zoned device support is not implemented.
+- The transaction crate does not allocate new chunks. Everything written in
+  phases 2 and 3, including `--rootdir` content, must fit in the initial
+  metadata and data block groups.
+- `-M` (`--mixed`) is accepted but has no effect, and `-O mixed-bg` sets the
+  incompat flag without creating mixed block groups.
+- The `--compress` level is parsed but not passed to the compressor.
+- `--reflink` does not support RAID5 or RAID6 data.

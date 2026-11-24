@@ -72,7 +72,7 @@ The item payload is a `btrfs_chunk` structure followed by an array of
 | `io_width` | 36 | 4 | I/O width (same as `io_align`) |
 | `sector_size` | 40 | 4 | Sector size of the underlying devices |
 | `num_stripes` | 44 | 2 | Number of stripe entries following |
-| `sub_stripes` | 46 | 2 | Sub-stripe count (nonzero only for RAID10) |
+| `sub_stripes` | 46 | 2 | Sub-stripe count (2 for RAID10, 1 otherwise in this project) |
 
 `btrfs_stripe` (32 bytes each, `num_stripes` entries):
 
@@ -258,8 +258,8 @@ The item payload is a `btrfs_dev_item` (98 bytes):
 | `fsid` | 82 | 16 | Filesystem UUID |
 
 The `bytes_used` field is the sum of the lengths of all device extents
-on that device. A copy of the device item for device 1 is also embedded
-in the superblock.
+on that device. Each device's superblock also embeds a copy of that
+device's own item.
 
 
 ## The Bootstrap Problem
@@ -291,7 +291,8 @@ sys_chunk_array[0..sys_chunk_array_size]:
       type:     u8           (always CHUNK_ITEM = 228)
       offset:   u64_le       (logical offset of the chunk)
     btrfs_chunk + stripes:
-      (same format as the chunk item payload described in section 2.1)
+      (same format as the chunk item payload, see
+       "CHUNK_ITEM On-Disk Structure" above)
   }
 ```
 
@@ -326,7 +327,8 @@ The full bootstrap sequence for reading a btrfs filesystem:
    tree and using the `ChunkTreeCache` to resolve addresses.
 
 `seed_from_sys_chunk_array()` in `disk/src/chunk.rs` implements step 2.
-`BlockReader` in `disk/src/reader.rs` drives the full bootstrap sequence.
+`reader::filesystem_open` in `disk/src/reader.rs` drives the full bootstrap
+sequence and returns a `BlockReader` over the populated chunk cache.
 
 
 ## RAID Profiles
@@ -339,7 +341,7 @@ entries are interpreted.
 
 ```
 num_stripes = 1
-sub_stripes = 0
+sub_stripes = 1
 ```
 
 One stripe on one device. The logical offset maps 1:1 to a physical offset
@@ -354,7 +356,7 @@ Physical:  [dev1: stripe 0     ]
 
 ```
 num_stripes = 2
-sub_stripes = 0
+sub_stripes = 1
 ```
 
 Two stripes on the **same** device at different physical offsets, with
@@ -387,7 +389,7 @@ Physical layout on device 1:
 
 ```
 num_stripes = 2  (RAID1C3: 3, RAID1C4: 4)
-sub_stripes = 0
+sub_stripes = 1
 ```
 
 One stripe per device, each containing identical data. RAID1 uses 2
@@ -411,7 +413,7 @@ Device 2:        [meta stripe 1]
 
 ```
 num_stripes = N  (number of devices)
-sub_stripes = 0
+sub_stripes = 1
 ```
 
 Data is striped across N devices in `stripe_len`-sized (64 KiB) units.
@@ -446,8 +448,8 @@ redundancy.
 ### RAID5 and RAID6
 
 ```
-RAID5: num_stripes = N, sub_stripes = 0, one parity stripe
-RAID6: num_stripes = N, sub_stripes = 0, two parity stripes
+RAID5: num_stripes = N, sub_stripes = 1, one parity stripe
+RAID6: num_stripes = N, sub_stripes = 1, two parity stripes
 ```
 
 Data is striped with rotating parity. RAID5 tolerates one device failure.
@@ -474,7 +476,7 @@ offset 64 KiB inside it.
 ### Metadata Block Group
 
 ```
-meta_size = clamp(total_bytes / 10, 32 MiB, 256 MiB)
+meta_size = clamp(total_bytes / 10, 8 MiB, 256 MiB)
 meta_size = round_down(meta_size, STRIPE_LEN)
 ```
 
@@ -484,27 +486,34 @@ devices.
 The metadata chunk starts at logical offset `CHUNK_START` = 5 MiB
 (`SYSTEM_GROUP_OFFSET + SYSTEM_GROUP_SIZE`). For DUP, two physical
 stripes are placed sequentially on device 1. For RAID1, one stripe is
-placed on each of the first two devices.
+placed on each of the first two devices. `meta_size` is the size of one
+physical stripe.
 
 Examples:
-- 256 MiB device: `clamp(25.6M, 32M, 256M)` = 32 MiB
-- 1 GiB device: `clamp(102.4M, 32M, 256M)` = 102 MiB (rounded to 64K)
-- 10 GiB device: `clamp(1G, 32M, 256M)` = 256 MiB
+- 256 MiB device: `clamp(25.6M, 8M, 256M)` = 25.5625 MiB (rounded down
+  to 64K)
+- 1 GiB device: `clamp(102.4M, 8M, 256M)` = 102.375 MiB (rounded down
+  to 64K)
+- 10 GiB device: `clamp(1G, 8M, 256M)` = 256 MiB
 
 ### Data Block Group
 
 ```
-data_size = clamp(total_bytes / 10, 64 MiB, 1 GiB)
+data_size = clamp(total_bytes / 10, 8 MiB, 1 GiB)
 data_size = round_down(data_size, STRIPE_LEN)
 ```
 
 The data chunk follows the metadata chunk in both logical and physical
-address spaces. Logical offset = `CHUNK_START + meta_size`.
+address spaces. Its logical offset is `CHUNK_START` plus the metadata
+chunk's logical size (`meta_size` times the number of data stripes, so
+`meta_size` for DUP and the mirrored profiles).
 
 Examples:
-- 256 MiB device: `clamp(25.6M, 64M, 1G)` = 64 MiB
-- 1 GiB device: `clamp(102.4M, 64M, 1G)` = 102 MiB (rounded to 64K)
-- 10 GiB device: `clamp(1G, 64M, 1G)` = 1 GiB
+- 256 MiB device: `clamp(25.6M, 8M, 1G)` = 25.5625 MiB (rounded down
+  to 64K)
+- 1 GiB device: `clamp(102.4M, 8M, 1G)` = 102.375 MiB (rounded down to
+  64K)
+- 10 GiB device: `clamp(1G, 8M, 1G)` = 1 GiB
 
 ### Minimum Device Size
 
@@ -515,8 +524,9 @@ minimum physical space is:
 1 MiB (reserved) + 4 MiB (system) + 2 * meta_size + data_size
 ```
 
-With the minimum sizes (meta = 32 MiB, data = 64 MiB), this is about 133 MiB.
-A 100 MiB device fails with "device too small".
+With the minimum sizes (meta = 8 MiB, data = 8 MiB), this is 29 MiB
+(`minimum_device_size` in `mkfs/src/mkfs.rs`). A smaller device fails with
+"device too small".
 
 ### Physical Layout Summary
 
@@ -589,7 +599,7 @@ DeviceExtentOverlap { devid, offset }
 ### Block Group Source
 
 When the `BLOCK_GROUP_TREE` compat_ro feature is enabled, block group items
-live in a separate tree (tree objectid 10) instead of the extent tree. The
+live in a separate tree (tree objectid 11) instead of the extent tree. The
 check code handles both cases by picking the right tree root:
 
 ```rust
@@ -679,41 +689,41 @@ A mirror is written only if the device is large enough to hold it.
 
 The superblock contains the `sys_chunk_array` bootstrap data, the root
 pointers for the chunk tree and root tree, the embedded device item for
-device 1, and all filesystem-level metadata (UUID, label, feature flags,
+that device, and all filesystem-level metadata (UUID, label, feature flags,
 generation counter, `bytes_used`, and so on).
 
-All three mirrors hold identical data for a given generation. On mount, the
-kernel reads all available mirrors and uses the one with the highest valid
-generation, which protects against corruption of the primary superblock.
+For a given generation, all mirrors on a device are identical except for
+`bytenr` and the checksum (`write_superblock_all_mirrors` in
+`disk/src/superblock.rs`). This project reads mirror 0 unless told
+otherwise. `restore` falls back to mirrors 1 and 2 when the primary fails,
+and `rescue super-recover` rewrites stale or damaged mirrors from the valid
+copies with the highest generation.
 
 
 ## Tree Block Placement in mkfs
 
-During filesystem creation, tree blocks go at specific logical addresses
-within the chunks. `BlockLayout` in `mkfs/src/layout.rs` assigns them:
+The mkfs bootstrap writes only four tree blocks. `BlockLayout` in
+`mkfs/src/layout.rs` gives each a fixed address:
 
 **Chunk tree block:** placed at `SYSTEM_GROUP_OFFSET` (1 MiB) in the
 system chunk. This is the only tree block in the system block group.
 
-**All other tree blocks** (root, extent, device, FS, csum, free-space,
-data-reloc, and optionally block-group): placed sequentially in the
-metadata chunk starting at `meta_logical` = 5 MiB. With a 16 KiB
-nodesize:
+**Root, extent, and device tree blocks:** placed sequentially in the
+metadata chunk starting at `meta_logical` = 5 MiB. With a 16 KiB nodesize:
 
 | Logical address | Tree |
 |-----------------|------|
 | `meta_logical + 0` | Root tree |
 | `meta_logical + 16K` | Extent tree |
 | `meta_logical + 32K` | Device tree |
-| `meta_logical + 48K` | FS tree |
-| `meta_logical + 64K` | Csum tree |
-| `meta_logical + 80K` | Free-space tree |
-| `meta_logical + 96K` | Data-reloc tree |
-| `meta_logical + 112K` | Block-group tree (if enabled) |
 
-In `--rootdir` mode, trees may need multiple blocks. `BlockAllocator` hands
-out sequential addresses from the system and metadata chunks, so trees can be
-any size.
+After the bootstrap, system chunk bytes used = nodesize (one chunk tree
+block), and metadata chunk bytes used = `3 * nodesize`.
 
-System chunk bytes used = nodesize (one chunk tree block).
-Metadata chunk bytes used = `7 * nodesize` (or 8 with block-group tree).
+Every other tree (FS, csum, data-reloc, UUID, and the optional free space,
+block group, and quota trees) is created by the post-bootstrap transaction
+in `mkfs/src/post_bootstrap.rs`. With `--rootdir`, a second transaction
+fills the trees through `rootdir::walk_to_transaction`. Both allocate tree
+blocks through the transaction crate's allocator, so their addresses are
+not fixed and trees can grow to any size. The commit updates the block
+group `used` values and the superblock `bytes_used`.

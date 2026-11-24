@@ -23,7 +23,7 @@ All multi-byte integers are little-endian on disk.
 | 0 | 32 | `csum` | Checksum of bytes 32..`nodesize` (header fields after csum + all payload). Algorithm determined by superblock `csum_type`. Zero-padded: for `CRC32C` only bytes 0..3 are meaningful. |
 | 32 | 16 | `fsid` | Filesystem UUID. Must match superblock `fsid` (or `metadata_uuid` if `METADATA_UUID` incompat flag is set). |
 | 48 | 8 | `bytenr` | Logical byte address of this block. Must match the address used to read/write it. |
-| 56 | 8 | `flags` | Bits 0..55: header flags (currently unused by userspace). Bits 56..63: backref revision (1 = mixed backrefs, the modern format). |
+| 56 | 8 | `flags` | Bits 0..55: header flags. `WRITTEN` (bit 0) must be set on every committed block, and `RELOC` (bit 1) marks relocation blocks. `cow_block` clears both on the new copy, and `flush_dirty` sets `WRITTEN` before checksumming. Bits 56..63: backref revision (1 = mixed backrefs, the modern format). |
 | 64 | 16 | `chunk_tree_uuid` | UUID of the chunk tree that maps this block's logical address to physical. Typically the same for all blocks on a single-device fs. |
 | 80 | 8 | `generation` | Transaction generation when this block was last written. Critical for COW: a block with `generation` == current transaction has already been COWed and can be modified in place. |
 | 88 | 8 | `owner` | Tree ID that owns this block (e.g. 1 for root tree, 2 for extent tree, 5 for default fs tree). Used for backref accounting. |
@@ -38,7 +38,7 @@ On disk this is the little-endian `btrfs_disk_key`:
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0 | 8 | `objectid` | Primary identifier (inode number, tree ID, extent bytenr, etc. depending on key type). |
-| 8 | 1 | `type` | Key type discriminator (see section 7). |
+| 8 | 1 | `type` | Key type discriminator (see [Key type reference](#key-type-reference)). |
 | 9 | 8 | `offset` | Type-specific secondary value (file offset, extent size, parent ID, etc.). |
 
 Keys compare as the tuple `(objectid, type, offset)`, in that order, all as
@@ -163,7 +163,7 @@ The superblock is the entry point for reading a btrfs filesystem. It is a
 | 198 | 1 | `root_level` | B-tree level of root tree root. |
 | 199 | 1 | `chunk_root_level` | B-tree level of chunk tree root. |
 | 200 | 1 | `log_root_level` | B-tree level of log tree root. |
-| 201 | 98 | `dev_item` | Embedded device item for this device (see section 6.4). |
+| 201 | 98 | `dev_item` | Embedded device item for this device (see [Device item](#device-item-98-bytes)). |
 | 299 | 256 | `label` | NUL-terminated filesystem label. |
 | 555 | 8 | `cache_generation` | Free space cache v1 generation. |
 | 563 | 8 | `uuid_tree_generation` | UUID tree last-updated generation. |
@@ -174,8 +174,8 @@ The superblock is the entry point for reading a btrfs filesystem. It is a
 | 611 | 1 | `remap_root_level` | Remap tree level. |
 | 612 | 199 | `reserved` | Zero-filled. |
 | 811 | 2048 | `sys_chunk_array` | Bootstrap chunk tree entries (key + chunk item pairs, packed sequentially). |
-| 2859 | 668 | `super_roots` | 4 rotating backup root entries (167 bytes each). See section 2.3. |
-| 3527 | 569 | `padding` | Zero-filled to 4096. |
+| 2859 | 672 | `super_roots` | 4 rotating backup root entries (168 bytes each). See [Backup roots](#backup-roots-168-bytes-each-4-entries). |
+| 3531 | 565 | `padding` | Zero-filled to 4096. |
 
 ### Fields updated on every transaction commit
 
@@ -196,9 +196,9 @@ A transaction commit updates these superblock fields:
 The commit writes the superblock to all mirrors. The superblock write is
 the atomic commit point. If power is lost before it is written, the previous
 generation's state is intact, because COW never overwrites old blocks (see
-section 3).
+[Copy-on-write (COW) protocol](#copy-on-write-cow-protocol)).
 
-### Backup roots (167 bytes each, 4 entries)
+### Backup roots (168 bytes each, 4 entries)
 
 The superblock holds 4 rotating backup root entries. Each commit overwrites
 one slot, cycling 0 → 1 → 2 → 3 → 0 → .... They are used for recovery when
@@ -228,7 +228,7 @@ the primary root pointers are corrupt.
 | 155 | 1 | `fs_root_level` | FS tree level. |
 | 156 | 1 | `dev_root_level` | Device tree level. |
 | 157 | 1 | `csum_root_level` | Checksum tree level. |
-| 158 | 9 | `padding` | Padding to 167 bytes. |
+| 158 | 10 | `padding` | Padding to 168 bytes. |
 
 ### Superblock flags
 
@@ -258,7 +258,7 @@ the primary root pointers are corrupt.
 | 5 | `BIG_METADATA` | 0x20 | Metadata blocks > 4 KiB (always set with modern mkfs for `nodesize` > 4096). |
 | 6 | `EXTENDED_IREF` | 0x40 | Extended inode references (`INODE_EXTREF`). |
 | 7 | `RAID56` | 0x80 | RAID5/RAID6 profiles in use. |
-| 8 | `SKINNY_METADATA` | 0x100 | Skinny metadata extent refs (see 5.1). |
+| 8 | `SKINNY_METADATA` | 0x100 | Skinny metadata extent refs (see [Extent items](#extent-items)). |
 | 9 | `NO_HOLES` | 0x200 | No explicit hole extent items. |
 | 10 | `METADATA_UUID` | 0x400 | `metadata_uuid` field is in use. |
 | 11 | `RAID1C34` | 0x800 | RAID1C3 or RAID1C4 profiles in use. |
@@ -371,7 +371,7 @@ COW:
 ### Commit
 
 1. **Flush pending reference updates.** Process all queued extent reference
-   changes (delayed refs, see section 5.3). This may modify the extent tree,
+   changes (see [Delayed references](#delayed-references)). This may modify the extent tree,
    which may COW more blocks and generate more ref updates. Repeat until no
    updates are pending.
 
@@ -382,8 +382,8 @@ COW:
 3. **Write dirty blocks.** Write all blocks in the dirty set to disk with
    correct checksums. Each block's checksum covers bytes 32..`nodesize`.
 
-4. **Prepare superblock.** Update the superblock fields listed in section
-   2.2. Write one backup root entry, rotating through slots 0-3. Recompute
+4. **Prepare superblock.** Update the superblock fields listed in
+   [Fields updated on every transaction commit](#fields-updated-on-every-transaction-commit). Write one backup root entry, rotating through slots 0-3. Recompute
    the superblock checksum.
 
 5. **Write superblock.** Write the superblock to all mirrors, then fsync for
@@ -453,7 +453,7 @@ The backref types:
 |-----------|-----------------------|-----------------------|---------------|-------------------|
 | 176       | `TREE_BLOCK_REF`      | Root tree ID          | (none)        | 9 bytes           |
 | 182       | `SHARED_BLOCK_REF`    | Parent block bytenr   | (none)        | 9 bytes           |
-| 178       | `EXTENT_DATA_REF`     | (see below)           | 28 bytes      | 37 bytes          |
+| 178       | `EXTENT_DATA_REF`     | (none, see below)     | 28 bytes      | 29 bytes          |
 | 184       | `SHARED_DATA_REF`     | Parent block bytenr   | 4-byte count  | 13 bytes          |
 | 172       | `EXTENT_OWNER_REF`    | Root tree ID          | (none)        | 9 bytes           |
 
@@ -557,7 +557,7 @@ Key: `(logical_offset, BLOCK_GROUP_ITEM=192, length)`
 |--------|------|-------|-------------|
 | 0 | 8 | `used` | Bytes currently allocated within this group. |
 | 8 | 8 | `chunk_objectid` | Always 256 (`BTRFS_FIRST_CHUNK_TREE_OBJECTID`). |
-| 16 | 8 | `flags` | Type + RAID profile (see 6.5). |
+| 16 | 8 | `flags` | Type + RAID profile (see [Block group type flags](#block-group-type-flags)). |
 
 Block groups are the allocation units. To allocate an extent, the allocator
 finds a block group of the right type (DATA, METADATA, or SYSTEM) with enough
@@ -579,7 +579,7 @@ Key: `(256, CHUNK_ITEM=228, logical_offset)`
 | 36 | 4 | `io_width` | I/O width (same as `io_align`). |
 | 40 | 4 | `sector_size` | Device sector size (typically 4096). |
 | 44 | 2 | `num_stripes` | Number of stripes. |
-| 46 | 2 | `sub_stripes` | Sub-stripes for RAID10 (0 otherwise). |
+| 46 | 2 | `sub_stripes` | 2 for RAID10, 1 otherwise. |
 | 48+ | 32*N | `stripes` | Array of stripe descriptors. |
 
 Each stripe (32 bytes):
@@ -715,7 +715,8 @@ block group is `SINGLE` (no replication). The virtual `SINGLE` bit 48
 
 For each allocated region of logical space:
 
-1. A **block group item** in the extent tree defines the logical range and
+1. A **block group item** in the extent tree (or the block group tree)
+   defines the logical range and
    tracks usage.
 2. A **chunk item** in the chunk tree maps the same logical range to one or
    more physical stripes.
@@ -751,44 +752,44 @@ transaction.
 The root tree is the master index. It holds a `ROOT_ITEM` for every other
 tree except itself and the chunk tree, whose roots are in the superblock.
 
-### Root item (439 bytes used, padded to 496 bytes)
+### Root item (439 bytes)
 
 Stored in root tree with key `(tree_id, ROOT_ITEM=132, 0)`.
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
-| 0 | 176 | `inode` | Embedded `btrfs_inode_item` (see 7.3). |
-| 176 | 8 | `generation` | Transaction generation of this root. |
-| 184 | 8 | `root_dirid` | Root directory objectid (typically 256). |
-| 192 | 8 | `bytenr` | Logical bytenr of this tree's root block. |
-| 200 | 8 | `byte_limit` | Deprecated (0). |
-| 208 | 8 | `bytes_used` | Total bytes used by this tree's extents. |
-| 216 | 8 | `last_snapshot` | Generation of last snapshot of this tree. |
-| 224 | 8 | `flags` | Root flags (bit 0 = read-only subvolume). |
-| 232 | 4 | `refs` | Reference count. |
-| 236 | 17 | `drop_progress` | Key tracking in-progress drop operation. |
-| 253 | 1 | `drop_level` | Level of drop progress. |
-| 254 | 1 | `level` | Current B-tree height of this root. |
-| 255 | 8 | `generation_v2` | Same as `generation` (marks v2 format). |
-| 263 | 16 | `uuid` | Subvolume UUID. |
-| 279 | 16 | `parent_uuid` | Parent subvolume UUID (for snapshots). |
-| 295 | 16 | `received_uuid` | Source UUID (for received subvolumes). |
-| 311 | 8 | `ctransid` | Transaction of last inode change. |
-| 319 | 8 | `otransid` | Transaction when this root was created. |
-| 327 | 8 | `stransid` | Transaction when sent. |
-| 335 | 8 | `rtransid` | Transaction when received. |
-| 343 | 12 | `ctime` | Change time (8-byte sec + 4-byte nsec). |
-| 355 | 12 | `otime` | Creation time. |
-| 367 | 12 | `stime` | Send time. |
-| 379 | 12 | `rtime` | Receive time. |
-| 391 | 64 | `reserved` | Zero-filled. |
+| 0 | 160 | `inode` | Embedded `btrfs_inode_item` (see [Inode item](#inode-item-160-bytes)). |
+| 160 | 8 | `generation` | Transaction generation of this root. |
+| 168 | 8 | `root_dirid` | Root directory objectid (typically 256). |
+| 176 | 8 | `bytenr` | Logical bytenr of this tree's root block. |
+| 184 | 8 | `byte_limit` | Deprecated (0). |
+| 192 | 8 | `bytes_used` | Total bytes used by this tree's extents. |
+| 200 | 8 | `last_snapshot` | Generation of last snapshot of this tree. |
+| 208 | 8 | `flags` | Root flags (bit 0 = read-only subvolume). |
+| 216 | 4 | `refs` | Reference count. |
+| 220 | 17 | `drop_progress` | Key tracking in-progress drop operation. |
+| 237 | 1 | `drop_level` | Level of drop progress. |
+| 238 | 1 | `level` | Current B-tree height of this root. |
+| 239 | 8 | `generation_v2` | Same as `generation` (marks v2 format). |
+| 247 | 16 | `uuid` | Subvolume UUID. |
+| 263 | 16 | `parent_uuid` | Parent subvolume UUID (for snapshots). |
+| 279 | 16 | `received_uuid` | Source UUID (for received subvolumes). |
+| 295 | 8 | `ctransid` | Transaction of last inode change. |
+| 303 | 8 | `otransid` | Transaction when this root was created. |
+| 311 | 8 | `stransid` | Transaction when sent. |
+| 319 | 8 | `rtransid` | Transaction when received. |
+| 327 | 12 | `ctime` | Change time (8-byte sec + 4-byte nsec). |
+| 339 | 12 | `otime` | Creation time. |
+| 351 | 12 | `stime` | Send time. |
+| 363 | 12 | `rtime` | Receive time. |
+| 375 | 64 | `reserved` | Zero-filled. |
 
 Fields updated during commit when a tree's root block changes:
 - `bytenr`: new root block address.
 - `generation` and `generation_v2`: current transaction generation.
 - `level`: root block level.
 
-### Inode item (176 bytes)
+### Inode item (160 bytes)
 
 Embedded in root items and stored standalone in FS trees.
 
@@ -854,8 +855,8 @@ All key types with their numeric values:
 | 244 | `QGROUP_LIMIT` | Quota tree | (qgroupid, 244, 0) |
 | 246 | `QGROUP_RELATION` | Quota tree | (qgroupid, 246, other_qgroupid) |
 | 248 | `TEMPORARY_ITEM` | Root tree | (objectid, 248, offset) |
-| 249 | `PERSISTENT_ITEM` | Root tree | (objectid, 249, offset) |
-| 250 | `DEV_REPLACE` | Root tree | (objectid, 250, 0) |
+| 249 | `PERSISTENT_ITEM` | Device tree | (0, 249, devid) for device stats |
+| 250 | `DEV_REPLACE` | Device tree | (0, 250, 0) |
 
 *`BLOCK_GROUP_ITEM` lives in the extent tree by default. With the
 `BLOCK_GROUP_TREE` compat_ro flag, it moves to tree ID 11.
@@ -1085,7 +1086,7 @@ Given a search path pointing to the insertion slot in a leaf:
    e. Write the new item data.
    f. Increment `nritems`.
 
-2. If the leaf is full: split the leaf (section 9.5), then insert.
+2. If the leaf is full: split the leaf (see [Leaf split](#leaf-split)), then insert.
 
 ### Item deletion
 
@@ -1111,7 +1112,7 @@ When a leaf is too full for an insertion:
 4. Update the original leaf's `nritems`.
 5. Insert a new key pointer in the parent node pointing to the new leaf.
    The key is the first key of the new leaf.
-6. If the parent node is full, split the parent (section 9.6).
+6. If the parent node is full, split the parent (see [Node split](#node-split)).
 
 ### Node split
 

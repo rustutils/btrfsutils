@@ -28,11 +28,15 @@ exits with code 1 if any errors were detected.
 The main `CheckCommand::run` method:
 
 1. Rejects unsupported flags (`--repair`, `--init-csum-tree`, `--init-extent-tree`,
-   `--backup`, `--tree-root`, `--chunk-root`, `--qgroup-report`, `--subvol-extents`).
+   `--qgroup-report`, `--subvol-extents`).
 2. Checks mount status (skippable with `--force`).
 3. Validates the superblock mirror index (0-2).
-4. Opens the filesystem with `reader::filesystem_open_mirror`, which bootstraps
-   chunk mapping and discovers all tree roots.
+4. Opens the filesystem with `open_with_overrides`, which bootstraps chunk
+   mapping and discovers all tree roots. Without overrides it calls
+   `reader::filesystem_open_mirror`. `--backup` takes the root and chunk
+   tree pointers from the backup root with the highest `tree_root_gen`.
+   `--tree-root` and `--chunk-root` replace those pointers directly and take
+   precedence over `--backup`.
 5. Runs phases 1-7 in order.
 6. Prints summary and exits.
 
@@ -183,7 +187,8 @@ where 101 is the header size and 25 is the item descriptor size.
 ### Output
 
 Returns a `HashMap<u64, u64>` mapping each tree block's logical address to the
-objectid of the tree that owns it. Phase 3 uses this map for bidirectional
+objectid of the tree whose walk reached it. The header `owner` field is not
+used. Phase 3 uses this map for bidirectional
 ownership verification.
 
 ### Tree name resolution
@@ -548,7 +553,7 @@ using two item types:
   `offset = child_root_id`. Contains the directory ID, sequence number, and
   name of the directory entry that references the child subvolume.
 
-- **`ROOT_BACKREF`** (key type 157): stored with `objectid = child_root_id`,
+- **`ROOT_BACKREF`** (key type 144): stored with `objectid = child_root_id`,
   `offset = parent_root_id`. Contains the same fields as the corresponding
   `ROOT_REF`.
 
@@ -693,7 +698,6 @@ These features of the C reference are not yet implemented:
   "original" mode: collect all items, then cross-check.
 - **Log tree checking.** Phase 2 does not walk the log tree.
 - **`--repair`**. All checking is read-only.
-- **`--backup`, `--tree-root`, `--chunk-root`** (alternate root selection).
 - **`--init-csum-tree`, `--init-extent-tree`** (destructive reconstruction).
 - **`--qgroup-report`** (quota group consistency checking).
 - **`--subvol-extents`** (per-subvolume extent sharing analysis).

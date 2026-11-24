@@ -50,8 +50,8 @@ extents (tree blocks), `length` equals the filesystem's `nodesize`.
 
 ### METADATA_ITEM (type 169): Skinny Metadata
 
-When the `SKINNY_METADATA` incompat feature is enabled (the default since
-Linux 3.10), metadata extents use a more compact key:
+When the `SKINNY_METADATA` incompat feature is enabled (on by default in
+this project's mkfs), metadata extents use a more compact key:
 
 ```
 Key: (bytenr, METADATA_ITEM, level)
@@ -75,13 +75,16 @@ tree blocks carry.
 | Item body         | extent_item + tree_block_info + inline refs | extent_item + inline refs |
 | When used         | Always for data, and for metadata without skinny_metadata | Metadata only, with skinny_metadata |
 
-In mkfs, the `skinny_metadata()` config flag controls the choice:
+The `SKINNY_METADATA` incompat flag controls the choice, both in the mkfs
+bootstrap (`build_extent_tree` in `mkfs/src/mkfs.rs`) and in the
+transaction crate (`create_metadata_extent` in
+`transaction/src/transaction.rs`):
 
 ```rust
 let (item_type, offset) = if skinny {
-    (BTRFS_METADATA_ITEM_KEY, 0u64)   // level 0 for leaf blocks
+    (BTRFS_METADATA_ITEM_KEY, u64::from(level))
 } else {
-    (BTRFS_EXTENT_ITEM_KEY, nodesize as u64)
+    (BTRFS_EXTENT_ITEM_KEY, u64::from(nodesize))
 };
 ```
 
@@ -105,7 +108,7 @@ The `flags` field uses these bits:
 |----------------|-------|--------------------------------------------|
 | DATA           | 0x01  | Extent holds file data                     |
 | TREE_BLOCK     | 0x02  | Extent holds a metadata tree block         |
-| FULL_BACKREF   | 0x80  | Uses shared (parent-based) backrefs only   |
+| FULL_BACKREF   | 0x100 | Uses shared (parent-based) backrefs only   |
 
 A data extent has `flags = DATA` (0x01). A metadata extent has
 `flags = TREE_BLOCK` (0x02). `FULL_BACKREF` is set when the extent uses
@@ -118,7 +121,7 @@ The `ExtentFlags` type in `disk/src/items.rs` represents these flags as a
 ### Tree Block Info (Non-Skinny Only)
 
 For non-skinny `EXTENT_ITEM` entries with the `TREE_BLOCK` flag, the header
-is followed by `btrfs_tree_block_info` (25 bytes):
+is followed by `btrfs_tree_block_info` (18 bytes):
 
 | Field | Offset | Size | Description |
 |-------|--------|------|-------------|
@@ -479,9 +482,11 @@ The `root` field is the tree's objectid:
 - 3 = chunk tree
 - 4 = device tree
 - 5 = FS tree (default subvolume)
-- 6 = csum tree
-- 7 = quota tree
+- 7 = csum tree
+- 8 = quota tree
+- 9 = UUID tree
 - 10 = free-space tree
+- 11 = block group tree
 - >= 256 = subvolume and snapshot trees
 
 ### SHARED_BLOCK_REF
@@ -507,8 +512,9 @@ ambiguous until the block is CoW'd.
 ### Cross-Referencing with Tree Ownership
 
 `btrfs check` builds a map of `(block_address -> owning_tree)` during its
-tree walks. The owning tree for each block comes from the `owner` field in
-the block's header (`btrfs_header`). The map is then cross-referenced against
+tree walks. The owning tree for each block is the objectid of the tree whose
+walk reached it, not the `owner` field in the block header
+(`cli/src/check/tree_structure.rs`). The map is then cross-referenced against
 the extent tree's `TREE_BLOCK_REF` entries in both directions.
 
 
@@ -516,7 +522,8 @@ the extent tree's `TREE_BLOCK_REF` entries in both directions.
 
 Historically, `BLOCK_GROUP_ITEM` entries are stored in the extent tree
 alongside extent items. With the `BLOCK_GROUP_TREE` compat_ro feature
-(default since btrfs-progs 6.x), they move to a separate tree (objectid 10).
+(on by default in this project's mkfs), they move to a separate tree
+(objectid 11).
 
 ### BLOCK_GROUP_ITEM Structure
 
@@ -549,17 +556,17 @@ any extent item at the same address.
 
 ### mkfs Construction
 
-`mkfs` creates three block group items, one for each chunk:
+The mkfs bootstrap (`build_extent_tree` in `mkfs/src/mkfs.rs`) writes
+three block group items into the extent tree, one for each chunk: system
+(SYSTEM flag), metadata (METADATA and the profile flag), and data (DATA and
+the profile flag). At this stage the metadata block group's `used` covers
+only the four bootstrap tree blocks.
 
-```rust
-add_block_group_items(extent_items, cfg, layout, chunks, data_used);
-```
-
-This adds entries for the system (SYSTEM flag), metadata (METADATA |
-profile flag), and data (DATA | profile flag) block groups.
-
-When the `BLOCK_GROUP_TREE` feature is enabled, these items go in a separate
-tree instead (`build_block_group_tree_with_used`).
+When the `BLOCK_GROUP_TREE` feature is enabled, the post-bootstrap
+transaction (`mkfs/src/post_bootstrap.rs`) creates the block group tree and
+moves the items there with `convert::create_block_group_tree`. Later
+allocations in that transaction update `used` through the transaction
+crate.
 
 
 ## What btrfs check Verifies
@@ -610,8 +617,8 @@ length = 0 for metadata items and skips overlap detection for them.
 
 During tree walks in earlier check phases, the checker builds
 `tree_block_owners: HashMap<u64, u64>`, which maps each tree block's logical
-address to the objectid of the tree that owns it (from the block header's
-`owner` field).
+address to the objectid of the tree whose walk reached it. The block
+header's `owner` field is not used.
 
 After processing the extent tree, the checker verifies that every block seen
 during the walks has an extent item:
@@ -668,75 +675,65 @@ bytes are computed from the inline ref count. For standalone refs, each
 
 ## Extent Item Construction in mkfs
 
-### Metadata Extent Items
+mkfs builds extent items in two places. The bootstrap writes the items for
+its own four tree blocks by hand. Everything after that goes through the
+transaction crate.
 
-Each tree block allocated during mkfs gets a metadata extent item with one
-inline `TREE_BLOCK_REF`:
+### Bootstrap Metadata Extent Items
 
-```rust
-fn metadata_extent_item(addr, skinny, generation, owner, nodesize) -> (Key, Vec<u8>) {
-    let (item_type, offset) = if skinny {
-        (BTRFS_METADATA_ITEM_KEY, 0u64)     // offset = level 0
-    } else {
-        (BTRFS_EXTENT_ITEM_KEY, nodesize)    // offset = nodesize
-    };
-    (
-        Key::new(addr, item_type, offset),
-        extent_item(1, generation, skinny, owner),
-    )
-}
-```
+The bootstrap (`build_extent_tree` in `mkfs/src/mkfs.rs`) writes one
+metadata extent item for each of the four bootstrap trees (root, extent,
+chunk, device), each with one inline `TREE_BLOCK_REF`. The payload comes
+from `items::extent_item` in `mkfs/src/items.rs`:
 
-The `extent_item()` function serializes:
 1. `btrfs_extent_item` header: refs=1, generation, flags=TREE_BLOCK
-2. For non-skinny: zero-filled `btrfs_tree_block_info` (25 bytes)
+2. For non-skinny: zero-filled `btrfs_tree_block_info` (18 bytes)
 3. Inline `TREE_BLOCK_REF`: type byte (176) and root objectid (8 bytes)
 
-Total item size: 33 bytes (skinny) or 58 bytes (non-skinny).
+Total item size: 33 bytes (skinny) or 51 bytes (non-skinny).
+
+### Transaction Metadata Extent Items
+
+Every other tree block (the FS, csum, data-reloc, and UUID trees, the
+optional free space, block group, and quota trees, and every block
+allocated while populating `--rootdir`) is allocated by the transaction
+crate. Allocation queues a delayed ref. At commit, `flush_delayed_refs`
+calls `create_metadata_extent`, which writes the same layout through
+`ExtentItem::to_bytes_skinny` or `ExtentItem::to_bytes_non_skinny`. The
+non-skinny form fills `tree_block_info` with the block's first key and
+level instead of zeros.
 
 ### Data Extent Items
 
-Each data extent written in `--rootdir` mode gets a data extent item with
-one inline `EXTENT_DATA_REF`:
+In `--rootdir` mode, `rootdir::walk_to_transaction` writes file contents
+with `Transaction::write_file_data`. Each regular extent queues a data ref,
+and `flush_delayed_refs` calls `create_data_extent`. That writes an
+`EXTENT_ITEM` with one inline `EXTENT_DATA_REF`, serialized by
+`ExtentItem::to_bytes_data` in `disk/src/items.rs`:
 
-```rust
-fn data_extent_item(refs, generation, root, objectid, offset, count) -> Vec<u8> {
-    // btrfs_extent_item header
-    buf.put_u64_le(refs);
-    buf.put_u64_le(generation);
-    buf.put_u64_le(BTRFS_EXTENT_FLAG_DATA);
-    // inline EXTENT_DATA_REF
-    buf.put_u8(BTRFS_EXTENT_DATA_REF_KEY);
-    buf.put_u64_le(root);
-    buf.put_u64_le(objectid);
-    buf.put_u64_le(offset);
-    buf.put_u32_le(count);
-}
+```
+btrfs_extent_item   refs, generation, flags = DATA         24 bytes
+inline ref type     EXTENT_DATA_REF_KEY (178)               1 byte
+extent_data_ref     root, objectid, offset, count          28 bytes
 ```
 
-Total item size: 53 bytes. The key is
-`(extent_bytenr, EXTENT_ITEM, extent_length)`.
+Total item size: 53 bytes (`ExtentItem::DATA_INLINE_SIZE`). The key is
+`(extent_bytenr, EXTENT_ITEM, extent_length)`. Inline extents get no extent
+item.
 
 ### Self-Referential Convergence
 
-The extent tree must contain entries for its own tree blocks. But the number
-of tree blocks it needs depends on how many items it contains, which depends
-on how many extent items there are, which in turn depends on the number of
-tree blocks. This is a circular dependency.
+The extent tree must contain entries for its own tree blocks. Inserting an
+extent item can COW or split an extent tree block, which allocates a new
+block, which needs another extent item.
 
-The `--rootdir` code path solves this with a convergence loop
-(`converge_extent_tree_block_count` in `mkfs/src/mkfs.rs`):
-
-1. Start with `extent_tree_block_count = 1`.
-2. Build a trial extent tree with all items (including placeholder
-   entries for the extent tree's own blocks).
-3. If the trial tree's actual block count differs from the assumed count,
-   update the count and repeat.
-4. The loop converges quickly (usually in 1-2 iterations), because extent
-   items for extra blocks only marginally increase the tree size.
-
-After convergence, the real extent tree is built with the logical addresses
-assigned by `BlockAllocator`.
+The transaction crate resolves this in its commit loop
+(`Transaction::commit`): it runs `flush_delayed_refs`, `update_root_items`,
+`snapshot_roots`, and `update_free_space_tree` repeatedly until no delayed
+refs remain, no root changed, and the free space tree is stable. It gives
+up with an error after 32 passes. The mkfs bootstrap has no such loop. Its
+extent tree fits in one leaf, and every block it describes is placed at a
+fixed address by `BlockLayout`.
 
 
 ## Extent Tree Key Ordering
