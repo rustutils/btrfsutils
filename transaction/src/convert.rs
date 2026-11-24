@@ -67,7 +67,7 @@ const ROOT_TREE_ID: u64 = 1;
 ///   (`objectid == BTRFS_FREE_SPACE_OBJECTID`).
 /// * Any bitmap-layout block group is encountered.
 /// * The metadata allocator runs out of space.
-/// * Any tree read/write fails.
+/// * Any tree read or write fails.
 pub fn convert_to_free_space_tree<R: Read + Write + Seek>(
     trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
@@ -78,8 +78,8 @@ pub fn convert_to_free_space_tree<R: Read + Write + Seek>(
     let compat_ro = fs_info.superblock.compat_ro_flags;
 
     // Precondition: FST not already enabled, and no stale on-disk
-    // root for tree id 10. The bit-and-pointer state should agree;
-    // any disagreement is a corrupted (or partially-converted)
+    // root for tree id 10. The bit and the pointer should agree. Any
+    // disagreement means a corrupted (or partially converted)
     // filesystem and is bounced back to the caller.
     if compat_ro & fst_bit != 0 {
         return Err(io::Error::other(
@@ -111,11 +111,11 @@ pub fn convert_to_free_space_tree<R: Read + Write + Seek>(
     trans.create_empty_tree(fs_info, FREE_SPACE_TREE_ID)?;
 
     // Step 2: walk every block group, derive free ranges, insert
-    // FREE_SPACE_INFO + FREE_SPACE_EXTENT items.
+    // FREE_SPACE_INFO and FREE_SPACE_EXTENT items.
     seed_free_space_tree(trans, fs_info)?;
 
     // Step 3: flip superblock bits. The in-memory superblock is the
-    // single source of truth; the commit path serialises it.
+    // single source of truth. The commit path serialises it.
     fs_info.superblock.compat_ro_flags |= fst_bit | fst_valid_bit;
     // Zero cache_generation so the kernel does not try to load a
     // stale v1 cache on the next mount.
@@ -132,8 +132,8 @@ pub fn convert_to_free_space_tree<R: Read + Write + Seek>(
 /// `FREE_SPACE_INFO` is already present is skipped, so this can be
 /// called against a partially-seeded FST without producing duplicate
 /// entries. A pre-existing entry that uses the bitmap layout (the
-/// `USING_BITMAPS` flag) is rejected — same restriction as the rest of
-/// the v1 FST machinery.
+/// `USING_BITMAPS` flag) is rejected, the same restriction as the rest
+/// of the FST code.
 ///
 /// Preconditions:
 /// * The FST root must already be registered
@@ -141,7 +141,7 @@ pub fn convert_to_free_space_tree<R: Read + Write + Seek>(
 ///   caller has called [`Transaction::create_empty_tree`] for tree id
 ///   10 in the same transaction (or mkfs's bootstrap put it there).
 /// * No `USING_BITMAPS` block groups (only the extent layout is
-///   supported in v1).
+///   supported).
 ///
 /// Intended for two callers:
 /// * [`convert_to_free_space_tree`] uses it as the populate step
@@ -154,7 +154,7 @@ pub fn convert_to_free_space_tree<R: Read + Write + Seek>(
 ///
 /// Returns an error if the FST root is missing, if any block group
 /// uses bitmap layout, if `extent_walk::walk_block_group_extents` or
-/// `derive_free_ranges` fails, or if any tree read/write fails.
+/// `derive_free_ranges` fails, or if any tree read or write fails.
 pub fn seed_free_space_tree<R: Read + Write + Seek>(
     trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
@@ -361,7 +361,7 @@ struct BlockGroupItemSnapshot {
 /// * The free space tree is not enabled (`FREE_SPACE_TREE` bit
 ///   missing) or not valid (`FREE_SPACE_TREE_VALID` bit missing).
 ///   The kernel requires both for BGT.
-/// * Any tree read/write or allocator operation fails.
+/// * Any tree read, tree write, or allocator operation fails.
 pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
     trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
@@ -369,11 +369,11 @@ pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
     let bgt_bit = u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE);
     let compat_ro = fs_info.superblock.compat_ro_flags;
 
-    // Preconditions specific to the conversion path: refuse-on-weird,
-    // no repair attempts. The shared per-item move + create + flag
-    // logic lives in [`create_block_group_tree`], which has weaker
-    // preconditions (it tolerates an existing BGT root and an
-    // already-set BGT flag for resumable use from mkfs).
+    // Preconditions specific to the conversion path: refuse anything
+    // unexpected and attempt no repair. The shared per-item move,
+    // create, and flag logic lives in [`create_block_group_tree`],
+    // which has weaker preconditions (it tolerates an existing BGT
+    // root and an already-set BGT flag for resumable use from mkfs).
     if compat_ro & bgt_bit != 0 {
         return Err(io::Error::other(
             "convert_to_block_group_tree: block group tree already enabled",
@@ -399,19 +399,19 @@ pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
 ///    (compound-key order). This runs *before* the routing override
 ///    is pinned, so the read sees the pre-conversion state.
 /// 3. Pin the BG-tree-id override to the extent tree for the
-///    duration of the function. Allocator + `update_block_group_used`
+///    duration of the function. Allocator and `update_block_group_used`
 ///    calls during the body keep reading BG state from the extent
 ///    tree, even though BGT is being built up under them.
 /// 4. Create the BGT root if it doesn't already exist.
 /// 5. Per snapshot: insert into BGT (skip if the same key is already
 ///    present there) and delete from the extent tree (skip if it's
 ///    already gone). This makes the function idempotent at the
-///    per-item level — a partial conversion (e.g. interrupted commit)
+///    per-item level: a partial conversion (e.g. interrupted commit)
 ///    can be resumed by re-calling.
 /// 6. Set the `BLOCK_GROUP_TREE` `compat_ro` flag if it isn't set yet.
 ///    Callers that already set the flag (mkfs's bootstrap) get
 ///    a no-op here.
-/// 7. Drop the routing override; subsequent allocator /
+/// 7. Drop the routing override. Subsequent allocator and
 ///    `update_block_group_used` calls (notably the commit's
 ///    `flush_delayed_refs`) route to the freshly populated BGT.
 ///
@@ -426,7 +426,7 @@ pub fn convert_to_block_group_tree<R: Read + Write + Seek>(
 /// # Errors
 ///
 /// Returns an error if the FST is missing or not VALID, or if any
-/// tree read/write or allocator operation fails.
+/// tree read, tree write, or allocator operation fails.
 pub fn create_block_group_tree<R: Read + Write + Seek>(
     trans: &mut Transaction<R>,
     fs_info: &mut Filesystem<R>,
@@ -450,8 +450,8 @@ pub fn create_block_group_tree<R: Read + Write + Seek>(
 
     // Snapshot before pinning so the read sees the extent tree as it
     // was before any conversion-side modifications. May be empty on a
-    // re-call where every BG item has already been moved to BGT —
-    // that's the per-item-idempotent path and the loop below
+    // re-call where every BG item has already been moved to BGT.
+    // That is the per-item idempotent path and the loop below
     // becomes a no-op.
     let snapshots = collect_block_group_items(fs_info)?;
 
@@ -486,7 +486,7 @@ pub fn create_block_group_tree<R: Read + Write + Seek>(
 
     // Guard drops here, restoring bg_tree_override. Past this point,
     // fs_info.block_group_tree_id() returns 11 and any subsequent
-    // allocator/update_block_group_used calls (notably from the
+    // allocator and update_block_group_used calls (notably from the
     // upcoming commit's flush_delayed_refs) route to the freshly
     // populated BGT.
     Ok(())
@@ -521,10 +521,10 @@ fn collect_block_group_items<R: Read + Write + Seek>(
 ) -> io::Result<Vec<BlockGroupItemSnapshot>> {
     let mut out: Vec<BlockGroupItemSnapshot> = Vec::new();
 
-    // Position the cursor at (0, 0, 0) and walk forward; the
-    // compound-key search will land at-or-before the first item.
-    // BG items are typically sparse — a few per filesystem — so
-    // the linear scan is fine.
+    // Position the cursor at (0, 0, 0) and walk forward. The
+    // compound-key search lands at or before the first item.
+    // BG items are sparse (a few per filesystem), so the linear
+    // scan is fine.
     let start_key = DiskKey {
         objectid: 0,
         key_type: KeyType::from_raw(0),
@@ -562,7 +562,7 @@ fn collect_block_group_items<R: Read + Write + Seek>(
 
     // The walk yields items in compound-key order, which for
     // BLOCK_GROUP_ITEM (keyed `(start, BLOCK_GROUP_ITEM, length)`)
-    // is BG-start order — exactly what BGT expects.
+    // is BG-start order, which is exactly what BGT expects.
     debug_assert!(
         out.windows(2).all(|w| {
             (w[0].key.objectid, w[0].key.offset)

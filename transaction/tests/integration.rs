@@ -37,7 +37,8 @@ fn fixture_gz_path() -> PathBuf {
     path
 }
 
-/// Decompress the fixture image to a temporary file and return it opened for R/W.
+/// Decompress the fixture image to a temporary file and return it opened
+/// for reading and writing.
 fn open_fixture() -> io::Result<tempfile::NamedTempFile> {
     let gz_path = fixture_gz_path();
     let gz_file = File::open(&gz_path).map_err(|e| {
@@ -54,7 +55,7 @@ fn open_fixture() -> io::Result<tempfile::NamedTempFile> {
     Ok(tmp)
 }
 
-// ---- Read path tests (fixture image) ----
+// Read path tests (fixture image).
 
 #[test]
 fn open_fixture_image() {
@@ -241,7 +242,7 @@ fn search_extent_tree() {
     assert!(leaf.nritems() > 0, "extent tree leaf should have items");
 }
 
-// ---- Write path tests ----
+// Write path tests.
 
 /// Create a temporary btrfs image file using the system `mkfs.btrfs`.
 /// Returns the temp directory (keeps the file alive) and the image path.
@@ -306,7 +307,7 @@ fn create_multi_device_test_image(
     (dir, paths)
 }
 
-/// Open every image path as a R/W file and zip into a `devid -> File`
+/// Open every image path for reading and writing and zip into a `devid -> File`
 /// map by reading each device's superblock to learn its devid.
 fn open_devices_by_devid(
     paths: &[PathBuf],
@@ -343,7 +344,7 @@ fn find_our_mkfs() -> PathBuf {
 
 /// Run `btrfs check` on an image, asserting it passes cleanly.
 ///
-/// Captures stdout/stderr and only prints them if the check fails.
+/// Captures stdout and stderr and only prints them if the check fails.
 ///
 /// # Panics
 ///
@@ -460,7 +461,7 @@ fn write_insert_item_and_verify() {
         assert_eq!(data, test_data, "item data should match");
     }
 
-    // Phase 3: Run btrfs check — must pass clean
+    // Phase 3: btrfs check must pass clean.
     assert_btrfs_check(&img_path);
 
     drop(dir);
@@ -940,7 +941,7 @@ fn write_set_subvol_readonly() {
     drop(dir);
 }
 
-// ---- Privileged tests (require root, run via `just test`) ----
+// Privileged tests (require root, run via `just test`).
 
 /// RAII loopback device: attaches on creation, detaches on drop.
 struct LoopDev {
@@ -1346,8 +1347,8 @@ fn chunk_tree_cow_round_trip() {
     let (dir, img_path) = create_test_image();
 
     // Phase 1: pick a DEV_ITEM, modify a benign field, commit.
-    // Use `seek_speed` (1 byte at offset 64) which btrfs check ignores;
-    // touching `bytes_used` would trip allocation-tree checks.
+    // Use `seek_speed` (1 byte at offset 64), which btrfs check ignores.
+    // Touching `bytes_used` would trip allocation-tree checks.
     let (devid, new_seek_speed) = {
         let file = File::options()
             .read(true)
@@ -1462,7 +1463,7 @@ fn chunk_tree_cow_round_trip() {
     drop(dir);
 }
 
-/// Stage G: drop a data extent backref through `Transaction::commit` and
+/// Drop a data extent backref through `Transaction::commit` and
 /// verify the parent `EXTENT_ITEM` and any csum tree entries for the
 /// freed range disappear.
 ///
@@ -1640,7 +1641,8 @@ fn drop_data_extent_ref_removes_extent_item_and_csums() {
     }
 }
 
-// ---- Stage J: mkfs migration prerequisites ----
+// Primitives that mkfs relies on: data extents, block group
+// accounting, csums, and bootstrap verification.
 
 /// Helper: find the first data block group in a filesystem image.
 fn find_data_block_group(
@@ -1654,7 +1656,7 @@ fn find_data_block_group(
         .expect("no data block group found")
 }
 
-// -- J.2: Data block group accounting --
+// Data block group accounting.
 
 #[test]
 fn data_block_group_loaded() {
@@ -1774,10 +1776,10 @@ fn data_bg_used_update() {
         );
     }
 
-    // No btrfs check — orphaned extent by design (only testing BG accounting).
+    // No btrfs check: orphaned extent by design (only testing BG accounting).
 }
 
-// -- J.1: Data extent ref creation --
+// Data extent ref creation.
 
 #[test]
 fn create_data_extent_basic() {
@@ -1883,7 +1885,7 @@ fn create_data_extent_basic() {
 
     // Note: btrfs check would report a backref mismatch because
     // there's no FILE_EXTENT_DATA in the FS tree. That's by design
-    // for this unit test — create_then_drop_data_extent tests the
+    // for this unit test. create_then_drop_data_extent tests the
     // full round trip with btrfs check.
 }
 
@@ -1959,7 +1961,7 @@ fn create_data_extent_multiple() {
         }
     }
 
-    // No btrfs check — orphaned extents by design (no FILE_EXTENT_DATA).
+    // No btrfs check: orphaned extents by design (no FILE_EXTENT_DATA).
 }
 
 #[test]
@@ -2091,10 +2093,9 @@ fn alloc_data_extent_writes_data_and_creates_extent_item() {
         );
     }
 
-    // No btrfs check — there's no FILE_EXTENT_DATA in the FS tree
-    // pointing at this extent yet, so the backref check would fail.
-    // End-to-end coverage with btrfs check arrives once
-    // insert_file_extent + insert_csums land.
+    // No btrfs check: there's no FILE_EXTENT_DATA in the FS tree
+    // pointing at this extent, so the backref check would fail.
+    // The write_file_data tests cover the full path with btrfs check.
 }
 
 #[test]
@@ -2200,10 +2201,9 @@ fn insert_file_extent_regular_round_trips() {
         path.release();
     }
 
-    // No btrfs check — inode 999 has no INODE_ITEM and there are no
-    // csum entries for the extent yet; both would be flagged.
-    // End-to-end coverage with btrfs check arrives once insert_csums
-    // and a complete write_file_data path land.
+    // No btrfs check: inode 999 has no INODE_ITEM and there are no
+    // csum entries for the extent. Both would be flagged.
+    // The write_file_data tests cover the full path with btrfs check.
 }
 
 #[test]
@@ -2276,7 +2276,7 @@ fn insert_csums_round_trips_per_sector_crc32c() {
 
 /// End-to-end: create a regular file with real content using the
 /// high-level `write_file_data` helper, plus the surrounding
-/// INODE_ITEM/REF and parent dir entries, and verify the result with
+/// INODE_ITEM, INODE_REF, and parent dir entries, and verify the result with
 /// `btrfs check`.
 #[test]
 fn write_file_data_passes_btrfs_check() {
@@ -2366,7 +2366,7 @@ fn write_file_data_inline_passes_btrfs_check() {
             transid,
             ts,
         );
-        // Small payload — write_file_data picks inline.
+        // Small payload, so write_file_data picks inline.
         trans
             .write_file_data(&mut fs, 5, file_inode, 0, payload, false, None)
             .expect("write_file_data");
@@ -2491,7 +2491,7 @@ fn write_file_data_multi_chunk_passes_btrfs_check() {
             transid,
             ts,
         );
-        // The actual write — three chunks.
+        // The actual write: three chunks.
         trans
             .write_file_data(&mut fs, 5, file_inode, 0, &payload, false, None)
             .expect("write_file_data");
@@ -2648,7 +2648,7 @@ fn create_then_drop_data_extent() {
     assert_btrfs_check(&img_path);
 }
 
-// -- J.3: Csum tree item insertion --
+// Csum tree item insertion.
 
 #[test]
 fn csum_tree_insert_basic() {
@@ -2911,7 +2911,7 @@ fn csum_tree_root_item_updated() {
     assert_btrfs_check(&img_path);
 }
 
-// -- J.4: Bootstrap verification --
+// Bootstrap verification.
 
 #[test]
 fn open_our_mkfs_image() {
@@ -3056,10 +3056,8 @@ fn allocator_finds_free_space_in_mkfs_image() {
 /// Wire up the FS-tree dir machinery (INODE_ITEM, INODE_REF, DIR_ITEM,
 /// DIR_INDEX, parent dir size bump, ROOT_ITEM embedded inode mirror)
 /// for a single regular file in the FS root. Only used by the
-/// compressed-extent tests; the older tests inlined the same boilerplate.
+/// compressed-extent tests. The older tests inline the same boilerplate.
 #[allow(clippy::too_many_arguments)]
-/// Test helper: create a regular file under the FS-tree root dir
-/// (inode 256) using the new high-level `Transaction` helpers.
 fn create_file_dir_machinery(
     fs: &mut Filesystem<File>,
     trans: &mut Transaction<File>,
@@ -3107,7 +3105,7 @@ fn run_compressed_regular_test(
 
     let file_inode = 257u64;
     let dir_index = 100u64;
-    // 8 KiB of repeated bytes — highly compressible.
+    // 8 KiB of repeated bytes, highly compressible.
     let payload = vec![0x42u8; 8192];
 
     {
@@ -3376,7 +3374,7 @@ fn write_file_data_inline_lzo_compressed_passes_btrfs_check() {
     );
 }
 
-// --- Multi-device tests (J.5) ---
+// Multi-device tests.
 
 /// Open a 2-device RAID1 image with `Filesystem::open_multi`, verify
 /// the bootstrap completes and basic reads succeed.
@@ -3423,7 +3421,7 @@ fn multi_device_raid1_metadata_cow_passes_btrfs_check() {
         let mut fs = Filesystem::open_multi(devices).expect("open_multi");
         let mut trans = Transaction::start(&mut fs).expect("start txn");
 
-        // Insert into the root tree (id 1) — TemporaryItem is the
+        // Insert into the root tree (id 1). TemporaryItem is the
         // canonical home for ad-hoc test items there. Inserting into
         // the FS tree would trigger btrfs check's "unknown key in fs
         // root" complaint.
@@ -3505,7 +3503,7 @@ fn multi_device_raid1_data_extent_passes_btrfs_check() {
             transid,
             ts,
         );
-        // The actual write — exercises alloc_data_extent + write_block
+        // The actual write. Exercises alloc_data_extent and write_block,
         // which fan out to all stripe copies.
         trans
             .write_file_data(&mut fs, 5, file_inode, 0, &payload, false, None)
@@ -3519,8 +3517,8 @@ fn multi_device_raid1_data_extent_passes_btrfs_check() {
 
 /// Open a 3-device RAID0 image (metadata + data both RAID0), commit a
 /// small COW transaction in the root tree, reopen, and verify the item
-/// is reachable. This exercises the stripe-aware `plan_write` /
-/// `plan_read` routing — every row of every striped tree write must
+/// is reachable. This exercises the stripe-aware `plan_write` and
+/// `plan_read` routing: every row of every striped tree write must
 /// land on the column the chunk's profile says owns it, and reads must
 /// follow the same routing.
 #[test]
@@ -3787,7 +3785,7 @@ fn multi_device_missing_handle_errors() {
     );
 }
 
-// --- Inode / dir / xattr helpers ---
+// Inode, directory, and xattr helpers.
 
 /// Create a file with two xattrs via the new helpers, then verify both
 /// xattrs round-trip through reopen and the image passes `btrfs check`.
@@ -3876,7 +3874,7 @@ fn set_xattr_round_trips_passes_btrfs_check() {
             assert!(found, "xattr {name:?} not found");
             let leaf = path.leaf().unwrap();
             let data = leaf.item_data(path.slots[0]).to_vec();
-            // XATTR_ITEM body is a DirItem with FT_XATTR; the value is
+            // XATTR_ITEM body is a DirItem with FT_XATTR. The value is
             // stored as the "data" portion after the name.
             let parsed = DirItem::parse_all(&data);
             assert_eq!(parsed.len(), 1);
@@ -3957,7 +3955,7 @@ fn insert_root_ref_inserts_paired_keys() {
     // The FS tree (id 5) is the only subvolume in a fresh image. Pretend
     // we're recording a directory entry that the parent root tree (id 1)
     // would point at. The keys are insertable in tree id 1 because no
-    // ROOT_REF/ROOT_BACKREF exists between (1, 5) by default.
+    // ROOT_REF or ROOT_BACKREF exists between (1, 5) by default.
     let parent_root = 1u64;
     let child_root = 5u64;
     let dirid = 256u64;
@@ -4086,7 +4084,7 @@ fn set_default_subvol_inserts_dir_item() {
         let mut trans = Transaction::start(&mut fs).unwrap();
         // Override mkfs's default (FS tree, id 5) with id 256. Tree
         // 256 doesn't actually exist in this image, but the helper
-        // writes the DIR_ITEM regardless; this lets us tell the
+        // writes the DIR_ITEM regardless. This lets us tell the
         // helper-installed item apart from the bootstrap one.
         trans.set_default_subvol(&mut fs, 256).expect("set default");
         trans.commit(&mut fs).unwrap();

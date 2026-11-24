@@ -1,16 +1,16 @@
 //! # Generic B-tree search: walking any internal btrfs tree via `BTRFS_IOC_TREE_SEARCH`
 //!
 //! The kernel's tree search ioctl lets userspace read any internal btrfs tree
-//! (chunk, root, quota, …) by specifying a key range.  Items are returned in
-//! batches; [`tree_search`] advances the cursor automatically and calls a
+//! (chunk, root, quota, …) by specifying a key range. Items are returned in
+//! batches. [`tree_search`] advances the cursor automatically and calls a
 //! closure once per item until the range is exhausted.
 //!
 //! # Byte order
 //!
 //! [`SearchHeader`] fields (objectid, offset, type) are in host byte order:
-//! the kernel fills them in through the ioctl layer.  The `data` slice passed
+//! the kernel fills them in through the ioctl layer. The `data` slice passed
 //! to the callback contains the raw on-disk item payload, which is
-//! **little-endian**; callers must use `u64::from_le_bytes` and friends when
+//! **little-endian**. Callers must use `u64::from_le_bytes` and friends when
 //! interpreting it.
 //!
 //! # Ioctl version
@@ -23,11 +23,11 @@
 //!   buffer size. Useful when items may be larger than what v1 can return in a
 //!   single batch.
 //! - [`tree_search_auto`] tries v2 first and transparently falls back to v1
-//!   when the underlying driver doesn't support v2 — currently FUSE drivers
-//!   like our own `btrfs-fuse` (the indirected-buffer pattern can't survive
-//!   a FUSE round trip; signalled with `ENOPROTOOPT`) and very old kernels
-//!   that pre-date v2 (`ENOTTY` / `ENOSYS`). Use this when you don't care
-//!   which path runs, only that the search completes.
+//!   when the underlying driver doesn't support v2. This currently covers
+//!   FUSE drivers like `btrfs-fuse`, where the indirected-buffer pattern
+//!   can't survive a FUSE round trip (signalled with `ENOPROTOOPT`), and very
+//!   old kernels that predate v2 (`ENOTTY` or `ENOSYS`). Use this when you
+//!   don't care which path runs, only that the search completes.
 
 use crate::raw::{
     btrfs_ioc_tree_search, btrfs_ioc_tree_search_v2, btrfs_ioctl_search_args,
@@ -43,8 +43,8 @@ use std::{
 ///
 /// Items in a btrfs tree are ordered by this 136-bit compound value:
 /// `(objectid << 72) | (item_type << 64) | offset`.
-/// The three fields are not independent ranges — they form a single
-/// ordered tuple.
+/// The three fields are not independent ranges. They form a single ordered
+/// tuple.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Key {
     /// Object this key belongs to (e.g. inode number, tree ID, device ID).
@@ -78,11 +78,11 @@ impl Key {
 ///
 /// 1. Select a tree by `tree_id` (e.g. root tree, chunk tree, quota tree).
 /// 2. Return only items whose compound key `(objectid, item_type, offset)`
-///    falls within the inclusive range `[start, end]`.  Because the key is a
+///    falls within the inclusive range `[start, end]`. Because the key is a
 ///    compound tuple, the three components of `start` and `end` are not
-///    independent filters — they form a single ordered bound on the B-tree.
-///    This means items with unexpected types can appear if their compound key
-///    is between `start` and `end`; callbacks should filter on
+///    independent filters. They form a single ordered bound on the B-tree.
+///    Items with unexpected types can appear if their compound key is
+///    between `start` and `end`, so callbacks should filter on
 ///    `hdr.item_type` when they need a single type.
 /// 3. Trim results to only include items stored in metadata blocks whose
 ///    transaction ID falls within `[min_transid, max_transid]`.
@@ -159,7 +159,7 @@ impl SearchFilter {
 /// Metadata returned for each item found by [`tree_search`].
 ///
 /// The header fields are in host byte order (the kernel fills them in through
-/// the ioctl layer).  The accompanying `data` slice passed to the callback is
+/// the ioctl layer). The accompanying `data` slice passed to the callback is
 /// the raw on-disk item payload and is in **little-endian** byte order.
 #[derive(Debug, Clone, Copy)]
 pub struct SearchHeader {
@@ -196,10 +196,10 @@ const SEARCH_HEADER_SIZE: usize = mem::size_of::<btrfs_ioctl_search_header>();
 ///
 /// **Important:** the kernel treats `(min_objectid, min_type, min_offset)` and
 /// `(max_objectid, max_type, max_offset)` as compound tuple keys, not three
-/// independent range filters.  This means items whose type falls outside
+/// independent range filters. This means items whose type falls outside
 /// `[min_type, max_type]` CAN be returned when their compound key is between
 /// the min and max bounds (e.g. a type-144 item with a lower objectid than a
-/// type-132 item with a higher objectid).  Callbacks that need a single item
+/// type-132 item with a higher objectid). Callbacks that need a single item
 /// type must filter on `hdr.item_type` themselves.
 ///
 /// # Errors
@@ -208,7 +208,7 @@ const SEARCH_HEADER_SIZE: usize = mem::size_of::<btrfs_ioctl_search_header>();
 ///
 /// # Privileges
 ///
-/// Most trees require `CAP_SYS_ADMIN`.  The subvolume tree of the inode
+/// Most trees require `CAP_SYS_ADMIN`. The subvolume tree of the inode
 /// belonging to `fd` can be searched without elevated privileges by setting
 /// `key.tree_id = 0`.
 #[allow(clippy::needless_pass_by_value)] // SearchFilter is small but not Copy by design
@@ -231,7 +231,7 @@ pub fn tree_search(
             break;
         }
 
-        // Walk the result buffer.  We use raw pointer reads to avoid borrow
+        // Walk the result buffer. We use raw pointer reads to avoid borrow
         // checker conflicts: args.buf (read-only after the ioctl) and
         // args.key (mutated below for cursor advancement) are separate fields,
         // but a Rust reference to one would prevent mutation of the other.
@@ -240,10 +240,10 @@ pub fn tree_search(
         // * The ioctl has returned successfully, so args.buf contains nr valid
         //   (header, data) pairs totalling at most args.buf.len() bytes.
         // * buf_base is derived from args.buf which lives for the entire loop
-        //   body; it is not invalidated until args is dropped.
+        //   body, and is not invalidated until args is dropped.
         // * All raw reads are bounds-checked before dereferencing.
         // * The `data` slices passed to `f` do not outlive this loop
-        //   iteration — `f` takes `&[u8]`, not `&'static [u8]`.
+        //   iteration: `f` takes `&[u8]`, not `&'static [u8]`.
         let buf_base: *const u8 = args.buf.as_ptr().cast();
         let buf_cap = args.buf.len();
 
@@ -437,7 +437,7 @@ pub fn tree_search_v2(
     Ok(())
 }
 
-/// Try [`tree_search_v2`] first; if the driver can't serve v2,
+/// Try [`tree_search_v2`] first. If the driver can't serve v2,
 /// fall back to [`tree_search`] (v1) with the same filter and
 /// callback.
 ///
@@ -449,16 +449,16 @@ pub fn tree_search_v2(
 ///   issued with `FUSE_IOCTL_UNRESTRICTED`, which standard
 ///   `ioctl(2)` callers never set). Picked specifically because
 ///   no other path in the btrfs ioctl surface returns it.
-/// - `ENOTSUP` / `EOPNOTSUPP`: generic "op not supported on this
+/// - `ENOTSUP` or `EOPNOTSUPP`: generic "op not supported on this
 ///   endpoint", e.g. another FUSE-btrfs implementation.
-/// - `ENOTTY` / `ENOSYS`: very old kernels that pre-date v2
-///   (added in 3.18) returning "unknown ioctl" / "function not
+/// - `ENOTTY` or `ENOSYS`: very old kernels that predate v2
+///   (added in 3.18) returning "unknown ioctl" or "function not
 ///   implemented".
 ///
 /// **Safety against duplicate items.** v1 is only attempted when
 /// v2 errors *before* invoking the user callback. If v2 fails
 /// mid-walk (a transient condition we don't see in practice),
-/// the v2 error is propagated unchanged — re-running v1 from
+/// the v2 error is propagated unchanged. Re-running v1 from
 /// scratch would re-deliver items the caller already saw.
 ///
 /// `buf_size` controls the v2 buffer size in bytes (default
@@ -467,10 +467,10 @@ pub fn tree_search_v2(
 ///
 /// # Errors
 ///
-/// Returns the v2 error if the callback was already invoked when
-/// it surfaced; the v1 error if v2 was unsupported and v1 also
-/// failed; or the callback's error if either path's callback
-/// returns one.
+/// Returns the v2 error if it surfaced after the callback was
+/// already invoked, the v1 error if v2 was unsupported and v1
+/// also failed, or the callback's error if either path's
+/// callback returns one.
 #[allow(clippy::needless_pass_by_value)]
 pub fn tree_search_auto(
     fd: BorrowedFd,
@@ -522,7 +522,7 @@ fn fill_search_key(sk: &mut btrfs_ioctl_search_key, filter: &SearchFilter) {
 ///
 /// The kernel interprets `(min_objectid, min_type, min_offset)` as a compound
 /// tuple key, so all three fields must be updated together to point past the
-/// last returned item.  Advancing only `min_offset` while leaving
+/// last returned item. Advancing only `min_offset` while leaving
 /// `min_objectid` at its original value would cause items from lower objectids
 /// that were already returned to satisfy the new minimum and be yielded again.
 ///
@@ -575,8 +575,6 @@ mod tests {
         unsafe { mem::zeroed() }
     }
 
-    // --- SearchFilter constructors ---
-
     #[test]
     fn for_type_covers_all_objectids_and_offsets() {
         let f = SearchFilter::for_type(5, 132);
@@ -602,8 +600,6 @@ mod tests {
         assert_eq!(f.start.offset, 0);
         assert_eq!(f.end.offset, u64::MAX);
     }
-
-    // --- fill_search_key ---
 
     #[test]
     fn fill_search_key_copies_all_fields() {
@@ -635,8 +631,6 @@ mod tests {
         assert_eq!(sk.max_transid, 80);
     }
 
-    // --- advance_cursor: normal case ---
-
     #[test]
     fn advance_increments_offset() {
         let mut sk = zeroed_search_key();
@@ -649,8 +643,8 @@ mod tests {
 
     #[test]
     fn advance_tracks_objectid_from_last_item() {
-        // This is the bug that was fixed: the cursor must track the last
-        // item's objectid, not leave min_objectid at its original value.
+        // The cursor must track the last item's objectid, not leave
+        // min_objectid at its original value.
         let mut sk = zeroed_search_key();
         sk.min_objectid = 100; // original search started at 100
         let last = header(300, 132, 50); // batch ended at objectid 300
@@ -670,8 +664,6 @@ mod tests {
         assert_eq!(sk.min_offset, 43);
     }
 
-    // --- advance_cursor: offset overflow ---
-
     #[test]
     fn advance_offset_overflow_bumps_type() {
         let mut sk = zeroed_search_key();
@@ -681,8 +673,6 @@ mod tests {
         assert_eq!(sk.min_type, 133);
         assert_eq!(sk.min_offset, 0);
     }
-
-    // --- advance_cursor: type overflow ---
 
     #[test]
     fn advance_type_overflow_bumps_objectid() {
@@ -694,16 +684,12 @@ mod tests {
         assert_eq!(sk.min_offset, 0);
     }
 
-    // --- advance_cursor: full keyspace exhaustion ---
-
     #[test]
     fn advance_all_overflow_returns_false() {
         let mut sk = zeroed_search_key();
         let last = header(u64::MAX, u32::MAX, u64::MAX);
         assert!(!advance_cursor(&mut sk, &last));
     }
-
-    // --- advance_cursor: edge cases ---
 
     #[test]
     fn advance_zero_key() {

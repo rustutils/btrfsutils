@@ -6,10 +6,10 @@
 //! Three layers, all wired together by `Transaction::commit`'s
 //! convergence loop:
 //!
-//! 1. Pure data types and coalescing/cancellation helpers
+//! 1. Pure data types and coalescing and cancellation helpers
 //!    ([`Range`], [`BlockGroupRangeDeltas`]) accumulate the
 //!    allocated and freed ranges produced during a transaction.
-//!    Add / drop pairs to the same range cancel.
+//!    Add and drop pairs on the same range cancel.
 //! 2. The pure delta-apply step folds those deltas into a
 //!    per-block-group free-range list.
 //! 3. The on-disk FST update step (driven from
@@ -129,8 +129,8 @@ impl RangeList {
     /// invariants.
     ///
     /// If the subtracted range is not fully covered by existing ranges,
-    /// the uncovered portions are silently ignored — callers that want
-    /// to detect this should use the F2 apply function which performs
+    /// the uncovered portions are silently ignored. Callers that want
+    /// to detect this should use [`apply_delta`], which performs
     /// extent-tree consistency checks.
     pub fn subtract(&mut self, range: Range) {
         if range.is_empty() {
@@ -160,7 +160,7 @@ impl RangeList {
             } else {
                 None
             };
-            // Replace r with left/right pieces.
+            // Replace r with the left and right pieces.
             match (left, right) {
                 (None, None) => {
                     self.ranges.remove(i);
@@ -278,7 +278,7 @@ impl BlockGroupRangeDeltas {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyError {
     /// The block group's `FREE_SPACE_INFO` item has the BITMAPS flag
-    /// set. Bitmap layout is out of scope for v1; the caller must
+    /// set. Bitmap layout is not supported. The caller must
     /// detect this before computing the delta.
     BitmapLayout { bg_start: u64 },
     /// An allocated range is not fully contained inside an existing
@@ -338,8 +338,8 @@ impl std::error::Error for ApplyError {}
 /// is inconsistent with the existing state.
 ///
 /// This function is pure: it does not read or write the on-disk FST.
-/// Stage F3 calls it from the commit path with input read out of the
-/// FST and writes the output back.
+/// The commit path's free space tree update calls it with input read
+/// out of the FST and writes the output back.
 pub fn apply_delta(
     bg_start: u64,
     bg: Range,
@@ -523,8 +523,8 @@ mod tests {
     fn subtract_spanning_multiple_ranges() {
         let mut l = rl(&[(100, 10), (200, 10), (300, 10)]);
         l.subtract(Range::new(105, 200));
-        // 100..105 remains; 200..210 fully removed; 300..305 removed,
-        // 305..310 remains.
+        // 100..105 remains, 200..210 is fully removed, 300..305 is
+        // removed, and 305..310 remains.
         assert_eq!(collect(&l), &[(100, 5), (305, 5)]);
     }
 
@@ -716,7 +716,7 @@ mod tests {
         d.record_allocated(0, Range::new(100, 10));
         d.record_freed(1000, Range::new(100, 10));
         d.cancel_within_transaction();
-        // Different block groups; nothing cancels.
+        // Different block groups, so nothing cancels.
         assert_eq!(d.len(), 2);
     }
 }

@@ -5,8 +5,8 @@
 //! tree root pointers, and tracks which blocks have been modified during the
 //! current transaction.
 //!
-//! Open a device or image with [`Filesystem::open`], then use the read/write
-//! methods to access tree blocks through `ExtentBuffer`.
+//! Open a device or image with [`Filesystem::open`], then use the read and
+//! write methods to access tree blocks through `ExtentBuffer`.
 
 use crate::buffer::ExtentBuffer;
 use btrfs_disk::{
@@ -68,7 +68,7 @@ pub struct Filesystem<R> {
     /// cannot leak the override into normal operation.
     bg_tree_override: Option<u64>,
     /// Per-device superblock `dev_item` snapshots taken at open time.
-    /// The key is `devid`; the value is that device's local `dev_item`
+    /// The key is `devid`. The value is that device's local `dev_item`
     /// (which encodes the device's identity: `devid`, `dev_uuid`,
     /// per-device `bytes_used`, etc.). On commit, each device's
     /// superblock is rewritten with these per-device fields preserved
@@ -78,10 +78,10 @@ pub struct Filesystem<R> {
 }
 
 impl<R: Read + Write + Seek> Filesystem<R> {
-    /// Open a btrfs filesystem from a readable+writable+seekable handle.
+    /// Open a btrfs filesystem from a readable, writable, and seekable handle.
     ///
     /// Performs the full bootstrap sequence (superblock, chunk cache, root
-    /// tree), then wraps the result into an `Filesystem` ready for transactions.
+    /// tree), then wraps the result into a `Filesystem` ready for transactions.
     ///
     /// # Errors
     ///
@@ -174,7 +174,7 @@ impl<R: Read + Write + Seek> Filesystem<R> {
     ///
     /// Every device referenced by the filesystem's chunk tree must be
     /// present in `devices`. Each device's superblock is read and
-    /// validated against the map key; all devices must share the same
+    /// validated against the map key, and all devices must share the same
     /// `fsid`. The bootstrap fails with a clear error if any of these
     /// invariants is violated.
     ///
@@ -647,7 +647,7 @@ mod tests {
     use super::*;
 
     // Filesystem requires a real filesystem image to test meaningfully.
-    // These are basic structural tests; full integration tests will use
+    // These are basic structural tests. The integration tests use
     // temporary images created by btrfs-mkfs.
 
     #[test]

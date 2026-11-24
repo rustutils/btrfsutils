@@ -2,8 +2,8 @@
 //!
 //! Verifies that:
 //! 1. Tree-block reads hit the LRU cache on the second access.
-//! 2. `Filesystem` operations populate the cache (so a second op
-//!    re-uses tree blocks fetched by the first).
+//! 2. `Filesystem` operations populate the cache, so a second op
+//!    reuses tree blocks fetched by the first.
 
 use btrfs_fs::{Filesystem, LruTreeBlockCache};
 use std::{
@@ -44,9 +44,8 @@ fn fixture_path() -> &'static Path {
     path
 }
 
-/// Direct test of the `LruTreeBlockCache` against a `BlockReader`:
-/// reading the same logical address twice should produce one miss
-/// followed by one hit.
+/// Direct test of `LruTreeBlockCache` with a `BlockReader`: reading
+/// the same logical address twice should give one miss, then one hit.
 #[test]
 fn tree_block_cache_hits_on_repeat_read() {
     use btrfs_disk::reader::filesystem_open;
@@ -55,8 +54,8 @@ fn tree_block_cache_hits_on_repeat_read() {
     let cache = Arc::new(LruTreeBlockCache::new(1024));
     fs.reader.set_cache(Some(cache.clone()));
 
-    // Pick a tree root we know exists — the FS tree root from the
-    // root-tree map.
+    // Use a tree root that must exist: the FS tree root from the
+    // root tree map.
     let (fs_tree_root, _) = fs.tree_roots[&5];
 
     let _ = fs.reader.read_tree_block(fs_tree_root).unwrap();
@@ -75,9 +74,9 @@ fn tree_block_cache_hits_on_repeat_read() {
     assert_eq!(stats_after_second.insertions, 1);
 }
 
-/// Tree-block cache integrates with `Filesystem`: repeating an
-/// operation grows the hit counter while keeping the miss counter
-/// pinned (no new disk reads).
+/// The tree-block cache is wired into `Filesystem`: repeating an
+/// operation grows the hit counter while the miss counter stays put
+/// (no new disk reads).
 #[tokio::test]
 async fn filesystem_repeat_op_hits_cache() {
     let fs = Filesystem::open(File::open(fixture_path()).unwrap()).unwrap();
@@ -92,7 +91,7 @@ async fn filesystem_repeat_op_hits_cache() {
     );
     let cold_misses = after_first.misses;
 
-    // Subsequent identical lookups: should hit, not miss.
+    // Repeated identical lookups should hit, not miss.
     for _ in 0..5 {
         let result = fs.lookup(root, b"large.bin").await.unwrap();
         assert!(result.is_some());
@@ -107,9 +106,9 @@ async fn filesystem_repeat_op_hits_cache() {
         "warm lookups should produce hits; stats={after_warm:?}",
     );
 
-    // Reads of the same file should also benefit — the second `read`
-    // skips the FS-tree walk entirely (extent-map cache) and gets
-    // any tree-block lookups it needs from the cache.
+    // Reads of the same file benefit too: the second `read` skips the
+    // FS tree walk (extent-map cache) and gets any tree blocks it
+    // needs from the cache.
     let _ = fs.read(ino, 0, 1024).await.unwrap();
     let after_first_read = fs.tree_block_cache_stats();
     let _ = fs.read(ino, 0, 1024).await.unwrap();

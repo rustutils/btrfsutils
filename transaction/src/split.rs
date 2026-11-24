@@ -158,7 +158,7 @@ pub fn split_leaf<R: Read + Write + Seek>(
     debug_assert_leaf_valid(old_leaf);
     debug_assert_leaf_valid(&new_leaf);
     // The new leaf's first key must be strictly greater than the old
-    // leaf's last key — the split must preserve global key ordering.
+    // leaf's last key. The split must preserve global key ordering.
     debug_assert!(
         key_cmp(
             &old_leaf.item_key(old_leaf.nritems() as usize - 1),
@@ -288,7 +288,7 @@ fn insert_ptr_in_parent<R: Read + Write + Seek>(
     let parent_level = find_parent_level_above(path, child_level as usize);
 
     if parent_level.is_none() {
-        // We're splitting the root — create a new root
+        // Splitting the root: create a new root.
         return create_new_root(
             trans,
             fs_info,

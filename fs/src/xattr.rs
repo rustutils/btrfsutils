@@ -3,9 +3,9 @@
 //! btrfs stores xattrs as `XATTR_ITEM` entries with the same `DirItem`
 //! wire format as directory entries: key `(ino, XATTR_ITEM, crc32c(name))`.
 //! The `DirItem.name` field is the xattr name and `DirItem.data` is the
-//! xattr value. Multiple xattrs with the same hash bucket share one item
-//! (packed `DirItem` list), so name lookup must scan all entries in the
-//! bucket after finding the item.
+//! xattr value. Xattrs whose names hash to the same value share one item
+//! (a packed `DirItem` list), so a name lookup must scan every entry in
+//! that item.
 
 use btrfs_disk::{
     items::DirItem,

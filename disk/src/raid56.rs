@@ -1,4 +1,4 @@
-//! # RAID5 / RAID6 parity computation
+//! # RAID5 and RAID6 parity computation
 //!
 //! Self-contained math for the parity stripes that btrfs's RAID5 and
 //! RAID6 profiles require. Two functions:
@@ -21,7 +21,7 @@
 //! byte sequence the on-disk format expects.
 //!
 //! The two-times multiplication table is precomputed at first use via
-//! [`std::sync::OnceLock`]; the cost is 256 byte writes once per
+//! [`std::sync::OnceLock`], at a cost of 256 byte writes once per
 //! process.
 
 use std::sync::OnceLock;
@@ -34,7 +34,7 @@ const RS_POLY: u8 = 0x1D;
 
 /// Lookup table for `x -> 2 * x` in GF(2^8) under [`RS_POLY`].
 ///
-/// Built once at first call; subsequent lookups are O(1).
+/// Built once at first call. Subsequent lookups are O(1).
 fn mul2_table() -> &'static [u8; 256] {
     static TABLE: OnceLock<[u8; 256]> = OnceLock::new();
     TABLE.get_or_init(|| {
@@ -42,9 +42,9 @@ fn mul2_table() -> &'static [u8; 256] {
         for (i, slot) in t.iter_mut().enumerate() {
             // i is bounded by 256 (array length), so the cast is exact.
             let x = u8::try_from(i).expect("table index < 256");
-            // Multiplication by 2 in GF(2^8) is a left shift; if the
+            // Multiplication by 2 in GF(2^8) is a left shift. If the
             // pre-shift high bit was set (so the result would overflow
-            // into x^8) reduce by XORing the polynomial.
+            // into x^8), reduce by XORing the polynomial.
             let shifted = x << 1;
             *slot = if x & 0x80 != 0 {
                 shifted ^ RS_POLY
@@ -62,17 +62,17 @@ fn mul2(x: u8) -> u8 {
     mul2_table()[x as usize]
 }
 
-/// Compute the RAID5/RAID6 P (XOR) stripe over `data_stripes`.
+/// Compute the RAID5 or RAID6 P (XOR) stripe over `data_stripes`.
 ///
-/// Every input slice must have the same length; the returned buffer has
-/// that length too. With zero data stripes, returns an empty buffer.
+/// Every input slice must have the same length, and the returned buffer
+/// has that length too. With zero data stripes, returns an empty buffer.
 ///
 /// # Panics
 ///
 /// Panics if the data stripes are not all the same length. Callers
 /// inside this crate construct the stripes from a single chunk row, so
-/// equal lengths are an invariant — the panic catches programmer
-/// errors only.
+/// equal lengths are an invariant. The panic only catches programmer
+/// errors.
 #[must_use]
 pub fn compute_p(data_stripes: &[&[u8]]) -> Vec<u8> {
     let Some(first) = data_stripes.first() else {
@@ -119,7 +119,7 @@ pub fn compute_p_q(data_stripes: &[&[u8]]) -> (Vec<u8>, Vec<u8>) {
     let mut p = vec![0u8; len];
     let mut q = vec![0u8; len];
 
-    // Walk stripes in order; each iteration mixes one column into both
+    // Walk stripes in order. Each iteration mixes one column into both
     // P (xor) and Q (mul2-then-xor).
     for stripe in data_stripes {
         for i in 0..len {
@@ -154,8 +154,8 @@ mod tests {
 
     #[test]
     fn mul2_doubling_is_associative_to_pow2() {
-        // Doubling x four times equals multiplying by 16 in GF(2^8);
-        // for x = 1 that should reach 16.
+        // Doubling x four times equals multiplying by 16 in GF(2^8).
+        // For x = 1 that should reach 16.
         let mut x = 1u8;
         for _ in 0..4 {
             x = mul2(x);
@@ -193,8 +193,8 @@ mod tests {
 
     #[test]
     fn compute_p_xor_of_self_is_zero() {
-        // Two copies of the same stripe XOR to zero — sanity check that
-        // there's no off-by-one mixing step or extra mul.
+        // Two copies of the same stripe XOR to zero. Checks that there's
+        // no off-by-one mixing step or extra mul.
         let s = [0xDEu8, 0xAD, 0xBE, 0xEF];
         let p = compute_p(&[&s, &s]);
         assert_eq!(p, vec![0; 4]);
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn compute_p_q_three_stripes_explicit() {
-        // Three stripes; reproduce the loop step by step:
+        // Three stripes. Reproduce the loop step by step:
         //   q after stripe 0: q1 = A
         //   q after stripe 1: q2 = mul2(A) ^ B
         //   q after stripe 2: q3 = mul2(mul2(A) ^ B) ^ C

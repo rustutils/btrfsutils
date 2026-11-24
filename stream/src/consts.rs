@@ -15,7 +15,7 @@ pub(crate) const STREAM_HEADER_LEN: usize = SEND_STREAM_MAGIC_LEN + 4;
 pub(crate) const CMD_HEADER_LEN: usize = 10;
 // TLV header: 2 bytes type + 2 bytes length = 4 bytes (inline at use site).
 
-// ── Command types ─────────────────────────────────────────────────
+// Command types.
 
 pub(crate) const BTRFS_SEND_C_SUBVOL: u16 = 1;
 pub(crate) const BTRFS_SEND_C_SNAPSHOT: u16 = 2;
@@ -46,7 +46,7 @@ pub(crate) const BTRFS_SEND_C_ENCODED_WRITE: u16 = 25;
 // v3 commands.
 pub(crate) const BTRFS_SEND_C_ENABLE_VERITY: u16 = 26;
 
-// ── Attribute types ───────────────────────────────────────────────
+// Attribute types.
 
 pub(crate) const BTRFS_SEND_A_UUID: u16 = 1;
 pub(crate) const BTRFS_SEND_A_CTRANSID: u16 = 2;

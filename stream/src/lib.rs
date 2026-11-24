@@ -1,7 +1,7 @@
 //! # btrfs-stream: btrfs send stream parser and receive operations
 //!
 //! This crate handles the btrfs send stream format: a binary TLV protocol
-//! used by `btrfs send` / `btrfs receive` to serialize and replay filesystem
+//! used by `btrfs send` and `btrfs receive` to serialize and replay filesystem
 //! changes between subvolume snapshots.
 //!
 //! ## Stream parsing (default, platform-independent)

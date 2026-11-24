@@ -2,7 +2,7 @@
 //!
 //! A btrfs filesystem is organized as a collection of B-trees. Each tree is
 //! stored as a hierarchy of blocks (nodesize bytes each, typically 16 KiB).
-//! Internal nodes contain key pointers to child blocks; leaves contain items
+//! Internal nodes contain key pointers to child blocks. Leaves contain items
 //! with their associated data payloads.
 //!
 //! This module provides typed Rust structs for all tree block components and
@@ -39,7 +39,7 @@ pub enum KeyType {
     /// Stores a block of the Merkle tree used for fs-verity verification.
     VerityMerkleItem,
     /// Orphan inode marker. Key: `(ORPHAN_OBJECTID, ORPHAN_ITEM, ino)`.
-    /// Created when an inode is unlinked while still open; cleaned up on
+    /// Created when an inode is unlinked while still open. Removed on
     /// mount or by orphan cleanup.
     OrphanItem,
     /// Directory log item (tree-log only). Key:
@@ -67,7 +67,7 @@ pub enum KeyType {
     /// range of data blocks.
     ExtentCsum,
     /// Tree root descriptor. Key: `(tree_objectid, ROOT_ITEM, 0)`. Stored
-    /// in the root tree; contains the root block pointer, generation,
+    /// in the root tree. Contains the root block pointer, generation,
     /// subvolume UUIDs, and timestamps.
     RootItem,
     /// Backreference from a child subvolume to its parent. Key:
@@ -105,11 +105,11 @@ pub enum KeyType {
     SharedBlockRef,
     /// Shared backref from a data extent via a parent tree block. Key:
     /// `(bytenr, SHARED_DATA_REF, parent_bytenr)`. Used for
-    /// snapshot-shared data extents; stores a reference count.
+    /// snapshot-shared data extents. Stores a reference count.
     SharedDataRef,
     /// Block group descriptor tracking space usage for a chunk. Key:
     /// `(logical_offset, BLOCK_GROUP_ITEM, length)`. Contains bytes used
-    /// and the chunk type/RAID profile flags.
+    /// and the chunk type and RAID profile flags.
     BlockGroupItem,
     /// Free space info for a block group in the free space tree. Key:
     /// `(block_group_offset, FREE_SPACE_INFO, block_group_length)`.
@@ -117,11 +117,11 @@ pub enum KeyType {
     FreeSpaceInfo,
     /// Free space extent in the free space tree. Key:
     /// `(start, FREE_SPACE_EXTENT, length)`. Represents a contiguous
-    /// free range; the item has no data payload.
+    /// free range. The item has no data payload.
     FreeSpaceExtent,
     /// Free space bitmap in the free space tree. Key:
     /// `(start, FREE_SPACE_BITMAP, length)`. A bitmap covering the
-    /// block group's address range; each bit represents one sector.
+    /// block group's address range. Each bit represents one sector.
     FreeSpaceBitmap,
     /// Physical extent mapping on a device. Key:
     /// `(devid, DEV_EXTENT, physical_offset)`. The inverse of a chunk
@@ -148,7 +148,7 @@ pub enum KeyType {
     /// exclusive bytes for a qgroup.
     QgroupInfo,
     /// Quota group limits. Key: `(level/subvolid, QGROUP_LIMIT, 0)`.
-    /// Caps referenced and/or exclusive space usage for a qgroup.
+    /// Caps referenced space, exclusive space, or both for a qgroup.
     QgroupLimit,
     /// Quota group relation. Key:
     /// `(child_qgroupid, QGROUP_RELATION, parent_qgroupid)`. Defines
@@ -235,8 +235,8 @@ impl KeyType {
     }
 
     /// Return the raw u8 key type value.
-    // All btrfs key type constants are defined to fit in u8 (they're the
-    // on-disk key type field); the u32 bindgen type is wider than necessary.
+    // All btrfs key type constants fit in u8 because they're stored in the
+    // on-disk key type field. The u32 bindgen type is wider than necessary.
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn to_raw(self) -> u8 {
@@ -360,7 +360,7 @@ pub enum ObjectId {
     DevTree,
     /// The default FS tree (objectid 5). Holds the filesystem content
     /// (inodes, directory entries, file extents) for the top-level
-    /// subvolume. Additional subvolumes/snapshots have objectids >= 256.
+    /// subvolume. Additional subvolumes and snapshots have objectids >= 256.
     FsTree,
     /// The root tree directory (objectid 6). A virtual directory entry
     /// in the root tree that links to the default subvolume.
@@ -372,7 +372,7 @@ pub enum ObjectId {
     /// and relation items for space accounting.
     QuotaTree,
     /// The UUID tree (objectid 9). Provides fast UUID-to-subvolume
-    /// lookups for send/receive operations.
+    /// lookups for send and receive.
     UuidTree,
     /// The free space tree (objectid 10). Tracks free space per block
     /// group using extent or bitmap items, replacing the older free
@@ -427,7 +427,7 @@ pub enum ObjectId {
     /// indicate that an extent is referenced by multiple trees.
     Multiple,
     /// First user-accessible objectid (256). Inode numbers in FS trees
-    /// start at this value; the root directory inode is always 256.
+    /// start at this value. The root directory inode is always 256.
     FirstFree,
     /// A numeric objectid that doesn't match any well-known value.
     Id(u64),
@@ -436,7 +436,7 @@ pub enum ObjectId {
 impl ObjectId {
     /// Convert a raw 64-bit objectid to an `ObjectId` variant.
     // Negative objectid constants (e.g. BTRFS_BALANCE_OBJECTID = -4) are i32
-    // in bindgen output; casting them to u64 intentionally produces the kernel's
+    // in bindgen output. Casting them to u64 intentionally produces the kernel's
     // two's-complement representation (e.g. 0xFFFFFFFF_FFFFFFFC).
     #[must_use]
     #[allow(clippy::cast_sign_loss, clippy::cast_lossless)]
@@ -551,7 +551,7 @@ impl ObjectId {
         {
             return "FIRST_CHUNK_TREE".to_string();
         }
-        // DEV_EXTENT objectids are device IDs, not tree IDs — print as numbers
+        // DEV_EXTENT objectids are device IDs, not tree IDs, so print them as numbers.
         if key_type == KeyType::DeviceExtent {
             return raw.to_string();
         }
@@ -710,8 +710,8 @@ fn format_key_offset(key: &DiskKey) -> String {
 }
 
 bitflags::bitflags! {
-    /// Tree block header flags stored in `btrfs_header::flags` (lower 56 bits;
-    /// the upper 8 bits hold the backref revision).
+    /// Tree block header flags, stored in the lower 56 bits of
+    /// `btrfs_header::flags`. The upper 8 bits hold the backref revision.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct HeaderFlags: u64 {
         const WRITTEN = raw::BTRFS_HEADER_FLAG_WRITTEN as u64;
@@ -852,15 +852,14 @@ impl KeyPtr {
     }
 }
 
-/// A leaf item descriptor: key + offset/size into the leaf's data area.
+/// A leaf item descriptor: the key plus the offset and size of its data.
 #[derive(Debug, Clone, Copy)]
 pub struct Item {
     /// The three-part key that identifies this item (objectid, type, offset).
     pub key: DiskKey,
-    /// Byte offset of this item's data, relative to the end of the item array
-    /// (i.e. relative to `HEADER_SIZE + nritems * ITEM_SIZE`... but actually
-    /// it's an offset from the start of the leaf data area in the C code,
-    /// which starts right after the header). See `Leaf::item_data()`.
+    /// Byte offset of this item's data, relative to the start of the leaf
+    /// data area, which begins right after the header. See
+    /// [`TreeBlock::item_data`].
     pub offset: u32,
     /// Size of this item's data in bytes.
     pub size: u32,
@@ -899,7 +898,7 @@ pub enum TreeBlock {
     Leaf {
         /// The tree block header.
         header: Header,
-        /// Sorted item descriptors (key + offset/size into the data area).
+        /// Sorted item descriptors (key, data offset, and data size).
         items: Vec<Item>,
         /// The full block data, so item formatters can extract payloads.
         data: Vec<u8>,

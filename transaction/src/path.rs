@@ -11,7 +11,7 @@ use crate::buffer::{BTRFS_MAX_LEVEL, ExtentBuffer};
 ///
 /// After `search_slot` completes, `nodes[level]` holds the extent buffer at
 /// that level, and `slots[level]` holds the slot index within that buffer.
-/// Level 0 is the leaf; higher levels are internal nodes up to the root.
+/// Level 0 is the leaf. Higher levels are internal nodes up to the root.
 pub struct BtrfsPath {
     /// Extent buffers at each level of the path.
     pub nodes: [Option<ExtentBuffer>; BTRFS_MAX_LEVEL],

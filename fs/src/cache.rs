@@ -2,21 +2,20 @@
 //!
 //! Three caches sit on the read path:
 //!
-//! - [`LruTreeBlockCache`] — a [`btrfs_disk::reader::TreeBlockCache`] impl
-//!   keyed by logical address. Wired into the `BlockReader` so every
-//!   tree walk benefits transparently.
-//! - [`InodeCache`] — `Inode` → parsed `InodeItem`. Hot path for
-//!   `getattr` and the inode lookups inside `lookup` / `readlink` /
+//! - [`LruTreeBlockCache`]: a [`btrfs_disk::reader::TreeBlockCache`] impl
+//!   keyed by logical address. Wired into the `BlockReader`, so every
+//!   tree walk uses it.
+//! - [`InodeCache`]: `Inode` → parsed `InodeItem`. Hot path for
+//!   `getattr` and the inode lookups in `lookup`, `readlink`, and
 //!   `read`.
-//! - [`ExtentMapCache`] — `Inode` → sorted list of `EXTENT_DATA`
-//!   records for that file. Built lazily on first read and reused for
-//!   subsequent reads of the same file.
+//! - [`ExtentMapCache`]: `Inode` → sorted list of `EXTENT_DATA`
+//!   records for that file. Built on first read and reused for later
+//!   reads of the same file.
 //!
-//! All three use interior mutability behind a `Mutex` so they're
+//! All three use interior mutability behind a `Mutex`, so they're
 //! `Send + Sync` and shareable through the `Arc<Inner>` filesystem
-//! handle. `Mutex` rather than `RwLock` because LRU mutation happens
-//! on every access (touching MRU order), so even a "read" needs
-//! exclusive access to the cache structure.
+//! handle. `Mutex` rather than `RwLock` because every LRU access
+//! updates MRU order, so even a lookup needs exclusive access.
 
 use crate::Inode;
 use btrfs_disk::{
@@ -44,13 +43,13 @@ pub(crate) const INODE_CACHE_DEFAULT_ENTRIES: usize = 4096;
 pub(crate) const EXTENT_MAP_CACHE_DEFAULT_ENTRIES: usize = 1024;
 
 /// Capacities for the three caches a [`crate::Filesystem`] holds.
-/// Pass to [`crate::Filesystem::open_with_caches`] /
+/// Pass to [`crate::Filesystem::open_with_caches`] or
 /// [`crate::Filesystem::open_subvol_with_caches`] to override the
-/// defaults — useful for memory-constrained embedders or
-/// benchmarking the cold path.
+/// defaults, for memory-constrained embedders or benchmarking the
+/// cold path.
 ///
-/// All three values must be `> 0`; the underlying LRU caches reject
-/// zero-capacity construction. Use [`CacheConfig::no_cache`] for the
+/// All three values must be `> 0`. The underlying LRU caches reject
+/// zero capacity. Use [`CacheConfig::no_cache`] for the
 /// minimum-viable single-entry caches.
 #[derive(Debug, Clone, Copy)]
 pub struct CacheConfig {
@@ -75,9 +74,9 @@ impl Default for CacheConfig {
 
 impl CacheConfig {
     /// Smallest viable configuration: each cache holds a single
-    /// entry. Useful for benchmarking the cold path or when the
-    /// embedder wants to disable caching entirely. The LRU
-    /// implementations reject `0`, so this is the actual floor.
+    /// entry. Useful for benchmarking the cold path or to effectively
+    /// disable caching. The LRU implementations reject `0`, so this is
+    /// the floor.
     #[must_use]
     pub fn no_cache() -> Self {
         Self {
@@ -88,9 +87,8 @@ impl CacheConfig {
     }
 }
 
-/// Live counters for an [`LruTreeBlockCache`]. Useful for tests,
-/// benchmarks, and embedders who want to expose cache hit ratios via
-/// metrics.
+/// Live counters for an [`LruTreeBlockCache`], for tests, benchmarks,
+/// and embedders that export cache hit ratios as metrics.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CacheStats {
     pub hits: u64,
@@ -101,8 +99,8 @@ pub struct CacheStats {
 
 /// LRU-evicting [`TreeBlockCache`] keyed by logical address.
 ///
-/// Hit/miss/insertion counters are tracked via atomics so reading
-/// `stats()` doesn't contend with cache traffic.
+/// Counters are atomics, so reading `stats()` doesn't contend with
+/// cache traffic.
 pub struct LruTreeBlockCache {
     inner: Mutex<LruCache<u64, Arc<TreeBlock>>>,
     hits: AtomicU64,
@@ -126,7 +124,7 @@ impl LruTreeBlockCache {
         }
     }
 
-    /// Snapshot of the current hit/miss/insertion counters.
+    /// Snapshot of the current counters.
     #[must_use]
     pub fn stats(&self) -> CacheStats {
         CacheStats {
@@ -140,8 +138,8 @@ impl LruTreeBlockCache {
 
 impl TreeBlockCache for LruTreeBlockCache {
     fn get(&self, addr: u64) -> Option<Arc<TreeBlock>> {
-        // `LruCache::get` mutates MRU order, so we need exclusive
-        // access. `&self` is fine because we use interior mutability.
+        // `LruCache::get` updates MRU order, so it needs the lock even
+        // for a lookup.
         let hit = self.inner.lock().unwrap().get(&addr).map(Arc::clone);
         if hit.is_some() {
             self.hits.fetch_add(1, Ordering::Relaxed);
@@ -162,8 +160,8 @@ impl TreeBlockCache for LruTreeBlockCache {
     }
 }
 
-/// LRU cache mapping `Inode` → parsed `InodeItem`. Stored as `Arc<...>`
-/// so cache lookups don't have to copy the 160-byte struct.
+/// LRU cache mapping `Inode` → parsed `InodeItem`. Values are `Arc`s
+/// so lookups don't copy the 160-byte struct.
 pub(crate) struct InodeCache {
     inner: Mutex<LruCache<Inode, Arc<InodeItem>>>,
 }
@@ -185,17 +183,17 @@ impl InodeCache {
         self.inner.lock().unwrap().put(ino, item);
     }
 
-    /// Drop a single entry. Wired to FUSE `forget` so the kernel's
-    /// reference-count signal frees memory ahead of LRU eviction;
-    /// also called by upcoming write ops (F9+) for invalidation.
+    /// Drop a single entry. Called from FUSE `forget` so memory is
+    /// freed when the kernel drops its reference, ahead of LRU
+    /// eviction. Future write operations will use it for invalidation.
     pub(crate) fn invalidate(&self, ino: Inode) {
         self.inner.lock().unwrap().pop(&ino);
     }
 }
 
-/// A single `EXTENT_DATA` item collected for a file. Mirrors the
-/// shape used by the read path so cache hits can feed straight into
-/// `read::read_file` without re-parsing.
+/// A single `EXTENT_DATA` item collected for a file. Has the shape the
+/// read path uses, so cache hits feed straight into `read::read_file`
+/// without re-parsing.
 #[derive(Clone)]
 pub(crate) struct ExtentRecord {
     pub file_pos: u64,
@@ -211,8 +209,8 @@ pub(crate) struct ExtentMap {
     pub records: Vec<ExtentRecord>,
 }
 
-/// LRU cache mapping `Inode` → its full extent map. Built lazily on
-/// the first `read` of a file; reused for all subsequent reads.
+/// LRU cache mapping `Inode` → its full extent map. Built on the first
+/// `read` of a file and reused for later reads.
 pub(crate) struct ExtentMapCache {
     inner: Mutex<LruCache<Inode, Arc<ExtentMap>>>,
 }
@@ -234,9 +232,9 @@ impl ExtentMapCache {
         self.inner.lock().unwrap().put(ino, map);
     }
 
-    /// Drop a single entry. Wired to FUSE `forget` so the kernel's
-    /// reference-count signal frees memory ahead of LRU eviction;
-    /// also called by upcoming write ops (F9+) for invalidation.
+    /// Drop a single entry. Called from FUSE `forget` so memory is
+    /// freed when the kernel drops its reference, ahead of LRU
+    /// eviction. Future write operations will use it for invalidation.
     pub(crate) fn invalidate(&self, ino: Inode) {
         self.inner.lock().unwrap().pop(&ino);
     }
@@ -244,11 +242,9 @@ impl ExtentMapCache {
 
 #[cfg(test)]
 mod tests {
-    //! Cache mechanics are exercised end-to-end by `fs/tests/basic.rs`
-    //! and `fs/tests/cache.rs`. The unit-test surface here would have
-    //! to construct an `InodeItem` from scratch (16+ fields including
-    //! a `Timespec` quartet and bitflags) just to prove that an
-    //! `lru::LruCache` evicts correctly, which would test the upstream
-    //! crate more than our wrapper. Skipping in favour of integration
-    //! coverage.
+    //! Cache behaviour is tested end-to-end by `fs/tests/basic.rs` and
+    //! `fs/tests/cache.rs`. A unit test here would have to build an
+    //! `InodeItem` from scratch (16+ fields, four `Timespec`s, bitflags)
+    //! only to show that `lru::LruCache` evicts correctly, which tests
+    //! the upstream crate rather than this wrapper.
 }

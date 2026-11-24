@@ -79,7 +79,7 @@ fn scrub_cancel_test() {
 
     std::thread::sleep(std::time::Duration::from_millis(100));
 
-    // Cancel — may return ENOTCONN if scrub already finished.
+    // Cancel. May return ENOTCONN if the scrub already finished.
     match scrub_cancel(mnt.fd()) {
         Ok(()) => {}
         Err(Errno::ENOTCONN) => {}

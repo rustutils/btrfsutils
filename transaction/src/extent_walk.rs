@@ -41,12 +41,12 @@ const EXTENT_TREE_ID: u64 = 2;
 /// `[bg_start, bg_start + bg_length)`, calling `visit` once per item
 /// in ascending logical order.
 ///
-/// `EXTENT_ITEM` keys encode the byte length in the key offset;
+/// `EXTENT_ITEM` keys encode the byte length in the key offset.
 /// `METADATA_ITEM` keys encode the level in the key offset, so the
 /// extent length is taken from `fs_info.nodesize`. Both data and
 /// metadata extents are reported (mixed block groups are handled
 /// transparently because the walker keys off addresses, not on a
-/// data/metadata classification).
+/// data or metadata classification).
 ///
 /// Other extent-tree item types (`TREE_BLOCK_REF`, `EXTENT_DATA_REF`,
 /// `BLOCK_GROUP_ITEM`, etc.) whose compound key happens to fall
@@ -55,7 +55,7 @@ const EXTENT_TREE_ID: u64 = 2;
 /// The walker stops at the first key whose objectid is at or past
 /// `bg_start + bg_length`. It also stops if the visitor returns an
 /// error, surfacing that error to the caller. The compound-key
-/// search may return items whose key type is outside the range; the
+/// search may return items whose key type is outside the range. The
 /// internal filter handles that.
 ///
 /// Read-only: takes no transaction handle and never COWs.
@@ -185,7 +185,7 @@ where
 /// trailing gap after the last) in ascending order.
 ///
 /// `allocated` must be sorted by `start` and contain no overlapping
-/// or out-of-bounds extents; this is the invariant that
+/// or out-of-bounds extents. This is the invariant that
 /// [`walk_block_group_extents`] enforces.
 ///
 /// # Errors

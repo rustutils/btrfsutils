@@ -1,7 +1,7 @@
 //! # Block group space usage: how much space each chunk type allocates and uses
 //!
 //! Reports the allocated and used byte counts for each combination of block
-//! group type (data, metadata, system) and RAID profile.  This is the data
+//! group type (data, metadata, system) and RAID profile. This is the data
 //! underlying the `btrfs filesystem df` command.
 
 use crate::raw::{
@@ -13,16 +13,17 @@ use std::{
     os::{fd::AsRawFd, unix::io::BorrowedFd},
 };
 
-/// Space usage information for one block group type/profile combination.
+/// Space usage information for one combination of block group type and
+/// profile.
 ///
 /// Returned by [`space_info`]. The `flags` field describes the chunk type and
-/// RAID profile; `total_bytes` and `used_bytes` are the allocated and in-use
-/// byte counts respectively.
+/// RAID profile. `total_bytes` and `used_bytes` are the allocated and in-use
+/// byte counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpaceInfo {
     /// Block group type and RAID profile flags for this space category.
     pub flags: BlockGroupFlags,
-    /// Total bytes allocated to block groups of this type/profile.
+    /// Total bytes allocated to block groups of this type and profile.
     pub total_bytes: u64,
     /// Bytes actually in use within those block groups.
     pub used_bytes: u64,
@@ -54,21 +55,22 @@ impl From<btrfs_ioctl_space_info> for SpaceInfo {
 /// Query space usage by block group type for the filesystem referred to by
 /// `fd`.
 ///
-/// Returns one [`SpaceInfo`] entry per block group type/profile combination.
+/// Returns one [`SpaceInfo`] entry per combination of block group type and
+/// profile.
 ///
 /// Uses a two-phase ioctl call: the first call with `space_slots = 0`
 /// retrieves the entry count, and the second call retrieves all entries.
 /// The entry count can change between calls if the kernel allocates new
-/// block groups concurrently; this is benign (the kernel fills at most
-/// `space_slots` entries and the second call will simply return fewer
-/// than expected).
+/// block groups concurrently. This is benign: the kernel fills at most
+/// `space_slots` entries, and the second call simply returns fewer than
+/// expected.
 ///
 /// # Errors
 ///
 /// Returns `Err` if the ioctl fails.
 #[allow(clippy::cast_possible_truncation)] // space count always fits in usize
 pub fn space_info(fd: BorrowedFd) -> nix::Result<Vec<SpaceInfo>> {
-    // Phase 1: query with space_slots = 0 to discover the number of entries.
+    // First call: query with space_slots = 0 to discover the number of entries.
     let mut args: btrfs_ioctl_space_args = unsafe { mem::zeroed() };
     unsafe { btrfs_ioc_space_info(fd.as_raw_fd(), &raw mut args) }?;
     let count = args.total_spaces as usize;
@@ -77,7 +79,7 @@ pub fn space_info(fd: BorrowedFd) -> nix::Result<Vec<SpaceInfo>> {
         return Ok(Vec::new());
     }
 
-    // Phase 2: allocate a buffer large enough to hold the header plus all
+    // Second call: allocate a buffer large enough to hold the header plus all
     // entries, then call again with space_slots set to the count.
     //
     // We use Vec<u64> rather than Vec<u8> to guarantee 8-byte alignment,

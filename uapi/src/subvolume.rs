@@ -2,7 +2,7 @@
 //!
 //! Subvolumes are independently snapshotable subtrees within a btrfs filesystem.
 //! Snapshots are subvolumes created as copy-on-write clones of an existing
-//! subvolume.  This module covers the full lifecycle: creating and deleting
+//! subvolume. This module covers the full lifecycle: creating and deleting
 //! subvolumes and snapshots, reading subvolume metadata and flags, listing all
 //! subvolumes in a filesystem, and getting or setting the default subvolume
 //! that is mounted when no subvolume is explicitly requested.
@@ -35,14 +35,14 @@ use std::{
 };
 use uuid::Uuid;
 
-/// The top-level subvolume (FS tree); objectid 5, always present.
+/// The top-level subvolume (FS tree). Objectid 5, always present.
 ///
 /// Returned by [`subvolume_default_get`] when no explicit default has been set.
 pub const FS_TREE_OBJECTID: u64 = BTRFS_FS_TREE_OBJECTID as u64;
 
 bitflags! {
-    /// Flags on a btrfs subvolume (the `flags` field of the root item /
-    /// `BTRFS_IOC_SUBVOL_{GET,SET}FLAGS`).
+    /// Flags on a btrfs subvolume (the `flags` field of the root item, as
+    /// used by `BTRFS_IOC_SUBVOL_{GET,SET}FLAGS`).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SubvolumeFlags: u64 {
         /// Subvolume is read-only.
@@ -104,7 +104,7 @@ pub struct SubvolumeInfo {
 pub struct SubvolumeListItem {
     /// Root ID (subvolume ID).
     pub root_id: u64,
-    /// Root ID of the parent subvolume (`0` if unknown / not found).
+    /// Root ID of the parent subvolume (`0` if unknown or not found).
     pub parent_id: u64,
     /// Inode of the directory in the parent that contains this subvolume.
     pub dir_id: u64,
@@ -125,7 +125,7 @@ pub struct SubvolumeListItem {
     /// Subvolume name (the leaf name within its parent).
     ///
     /// Full path resolution relative to the filesystem root requires
-    /// `BTRFS_IOC_INO_LOOKUP` and is not yet implemented; this field contains
+    /// `BTRFS_IOC_INO_LOOKUP` and is not yet implemented. This field contains
     /// only the leaf name as stored in the root backref item.
     pub name: String,
 }
@@ -138,8 +138,8 @@ fn set_v2_name(
     name: &CStr,
 ) -> nix::Result<()> {
     let bytes = name.to_bytes(); // excludes nul terminator
-    // SAFETY: name is the active union member; the struct is already zeroed so
-    // the implicit nul terminator is already present.
+    // SAFETY: name is the active union member. The struct is already zeroed,
+    // so the implicit nul terminator is already present.
     let name_buf: &mut [c_char] = unsafe { &mut args.__bindgen_anon_2.name };
     if bytes.len() >= name_buf.len() {
         return Err(nix::errno::Errno::ENAMETOOLONG);
@@ -161,7 +161,7 @@ fn build_qgroup_inherit(qgroups: &[u64]) -> Vec<u64> {
     let num_u64 = total_size.div_ceil(8);
     let mut buf = vec![0u64; num_u64];
 
-    // SAFETY: buf is large enough and zeroed; we write through a properly
+    // SAFETY: buf is large enough and zeroed. We write through a properly
     // aligned pointer (btrfs_qgroup_inherit has 8-byte alignment).
     let inherit =
         unsafe { &mut *buf.as_mut_ptr().cast::<btrfs_qgroup_inherit>() };
@@ -195,17 +195,15 @@ fn set_qgroup_inherit(
 /// Create a new subvolume named `name` inside the directory referred to by
 /// `parent_fd`.
 ///
-/// `name` must be a plain leaf name (no slashes).  The caller is responsible
-/// for opening the correct parent directory.  If `qgroups` is non-empty, the
-/// new subvolume is added to those qgroups.  Requires `CAP_SYS_ADMIN`.
-///
-/// Errors: ENAMETOOLONG if `name` does not fit in the 4040-byte kernel
-/// buffer.  EEXIST if a subvolume or directory with that name already exists.
-/// `EPERM` without `CAP_SYS_ADMIN`.
+/// `name` must be a plain leaf name (no slashes). The caller is responsible
+/// for opening the correct parent directory. If `qgroups` is non-empty, the
+/// new subvolume is added to those qgroups. Requires `CAP_SYS_ADMIN`.
 ///
 /// # Errors
 ///
-/// Returns `Err` if the ioctl fails.
+/// Returns `Err` if the ioctl fails: `ENAMETOOLONG` if `name` does not fit in
+/// the 4040-byte kernel buffer, `EEXIST` if a subvolume or directory with that
+/// name already exists, `EPERM` without `CAP_SYS_ADMIN`.
 pub fn subvolume_create(
     parent_fd: BorrowedFd,
     name: &CStr,
@@ -229,7 +227,7 @@ pub fn subvolume_create(
 /// Delete the subvolume or snapshot named `name` from the directory referred
 /// to by `parent_fd`.
 ///
-/// `name` must be a plain leaf name (no slashes).  Requires `CAP_SYS_ADMIN`.
+/// `name` must be a plain leaf name (no slashes). Requires `CAP_SYS_ADMIN`.
 ///
 /// Deletion is asynchronous: the ioctl removes the directory entry
 /// immediately, but the kernel cleaner thread reclaims the on-disk data
@@ -254,8 +252,8 @@ pub fn subvolume_delete(parent_fd: BorrowedFd, name: &CStr) -> nix::Result<()> {
 /// Delete a subvolume by its numeric subvolume ID.
 ///
 /// `fd` must be an open file descriptor on the filesystem (typically the mount
-/// point).  Unlike `subvolume_delete`, this does not require knowing the
-/// subvolume's path.  Requires `CAP_SYS_ADMIN`.
+/// point). Unlike `subvolume_delete`, this does not require knowing the
+/// subvolume's path. Requires `CAP_SYS_ADMIN`.
 ///
 /// See [`subvolume_delete`] for details on commit visibility and async
 /// cleanup.
@@ -277,18 +275,16 @@ pub fn subvolume_delete_by_id(
 /// Create a snapshot of the subvolume referred to by `source_fd`, placing it
 /// as `name` inside the directory referred to by `parent_fd`.
 ///
-/// If `readonly` is `true` the new snapshot is created read-only.  If
+/// If `readonly` is `true` the new snapshot is created read-only. If
 /// `qgroups` is non-empty, the new snapshot is added to those qgroups.
 /// Requires `CAP_SYS_ADMIN`.
 ///
-/// Errors: ENAMETOOLONG if `name` does not fit in the 4040-byte kernel
-/// buffer.  EEXIST if a subvolume or directory with that name already exists.
-/// EROFS if `parent_fd` refers to a read-only subvolume.  EPERM without
-/// `CAP_SYS_ADMIN`.
-///
 /// # Errors
 ///
-/// Returns `Err` if the ioctl fails.
+/// Returns `Err` if the ioctl fails: `ENAMETOOLONG` if `name` does not fit in
+/// the 4040-byte kernel buffer, `EEXIST` if a subvolume or directory with that
+/// name already exists, `EROFS` if `parent_fd` refers to a read-only
+/// subvolume, `EPERM` without `CAP_SYS_ADMIN`.
 pub fn snapshot_create(
     parent_fd: BorrowedFd,
     source_fd: BorrowedFd,
@@ -330,16 +326,14 @@ pub fn subvolume_info(fd: BorrowedFd) -> nix::Result<SubvolumeInfo> {
 
 /// Query detailed information about a subvolume by its numeric root ID.
 ///
-/// `fd` can be any open file descriptor on the filesystem.  If `rootid` is 0,
+/// `fd` can be any open file descriptor on the filesystem. If `rootid` is 0,
 /// the subvolume that `fd` belongs to is queried (equivalent to
-/// `subvolume_info`).  Does not require elevated privileges.
-///
-/// Errors: ENOENT if no subvolume with that `rootid` exists (or has been
-/// deleted but not yet cleaned).
+/// `subvolume_info`). Does not require elevated privileges.
 ///
 /// # Errors
 ///
-/// Returns `Err` if the ioctl fails.
+/// Returns `Err` if the ioctl fails: `ENOENT` if no subvolume with that
+/// `rootid` exists (or it has been deleted but not yet cleaned).
 pub fn subvolume_info_by_id(
     fd: BorrowedFd,
     rootid: u64,
@@ -386,7 +380,7 @@ pub fn subvolume_flags_get(fd: BorrowedFd) -> nix::Result<SubvolumeFlags> {
 
 /// Set the flags of the subvolume that `fd` belongs to.
 ///
-/// Requires `CAP_SYS_ADMIN` to make a subvolume read-only; any user may
+/// Requires `CAP_SYS_ADMIN` to make a subvolume read-only. Any user may
 /// clear the read-only flag from a subvolume they own.
 ///
 /// # Errors
@@ -462,7 +456,7 @@ pub fn subvolume_default_get(fd: BorrowedFd) -> nix::Result<u64> {
 /// Set the default subvolume of the filesystem referred to by `fd` to
 /// `subvolid`.
 ///
-/// Pass [`FS_TREE_OBJECTID`] to restore the default.  Requires `CAP_SYS_ADMIN`.
+/// Pass [`FS_TREE_OBJECTID`] to restore the default. Requires `CAP_SYS_ADMIN`.
 ///
 /// # Errors
 ///
@@ -476,15 +470,15 @@ pub fn subvolume_default_set(fd: BorrowedFd, subvolid: u64) -> nix::Result<()> {
 /// `fd` by walking the root tree.
 ///
 /// Two tree-search passes are made:
-/// 1. `ROOT_ITEM_KEY` — reads each subvolume's metadata (generation, flags,
+/// 1. `ROOT_ITEM_KEY`: reads each subvolume's metadata (generation, flags,
 ///    UUIDs, creation time).
-/// 2. `BTRFS_ROOT_BACKREF_KEY` — reads each subvolume's parent ID and leaf name.
+/// 2. `BTRFS_ROOT_BACKREF_KEY`: reads each subvolume's parent ID and leaf name.
 ///
-/// Subvolumes for which no backref is found are still included; their
-/// `parent_id`, `dir_id`, and `name` will be zeroed / empty.
+/// Subvolumes for which no backref is found are still included. Their
+/// `parent_id` and `dir_id` are zero and their `name` is empty.
 ///
 /// Requires `CAP_SYS_ADMIN` for the tree search. Without it the kernel
-/// returns `EPERM`; the caller should degrade gracefully (e.g. show only the
+/// returns `EPERM`. The caller should degrade gracefully (e.g. show only the
 /// leaf name without full path resolution).
 ///
 /// # Errors
@@ -531,12 +525,12 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
 
             if let Some(item) = items.iter_mut().find(|i| i.root_id == root_id)
             {
-                // Only take the first ROOT_BACKREF for each subvolume.  A
+                // Only take the first ROOT_BACKREF for each subvolume. A
                 // subvolume can have multiple ROOT_BACKREF entries when it is
                 // referenced from more than one parent (e.g. the subvolume
                 // also appears as a snapshot inside another subvolume).
                 // Items are returned in offset-ascending order, so the first
-                // entry has the smallest parent_id — which is the canonical
+                // entry has the smallest parent_id, which is the canonical
                 // location btrfs-progs uses for "top level" and path.
                 if item.parent_id == 0 {
                     item.parent_id = parent_id;
@@ -550,7 +544,7 @@ pub fn subvolume_list(fd: BorrowedFd) -> nix::Result<Vec<SubvolumeListItem>> {
         },
     )?;
 
-    // Determine which subvolume the fd is open on.  Paths are expressed
+    // Determine which subvolume the fd is open on. Paths are expressed
     // relative to this subvolume, matching btrfs-progs behaviour.
     let top_id =
         crate::inode::lookup_path_rootid(fd).unwrap_or(FS_TREE_OBJECTID);
@@ -577,11 +571,11 @@ fn ino_lookup_dir_path(
         objectid: dir_id,
         ..unsafe { mem::zeroed() }
     };
-    // SAFETY: args is a valid, zeroed btrfs_ioctl_ino_lookup_args; the ioctl
+    // SAFETY: args is a valid, zeroed btrfs_ioctl_ino_lookup_args. The ioctl
     // fills in args.name with a null-terminated path string.
     unsafe { btrfs_ioc_ino_lookup(fd.as_raw_fd(), &raw mut args) }?;
 
-    // args.name is [c_char; 4080]; find the null terminator and decode.
+    // args.name is [c_char; 4080]. Find the null terminator and decode.
     let name_ptr: *const c_char = args.name.as_ptr();
     // SAFETY: the ioctl guarantees null termination within the 4080-byte buffer.
     let cstr = unsafe { CStr::from_ptr(name_ptr) };
@@ -592,10 +586,10 @@ fn ino_lookup_dir_path(
 /// the full path relative to the filesystem root.
 ///
 /// For each subvolume we already have `parent_id`, `dir_id`, and the leaf name
-/// from the `ROOT_BACKREF` pass.  A single `BTRFS_IOC_INO_LOOKUP` call per item
+/// from the `ROOT_BACKREF` pass. A single `BTRFS_IOC_INO_LOOKUP` call per item
 /// gives the path from the parent tree's root down to the directory that
-/// contains the subvolume (the "dir prefix").  Concatenating that prefix with
-/// the leaf name yields the subvolume's segment within its parent.  Walking up
+/// contains the subvolume (the "dir prefix"). Concatenating that prefix with
+/// the leaf name yields the subvolume's segment within its parent. Walking up
 /// the parent chain (using the in-memory items map) and joining segments with
 /// `/` gives the final full path.
 fn resolve_full_paths(
@@ -611,7 +605,8 @@ fn resolve_full_paths(
         .collect();
 
     // Compute the "segment" for each item: the path of this subvolume within
-    // its immediate parent (dir prefix from INO_LOOKUP + leaf name).
+    // its immediate parent (dir prefix from INO_LOOKUP followed by the leaf
+    // name).
     // If INO_LOOKUP is not available (e.g. missing CAP_SYS_ADMIN), fall back
     // to the bare leaf name so the list still works.
     let segments: Vec<String> = items
@@ -652,7 +647,7 @@ fn resolve_full_paths(
 /// Compute the full path for `root_id`, memoizing into `cache`.
 ///
 /// Walks the ancestor chain iteratively to avoid stack overflow on deep
-/// subvolume trees.  Collects segments from the target up to the FS tree
+/// subvolume trees. Collects segments from the target up to the FS tree
 /// root, then joins them in reverse order.
 ///
 /// Cycle detection is included: `ROOT_BACKREF` entries can form mutual parent
@@ -760,8 +755,6 @@ fn parse_root_ref(data: &[u8]) -> Option<(u64, String)> {
     Some((rr.dirid, name))
 }
 
-/// Convert an on-disk `btrfs_timespec` (LE sec + LE nsec, packed) to
-/// [`SystemTime`].  Returns [`UNIX_EPOCH`] if sec == 0.
 /// Convert a (sec, nsec) timestamp to [`SystemTime`].
 /// Returns [`UNIX_EPOCH`] if sec == 0.
 fn timespec_to_system_time(sec: u64, nsec: u32) -> SystemTime {
@@ -783,16 +776,14 @@ pub struct SubvolRootRef {
 /// List the child subvolumes directly under the subvolume opened by `fd`.
 ///
 /// Returns all subvolumes whose root is referenced from the given
-/// subvolume. The kernel returns results in batches of up to 255; this
+/// subvolume. The kernel returns results in batches of up to 255. This
 /// function handles continuation automatically by advancing `min_treeid`.
 ///
 /// Does not require `CAP_SYS_ADMIN`.
 ///
-/// Errors: `ENOTTY` on kernels older than 4.18.
-///
 /// # Errors
 ///
-/// Returns `Err` if the ioctl fails.
+/// Returns `Err` if the ioctl fails: `ENOTTY` on kernels older than 4.18.
 pub fn subvol_rootrefs(fd: BorrowedFd) -> nix::Result<Vec<SubvolRootRef>> {
     use crate::raw::{
         btrfs_ioc_get_subvol_rootref, btrfs_ioctl_get_subvol_rootref_args,
@@ -1050,23 +1041,18 @@ mod tests {
         );
         assert_eq!(path, "C");
 
-        // B's path is also just "B" (its parent 256/A is below top_id in the
-        // tree, but B's own parent is not top_id — A's parent is FS_TREE).
-        // With top_id=257, building B: parent=256, 256 is in id_to_idx but
-        // 256's parent is FS_TREE (5) which triggers the stop, so chain = [257, 256],
-        // and A gets its segment, B gets "A/B".
         let path_b = build_full_path(
             257, 257, &id_to_idx, &segments, &items, &mut cache,
         );
-        // 257 itself: its parent is 256, 256 != top_id (257), so we walk up.
-        // 256's parent is FS_TREE (5), which triggers stop. chain = [257, 256].
-        // 256 resolves to "A" (parent is FS_TREE), 257 resolves to "A/B".
+        // Building B (257) itself: its parent 256 is not top_id, so the walk
+        // continues. 256's parent is FS_TREE (5), which stops it, so the
+        // chain is [257, 256]. 256 resolves to "A" and 257 to "A/B".
         assert_eq!(path_b, "A/B");
     }
 
     #[test]
     fn build_full_path_cycle_detection() {
-        // A (256) parent is B (257), B (257) parent is A (256) — mutual cycle
+        // A (256) parent is B (257), B (257) parent is A (256): a mutual cycle.
         let items = vec![test_item(256, 257), test_item(257, 256)];
         let segments = vec!["A".to_string(), "B".to_string()];
         let id_to_idx: HashMap<u64, usize> = [(256, 0), (257, 1)].into();
@@ -1088,7 +1074,7 @@ mod tests {
     #[test]
     fn build_full_path_cached_ancestor() {
         // A (256) -> B (257) -> C (258)
-        // Pre-cache B's path; building C should use it.
+        // Pre-cache B's path. Building C should use it.
         let items = vec![
             test_item(256, FS_TREE_OBJECTID),
             test_item(257, 256),

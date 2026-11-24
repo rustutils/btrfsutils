@@ -93,25 +93,11 @@ pub fn insert_item(
         eb.copy_within(items_src..items_src + items_len, items_dest);
     }
 
-    // The new item's data offset: data_end - data_size is the new lowest
-    // offset (now occupied by the shifted items). Our item goes at data_end,
-    // which is above the shifted data and below items [0..slot-1].
-    // Wait — after shifting, the old data_end is now occupied. The new gap
-    // is at (data_end - data_size + shifted_data_size)... Actually, the shift
-    // moved everything from [data_end..top) down to [data_end-data_size..top-data_size).
-    // So the gap is [top-data_size..top). The new item's data goes at
-    // the offset that was occupied by the old slot item's data top minus data_size.
-    //
-    // Simpler: the new item's offset should be: if slot == 0, one below item[1]'s
-    // offset (which is the old item[0] offset - data_size). If slot > 0,
-    // one below item[slot-1]'s offset.
-    //
-    // Actually the simplest correct formula: after shifting, the new lowest
-    // offset is data_end - data_size (at new item index nritems, which was
-    // the old nritems-1 shifted). The new item at slot `slot` should have
-    // offset = item[slot+1].offset + item[slot+1].size (right above item
-    // slot+1's data). But we can also just compute: the data for the new
-    // item should go right above the shifted item at slot+1.
+    // The new item's data offset. The shift above moved the data of
+    // [data_end..top) down to [data_end-data_size..top-data_size), leaving
+    // a gap of data_size bytes directly above the data of the item now at
+    // slot+1. The new item's data goes into that gap:
+    // offset = item[slot+1].offset + item[slot+1].size.
     let new_data_offset = if slot < nritems {
         // Item at slot+1 (which was the old item at slot, now shifted and
         // with updated offset) ends at offset + size. Our data goes right
@@ -198,7 +184,7 @@ pub fn del_items(eb: &mut ExtentBuffer, slot: usize, count: usize) {
     // But items after the deleted range (slot+count..nritems) have data that
     // is at even lower offsets. We need to shift that data up by del_data_size.
     if slot + count < nritems {
-        // Shift data of items [slot+count..nritems-1] up by del_data_size
+        // Shift data of items [slot+count..nritems-1] up by del_data_size.
         let last_item = nritems - 1;
         let move_start = HEADER_SIZE + eb.item_offset(last_item) as usize;
         let move_end = HEADER_SIZE
@@ -299,7 +285,7 @@ pub fn shrink_item(
     }
 
     // Slot's own offset moves up by shrink_by (its payload now starts
-    // at the higher position; its top edge is unchanged so it still
+    // at the higher position. Its top edge is unchanged, so it still
     // abuts slot-1's payload).
     eb.set_item_offset(slot, old_off + shrink_by);
     eb.set_item_size(slot, new_size);
@@ -606,7 +592,7 @@ mod tests {
         assert_eq!(eb.item_data(0), &[0x11; 50]);
         // Slot 1's payload now contains the *first 40 bytes* of the
         // original 0x22 fill (the upper part survives because the data
-        // moved up; the freed space is at the bottom of memory).
+        // moved up and the freed space is at the bottom of memory).
         assert_eq!(eb.item_data(1), &[0x22; 40]);
         assert_eq!(eb.item_data(2), &[0x33; 50]);
         // Free space grew by exactly shrink_by.

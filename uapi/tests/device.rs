@@ -76,7 +76,7 @@ fn device_info_and_stats() {
         "healthy filesystem should have zero errors: {stats:?}"
     );
 
-    // Reset and re-read — should still be zero.
+    // Reset and re-read. Should still be zero.
     let _reset =
         device_stats(mnt.fd(), 1, true).expect("device_stats reset failed");
     let after_reset = device_stats(mnt.fd(), 1, false)

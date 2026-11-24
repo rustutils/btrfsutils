@@ -1,8 +1,7 @@
 //! Re-exports of the shared test harness from the `btrfs-test-utils` crate.
 //!
-//! The previous in-crate copies of `BackingFile`, `LoopbackDevice`, and
-//! `Mount` have been consolidated in `util/testing`. This module just
-//! re-exports them under `crate::common::*` so the existing
+//! `BackingFile`, `LoopbackDevice`, and `Mount` live in `util/testing`.
+//! This module re-exports them under `crate::common::*` so the
 //! `use crate::common::{...}` imports in test files keep working.
 
 #![allow(unused_imports)]

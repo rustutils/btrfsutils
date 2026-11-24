@@ -1,7 +1,7 @@
 //! # Physical extent layout of files via `FS_IOC_FIEMAP`
 //!
 //! `FS_IOC_FIEMAP` is a standard VFS ioctl (not btrfs-specific) that reports
-//! the physical extents backing a file.  It is the mechanism `btrfs filesystem
+//! the physical extents backing a file. It is the mechanism `btrfs filesystem
 //! du` uses to determine how much disk space each file occupies and which
 //! extents are shared with other files.
 
@@ -14,11 +14,11 @@ use std::os::unix::io::BorrowedFd;
 const FS_IOC_FIEMAP: libc::Ioctl = 0xC020_660Bu32 as libc::Ioctl;
 
 // fiemap header field offsets (all native byte order)
-const FM_START: usize = 0; // u64 — logical offset to start from
-const FM_LENGTH: usize = 8; // u64 — logical length to map
-const FM_FLAGS: usize = 16; // u32 — request flags
-const FM_MAPPED: usize = 20; // u32 — out: number of extents returned
-const FM_COUNT: usize = 24; // u32 — in:  number of extent slots
+const FM_START: usize = 0; // u64: logical offset to start from
+const FM_LENGTH: usize = 8; // u64: logical length to map
+const FM_FLAGS: usize = 16; // u32: request flags
+const FM_MAPPED: usize = 20; // u32, out: number of extents returned
+const FM_COUNT: usize = 24; // u32, in: number of extent slots
 
 // fiemap_extent field offsets within one 56-byte slot
 const FE_LOGICAL: usize = 0; // u64
@@ -63,7 +63,7 @@ pub struct FileExtentInfo {
 /// physical ranges of all shared extents so the caller can compute cross-file
 /// deduplication counts.
 ///
-/// `fd` must be open on a regular file.  Symlinks and directories will return
+/// `fd` must be open on a regular file. Symlinks and directories will return
 /// an empty result or an error depending on the kernel version.
 ///
 /// # Errors
@@ -94,8 +94,8 @@ pub fn file_extents(fd: BorrowedFd) -> nix::Result<FileExtentInfo> {
         }
 
         // SAFETY: buf is aligned and large enough for the fiemap header plus
-        // EXTENTS_PER_BATCH extent slots.  The ioctl only writes within that
-        // region.  raw_fd is a valid open file descriptor for the duration of
+        // EXTENTS_PER_BATCH extent slots. The ioctl only writes within that
+        // region. raw_fd is a valid open file descriptor for the duration of
         // this call.
         let ret = unsafe {
             libc::ioctl(
@@ -154,7 +154,8 @@ pub fn file_extents(fd: BorrowedFd) -> nix::Result<FileExtentInfo> {
 }
 
 fn as_bytes(v: &[u64]) -> &[u8] {
-    // SAFETY: any &[u64] can be viewed as &[u8]; length scales correctly.
+    // SAFETY: any &[u64] can be viewed as &[u8], and the length scales
+    // correctly.
     unsafe { std::slice::from_raw_parts(v.as_ptr().cast(), v.len() * 8) }
 }
 

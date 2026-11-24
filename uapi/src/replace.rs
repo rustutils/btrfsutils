@@ -260,8 +260,6 @@ pub fn replace_cancel(fd: BorrowedFd) -> nix::Result<bool> {
 mod tests {
     use super::*;
 
-    // --- epoch_to_systemtime ---
-
     #[test]
     fn epoch_zero_is_none() {
         assert!(epoch_to_systemtime(0).is_none());
@@ -272,8 +270,6 @@ mod tests {
         let t = epoch_to_systemtime(1700000000).unwrap();
         assert_eq!(t, UNIX_EPOCH + Duration::from_secs(1700000000));
     }
-
-    // --- ReplaceState::from_raw ---
 
     #[test]
     fn replace_state_from_raw_all_variants() {
@@ -313,8 +309,6 @@ mod tests {
     fn replace_state_from_raw_unknown() {
         assert!(ReplaceState::from_raw(9999).is_none());
     }
-
-    // --- ReplaceStartError Display ---
 
     #[test]
     fn replace_start_error_display() {

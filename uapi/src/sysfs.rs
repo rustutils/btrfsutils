@@ -105,7 +105,7 @@ impl SysfsBtrfs {
         self.read_file("checksum")
     }
 
-    /// Minimum clone/reflink alignment in bytes.
+    /// Minimum clone (reflink) alignment in bytes.
     /// `/sys/fs/btrfs/<uuid>/clone_alignment`
     ///
     /// # Errors
@@ -642,7 +642,7 @@ mod tests {
     #[test]
     fn scrub_speed_max_get_missing_returns_zero() {
         let (_dir, sysfs) = setup();
-        // No devinfo directory exists — should return 0, not error.
+        // No devinfo directory exists: should return 0, not an error.
         assert_eq!(sysfs.scrub_speed_max_get(99).unwrap(), 0);
     }
 
@@ -730,8 +730,8 @@ pub struct QuotaStatus {
     /// Accounting mode: `"qgroup"` (full backref accounting) or `"squota"`
     /// (simplified lifetime accounting). `None` when quotas are disabled.
     pub mode: Option<String>,
-    /// Whether the quota tree is inconsistent; a rescan is needed to restore
-    /// accurate numbers. `None` when quotas are disabled.
+    /// Whether the quota tree is inconsistent, meaning a rescan is needed to
+    /// restore accurate numbers. `None` when quotas are disabled.
     pub inconsistent: Option<bool>,
     /// Whether the quota override flag is active (limits are bypassed for
     /// the current mount). `None` when quotas are disabled.

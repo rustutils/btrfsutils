@@ -3,9 +3,9 @@
 //! [`Filesystem`] exposes the operations a userspace driver needs:
 //! `lookup`, `readdir`, `read`, `readlink`, `getattr`, `xattr_get`,
 //! `xattr_list`, and `statfs`. Each returns plain `std::io::Result`
-//! values and does not depend on any FUSE protocol crate, so the same
-//! API drives the [`btrfs-fuse`] mount and any other embedder
-//! (offline tools, tests, alternate FUSE bindings).
+//! values and does not depend on any FUSE crate, so the same API
+//! drives the [`btrfs-fuse`] mount and other embedders (offline tools,
+//! tests, alternate FUSE bindings).
 //!
 //! # Inode model
 //!
@@ -16,8 +16,8 @@
 //!
 //! # Status
 //!
-//! Read-only. Write support is planned via the `btrfs-transaction`
-//! crate; see the project roadmap.
+//! Read-only. Write support is planned on top of the
+//! `btrfs-transaction` crate.
 //!
 //! [`btrfs-fuse`]: https://docs.rs/btrfs-fuse
 

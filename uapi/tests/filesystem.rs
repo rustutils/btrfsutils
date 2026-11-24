@@ -11,7 +11,7 @@ use btrfs_uapi::{
 use std::ffi::{CStr, CString};
 
 /// filesystem_info on a fresh filesystem should return a valid UUID, correct device
-/// count, and reasonable node/sector sizes.
+/// count, and reasonable node and sector sizes.
 #[test]
 #[ignore = "requires elevated privileges"]
 fn filesystem_info_basics() {
@@ -216,7 +216,7 @@ fn resize_shrink_below_minimum_fails() {
     write_test_data(mnt.path(), "data.bin", 200_000_000);
     sync(mnt.fd()).unwrap();
 
-    // Try to shrink to 1MB — way below what's used.
+    // Try to shrink to 1MB, far below what's used.
     let result = resize(
         mnt.fd(),
         ResizeArgs::new(ResizeAmount::Set(1_000_000)).with_devid(1),

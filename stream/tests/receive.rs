@@ -13,11 +13,11 @@ use std::{
 };
 use uuid::Uuid;
 
-// ── Test helpers ────────────────────────────────────────────────────
+// Test helpers.
 
-/// Thin wrapper around (`TempDir`, `Mount`) that keeps the existing
-/// `TestMount::new() -> Self; mnt.path()` API for the per-test setup
-/// functions below. Drop order (inner to outer) handles unmount/detach
+/// Thin wrapper around (`TempDir`, `Mount`) that keeps the
+/// `TestMount::new()` and `mnt.path()` API used by the per-test setup
+/// functions below. Drop order (inner to outer) unmounts and detaches
 /// before the tempdir is removed.
 struct TestMount {
     _td: tempfile::TempDir,
@@ -63,7 +63,7 @@ fn dummy_timespec() -> Timespec {
     }
 }
 
-// ── Tests ───────────────────────────────────────────────────────────
+// Tests.
 
 #[test]
 #[ignore = "requires elevated privileges"]

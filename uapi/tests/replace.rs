@@ -139,7 +139,7 @@ fn replace_cancel_test() {
         .expect("replace_start ioctl failed")
         .expect("replace_start returned application error");
 
-    // Cancel immediately — may already be finished on fast systems.
+    // Cancel immediately. May already be finished on fast systems.
     let cancelled = replace_cancel(mnt.fd()).expect("replace_cancel failed");
 
     let status = replace_status(mnt.fd()).expect("replace_status failed");

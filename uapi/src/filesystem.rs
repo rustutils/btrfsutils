@@ -2,7 +2,7 @@
 //!
 //! Operations that apply to a btrfs filesystem as a whole rather than to any
 //! individual device or subvolume: querying filesystem info (UUID, device count,
-//! node size), syncing pending writes to disk, reading/writing the
+//! node size), syncing pending writes to disk, reading and writing the
 //! human-readable label, and resizing a device within the filesystem.
 
 use crate::raw::{
@@ -117,8 +117,8 @@ pub fn label_get(fd: BorrowedFd) -> nix::Result<CString> {
 /// Further validation (e.g. rejecting labels that contain `/`) is left to the
 /// kernel.
 ///
-/// Errors: EINVAL if the label is 256 bytes or longer (checked before the
-/// ioctl).  `EPERM` without `CAP_SYS_ADMIN`.
+/// Returns `EINVAL` if the label is 256 bytes or longer (checked before the
+/// ioctl), and `EPERM` without `CAP_SYS_ADMIN`.
 ///
 /// # Errors
 ///
@@ -219,7 +219,7 @@ pub fn resize(fd: BorrowedFd, args: ResizeArgs) -> nix::Result<()> {
     let name = args.format_name();
     let name_bytes = name.as_bytes();
 
-    // BTRFS_PATH_NAME_MAX is 4087; the name field is [c_char; 4088].
+    // BTRFS_PATH_NAME_MAX is 4087. The name field is [c_char; 4088].
     // A well-formed resize string (devid + colon + u64 digits) is at most
     // ~23 characters, so this can only fail if the caller constructs a
     // pathological devid.
@@ -239,8 +239,6 @@ pub fn resize(fd: BorrowedFd, args: ResizeArgs) -> nix::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- ResizeAmount::to_string ---
 
     #[test]
     fn resize_amount_cancel() {
@@ -266,8 +264,6 @@ mod tests {
     fn resize_amount_sub() {
         assert_eq!(ResizeAmount::Sub(256000000).to_string(), "-256000000");
     }
-
-    // --- ResizeArgs builder + format_name ---
 
     #[test]
     fn resize_args_no_devid() {

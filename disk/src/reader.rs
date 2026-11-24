@@ -27,7 +27,7 @@ use std::{
 /// The trait is `Send + Sync` and uses `&self` methods so a single cache
 /// can be shared across threads (and, eventually, across multiple
 /// `BlockReader` instances in a reader pool). Implementations use
-/// interior mutability — typically a `Mutex<lru::LruCache<...>>` or
+/// interior mutability, typically a `Mutex<lru::LruCache<...>>` or
 /// similar.
 ///
 /// `btrfs-disk` does not provide an LRU implementation: keeping the
@@ -50,15 +50,15 @@ pub trait TreeBlockCache: Send + Sync {
 /// A block reader that resolves logical addresses through a chunk cache.
 ///
 /// Holds one I/O handle per device, keyed by `devid`. For single-device
-/// filesystems the map has a single entry. For RAID1 / RAID1C3 / RAID1C4
-/// / RAID10 / DUP, each stripe's `devid` (from the chunk cache) is used
+/// filesystems the map has a single entry. For RAID1, RAID1C3, RAID1C4,
+/// RAID10, and DUP, each stripe's `devid` (from the chunk cache) is used
 /// to look up the handle. SINGLE and DUP work with a one-entry map.
 pub struct BlockReader<R> {
     devices: BTreeMap<u64, R>,
     nodesize: u32,
     chunk_cache: ChunkTreeCache,
     /// Optional shared tree-block cache. `None` means no caching (the
-    /// default — preserves existing behaviour for one-shot readers).
+    /// default, which preserves existing behaviour for one-shot readers).
     /// Wired up by [`BlockReader::with_cache`].
     cache: Option<Arc<dyn TreeBlockCache>>,
 }
@@ -128,8 +128,8 @@ impl<R> BlockReader<R> {
 
     /// Return the per-devid handle map mutably.
     ///
-    /// Used by transaction commit / sync / flush paths that need to
-    /// flush every device. For ordinary reads/writes prefer
+    /// Used by transaction commit, sync, and flush paths that need to
+    /// flush every device. For ordinary reads and writes prefer
     /// [`read_block`](Self::read_block), [`read_data`](Self::read_data),
     /// or [`write_block`](Self::write_block) which route by devid via
     /// the chunk cache.
@@ -170,8 +170,8 @@ impl<R: Read + Seek> BlockReader<R> {
     pub fn read_block(&mut self, logical: u64) -> io::Result<Vec<u8>> {
         // Tree blocks are always nodesize <= stripe_len, so a single
         // block lives entirely in one row. Use plan_read so striped
-        // profiles (RAID0 / RAID10 / RAID5 / RAID6) route to the
-        // correct device column; mirrored/SINGLE chunks return one
+        // profiles (RAID0, RAID10, RAID5, RAID6) route to the
+        // correct device column. Mirrored and SINGLE chunks return one
         // placement on stripes[0] either way.
         self.read_data(logical, self.nodesize as usize)
     }
@@ -179,7 +179,7 @@ impl<R: Read + Seek> BlockReader<R> {
     /// Read and parse a tree block at a logical address.
     ///
     /// If a [`TreeBlockCache`] is attached the cache is consulted first
-    /// and populated on miss; the returned `Arc` either points at the
+    /// and populated on miss. The returned `Arc` either points at the
     /// cached entry or at a freshly-parsed block.
     ///
     /// # Errors
@@ -226,9 +226,9 @@ impl<R: Read + Seek> BlockReader<R> {
     /// exactly `len` bytes. Used for reading file data extents.
     ///
     /// Uses [`ChunkTreeCache::plan_read`](crate::chunk::ChunkTreeCache::plan_read)
-    /// internally so reads on striped profiles (RAID0 / RAID10 /
-    /// RAID5 / RAID6) that span multiple rows assemble the bytes from
-    /// the correct devices in order. RAID5/RAID6 reads route to the
+    /// internally so reads on striped profiles (RAID0, RAID10,
+    /// RAID5, RAID6) that span multiple rows assemble the bytes from
+    /// the correct devices in order. RAID5 and RAID6 reads route to the
     /// data column owning each row's bytes, ignoring parity (degraded
     /// reads are out of scope).
     ///
@@ -278,19 +278,19 @@ impl<R: Read + Write + Seek> BlockReader<R> {
     /// per-device locations based on the chunk's RAID profile.
     ///
     /// Uses [`ChunkTreeCache::plan_write`](crate::chunk::ChunkTreeCache::plan_write)
-    /// internally. For DUP / RAID1 / RAID1C3 / RAID1C4 every mirror
-    /// receives the same bytes; for RAID0 each row goes to exactly one
-    /// device; for RAID10 each row goes to one mirror pair; for
-    /// RAID5/RAID6 the executor prereads every data column slot of
-    /// every touched row, mixes in caller bytes, computes parity, then
-    /// writes data + parity. Writes larger than `stripe_len` on a
-    /// striped profile are split into per-row segments automatically.
+    /// internally. For DUP, RAID1, RAID1C3, and RAID1C4 every mirror
+    /// receives the same bytes. For RAID0 each row goes to exactly one
+    /// device. For RAID10 each row goes to one mirror pair. For RAID5
+    /// and RAID6 the executor prereads every data column slot of every
+    /// touched row, mixes in caller bytes, computes parity, then writes
+    /// data and parity. Writes larger than `stripe_len` on a striped
+    /// profile are split into per-row segments automatically.
     ///
     /// # Errors
     ///
     /// Returns an error if the logical address is unmapped, the
     /// request extends past the chunk, any referenced device is not
-    /// open, or any underlying read/write fails.
+    /// open, or any underlying read or write fails.
     pub fn write_block(&mut self, logical: u64, buf: &[u8]) -> io::Result<()> {
         let plan = self.chunk_cache.plan_write(logical, buf.len()).ok_or_else(
             || {
@@ -323,7 +323,7 @@ impl<R: Read + Write + Seek> BlockReader<R> {
         Ok(())
     }
 
-    /// Run the read-modify-write cycle for a RAID5/RAID6 write.
+    /// Run the read-modify-write cycle for a RAID5 or RAID6 write.
     ///
     /// For every row in the plan: preread each data column slot into a
     /// scratch buffer, overlay any caller bytes, compute P (and Q for
@@ -482,7 +482,7 @@ pub fn filesystem_open_mirror<R: Read + Seek>(
 
 /// Open a multi-device btrfs filesystem from a map of `devid -> handle`.
 ///
-/// All devices in the filesystem must be present in the map; the
+/// All devices in the filesystem must be present in the map. The
 /// bootstrap fails with a clear error if the chunk tree references a
 /// devid that is not in the map. Each device's superblock is read and
 /// its `dev_item.devid` is verified against the map key, and all
@@ -900,7 +900,7 @@ pub struct TreeStats {
 /// Walk `root_logical` collecting [`TreeStats`].
 ///
 /// When `find_inline` is true the walk also counts inline extent data bytes
-/// (relevant for subvolume / FS trees which contain `EXTENT_DATA` items).
+/// (relevant for subvolume and FS trees, which contain `EXTENT_DATA` items).
 ///
 /// # Errors
 ///
@@ -1039,7 +1039,7 @@ fn collect_root_items<R: Read + Seek>(
 
     match &*block {
         TreeBlock::Leaf { items, data, .. } => {
-            // ROOT_ITEM contains btrfs_root_item; the bytenr field gives
+            // ROOT_ITEM contains btrfs_root_item. The bytenr field gives
             // the root block of that tree.
             let header_size = mem::size_of::<raw::btrfs_header>();
             let root_item_bytenr_offset = {
@@ -1101,7 +1101,7 @@ mod tests {
         } else {
             // Pick a profile that fans out to all stripes regardless of
             // count: DUP when stripes share a devid, otherwise
-            // RAID1 / RAID1C3 / RAID1C4 by mirror count.
+            // RAID1, RAID1C3, or RAID1C4 by mirror count.
             let same_devid = stripes.iter().all(|s| s.0 == stripes[0].0);
             if same_devid {
                 u64::from(raw::BTRFS_BLOCK_GROUP_DUP)
@@ -1110,7 +1110,7 @@ mod tests {
                     3 => raw::BTRFS_BLOCK_GROUP_RAID1C3,
                     4 => raw::BTRFS_BLOCK_GROUP_RAID1C4,
                     // Default: RAID1 (covers 2 stripes and any
-                    // unexpected count — every stripe gets the bytes).
+                    // unexpected count, since every stripe gets the bytes).
                     _ => raw::BTRFS_BLOCK_GROUP_RAID1,
                 })
             }
@@ -1154,7 +1154,7 @@ mod tests {
     fn read_block_routes_to_correct_devid() {
         // Two devices, each carrying distinguishable bytes at the
         // physical offset that the chunk mapping resolves the logical
-        // address to. resolve picks stripe[0]; we put devid=2 first
+        // address to. resolve picks stripe[0]. We put devid=2 first
         // in the stripe list to verify routing follows that, not the
         // numerically-lowest devid.
         let mapping =
@@ -1297,7 +1297,7 @@ mod tests {
 
     #[test]
     fn new_multi_with_disjoint_devids() {
-        // Sparse devid map (1 and 5 only — devid 3 was removed).
+        // Sparse devid map (1 and 5 only: devid 3 was removed).
         // Both reads and writes should route correctly.
         let mapping = make_mapping(0, 4096, &[(1, 100), (5, 200)]);
         let mut reader = make_reader(&[(1, 8192), (5, 8192)], &[mapping]);

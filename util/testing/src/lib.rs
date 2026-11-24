@@ -13,7 +13,7 @@
 //! All operations shell out to standard Linux tools (`losetup`, `mount`,
 //! `umount`, `mkfs.btrfs`, `gunzip`) so this crate has no dependency on any
 //! of the workspace library crates. It is intended for use as a
-//! `[dev-dependencies]` entry only — production code must not link against
+//! `[dev-dependencies]` entry only. Production code must not link against
 //! it. [`find_our_mkfs`] locates the workspace's `btrfs-mkfs` binary for
 //! callers that want to use it instead of the system `mkfs.btrfs`.
 //!
@@ -204,7 +204,7 @@ impl LoopbackDevice {
     }
 
     /// Attach a loop device to an existing file without taking ownership.
-    /// The file will not be deleted on drop — only the loop device is detached.
+    /// The file is not deleted on drop. Only the loop device is detached.
     #[must_use]
     pub fn attach_existing(path: &Path) -> Self {
         let dev_path = Self::losetup(path);
@@ -292,7 +292,7 @@ impl Mount {
             args.push("-o");
             // Join multiple options with commas.
             let opts = extra_opts.join(",");
-            // Leak the string so it lives long enough — this is test code.
+            // Leak the string so it lives long enough. Acceptable in test code.
             args.push(Box::leak(opts.into_boxed_str()));
         }
         args.push(dev.path().to_str().unwrap());
@@ -504,7 +504,7 @@ pub fn cache_gzipped_image(
 }
 
 /// Mount an existing image file read-only via a loop device. The file is not
-/// copied or owned; the loop device is detached on drop but the underlying
+/// copied or owned. The loop device is detached on drop but the underlying
 /// file is left in place. Suitable for mounting shared fixture images that
 /// may be used concurrently by many tests.
 #[must_use]

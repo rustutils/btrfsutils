@@ -97,7 +97,7 @@ pub fn push_leaf_left<R: Read + Write + Seek>(
         left.logical(),
     );
     if left.logical() != left_bytenr {
-        // COW allocated a new block — update the parent's pointer
+        // COW allocated a new block: update the parent's pointer.
         let parent = path.nodes[parent_level].as_mut().unwrap();
         parent.set_key_ptr_blockptr(parent_slot - 1, left.logical());
         parent.set_key_ptr_generation(parent_slot - 1, fs_info.generation);
@@ -234,7 +234,7 @@ pub fn push_leaf_right<R: Read + Write + Seek>(
         right.logical(),
     );
     if right.logical() != right_bytenr {
-        // COW allocated a new block — update the parent's pointer
+        // COW allocated a new block: update the parent's pointer.
         let parent = path.nodes[parent_level].as_mut().unwrap();
         parent.set_key_ptr_blockptr(parent_slot + 1, right.logical());
         parent.set_key_ptr_generation(parent_slot + 1, fs_info.generation);
@@ -273,7 +273,7 @@ pub fn push_leaf_right<R: Read + Write + Seek>(
             right.set_item_offset(i, old_off - push_data_total);
         }
     } else {
-        // No existing items — just shift descriptors area
+        // No existing items: only shift the descriptor area.
         let src = HEADER_SIZE;
         let len = right_nritems * ITEM_SIZE;
         let dest = HEADER_SIZE + push_count * ITEM_SIZE;

@@ -83,7 +83,7 @@ fn balance_full_completes() {
 }
 
 /// A balance that is cancelled mid-run should not return an error from our
-/// wrapper — ECANCELED is treated as a graceful stop.
+/// wrapper. ECANCELED is treated as a graceful stop.
 #[test]
 #[ignore = "requires elevated privileges"]
 fn balance_cancel_in_flight() {
@@ -103,7 +103,7 @@ fn balance_cancel_in_flight() {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     // Cancel may return ENOTCONN if the balance already finished on a small
-    // filesystem — that's fine.
+    // filesystem. That's fine.
     match balance_ctl(mnt.fd(), BalanceCtl::Cancel) {
         Ok(()) | Err(Errno::ENOTCONN) => {}
         Err(e) => panic!("unexpected error from balance_ctl(Cancel): {e}"),
@@ -223,8 +223,9 @@ fn balance_pause_resume() {
                 Err(e) => panic!("unexpected error from balance_progress: {e}"),
             }
 
-            // Resume — balance() with RESUME flag re-starts a paused balance.
-            // May return ENOTCONN/ECANCELED if balance finished while paused.
+            // Resume: balance() with the RESUME flag restarts a paused
+            // balance. May return ENOTCONN or ECANCELED if the balance
+            // finished while paused.
             let resume_fd =
                 File::open(&mnt.path()).expect("failed to open mount");
             let flags = BalanceFlags::DATA
@@ -237,7 +238,7 @@ fn balance_pause_resume() {
             }
         }
         Err(Errno::ENOTCONN) => {
-            // Balance already finished — that's fine.
+            // Balance already finished. That's fine.
         }
         Err(e) => panic!("unexpected error from balance_ctl(Pause): {e}"),
     }

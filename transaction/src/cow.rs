@@ -20,11 +20,11 @@ const HEADER_FLAG_RELOC: u64 = 1 << 1;
 /// Copy-on-write a tree block.
 ///
 /// If the block's generation matches the current transaction, it has already
-/// been copy-on-written and is returned as-is. Otherwise, a new block is allocated,
+/// been COWed and is returned as-is. Otherwise, a new block is allocated,
 /// the contents are copied, and the old block is queued for freeing.
 ///
 /// `parent_info` is `Some((parent_logical, parent_slot))` for non-root blocks.
-/// For root blocks, pass `None` — the caller is responsible for updating the
+/// For root blocks, pass `None`. The caller is responsible for updating the
 /// tree's root pointer.
 ///
 /// # Errors

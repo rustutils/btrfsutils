@@ -5,7 +5,7 @@
 //! ```text
 //! /                              (default FS_TREE, id 5)
 //! ├── top.txt                    (regular file in default subvol)
-//! ├── sub1/                      (subvolume — id assigned by mkfs)
+//! ├── sub1/                      (subvolume, id assigned by mkfs)
 //! │   ├── inside.txt
 //! │   └── nested/                (subvolume nested under sub1)
 //! │       └── deep.txt
@@ -13,11 +13,11 @@
 //!     └── other.txt
 //! ```
 //!
-//! Tests resolve names → ids via `list_subvolumes` rather than
-//! hard-coding ids; mkfs's id assignment order is implementation
-//! defined (it's alphabetical-by-source-inode in practice, not arg
-//! order). What matters is that the *relationships* are right:
-//! sub1 and sub2 are top-level, nested is nested under sub1.
+//! Tests resolve names to ids with `list_subvolumes` rather than
+//! hard-coding ids. The order in which mkfs assigns ids is
+//! implementation defined (in practice alphabetical by source inode,
+//! not argument order). What matters is that the relationships are
+//! right: sub1 and sub2 are top-level, and nested is under sub1.
 
 use btrfs_fs::{Filesystem, Inode, SubvolId, SubvolInfo};
 use std::{
@@ -90,14 +90,12 @@ fn find_by_name<'a>(list: &'a [SubvolInfo], name: &[u8]) -> &'a SubvolInfo {
         .unwrap_or_else(|| panic!("subvol {:?} not in list", name))
 }
 
-// ── list_subvolumes ────────────────────────────────────────────────
-
 #[tokio::test]
 async fn list_subvolumes_includes_default_and_user_subvols() {
     let fs = open();
     let subvols = fs.list_subvolumes().await.unwrap();
 
-    // Default FS_TREE plus three user subvols.
+    // Default FS_TREE and three user subvolumes.
     assert_eq!(subvols.len(), 4, "expected 4 subvols, got {subvols:#?}");
 
     let default = subvols.iter().find(|s| s.id.0 == 5).unwrap();
@@ -105,8 +103,8 @@ async fn list_subvolumes_includes_default_and_user_subvols() {
     assert!(default.name.is_empty());
     assert!(!default.readonly);
 
-    // Top-level user subvols (sub1, sub2) live under FS_TREE → parent
-    // should be SubvolId(5). The nested subvol lives under sub1.
+    // The top-level user subvolumes (sub1, sub2) live under FS_TREE,
+    // so their parent is SubvolId(5). nested lives under sub1.
     let sub1 = find_by_name(&subvols, b"sub1");
     let sub2 = find_by_name(&subvols, b"sub2");
     let nested = find_by_name(&subvols, b"nested");
@@ -121,8 +119,6 @@ async fn list_subvolumes_includes_default_and_user_subvols() {
         nested.parent,
     );
 }
-
-// ── lookup crossing ───────────────────────────────────────────────
 
 #[tokio::test]
 async fn lookup_into_subvol_returns_inode_in_new_tree() {
@@ -168,8 +164,6 @@ async fn lookup_into_nested_subvol() {
     let content = fs.read(deep_ino, 0, 64).await.unwrap();
     assert_eq!(content, b"deep in nested\n");
 }
-
-// ── readdir + .. across subvols ───────────────────────────────────
 
 #[tokio::test]
 async fn readdir_subvol_root_lists_subvol_contents() {
@@ -218,8 +212,8 @@ async fn dotdot_from_nested_subvol_root_resolves_to_parent_subvol() {
     let entries = fs.readdir(nested_ino, 0).await.unwrap();
     let dotdot = entries.iter().find(|e| e.name == b"..").unwrap();
 
-    // nested's parent is the directory inside sub1 that contains it
-    // — the sub1 root (objectid 256 in sub1's tree).
+    // nested's parent is the directory in sub1 that contains it: the
+    // sub1 root (objectid 256 in sub1's tree).
     assert_eq!(
         dotdot.ino,
         Inode {
@@ -230,8 +224,6 @@ async fn dotdot_from_nested_subvol_root_resolves_to_parent_subvol() {
         dotdot.ino,
     );
 }
-
-// ── open_subvol ────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn open_subvol_uses_alternative_root() {
@@ -249,8 +241,8 @@ async fn open_subvol_uses_alternative_root() {
     assert_eq!(root.subvol, sub1.id);
     assert_eq!(root.ino, 256);
 
-    // From this root, `inside.txt` is reachable directly (no need to
-    // descend through `sub1` first).
+    // From this root, `inside.txt` is reachable directly without
+    // going through `sub1`.
     let (ino, _) = fs.lookup(root, b"inside.txt").await.unwrap().unwrap();
     let content = fs.read(ino, 0, 64).await.unwrap();
     assert_eq!(content, b"inside sub1\n");
@@ -269,7 +261,7 @@ async fn open_subvol_unknown_id_errors() {
 
 #[tokio::test]
 async fn open_subvol_invalid_id_errors() {
-    // 1 is the root tree id — not a subvolume.
+    // 1 is the root tree id, not a subvolume.
     let result = Filesystem::open_subvol(
         File::open(fixture_path()).unwrap(),
         SubvolId(1),

@@ -25,7 +25,7 @@ macro_rules! field_size {
         let base = uninit.as_ptr();
 
         // SAFETY: we never dereference the pointer or read the
-        // uninitialised memory; addr_of! only computes an address.
+        // uninitialised memory. addr_of! only computes an address.
         let field_ptr = unsafe { std::ptr::addr_of!((*base).$f) };
 
         // The size of the field is the distance from the field pointer

@@ -34,7 +34,7 @@ pub const BTRFS_MAX_LEVEL: usize = 8;
 
 /// A mutable tree block backed by a byte buffer.
 ///
-/// Provides field-level read/write access to the 101-byte header, item
+/// Provides field-level read and write access to the 101-byte header, item
 /// descriptors (for leaves), and key pointers (for nodes). The buffer is
 /// always exactly `nodesize` bytes.
 #[derive(Clone)]
@@ -463,7 +463,7 @@ impl ExtentBuffer {
         }
 
         // Data offsets must be descending, and data must fit in the block.
-        // Item 0 has the highest data offset; item N-1 the lowest.
+        // Item 0 has the highest data offset, item N-1 the lowest.
         let first_data_end = HEADER_SIZE
             + self.item_offset(0) as usize
             + self.item_size(0) as usize;
@@ -584,7 +584,7 @@ impl ExtentBuffer {
 ///
 /// This is a `debug_assert!`-level check: compiled out in release builds.
 /// Walks all items to verify key ordering, data offset ordering, no
-/// overlaps, and descriptor/data region separation.
+/// overlaps, and separation of the descriptor and data regions.
 #[inline]
 pub fn debug_assert_leaf_valid(eb: &ExtentBuffer) {
     debug_assert!(

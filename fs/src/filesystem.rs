@@ -1,14 +1,13 @@
 //! The [`Filesystem`] type and its operation methods.
 //!
 //! [`Filesystem`] is `Clone` (cheap `Arc` bump) and exposes all
-//! operations as `async fn`. Internally each op runs the (currently
-//! sync) I/O work inside [`tokio::task::spawn_blocking`] so the
-//! async runtime is never blocked. Future work (a native async I/O
-//! backend, lock-free cache hits) is internal and won't change the
-//! API.
+//! operations as `async fn`. Each op runs its sync I/O inside
+//! [`tokio::task::spawn_blocking`], so the async runtime is never
+//! blocked. A native async I/O backend or lock-free cache hits would
+//! be internal changes and won't affect the API.
 //!
 //! Embedders must call these methods inside a tokio runtime context.
-//! `btrfs-fuse` provides one; tests use `#[tokio::test]`; other
+//! `btrfs-fuse` provides one, tests use `#[tokio::test]`, and other
 //! embedders bring their own.
 
 use crate::{
@@ -36,27 +35,26 @@ use std::{
 };
 use uuid::Uuid;
 
-/// `BTRFS_FS_TREE_OBJECTID` — the default subvolume's tree root.
+/// `BTRFS_FS_TREE_OBJECTID`: the default subvolume's tree root.
 const FS_TREE_OBJECTID: u64 = 5;
 
-/// `BTRFS_FIRST_FREE_OBJECTID` — the root directory of any subvolume,
+/// `BTRFS_FIRST_FREE_OBJECTID`: the root directory of any subvolume,
 /// and the lower bound for non-default subvolume IDs.
 const ROOT_DIR_OBJECTID: u64 = 256;
 
-/// `BTRFS_LAST_FREE_OBJECTID` — upper bound of the user-subvolume id
+/// `BTRFS_LAST_FREE_OBJECTID`: upper bound of the user subvolume id
 /// range. Anything above is reserved for system trees (UUID, etc.).
 const LAST_FREE_OBJECTID: u64 = u64::MAX - 256;
 
 /// Stream version emitted by [`Filesystem::send`]. v1 is the
-/// conservative pick — every byte goes through plain `WRITE`, no
-/// encoded passthrough, no clone refs. Maximum compatibility with
-/// receivers in the wild.
+/// conservative choice: every byte goes through plain `WRITE`, with no
+/// encoded passthrough and no clone refs. Every receiver supports it.
 const SEND_STREAM_VERSION: u32 = 1;
 
 /// Maximum bytes per `WRITE` command on the v1 stream. The TLV
-/// length field is `u16`, so a strict upper bound is 65 535 bytes;
-/// we leave headroom for the path/offset attributes plus the
-/// framed-command overhead. 48 KiB is what the kernel uses.
+/// length field is `u16`, so the hard limit is 65 535 bytes. This
+/// leaves headroom for the path and offset attributes and the command
+/// framing. 48 KiB is what the kernel uses.
 const SEND_WRITE_CHUNK_BYTES: usize = 48 * 1024;
 
 /// Whether `id` names a subvolume tree (the default `FS_TREE` plus
@@ -86,15 +84,15 @@ pub struct Inode {
 /// [`Filesystem::list_subvolumes`] and
 /// [`Filesystem::get_subvol_info`].
 ///
-/// Marked `#[non_exhaustive]` so additional fields can be added in
-/// the future without breaking pattern destructuring at call sites.
+/// `#[non_exhaustive]` so fields can be added without breaking
+/// destructuring at call sites.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct SubvolInfo {
     /// The subvolume's tree id.
     pub id: SubvolId,
     /// Parent subvolume, or `None` for the default `FS_TREE`
-    /// (`SubvolId(5)`) — it has no `ROOT_BACKREF` because nothing
+    /// (`SubvolId(5)`), which has no `ROOT_BACKREF` because nothing
     /// contains it.
     pub parent: Option<SubvolId>,
     /// Path component of this subvolume within its parent. Empty
@@ -161,8 +159,7 @@ pub struct SearchItem {
 }
 
 /// Whence value for [`Filesystem::seek_hole_data`]. Maps to the
-/// POSIX `SEEK_HOLE` / `SEEK_DATA` whence constants used by
-/// `lseek(2)`.
+/// `SEEK_HOLE` and `SEEK_DATA` whence constants of `lseek(2)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SeekHoleData {
     /// `SEEK_DATA`: return the offset of the start of the next data
@@ -196,8 +193,8 @@ pub struct StatFs {
 /// `Filesystem` is a cheap-to-clone handle (`Arc` internally) and all
 /// operations are `async fn`, so multiple tokio tasks can drive the
 /// same filesystem concurrently. I/O still serialises on a single
-/// internal mutex (held only inside `spawn_blocking`); a future phase
-/// can swap that for a reader pool without changing the public API.
+/// internal mutex, held only inside `spawn_blocking`. A reader pool
+/// could replace it without changing the public API.
 pub struct Filesystem<R: io::Read + io::Seek + Send + 'static> {
     inner: Arc<Inner<R>>,
 }
@@ -222,18 +219,18 @@ struct Inner<R: io::Read + io::Seek + Send + 'static> {
     /// Filesystem sectorsize, forwarded from the superblock.
     blksize: u32,
     /// I/O backend. Held only inside `spawn_blocking`, never across an
-    /// `.await`. Future work can swap this for a pool of readers
-    /// without changing the public `&self` API.
+    /// `.await`. A pool of readers could replace it without changing
+    /// the public `&self` API.
     reader: Mutex<BlockReader<R>>,
-    /// Concrete reference to the tree-block cache. Stored alongside
-    /// the `Arc<dyn TreeBlockCache>` inside the reader so callers can
-    /// inspect [`crate::CacheStats`] without going through the trait.
+    /// Typed handle to the tree-block cache. The reader holds the same
+    /// instance as `Arc<dyn TreeBlockCache>`. This one lets callers
+    /// read [`crate::CacheStats`] without going through the trait.
     tree_block_cache: Arc<LruTreeBlockCache>,
-    /// Inode cache. Hit on `getattr`, `lookup`, `readlink`, `read`.
+    /// Inode cache. Hit on `getattr`, `lookup`, `readlink`, and `read`.
     /// Populated whenever an `InodeItem` is parsed from the tree.
     inode_cache: InodeCache,
-    /// Per-inode extent map cache. Built lazily on first `read` of a
-    /// file; reused for subsequent reads of the same inode.
+    /// Per-inode extent map cache. Built on the first `read` of a file
+    /// and reused for later reads of the same inode.
     extent_map_cache: ExtentMapCache,
 }
 
@@ -241,10 +238,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     /// Bootstrap the filesystem from a reader over an image or block
     /// device, with default cache sizes.
     ///
-    /// This is sync because the heavy work happens during the bootstrap
-    /// (chunk tree walk, root tree walk) and only runs once. Embedders
-    /// that want non-blocking open can wrap the call in
-    /// `tokio::task::spawn_blocking` themselves.
+    /// This is sync because the bootstrap (chunk tree walk, root tree
+    /// walk) runs only once. Embedders that want a non-blocking open
+    /// can wrap the call in `tokio::task::spawn_blocking`.
     pub fn open(reader: R) -> io::Result<Self> {
         Self::open_inner(
             reader,
@@ -256,19 +252,18 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     /// Bootstrap the filesystem and select a non-default subvolume
     /// as the [`Filesystem::root`], with default cache sizes.
     ///
-    /// `subvol` must be the tree id of an existing subvolume — pass
-    /// the value from a previously-listed [`SubvolInfo::id`], or use
-    /// `SubvolId(5)` to get the default. Errors with `NotFound` if
-    /// the id is unknown, `InvalidInput` if it's outside the
-    /// subvolume id range.
+    /// `subvol` must be the tree id of an existing subvolume, such as a
+    /// [`SubvolInfo::id`] from a previous listing, or `SubvolId(5)` for
+    /// the default. Fails with `NotFound` if the id is unknown, and
+    /// with `InvalidInput` if it's outside the subvolume id range.
     pub fn open_subvol(reader: R, subvol: SubvolId) -> io::Result<Self> {
         Self::open_inner(reader, subvol, CacheConfig::default())
     }
 
     /// Like [`Filesystem::open`] but with caller-chosen cache sizes.
-    /// Use [`CacheConfig::no_cache`] for benchmarking the cold path
-    /// or memory-constrained embedders; otherwise tune the
-    /// individual entries to match your workload.
+    /// Use [`CacheConfig::no_cache`] to benchmark the cold path or for
+    /// memory-constrained embedders. Otherwise tune the individual
+    /// entries to match the workload.
     pub fn open_with_caches(
         reader: R,
         cache_config: CacheConfig,
@@ -315,11 +310,10 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
                 format!("subvolume {} not found", default_subvol.0),
             ));
         }
-        // Attach a tree-block cache to the underlying reader so every
-        // tree walk past the first benefits transparently. We keep
-        // both a typed `Arc<LruTreeBlockCache>` (for stats) and the
-        // erased `Arc<dyn TreeBlockCache>` (for the reader) — they
-        // point at the same instance.
+        // Attach a tree-block cache to the reader so every tree walk
+        // after the first benefits. The typed `Arc<LruTreeBlockCache>`
+        // (for stats) and the erased `Arc<dyn TreeBlockCache>` (for
+        // the reader) point at the same instance.
         let tree_block_cache =
             Arc::new(LruTreeBlockCache::new(cache_config.tree_blocks));
         fs.reader.set_cache(Some(tree_block_cache.clone()
@@ -338,8 +332,8 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         })
     }
 
-    /// Snapshot of the tree-block cache hit/miss counters. Useful for
-    /// tests, benchmarks, and embedders surfacing cache metrics.
+    /// Snapshot of the tree-block cache counters, for tests,
+    /// benchmarks, and embedders that export cache metrics.
     #[must_use]
     pub fn tree_block_cache_stats(&self) -> crate::CacheStats {
         self.inner.tree_block_cache.stats()
@@ -374,10 +368,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
 
     /// Fetch metadata for a single subvolume.
     ///
-    /// Currently implemented as a filtered [`Filesystem::list_subvolumes`]
-    /// call — the root-tree walk dominates either way, so a one-shot
-    /// lookup wouldn't be faster than the cached/single-pass list.
-    /// Returns `Ok(None)` for an unknown id.
+    /// Implemented as a filtered [`Filesystem::list_subvolumes`] call.
+    /// The root tree walk dominates either way, so a dedicated lookup
+    /// wouldn't be faster. Returns `Ok(None)` for an unknown id.
     pub async fn get_subvol_info(
         &self,
         id: SubvolId,
@@ -389,10 +382,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             .find(|s| s.id == id))
     }
 
-    /// Read-only access to the parsed primary-device superblock.
-    /// Used by ioctl handlers (`FS_INFO`, `GET_FEATURES`, etc.) and
-    /// by embedders that need to inspect format-level fields without
-    /// re-parsing.
+    /// The parsed primary-device superblock. Used by ioctl handlers
+    /// (`FS_INFO`, `GET_FEATURES`, etc.) and by embedders that need
+    /// format-level fields without re-parsing.
     #[must_use]
     pub fn superblock(&self) -> &Superblock {
         &self.inner.superblock
@@ -401,10 +393,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     /// Return the [`DeviceItem`] for `devid`, or `None` if no such
     /// device exists on this filesystem.
     ///
-    /// Currently single-device-only: returns the primary device's
-    /// embedded `dev_item` from the superblock when `devid == 1`,
-    /// `None` otherwise. Multi-device support would walk the dev
-    /// tree.
+    /// Single-device only: returns the primary device's embedded
+    /// `dev_item` from the superblock when `devid == 1`, `None`
+    /// otherwise. Multi-device support would walk the dev tree.
     #[must_use]
     pub fn dev_info(&self, devid: u64) -> Option<DeviceItem> {
         if self.inner.superblock.dev_item.devid == devid {
@@ -415,15 +406,13 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     }
 
     /// Run a tree search matching the kernel's `BTRFS_IOC_TREE_SEARCH_V2`
-    /// semantics. Returns at most `filter.max_items` items, stopping
-    /// early if `max_buf_size` (the userspace buffer cap, including
-    /// per-item 32-byte headers) would be exceeded by adding the next
-    /// item.
+    /// semantics. Returns at most `filter.max_items` items, and stops
+    /// early if the next item would exceed `max_buf_size` (the
+    /// userspace buffer size, including the 32-byte per-item headers).
     ///
-    /// Note: the kernel runs the search against any tree by id; we
-    /// only resolve subvolume trees and the root tree (`tree_id == 1`).
-    /// Searches against the chunk/extent/csum/etc. trees would need
-    /// additional plumbing — they're not exposed today.
+    /// The kernel searches any tree by id. This only resolves
+    /// subvolume trees and the root tree (`tree_id == 1`). The chunk,
+    /// extent, csum, and other trees are not exposed.
     pub async fn tree_search(
         &self,
         filter: SearchFilter,
@@ -440,8 +429,8 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     /// Walks the `INODE_REF` chain upwards from `objectid` until it
     /// reaches the subvolume root (objectid 256). For directories
     /// the kernel `INO_LOOKUP` ioctl returns the path with a
-    /// trailing `/`; this helper does NOT add one — the caller can
-    /// append if it needs to mimic that exactly.
+    /// trailing `/`. This helper does not add one, so callers that
+    /// need to match the kernel exactly must append it.
     ///
     /// Returns `Ok(None)` if any step in the chain has no
     /// `INODE_REF` (orphaned inode, or wrong subvol).
@@ -455,9 +444,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     }
 
     /// Resolve every path in `subvol` that names `objectid`. A regular
-    /// inode has a single path; hard-linked files have one entry per
+    /// inode has a single path. Hard-linked files have one entry per
     /// link, in unspecified order. Returns an empty vector for an
-    /// orphan inode (no `INODE_REF` / `INODE_EXTREF`).
+    /// orphan inode (no `INODE_REF` or `INODE_EXTREF`).
     ///
     /// Each returned path is relative to the subvolume root, with no
     /// leading slash.
@@ -470,18 +459,17 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         spawn_blocking(move || this.ino_paths_blocking(subvol, objectid)).await
     }
 
-    /// Filesystem sectorsize.
+    /// Filesystem sector size.
     #[must_use]
     pub fn blksize(&self) -> u32 {
         self.inner.blksize
     }
 
-    /// Drop cached state for `ino` from both the inode and
-    /// extent-map caches. Embedders that observe inode-level
-    /// invalidation events (FUSE `forget`, manual cache pressure)
-    /// can call this to release memory ahead of LRU eviction.
-    /// Safe to call for an inode that's never been cached: it's a
-    /// no-op in that case.
+    /// Drop cached state for `ino` from the inode and extent-map
+    /// caches. Embedders that see inode-level invalidation events
+    /// (FUSE `forget`, manual cache pressure) can call this to release
+    /// memory ahead of LRU eviction. A no-op for an inode that was
+    /// never cached.
     pub fn forget(&self, ino: Inode) {
         self.inner.inode_cache.invalidate(ino);
         self.inner.extent_map_cache.invalidate(ino);
@@ -525,15 +513,13 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     }
 
     /// Like [`Filesystem::readdir`] but pairs each [`Entry`] with its
-    /// [`Stat`] so callers don't need a separate `getattr` per entry.
-    /// The FUSE driver feeds this into the kernel's `READDIRPLUS`
-    /// path, which collapses `ls -l`-style listings into one round
-    /// trip.
+    /// [`Stat`], so callers don't need a separate `getattr` per entry.
+    /// The FUSE driver uses this for the kernel's `READDIRPLUS` path,
+    /// which turns an `ls -l` style listing into one round trip.
     ///
     /// Entries that vanish between the directory walk and the stat
-    /// (effectively impossible on a read-only mount, but defended
-    /// for robustness) are dropped from the result rather than
-    /// erroring.
+    /// (effectively impossible on a read-only mount) are dropped
+    /// rather than returning an error.
     pub async fn readdirplus(
         &self,
         dir_ino: Inode,
@@ -550,7 +536,7 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     }
 
     /// Read `size` bytes from `ino` starting at `offset`. Sparse holes
-    /// and prealloc extents return zeros; compressed extents are
+    /// and prealloc extents return zeros. Compressed extents are
     /// decompressed.
     pub async fn read(
         &self,
@@ -563,7 +549,7 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     }
 
     /// Resolve a slash-separated subvolume path (relative to the
-    /// filesystem root) to its [`SubvolId`]. Empty path / `"/"`
+    /// filesystem root) to its [`SubvolId`]. An empty path or `"/"`
     /// resolves to the default `FS_TREE` (`SubvolId(5)`).
     ///
     /// Walks the same `list_subvolumes` graph that
@@ -591,26 +577,24 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     }
 
     /// Generate a v1 send stream describing `snapshot` and write it
-    /// to `output`. Tier 1 of the send roadmap: full sends only
-    /// (no `parent`), no clone sources, no encoded-write
-    /// passthrough.
+    /// to `output`. Full sends only: no `parent`, no clone sources,
+    /// and no encoded-write passthrough.
     ///
     /// The stream begins with a `SUBVOL` command, then walks the
-    /// subvolume tree path-first emitting per-inode creation
-    /// commands (`Mkfile` / `Mkdir` / `Symlink` / `Mknod` / `Mkfifo`
-    /// / `Mksock`), `SetXattr` for each xattr, `Write` chunks for
-    /// regular file contents, and `Truncate` / `Chmod` / `Chown` /
-    /// `Utimes` to finalise. Terminates with `End`.
+    /// subvolume tree path-first. Each inode gets a creation command
+    /// (`Mkfile`, `Mkdir`, `Symlink`, `Mknod`, `Mkfifo`, or `Mksock`),
+    /// a `SetXattr` per xattr, `Write` chunks for regular file
+    /// contents, and `Truncate`, `Chmod`, `Chown`, and `Utimes` to
+    /// finish. The stream ends with `End`.
     ///
     /// Hardlinks beyond the first reference become `Link` commands
     /// rather than re-creating the inode. Subvolume crossings
     /// (`DirItem` whose `location.key_type == ROOT_ITEM`) are
-    /// skipped — caller must run `send` again per subvolume.
+    /// skipped, so the caller must run `send` again per subvolume.
     ///
-    /// Encodes paths as UTF-8 (lossy on invalid byte sequences).
-    /// Real btrfs filenames are arbitrary bytes; full-fidelity
-    /// non-UTF-8 support can come later if a real workload needs
-    /// it.
+    /// Paths are encoded as UTF-8, lossily for invalid byte sequences.
+    /// btrfs filenames are arbitrary bytes, so non-UTF-8 names are not
+    /// preserved exactly.
     ///
     /// # Errors
     ///
@@ -626,8 +610,8 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     }
 
     /// Find the next hole or data region in `ino` at or after
-    /// `offset`. Mirrors `lseek(fd, offset, SEEK_HOLE)` /
-    /// `lseek(fd, offset, SEEK_DATA)` semantics.
+    /// `offset`, with the semantics of `lseek(fd, offset, SEEK_HOLE)`
+    /// and `lseek(fd, offset, SEEK_DATA)`.
     ///
     /// `SEEK_DATA` returns the offset of the next byte that is part
     /// of a data region. Returns `Err(ENXIO)` if no data exists at
@@ -640,8 +624,8 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
     ///
     /// Holes include both implicit (gaps with no `EXTENT_DATA` item)
     /// and explicit (regular extent with `disk_bytenr == 0`)
-    /// representations. Inline and prealloc extents are treated as
-    /// data — matching kernel btrfs and POSIX convention.
+    /// representations. Inline and prealloc extents count as data,
+    /// matching kernel btrfs and POSIX convention.
     pub async fn seek_hole_data(
         &self,
         ino: Inode,
@@ -672,8 +656,8 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         spawn_blocking(move || this.xattr_get_blocking(ino, &name)).await
     }
 
-    /// Filesystem-wide statistics pulled straight from the superblock.
-    /// No I/O — sync.
+    /// Filesystem-wide statistics from the superblock. Sync because it
+    /// does no I/O.
     #[must_use]
     pub fn statfs(&self) -> StatFs {
         let sb = &self.inner.superblock;
@@ -690,11 +674,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         }
     }
 
-    // ── Sync (blocking) implementations ─────────────────────────────
-    //
     // The `_blocking` methods carry the actual logic. They run inside
-    // `spawn_blocking`, so they're allowed to take the reader Mutex
-    // and do sync I/O without blocking the runtime.
+    // `spawn_blocking`, so they can take the reader mutex and do sync
+    // I/O without blocking the runtime.
 
     fn lookup_blocking(
         &self,
@@ -710,8 +692,8 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         };
 
         // Subvolume crossing: a `DirItem` whose `location` points at a
-        // `ROOT_ITEM` key is not a regular dirent — it's a mount of
-        // another subvolume's root. The child inode lives at objectid
+        // `ROOT_ITEM` key is not a regular dirent but the root of
+        // another subvolume. The child inode lives at objectid
         // 256 of that subvolume's tree, not at `entry.location.objectid`
         // in the parent's tree.
         let child = if entry.location.key_type == KeyType::RootItem {
@@ -726,9 +708,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             }
         };
 
-        // Reuse the cached InodeItem if present; otherwise fetch and
-        // populate. The fetch uses the *child*'s tree (which equals
-        // the parent's for non-crossings).
+        // Reuse the cached `InodeItem` if present, otherwise fetch and
+        // cache it. The fetch uses the child's tree, which is the
+        // parent's tree unless this is a subvolume crossing.
         let item = if let Some(cached) = self.inner.inode_cache.get(child) {
             (*cached).clone()
         } else {
@@ -784,9 +766,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         }
         if offset <= 1 {
             // For most inodes `..` lives in the same subvolume tree
-            // (walk INODE_REF). For a subvolume root we instead walk
-            // ROOT_BACKREF in the root tree to find the parent
-            // subvolume's containing directory.
+            // (walk `INODE_REF`). For a subvolume root, walk
+            // `ROOT_BACKREF` in the root tree instead to find the
+            // containing directory in the parent subvolume.
             let parent = if dir_ino.ino == ROOT_DIR_OBJECTID
                 && dir_ino.subvol.0 != FS_TREE_OBJECTID
             {
@@ -823,7 +805,7 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
                 return;
             }
             for item in DirItem::parse_all(data) {
-                // Cookie is "next offset to start from", so add 1.
+                // The cookie is the next offset to start from, so add 1.
                 let entry = dir::Entry::from_dir_item(
                     dir_ino.subvol,
                     &item,
@@ -846,10 +828,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         let blksize = self.inner.blksize;
         let mut out = Vec::with_capacity(entries.len());
         for entry in entries {
-            // `read_inode_item_blocking` consults the inode cache
-            // first, so repeated `readdirplus` over the same dir
-            // pays at most one tree walk per inode across the
-            // working set.
+            // `read_inode_item_blocking` checks the inode cache first,
+            // so repeated `readdirplus` calls on the same directory
+            // cost at most one tree walk per inode.
             if let Some(item) = self.read_inode_item_blocking(entry.ino)? {
                 let stat = Stat::from_inode(entry.ino, &item, blksize);
                 out.push((entry, stat));
@@ -920,10 +901,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
 
         let mut writer = StreamWriter::new(output, SEND_STREAM_VERSION)?;
 
-        // The SUBVOL command names the receive-side directory. We use
-        // the subvolume's recorded name; for the default `FS_TREE`
-        // (no name) fall back to a synthetic identifier so receive
-        // has something to mkdir with.
+        // The SUBVOL command names the receive-side directory. Use the
+        // subvolume's recorded name. The default `FS_TREE` has none,
+        // so fall back to a synthetic name for receive to create.
         let subvol_path = if info.name.is_empty() {
             format!("subvol-{}", info.id.0)
         } else {
@@ -935,11 +915,10 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             ctransid: info.ctransid,
         })?;
 
-        // Walk the subvolume tree starting at the root directory.
-        // `seen` tracks inodes we've already created so a second
-        // `INODE_REF` for the same inode emits `Link` instead of a
-        // duplicate creation. Stores the first emitted path so the
-        // `Link` target is reachable.
+        // Walk the subvolume tree from the root directory. `seen` maps
+        // each inode already created to its first emitted path, so a
+        // second `INODE_REF` for the same inode emits a `Link` to that
+        // path instead of a duplicate creation.
         let root = Inode {
             subvol: snapshot,
             ino: ROOT_DIR_OBJECTID,
@@ -959,18 +938,18 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         dir_path: &str,
         seen: &mut BTreeMap<u64, String>,
     ) -> io::Result<()> {
-        // Skip `.` and `..` (offsets 0 and 1) — those are synthetic.
+        // Skip the synthetic `.` and `..` (offsets 0 and 1).
         let entries = self.readdir_blocking(dir, 1)?;
         let mut subdirs: Vec<(Inode, String)> = Vec::new();
         for entry in entries {
-            // Skip the synthetic `.` / `..` slots.
+            // Skip the synthetic `.` and `..` entries.
             if entry.name == b"." || entry.name == b".." {
                 continue;
             }
-            // Subvolume crossings are out of scope for tier 1: the
-            // child subvolume is a separate tree and would need its
-            // own SUBVOL/SNAPSHOT command. Caller can re-invoke
-            // send() on each subvol they want.
+            // Subvolume crossings are not followed: the child
+            // subvolume is a separate tree and would need its own
+            // SUBVOL or SNAPSHOT command. The caller can run `send()`
+            // on each subvolume it wants.
             if entry.ino.subvol != dir.subvol {
                 continue;
             }
@@ -981,8 +960,8 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
                 format!("{dir_path}/{entry_name}")
             };
 
-            // Hardlink case: we've already emitted the inode under
-            // its first path. Just attach a Link and move on.
+            // Hardlink: the inode was already emitted under its first
+            // path, so just emit a `Link`.
             if let Some(first_path) = seen.get(&entry.ino.ino) {
                 writer.write_command(&StreamCommand::Link {
                     path: entry_path.clone(),
@@ -1010,9 +989,8 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             }
             send_metadata(writer, &entry_path, &item)?;
 
-            // Defer recursion until after we've finished this
-            // directory's own entries — keeps the per-dir command
-            // ordering cleaner.
+            // Recurse only after this directory's own entries are
+            // done, which keeps each directory's commands together.
             if entry.kind == FileKind::Directory {
                 subdirs.push((entry.ino, entry_path));
             }
@@ -1080,12 +1058,12 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         Ok(())
     }
 
-    /// Emit `Write` commands covering `[0, size)` of `ino` in
-    /// chunks that fit comfortably in v1's u16 TLV length field
-    /// (we cap at [`SEND_WRITE_CHUNK_BYTES`] to leave headroom for
-    /// the path/offset attributes). `read_blocking` materialises
-    /// holes and prealloc as zeros and decompresses any compressed
-    /// extents, so `data` is always plain bytes.
+    /// Emit `Write` commands covering `[0, size)` of `ino` in chunks
+    /// of at most [`SEND_WRITE_CHUNK_BYTES`], which fits v1's `u16`
+    /// TLV length field with headroom for the path and offset
+    /// attributes. `read_blocking` returns holes and prealloc as
+    /// zeros and decompresses compressed extents, so `data` is always
+    /// plain bytes.
     fn send_file_data<W: io::Write>(
         &self,
         writer: &mut StreamWriter<W>,
@@ -1126,8 +1104,8 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         })?;
         let file_size = item.size;
 
-        // POSIX: any whence at or past EOF is ENXIO. Linux returns
-        // ENXIO for both SEEK_HOLE and SEEK_DATA in that case.
+        // POSIX: any whence at or past EOF is `ENXIO`. Linux returns
+        // `ENXIO` for both `SEEK_HOLE` and `SEEK_DATA` in that case.
         if offset >= file_size {
             return Err(io::Error::from_raw_os_error(libc::ENXIO));
         }
@@ -1136,10 +1114,10 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         let extent_map = self.extent_map_for(ino, tree_root)?;
         let want_hole = matches!(whence, SeekHoleData::Hole);
 
-        // Walk records in file_pos order, classifying each region as
+        // Walk records in `file_pos` order, classifying each region as
         // data or hole. An implicit hole sits before any record whose
-        // file_pos > cursor; a regular extent with disk_bytenr == 0
-        // is an explicit hole; inline and prealloc count as data.
+        // `file_pos > cursor`. A regular extent with `disk_bytenr == 0`
+        // is an explicit hole. Inline and prealloc count as data.
         let mut cursor = 0u64;
         for r in &extent_map.records {
             // Implicit hole [cursor, r.file_pos).
@@ -1175,15 +1153,15 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
             }
         }
 
-        // Past every record, the rest of the file (if any) is a
-        // trailing implicit hole. SEEK_HOLE additionally treats EOF
-        // itself as a virtual hole, so it always finds *something*
-        // for any offset within the file.
+        // After the last record, the rest of the file (if any) is a
+        // trailing implicit hole. `SEEK_HOLE` also treats EOF as a
+        // virtual hole, so it always finds one for any offset within
+        // the file.
         if want_hole {
             if cursor < file_size && cursor > offset {
                 Ok(cursor)
             } else if offset < file_size {
-                // No real hole found; report the virtual EOF hole.
+                // No real hole found, so report the virtual EOF hole.
                 Ok(file_size)
             } else {
                 Err(io::Error::from_raw_os_error(libc::ENXIO))
@@ -1231,10 +1209,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         filter: SearchFilter,
         max_buf_size: usize,
     ) -> io::Result<Vec<SearchItem>> {
-        // The root tree itself is at superblock.root; subvolume trees
-        // are looked up via tree_root_for. tree_id == 1 is the root
-        // tree (BTRFS_ROOT_TREE_OBJECTID). Anything else has to be a
-        // subvolume id we know about.
+        // `tree_id == 1` is the root tree (`BTRFS_ROOT_TREE_OBJECTID`),
+        // found at `superblock.root`. Anything else must be a known
+        // subvolume id, resolved with `tree_root_for`.
         // sizeof(btrfs_ioctl_search_header).
         const HEADER_SIZE: usize = 32;
 
@@ -1286,7 +1263,7 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
                 let payload = &data[start..end];
                 let next_used = buf_used + HEADER_SIZE + payload.len();
                 if next_used > max_buf_size {
-                    // Stop entirely — no more items will fit.
+                    // Stop entirely: no more items will fit.
                     return;
                 }
                 results.push(SearchItem {
@@ -1307,8 +1284,7 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         subvol: SubvolId,
         objectid: u64,
     ) -> io::Result<Option<Vec<u8>>> {
-        // The subvolume root has no `INODE_REF`; an empty path is
-        // the right answer for it.
+        // The subvolume root has no `INODE_REF`. Its path is empty.
         if objectid == ROOT_DIR_OBJECTID {
             return Ok(Some(Vec::new()));
         }
@@ -1316,9 +1292,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         let mut reader = self.lock_reader();
         let mut components: Vec<Vec<u8>> = Vec::new();
         let mut current = objectid;
-        // Bound the walk so a corrupted INODE_REF cycle can't hang
-        // the FUSE worker forever. 4096 nesting levels is more than
-        // any sane btrfs depth.
+        // Bound the walk so a corrupted `INODE_REF` cycle can't hang
+        // the FUSE worker. 4096 nesting levels is far deeper than any
+        // real directory tree.
         for _ in 0..4096 {
             if current == ROOT_DIR_OBJECTID {
                 components.reverse();
@@ -1332,10 +1308,10 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
                 }
                 if key.objectid == current && key.key_type == KeyType::InodeRef
                 {
-                    // A single INODE_REF item may pack multiple
+                    // A single `INODE_REF` item may pack multiple
                     // entries (one per hardlink to this inode). The
-                    // kernel `INO_LOOKUP` picks the first; do the
-                    // same.
+                    // kernel `INO_LOOKUP` picks the first, and so does
+                    // this.
                     if let Some(iref) =
                         InodeRef::parse_all(data).into_iter().next()
                     {
@@ -1363,16 +1339,16 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         subvol: SubvolId,
         objectid: u64,
     ) -> io::Result<Vec<Vec<u8>>> {
-        // The subvolume root has no INODE_REF; the empty path names it.
+        // The subvolume root has no `INODE_REF`. The empty path names it.
         if objectid == ROOT_DIR_OBJECTID {
             return Ok(vec![Vec::new()]);
         }
         let tree_root = self.tree_root_for(subvol)?;
-        // Collect all (parent_dirid, name) pairs in one tree walk.
-        // INODE_REF packs every link to the same parent dir into one
-        // item; INODE_EXTREF holds links whose name+parent pair didn't
-        // fit (typically across many parents), with the parent stored
-        // in the struct rather than the key offset.
+        // Collect all `(parent_dirid, name)` pairs in one tree walk.
+        // `INODE_REF` packs every link from the same parent directory
+        // into one item. `INODE_EXTREF` holds links whose name and
+        // parent pair didn't fit (typically across many parents), with
+        // the parent stored in the item rather than the key offset.
         let mut refs: Vec<(u64, Vec<u8>)> = Vec::new();
         let mut reader = self.lock_reader();
         for_each_item(&mut reader, tree_root, |key, data| {
@@ -1395,9 +1371,9 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         })?;
         drop(reader);
 
-        // For each (parent, name) prepend the parent's path. We reuse
-        // ino_lookup_blocking which re-acquires the reader lock, so it
-        // matters that the lock is released above.
+        // Prepend the parent's path to each `(parent, name)`.
+        // `ino_lookup_blocking` takes the reader lock itself, which is
+        // why the lock is dropped above.
         let mut paths = Vec::with_capacity(refs.len());
         for (parent, name) in refs {
             let Some(parent_path) = self.ino_lookup_blocking(subvol, parent)?
@@ -1416,10 +1392,10 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
 
     fn list_subvolumes_blocking(&self) -> io::Result<Vec<SubvolInfo>> {
         let root_tree = self.inner.superblock.root;
-        // Collect ROOT_ITEM (id → metadata) and ROOT_BACKREF (id →
-        // (parent, name)) in a single root-tree walk. Each subvolume
-        // has at most one BACKREF; we keep the first if any duplicate
-        // appears.
+        // Collect `ROOT_ITEM` (id → metadata) and `ROOT_BACKREF` (id →
+        // (parent, name)) in a single root tree walk. Each subvolume
+        // has at most one backref. If duplicates appear, the first
+        // wins.
         let mut roots: BTreeMap<u64, RootItem> = BTreeMap::new();
         let mut backrefs: BTreeMap<u64, (u64, RootRef)> = BTreeMap::new();
         let mut reader = self.lock_reader();
@@ -1469,8 +1445,8 @@ impl<R: io::Read + io::Seek + Send + 'static> Filesystem<R> {
         Ok(out)
     }
 
-    /// Acquire the I/O lock. Forwards a poisoned mutex without
-    /// unwrapping at every call site.
+    /// Acquire the I/O lock. Panics on a poisoned mutex, so call sites
+    /// don't each unwrap.
     fn lock_reader(&self) -> MutexGuard<'_, BlockReader<R>> {
         self.inner.reader.lock().unwrap()
     }
@@ -1576,7 +1552,7 @@ fn lookup_in_dir<R: io::Read + io::Seek>(
 
 /// Build the full slash-separated path (no leading slash) of
 /// subvolume `id` by walking its parent chain. The default
-/// `FS_TREE` has an empty path; user subvolumes accumulate name
+/// `FS_TREE` has an empty path. User subvolumes accumulate name
 /// components from each ancestor. Used by
 /// [`Filesystem::resolve_subvol_path`].
 fn subvol_full_path(
@@ -1606,10 +1582,9 @@ fn subvol_full_path(
 }
 
 /// Convert a btrfs on-disk [`DiskTimespec`] into the
-/// [`StreamTimespec`] shape carried by send-stream `Utimes`
-/// commands. Both types are `(sec: u64, nsec: u32)` — separate
-/// types for type-system hygiene rather than wire-level
-/// difference.
+/// [`StreamTimespec`] carried by send-stream `Utimes` commands.
+/// Both are `(sec: u64, nsec: u32)`. They are separate types to keep
+/// the crates independent, not because the wire format differs.
 fn to_stream_timespec(t: &DiskTimespec) -> StreamTimespec {
     StreamTimespec {
         sec: t.sec,
@@ -1617,10 +1592,9 @@ fn to_stream_timespec(t: &DiskTimespec) -> StreamTimespec {
     }
 }
 
-/// Emit the trailing `Chown`/`Chmod`/`Utimes` triple every inode
-/// gets after creation. Free function rather than a method since
-/// it doesn't touch the [`Filesystem`] state — only forwards
-/// fields from the inode item we've already loaded.
+/// Emit the `Chown`, `Chmod`, and `Utimes` commands every inode gets
+/// after creation. A free function because it doesn't touch
+/// [`Filesystem`] state, only fields of the already-loaded inode item.
 fn send_metadata<W: io::Write>(
     writer: &mut StreamWriter<W>,
     path: &str,
@@ -1633,8 +1607,8 @@ fn send_metadata<W: io::Write>(
     })?;
     writer.write_command(&StreamCommand::Chmod {
         path: path.into(),
-        // Strip the file-type bits; receive applies these as
-        // permission/setuid/setgid/sticky only.
+        // Strip the file-type bits. Receive applies only the
+        // permission, setuid, setgid, and sticky bits.
         mode: u64::from(item.mode & 0o7777),
     })?;
     writer.write_command(&StreamCommand::Utimes {

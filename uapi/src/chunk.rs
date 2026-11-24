@@ -1,7 +1,7 @@
 //! # Per-device physical allocation data from the chunk tree
 //!
 //! Walks the chunk tree to determine how many bytes each device has allocated,
-//! broken down by block-group profile flags.  This is the data source for the
+//! broken down by block-group profile flags. This is the data source for the
 //! per-device breakdown in `btrfs filesystem usage`.
 //!
 //! Also exposes the full per-stripe chunk list used by `inspect-internal
@@ -25,7 +25,7 @@ use std::os::unix::io::BorrowedFd;
 /// from the chunk tree.
 ///
 /// `bytes` is the sum of `stripe_len` over all chunk stripes that land on
-/// `devid` and share the same `flags`.  This is the physical space the device
+/// `devid` and share the same `flags`. This is the physical space the device
 /// contributes to that profile, not the logical (usable) space.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceAllocation {
@@ -42,7 +42,7 @@ pub struct DeviceAllocation {
 /// the extent tree.
 ///
 /// For striped profiles (RAID0, RAID10, …) each logical chunk maps to
-/// multiple stripes on different devices; each stripe yields one `ChunkEntry`.
+/// multiple stripes on different devices. Each stripe yields one `ChunkEntry`.
 /// For non-striped profiles (single, DUP) there is one `ChunkEntry` per chunk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChunkEntry {
@@ -67,8 +67,8 @@ pub struct ChunkEntry {
 ///
 /// The result may contain multiple entries with the same `devid` when a
 /// device participates in chunks of different profiles (e.g. both
-/// `DATA|SINGLE` and `METADATA|DUP`).  Entries with the same `(devid, flags)`
-/// pair are merged — there will be at most one entry per unique pair.
+/// `DATA|SINGLE` and `METADATA|DUP`). Entries with the same `(devid, flags)`
+/// pair are merged, so each pair appears at most once.
 ///
 /// Internally, each `BTRFS_CHUNK_ITEM_KEY` payload is a packed `btrfs_chunk`
 /// struct followed by `num_stripes - 1` additional `btrfs_stripe` structs.
@@ -105,10 +105,10 @@ pub fn device_chunk_allocations(
 /// Walk the chunk tree and return one [`ChunkEntry`] per stripe, including
 /// bytes-used from the extent tree.
 ///
-/// The returned list is in chunk-tree order (ascending logical offset); call
-/// sites are responsible for any further sorting.  For each logical chunk the
-/// `used` field is populated by a single extent-tree lookup; if that lookup
-/// fails the field is set to `0` rather than propagating an error.
+/// The returned list is in chunk-tree order (ascending logical offset). Callers
+/// do any further sorting. For each logical chunk the `used` field comes from a
+/// single extent-tree lookup. If that lookup fails, the field is set to `0`
+/// rather than propagating an error.
 ///
 /// Requires `CAP_SYS_ADMIN`.
 ///
@@ -291,8 +291,6 @@ mod tests {
         let (_, _, devids) = result.unwrap();
         assert_eq!(devids.len(), 1);
     }
-
-    // --- accumulate ---
 
     #[test]
     fn accumulate_new_entry() {

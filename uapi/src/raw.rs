@@ -1,12 +1,12 @@
 //! # Raw bindgen output and ioctl declarations for the btrfs UAPI
 //!
 //! The types in this module are generated automatically from
-//! `uapi/src/raw/btrfs.h` and `btrfs_tree.h` by bindgen.  The `ioctl_*!`
+//! `uapi/src/raw/btrfs.h` and `btrfs_tree.h` by bindgen. The `ioctl_*!`
 //! macro declarations translate each `BTRFS_IOC_*` C macro into a callable
 //! Rust function with the correct direction and argument type.
 //!
 //! Prefer the typed wrappers in the sibling modules over using this module
-//! directly.  The functions here operate on raw bindgen structs, require
+//! directly. The functions here operate on raw bindgen structs, require
 //! `unsafe`, and do not map errno values to meaningful errors.
 
 use nix::{
@@ -14,7 +14,7 @@ use nix::{
     libc::{c_char, c_int},
 };
 
-// this is in a nested module so that we can suppress warnings from bindgen.
+// Nested module so that bindgen warnings can be suppressed.
 mod bindings {
     #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
@@ -140,7 +140,7 @@ ioctl_write_ptr!(
 );
 
 // NOTE: number 24 is shared between START_SYNC (_IOR) and SUBVOL_CREATE_V2 (_IOW)
-// in the kernel header — both are translated faithfully here.
+// in the kernel header. Both are translated as-is.
 ioctl_read!(btrfs_ioc_start_sync, BTRFS_IOCTL_MAGIC, 24, u64);
 
 ioctl_write_ptr!(
@@ -273,8 +273,9 @@ ioctl_read!(
 
 ioctl_none!(btrfs_ioc_quota_rescan_wait, BTRFS_IOCTL_MAGIC, 46);
 
-// NOTE: GET_FSLABEL/SET_FSLABEL may alias FS_IOC_GETFSLABEL/FS_IOC_SETFSLABEL
-// on kernels that define those; these are the btrfs-native variants.
+// NOTE: GET_FSLABEL and SET_FSLABEL may alias FS_IOC_GETFSLABEL and
+// FS_IOC_SETFSLABEL on kernels that define those. These are the btrfs-native
+// variants.
 ioctl_read!(btrfs_ioc_get_fslabel, BTRFS_IOCTL_MAGIC, 49, [c_char; 256]);
 
 ioctl_write_ptr!(btrfs_ioc_set_fslabel, BTRFS_IOCTL_MAGIC, 50, [c_char; 256]);

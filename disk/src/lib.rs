@@ -10,7 +10,7 @@
 //!
 //! A btrfs filesystem is organized as a forest of copy-on-write B-trees stored
 //! on one or more block devices. Every tree block is `nodesize` bytes
-//! (typically 16 KiB). The filesystem uses logical addresses internally; a
+//! (typically 16 KiB). The filesystem uses logical addresses internally. The
 //! chunk tree maps logical address ranges to physical device offsets.
 //!
 //! **Superblock.** The entry point into the filesystem. A fixed-size 4 KiB
@@ -30,7 +30,7 @@
 //!   to the root block of every other tree.
 //! - Chunk tree (objectid 3): maps logical address ranges to physical device
 //!   stripes ([`items::ChunkItem`]).
-//! - FS tree (objectid 5, plus one per subvolume/snapshot): holds the actual
+//! - FS tree (objectid 5, plus one per subvolume or snapshot): holds the actual
 //!   filesystem content: inodes ([`items::InodeItem`]), directory entries
 //!   ([`items::DirItem`]), file extents ([`items::FileExtentItem`]), and
 //!   extended attributes.
@@ -81,7 +81,7 @@
 
 // Note: missing_docs is not enabled as a warning because bitflags! generates
 // undocumentable `const _ = !0` associated constants. All public items are
-// documented — this was verified manually.
+// documented, verified manually.
 
 pub mod chunk;
 pub mod items;

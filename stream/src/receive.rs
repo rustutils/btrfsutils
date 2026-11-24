@@ -73,11 +73,11 @@ fn find_mount_root(path: &Path) -> Result<PathBuf> {
 ///
 /// Supported operations:
 ///
-/// v1 commands: subvolume and snapshot creation, file/directory/symlink/fifo/
-/// socket/device node creation, rename, link, unlink, rmdir, write (with fd
-/// caching for sequential writes to the same file), clone range (resolves
-/// source subvolume via UUID tree lookup), xattr set/remove, truncate, chmod,
-/// chown, utimes. `UpdateExtent` is a no-op (informational only).
+/// v1 commands: subvolume and snapshot creation, creation of files,
+/// directories, symlinks, FIFOs, sockets, and device nodes, rename, link,
+/// unlink, rmdir, write (with fd caching for sequential writes to the same
+/// file), clone range (resolves the source subvolume via UUID tree lookup),
+/// xattr set and remove, truncate, chmod, chown, utimes. `UpdateExtent` is a no-op (informational only).
 ///
 /// v2 commands: encoded write (passes compressed data directly to the kernel
 /// via `BTRFS_IOC_ENCODED_WRITE`, with automatic decompression fallback for
@@ -108,8 +108,8 @@ pub struct ReceiveContext {
     received_uuid: Option<uuid::Uuid>,
     /// ctransid from the stream (for `SET_RECEIVED_SUBVOL`).
     stransid: u64,
-    /// Cached write fd: keep one file open to avoid repeated open/close for
-    /// sequential writes to the same file.
+    /// Cached write fd. Keeps one file open so sequential writes to the same
+    /// file don't reopen it.
     write_fd: Option<File>,
     write_path: PathBuf,
 }
@@ -120,7 +120,7 @@ impl ReceiveContext {
     /// `dest_dir` must be a directory on a mounted btrfs filesystem. The mount
     /// root is auto-detected by walking up the directory tree while the device
     /// ID stays the same. An fd to the mount root is kept open for UUID tree
-    /// lookups; subvolumes are created under `dest_dir`.
+    /// lookups. Subvolumes are created under `dest_dir`.
     ///
     /// # Errors
     ///
@@ -257,7 +257,7 @@ impl ReceiveContext {
                 len,
             } => self.process_fallocate(path, *mode, *offset, *len),
             StreamCommand::Fileattr { .. } => {
-                // Intentionally a no-op, matching C reference.  File
+                // Intentionally a no-op, matching the C reference. File
                 // attributes (chattr flags) are filesystem-internal and
                 // not reliably transferable across systems.
                 Ok(())
@@ -337,8 +337,8 @@ impl ReceiveContext {
 
     /// Close the cached write file descriptor, if any.
     ///
-    /// Write operations cache an open fd to avoid repeated open/close when
-    /// the stream contains sequential writes to the same file. Call this
+    /// Write operations cache an open fd so sequential writes to the same
+    /// file don't reopen it. Call this
     /// before operations that require no open writable fds (e.g. enabling
     /// verity) or when switching subvolumes.
     pub fn close_write_fd(&mut self) {
@@ -689,7 +689,7 @@ impl ReceiveContext {
             format!("cannot open clone source '{}'", clone_full.display())
         })?;
 
-        // Close cached write fd if it's for this file — we need a fresh fd.
+        // Close the cached write fd if it's for this file. We need a fresh fd.
         if self.write_path == full {
             self.close_write_fd();
         }
@@ -934,8 +934,8 @@ impl ReceiveContext {
             self.write_path.clone_from(&full);
         }
 
-        // Try the encoded write ioctl first — passes compressed data directly
-        // to the filesystem without decompression.
+        // Try the encoded write ioctl first. It passes compressed data
+        // directly to the filesystem without decompression.
         let fd = self.write_fd.as_ref().unwrap();
         match encoded_write(
             fd.as_fd(),
@@ -971,7 +971,7 @@ impl ReceiveContext {
                 })?;
 
         #[allow(clippy::cast_possible_truncation)]
-        // offsets/lengths fit in usize
+        // Offsets and lengths fit in usize.
         let write_data = &decompressed[unencoded_offset as usize
             ..unencoded_offset as usize + unencoded_file_len as usize];
 
@@ -992,7 +992,7 @@ fn decompress(
 ) -> Result<Vec<u8>> {
     match compression {
         0 => {
-            // No compression — data is already unencoded.
+            // No compression: data is already unencoded.
             Ok(data.to_vec())
         }
         1 => {

@@ -24,11 +24,11 @@
 //!
 //! ## High-level helpers
 //!
-//! Most callers don't drive `search_slot` + `insert_item` directly
-//! — this module also provides higher-level builders that compose
+//! Most callers don't drive `search_slot` and `insert_item` directly.
+//! This module also provides higher-level builders that compose
 //! several primitive operations:
 //!
-//! - **Block / extent allocation**:
+//! - **Block and extent allocation**:
 //!   [`Transaction::alloc_block`],
 //!   [`Transaction::alloc_tree_block`],
 //!   [`Transaction::alloc_data_extent`],
@@ -89,7 +89,7 @@ use std::{
 /// [`abort`](Transaction::abort) (discard).
 /// Block group kind that the transaction allocator can target.
 ///
-/// Metadata block groups hold all tree blocks except the chunk tree;
+/// Metadata block groups hold all tree blocks except the chunk tree.
 /// SYSTEM block groups hold the chunk tree itself, so its blocks can be
 /// resolved by the early-mount bootstrap via the superblock's
 /// `sys_chunk_array`. DATA block groups hold file data extents, which
@@ -123,7 +123,7 @@ pub struct Transaction<R> {
     pub delayed_refs: DelayedRefQueue,
     /// Per-block-group byte ranges allocated and freed during this
     /// transaction. Populated by `flush_delayed_refs`. Consumed by the
-    /// free space tree update step (Stage F3). Cleared at commit end.
+    /// free space tree update step of the commit. Cleared at commit end.
     pub bg_range_deltas: BlockGroupRangeDeltas,
     /// Per-kind bump allocator state. Lazily populated on first use of
     /// each kind so that filesystems without the relevant block group
@@ -134,7 +134,7 @@ pub struct Transaction<R> {
     /// the previous superblock still references them. A crash before commit
     /// would leave both old and new data at the same address.
     pinned: BTreeSet<u64>,
-    /// Phantom to tie the lifetime/type parameter.
+    /// Phantom to tie the type parameter.
     _phantom: std::marker::PhantomData<R>,
 }
 
@@ -161,7 +161,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // Snapshot current roots so we can detect changes at commit time
         fs_info.snapshot_roots();
 
-        // Eagerly seed the metadata cursor — every transaction COWs at
+        // Eagerly seed the metadata cursor. Every transaction COWs at
         // least one metadata block, so failing here is the same as
         // failing on the first alloc. The SYSTEM cursor is created on
         // demand the first time the chunk tree is COWed.
@@ -215,12 +215,12 @@ impl<R: Read + Write + Seek> Transaction<R> {
         }
 
         loop {
-            // Snapshot current cursor; we mutate self.alloc below so we
+            // Snapshot the current cursor. We mutate self.alloc below, so we
             // can't hold a borrow into it across the find call.
             let mut state = *self.alloc.get(&kind).unwrap();
 
             if state.cursor + nodesize > state.end {
-                // Current region exhausted — find another free extent.
+                // Current region exhausted: find another free extent.
                 let (cursor, end) = find_alloc_region_after(
                     fs_info,
                     kind,
@@ -358,16 +358,16 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// bytes. Returns the allocated logical address. Queues the
     /// `+1 EXTENT_DATA_REF` delayed ref exactly like
     /// [`alloc_data_extent`](Self::alloc_data_extent), so subsequent commit machinery
-    /// produces the matching `EXTENT_ITEM` and FST entries; the
+    /// produces the matching `EXTENT_ITEM` and FST entries. The
     /// caller is responsible for placing actual content at the
     /// returned address before commit (e.g. via
     /// [`BlockReader::write_block`](btrfs_disk::reader::BlockReader::write_block),
-    /// or — for `mkfs --rootdir --reflink` — `FICLONERANGE` from a
+    /// or, for `mkfs --rootdir --reflink`, `FICLONERANGE` from a
     /// source file into each stripe's backing device file).
     ///
     /// `aligned_size` must be `> 0` and a multiple of `sectorsize`.
     /// Unlike [`alloc_data_extent`](Self::alloc_data_extent), this function never zero-pads
-    /// or rounds the size up — the caller knows the exact extent
+    /// or rounds the size up. The caller knows the exact extent
     /// length up front.
     ///
     /// # Errors
@@ -512,8 +512,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// Compute per-sector CRC32C checksums of `on_disk_data` and insert
     /// them into the csum tree (tree id 7).
     ///
-    /// `on_disk_data` is the data as it lands on disk — for compressed
-    /// extents that means the compressed/framed payload, not the
+    /// `on_disk_data` is the data as it lands on disk. For compressed
+    /// extents that means the compressed and framed payload, not the
     /// uncompressed original. Length must be a multiple of `sectorsize`.
     ///
     /// Each sector contributes a 4-byte CRC32C (standard ISO 3309) to a
@@ -521,8 +521,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// logical_bytenr)`. Large extents are split into multiple csum
     /// items so each fits in a single leaf.
     ///
-    /// This call does not merge with adjacent existing csum items;
-    /// callers that write contiguous extents in the same transaction
+    /// This call does not merge with adjacent existing csum items.
+    /// Callers that write contiguous extents in the same transaction
     /// will produce one item per call. `btrfs check` accepts either
     /// shape.
     ///
@@ -627,8 +627,9 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// (in-place patching avoids round-tripping fields not modeled by
     /// `InodeItemArgs`, e.g. `flags`, `rdev`, `sequence`).
     ///
-    /// `delta` is signed: positive grows `nbytes` (write/append), negative
-    /// shrinks it (truncate/COW drop). The result must not underflow.
+    /// `delta` is signed: positive grows `nbytes` (write or append),
+    /// negative shrinks it (truncate or COW drop). The result must not
+    /// underflow.
     ///
     /// # Errors
     ///
@@ -781,10 +782,10 @@ impl<R: Read + Write + Seek> Transaction<R> {
     ///
     /// `data` is the *uncompressed* file content. When `compression` is
     /// `Some(algorithm)`, the function attempts to compress `data` and
-    /// embeds the compressed bytes if they shrink (the on-disk
-    /// `compression` byte reflects the actual algorithm used; if
-    /// compression doesn't shrink, the raw bytes are embedded with
-    /// `compression = None`). LZO uses the inline single-segment
+    /// embeds the compressed bytes if they shrink. The on-disk
+    /// `compression` byte reflects the actual algorithm used. If
+    /// compression doesn't shrink the data, the raw bytes are embedded
+    /// with `compression = None`. LZO uses the inline single-segment
     /// framing format produced by [`try_compress`].
     ///
     /// Inline extents have no separate data extent, no extent-tree
@@ -793,7 +794,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// [`max_inline_data_size`]).
     ///
     /// Per the on-disk format the key offset for an inline extent is
-    /// always 0; this function rejects any other `file_offset`.
+    /// always 0. This function rejects any other `file_offset`.
     ///
     /// # Errors
     ///
@@ -870,12 +871,12 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// 3. Insert an `EXTENT_DATA` item via
     ///    [`insert_file_extent`](Self::insert_file_extent). For
     ///    compressed chunks `disk_num_bytes` is the aligned compressed
-    ///    size; `num_bytes`/`ram_bytes` are the aligned logical size.
+    ///    size, and `num_bytes` and `ram_bytes` are the aligned logical size.
     /// 4. If `nodatasum == false`, insert per-sector CRC32C csums over
-    ///    the on-disk (compressed+padded) bytes via
+    ///    the on-disk (compressed and padded) bytes via
     ///    [`insert_csums`](Self::insert_csums).
     /// 5. Bump the inode's `nbytes` by the chunk's aligned logical size
-    ///    (not the on-disk size — `INODE.nbytes` is logical).
+    ///    (not the on-disk size, because `INODE.nbytes` is logical).
     ///
     /// Files at `file_offset == 0` whose `data.len()` fits in
     /// [`max_inline_data_size`] are stored inline via
@@ -887,11 +888,11 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// skips the compression attempt entirely.
     ///
     /// The file's logical size (`INODE_ITEM.size`) is the caller's
-    /// responsibility — `write_file_data` only adjusts `nbytes`.
+    /// responsibility. `write_file_data` only adjusts `nbytes`.
     ///
     /// # Errors
     ///
-    /// Returns an error if `data` is empty, if any allocation/insert
+    /// Returns an error if `data` is empty, if any allocation or insert
     /// fails, or if the inode's `INODE_ITEM` is missing.
     #[allow(clippy::too_many_arguments)]
     pub fn write_file_data(
@@ -980,7 +981,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
             )?;
 
             if !nodatasum {
-                // Csums cover the on-disk (compressed+padded) bytes.
+                // Csums cover the on-disk (compressed and padded) bytes.
                 let on_disk = fs_info
                     .reader_mut()
                     .read_data(logical, aligned_disk as usize)?;
@@ -1006,7 +1007,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// Insert an `INODE_ITEM` for `inode` in `tree_id`.
     ///
     /// The key is `(inode, INODE_ITEM, 0)`. `args` carries every
-    /// on-disk field; see [`crate::inode::InodeArgs`].
+    /// on-disk field. See [`crate::inode::InodeArgs`].
     ///
     /// Errors if an `INODE_ITEM` already exists at this key, or if any
     /// tree operation fails.
@@ -1055,11 +1056,11 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// Inserts the three on-disk records that together make a directory
     /// entry visible to the kernel:
     ///
-    /// 1. `DIR_ITEM` at `(parent_inode, DIR_ITEM, name_hash(name))` —
+    /// 1. `DIR_ITEM` at `(parent_inode, DIR_ITEM, name_hash(name))`:
     ///    the name-hash-keyed entry walked on lookup.
-    /// 2. `DIR_INDEX` at `(parent_inode, DIR_INDEX, dir_index)` — the
-    ///    monotonically-increasing entry walked on `readdir`.
-    /// 3. `INODE_REF` at `(child_inode, INODE_REF, parent_inode)` —
+    /// 2. `DIR_INDEX` at `(parent_inode, DIR_INDEX, dir_index)`: the
+    ///    monotonically increasing entry walked on `readdir`.
+    /// 3. `INODE_REF` at `(child_inode, INODE_REF, parent_inode)`:
     ///    the back-pointer used by `..` resolution and orphan recovery.
     ///
     /// Bumps `parent_inode`'s on-disk `size` by `2 * name.len()` (one
@@ -1312,7 +1313,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     }
 
     /// Insert a single item via the standard search-and-insert pipeline.
-    /// Internal helper for the high-level dir/inode/xattr APIs.
+    /// Internal helper for the high-level directory, inode, and xattr APIs.
     fn insert_item_helper(
         &mut self,
         fs_info: &mut Filesystem<R>,
@@ -1430,7 +1431,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// # Errors
     ///
     /// Returns an error if an XATTR with the same name hash already
-    /// exists (no chain-walk-and-append for collisions in v1), or if
+    /// exists (hash collisions are not chained), or if
     /// any tree operation fails.
     pub fn set_xattr(
         &mut self,
@@ -1447,8 +1448,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // + 2B data_len + 2B name_len + 1B type + name + value.
         let total = 17 + 8 + 2 + 2 + 1 + name.len() + value.len();
         let mut data = Vec::with_capacity(total);
-        // location key — for xattrs the location is unused; mkfs writes
-        // it as the all-zero "Untyped" key.
+        // Location key. Unused for xattrs. mkfs writes it as the
+        // all-zero "Untyped" key.
         data.extend_from_slice(&[0u8; 17]);
         data.put_u64_le(self.transid);
         data.put_u16_le(value.len() as u16);
@@ -1474,11 +1475,11 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// The two records share an on-disk payload (`btrfs_root_ref`) and
     /// differ only in their key:
     ///
-    /// - `ROOT_REF` at `(parent_root, ROOT_REF, child_root)` — the
+    /// - `ROOT_REF` at `(parent_root, ROOT_REF, child_root)`: the
     ///   parent → child entry walked when listing a parent's
     ///   subvolume children.
-    /// - `ROOT_BACKREF` at `(child_root, ROOT_BACKREF, parent_root)`
-    ///   — the child → parent backref used by `subvolume list` to
+    /// - `ROOT_BACKREF` at `(child_root, ROOT_BACKREF, parent_root)`:
+    ///   the child → parent backref used by `subvolume list` to
     ///   reconstruct the path from a subvolume up to the mount root.
     ///
     /// Both items are inserted in tree id 1 (the root tree). Caller
@@ -1586,8 +1587,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// `(BTRFS_ROOT_TREE_DIR_OBJECTID = 6, DIR_ITEM,
     /// name_hash("default"))` in the root tree (id 1). The entry's
     /// location key is `(subvol_id, ROOT_ITEM, u64::MAX)`, matching
-    /// mkfs's convention; kernel `btrfs_find_root` does a range
-    /// search by objectid so the offset value is not load-bearing.
+    /// mkfs's convention. The kernel's `btrfs_find_root` does a range
+    /// search by objectid, so the offset value is not load-bearing.
     /// On mount without an explicit `subvolid=`, the kernel resolves
     /// the default to `subvol_id`.
     ///
@@ -1596,10 +1597,10 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// exists at this key (e.g. mkfs's default pointing at the FS
     /// tree), it is overwritten in place. The payload size is
     /// independent of `subvol_id`, so in-place update works without
-    /// a delete+insert cycle.
+    /// a delete and insert cycle.
     ///
     /// The matching `INODE_ITEM` for inode 6 is left to the caller
-    /// (mkfs historically did not create one — the kernel does not
+    /// (mkfs historically did not create one, and the kernel does not
     /// require it for the default-subvol lookup path).
     ///
     /// # Errors
@@ -1647,8 +1648,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
         let slot = path.slots[0];
         if found {
             // Existing "default" DIR_ITEM (e.g. mkfs's bootstrap one
-            // pointing at the FS tree). Same payload size — patch in
-            // place rather than delete+insert.
+            // pointing at the FS tree). Same payload size, so patch in
+            // place rather than delete and insert.
             items::update_item(leaf, slot, &payload)?;
         } else {
             items::insert_item(leaf, slot, &key, &payload)?;
@@ -1671,11 +1672,11 @@ impl<R: Read + Write + Seek> Transaction<R> {
     ///   actually requires.
     /// - `rescue fix-device-size`: re-align device totals when the
     ///   on-disk values disagree with the underlying block device or
-    ///   image file (currently does its own version of this; can be
-    ///   migrated to this helper).
+    ///   image file (currently does its own version of this and can
+    ///   be migrated to this helper).
     ///
     /// The caller is responsible for setting `fs.superblock.total_bytes`
-    /// (the sum across all devices) — this helper only touches the
+    /// (the sum across all devices). This helper only touches the
     /// per-device `DEV_ITEM` and the superblock's embedded
     /// `dev_item.total_bytes` (single-device convenience). For
     /// multi-device callers, sum the per-device values manually.
@@ -1741,7 +1742,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
 
         // Mirror into the superblock's embedded dev_item if this is
         // the primary device. (For multi-device, the caller handles
-        // each device separately; only the primary's dev_item lives
+        // each device separately. Only the primary's dev_item lives
         // in the superblock.)
         if fs_info.superblock.dev_item.devid == devid {
             fs_info.superblock.dev_item.total_bytes = new_total;
@@ -1779,11 +1780,11 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// `ROOT_ITEM` keyed `(tree_id, ROOT_ITEM, 0)` into the root tree
     /// pointing at the new block.
     ///
-    /// The new leaf and root-item are staged but not flushed; the
+    /// The new leaf and root item are staged but not flushed. The
     /// caller must invoke `commit` (possibly after inserting items
     /// into the new tree) for them to land on disk. Subsequent items
     /// inserted into the new tree go through the normal
-    /// `search_slot`/insert pipeline and may COW the empty leaf away.
+    /// `search_slot` and insert pipeline and may COW the empty leaf away.
     ///
     /// This is the foundation primitive for whole-tree creation
     /// (e.g. `convert-to-free-space-tree`,
@@ -1806,7 +1807,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         tree_id: u64,
     ) -> io::Result<u64> {
         // Reject bootstrap trees: their roots live in the superblock
-        // (1, 3) or are required for the allocator/extent bookkeeping
+        // (1, 3) or are required for the allocator and extent bookkeeping
         // itself (2). Allowing this primitive to overwrite them would
         // corrupt the in-memory roots map and break commit.
         if matches!(tree_id, 0..=3) {
@@ -1858,7 +1859,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         new_eb.set_chunk_tree_uuid(&chunk_tree_uuid);
         // The header `flags` field encodes the backref revision in
         // its top 8 bits (BTRFS_BACKREF_REV_SHIFT = 56). Modern btrfs
-        // uses BTRFS_MIXED_BACKREF_REV = 1; a leaf with revision 0
+        // uses BTRFS_MIXED_BACKREF_REV = 1. A leaf with revision 0
         // would be parsed as the obsolete pre-mixed-backref format
         // and rejected by btrfs check. WRITTEN (bit 0) stays clear:
         // flush_dirty sets it before checksumming.
@@ -2032,12 +2033,11 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // (and the kernel mount path) verify. Without this, a no-op
         // commit would either need to be short-circuited or would
         // corrupt the filesystem with "parent transid verify failed".
-        // See PLAN.md Finding 3 invariants I1, I2, I7.
         //
         // `cow_block` is idempotent: if the root tree was already COWed
         // earlier in this transaction (its in-memory generation matches
         // and the block is not yet written to disk), it returns the
-        // existing buffer unchanged. The new add/drop delayed refs and
+        // existing buffer unchanged. The new add and drop delayed refs and
         // the new dirty block flow into the convergence loop below.
         let root_tree_id = 1u64;
         if let Some(root_bytenr) = fs_info.root_bytenr(root_tree_id) {
@@ -2154,8 +2154,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // Step 6: Write superblock to all mirrors of every open device.
         //
         // For multi-device filesystems each device has its own
-        // `dev_item.devid` / `dev_item.dev_uuid` embedded in the
-        // superblock; preserving those across writes is handled by
+        // `dev_item.devid` and `dev_item.dev_uuid` embedded in the
+        // superblock. Preserving those across writes is handled by
         // `Filesystem::write_superblock_all_devices`, which splices
         // the per-device dev_item into the in-memory superblock
         // before serializing.
@@ -2181,8 +2181,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// block changed during this transaction.
     ///
     /// For each changed tree, searches the root tree for the existing
-    /// `ROOT_ITEM`, parses it, updates the bytenr/generation/level fields,
-    /// re-serializes it, and writes it back in place.
+    /// `ROOT_ITEM`, parses it, updates the bytenr, generation, and level
+    /// fields, re-serializes it, and writes it back in place.
     fn update_root_items(
         &mut self,
         fs_info: &mut Filesystem<R>,
@@ -2480,8 +2480,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
     /// For each block group with non-empty deltas:
     ///
     /// 1. Look up the block group's metadata (length).
-    /// 2. Read the `FREE_SPACE_INFO` item; if its `BITMAPS` flag is
-    ///    set, error out — bitmap layout is out of scope for v1.
+    /// 2. Read the `FREE_SPACE_INFO` item. If its `BITMAPS` flag is
+    ///    set, error out, because the bitmap layout is not supported.
     /// 3. Walk the existing `FREE_SPACE_EXTENT` items for this block
     ///    group and collect them into a sorted free-range list.
     /// 4. Apply the delta via [`free_space::apply_delta`] to produce
@@ -2491,7 +2491,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     ///    set, and update `FREE_SPACE_INFO.extent_count`.
     ///
     /// All FST modifications go through the standard COW search path,
-    /// so they generate their own delayed refs and dirty blocks; the
+    /// so they generate their own delayed refs and dirty blocks. The
     /// caller (the commit convergence loop) will pick those up on a
     /// subsequent pass.
     ///
@@ -2507,8 +2507,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // Skip the FST update when the FREE_SPACE_TREE compat_ro flag
         // is cleared, regardless of whether a tree at id 10 exists on
         // disk. mkfs images built with `^free-space-tree` carry a
-        // stale empty FST leaf today (mkfs PLAN B.2) — the kernel
-        // ignores it because the flag is cleared, and so should we.
+        // stale empty FST leaf. The kernel ignores it because the flag
+        // is cleared, and so should we.
         // Also skip when the tree simply doesn't exist.
         let fst_flag =
             u64::from(btrfs_disk::raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE);
@@ -3039,8 +3039,9 @@ impl<R: Read + Write + Seek> Transaction<R> {
         )?;
 
         if found {
-            // Extent item already exists. For v1 (mkfs), each data extent
-            // has exactly one backref; duplicates shouldn't happen.
+            // Extent item already exists. Each data extent created here
+            // (by mkfs) has exactly one backref, so duplicates shouldn't
+            // happen.
             debug_assert!(
                 false,
                 "create_data_extent: extent item already exists at {bytenr}"
@@ -3382,7 +3383,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
         // What we plan to do to one csum item.
         struct CsumOp {
             old_key: DiskKey,
-            // Up to two surviving sub-items (head and/or tail). Empty
+            // Up to two surviving sub-items (head, tail, or both). Empty
             // means whole-item deletion.
             survivors: Vec<Surviving>,
         }
@@ -3393,13 +3394,13 @@ impl<R: Read + Write + Seek> Transaction<R> {
         let csum_objectid =
             i64::from(btrfs_disk::raw::BTRFS_EXTENT_CSUM_OBJECTID) as u64;
         let sectorsize = u64::from(fs_info.superblock.sectorsize);
-        // v1 only supports CRC32C filesystems (4-byte csums). Other csum
+        // Only CRC32C filesystems (4-byte csums) are supported. Other csum
         // types are not produced by mkfs in this codebase.
         let csum_size: u64 = 4;
         let end = bytenr + num_bytes;
 
         // Pass 1: walk the csum tree once and collect every operation
-        // (full delete or trim/split). Done as a read-only walk so we
+        // (full delete, trim, or split). Done as a read-only walk so we
         // never hold an &mut borrow on `path` across calls.
         let mut ops: Vec<CsumOp> = Vec::new();
         {
@@ -3437,7 +3438,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
                     || item_key.key_type != KeyType::ExtentCsum
                 {
                     // For the very first iteration we may have backed
-                    // up onto a non-csum item; advance once and retry
+                    // up onto a non-csum item. Advance once and retry
                     // the type check before bailing.
                     if ops.is_empty() {
                         path.slots[0] = slot + 1;
@@ -3565,7 +3566,7 @@ impl<R: Read + Write + Seek> Transaction<R> {
     ///
     /// At mount time the kernel knows the chunk tree's root bytenr but
     /// has no way to resolve it to a physical offset until it can read
-    /// chunk items — and chunk items live in the chunk tree itself. The
+    /// chunk items, and chunk items live in the chunk tree itself. The
     /// circular dependency is broken by the `sys_chunk_array` byte
     /// buffer in the superblock, which embeds the chunk records for
     /// every system chunk. Whenever the chunk tree COWs into a system
@@ -3938,8 +3939,8 @@ impl<R: Read + Write + Seek> Transaction<R> {
             // Update FREE_SPACE_INFO extent_count for this block group.
             // For a simple allocation from the middle of an extent:
             // count changes by +1 (one extent becomes two) or -1 (exact match
-            // removes one) or 0 (trim from edge). Skip for now — the kernel
-            // rebuilds this on mount when VALID is cleared.
+            // removes one) or 0 (trim from edge). Skipped for now: the
+            // kernel rebuilds this on mount when VALID is cleared.
         }
 
         Ok(())
@@ -3972,7 +3973,7 @@ struct InlineRefLocation {
 
 /// Walk the inline-backref area of an `EXTENT_ITEM` looking for an
 /// `EXTENT_DATA_REF` whose `(root, ino, offset)` triple matches the
-/// target. Returns `Ok(None)` if the backref is not stored inline; the
+/// target. Returns `Ok(None)` if the backref is not stored inline. The
 /// caller should then look for a standalone `EXTENT_DATA_REF_KEY`
 /// item.
 fn locate_inline_data_ref(
@@ -4029,7 +4030,7 @@ fn locate_inline_data_ref(
             continue;
         }
         if type_byte > edr_type {
-            // Past the EXTENT_DATA_REF range; the target isn't inline.
+            // Past the EXTENT_DATA_REF range, so the target isn't inline.
             return Ok(None);
         }
 
@@ -4050,8 +4051,8 @@ fn locate_inline_data_ref(
             }));
         }
 
-        // Hash collision OR adjacent EDR record. Inline EDR records are
-        // ordered by extent_data_ref_hash; if we've already passed the
+        // Hash collision or adjacent EDR record. Inline EDR records are
+        // ordered by extent_data_ref_hash. If we've already passed the
         // target hash, the target is not inline.
         let here_hash = extent_data_ref_hash(r, o, off);
         if here_hash > target_hash {
@@ -4117,9 +4118,9 @@ fn decrement_inline_data_ref(
 /// Find a free region inside a block group of the requested kind,
 /// starting at or after `min_addr`.
 ///
-/// `alignment` constrains the start address; `min_size` is the minimum
+/// `alignment` constrains the start address. `min_size` is the minimum
 /// contiguous span of free space required. For metadata both are
-/// `nodesize`; for data, `alignment` is `sectorsize` and `min_size` is
+/// `nodesize`. For data, `alignment` is `sectorsize` and `min_size` is
 /// the requested data extent length.
 ///
 /// Uses extent-tree free space scanning to find actual gaps between
@@ -4255,7 +4256,7 @@ const fn align_up(value: u64, align: u64) -> u64 {
 /// inline `EXTENT_DATA` format.
 ///
 /// Returns `Some(payload)` only if the result is strictly smaller than
-/// the input — callers should fall back to writing the raw bytes
+/// the input. Callers should fall back to writing the raw bytes
 /// otherwise. Returns `None` for `CompressionType::None`,
 /// `CompressionType::Unknown(_)`, or empty input.
 ///
@@ -4315,8 +4316,8 @@ pub fn try_compress(
 /// sector boundary.
 ///
 /// An early-exit heuristic abandons LZO compression after the first
-/// 4 sectors if the framed buffer has already grown past 3 sectors —
-/// incompressible inputs lose to the per-sector header overhead, so
+/// 4 sectors if the framed buffer has already grown past 3 sectors.
+/// Incompressible inputs lose to the per-sector header overhead, so
 /// it is cheaper to bail and let the caller write raw bytes.
 ///
 /// Returns `Some(payload)` only if the result strictly shrinks `data`.
@@ -4338,7 +4339,7 @@ pub fn try_compress_regular(
     let ss = sectorsize as usize;
     let sectors = data.len().div_ceil(ss);
 
-    // Reserve space for the leading 4-byte total_len header; we'll
+    // Reserve space for the leading 4-byte total_len header. We
     // patch it in once we know the final length.
     let mut buf = Vec::with_capacity(data.len());
     buf.extend_from_slice(&[0u8; 4]);
@@ -4510,7 +4511,7 @@ mod tests {
     fn try_compress_regular_lzo_incompressible_short_circuits() {
         use btrfs_disk::items::CompressionType;
         let mut state: u64 = 0xDEAD_BEEF_CAFE_F00D;
-        // 8 sectors of high-entropy data — should trigger early-exit.
+        // 8 sectors of high-entropy data, which should trigger the early exit.
         let data: Vec<u8> = (0..32 * 1024)
             .map(|_| {
                 state ^= state << 13;

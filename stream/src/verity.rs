@@ -27,9 +27,9 @@ pub struct FsverityEnableArg {
 /// Enable fs-verity on the file referred to by `fd`.
 ///
 /// The file must be opened read-only and must not already have verity enabled.
-/// `algorithm` is the hash algorithm (1 = SHA-256, 2 = SHA-512), `block_size`
-/// must be a power of two between 1024 and 65536 (filesystem block size is
-/// typical).
+/// `algorithm` is the hash algorithm (1 = SHA-256, 2 = SHA-512). `block_size`
+/// must be a power of two between 1024 and 65536 (typically the filesystem
+/// block size).
 ///
 /// # Errors
 ///

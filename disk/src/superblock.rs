@@ -22,7 +22,7 @@ const SUPER_INFO_SIZE: usize = 4096;
 /// From kernel-shared/ctree.h: `BTRFS_SUPER_INFO_OFFSET`
 const SUPER_INFO_OFFSET: u64 = 65536;
 
-/// Maximum number of superblock mirrors (3: primary + 2 copies).
+/// Maximum number of superblock mirrors (3: the primary and 2 copies).
 /// From kernel-shared/disk-io.h: `BTRFS_SUPER_MIRROR_MAX`
 pub const SUPER_MIRROR_MAX: u32 = 3;
 
@@ -73,8 +73,8 @@ impl ChecksumType {
     }
 
     /// Size in bytes of checksums for this algorithm.
-    // Unknown falls back to 32 (BTRFS_CSUM_SIZE); same value as Sha256/Blake2
-    // but for a different reason — suppress the match_same_arms lint.
+    // Unknown falls back to 32 (BTRFS_CSUM_SIZE). That matches Sha256 and
+    // Blake2 only by coincidence, so suppress the match_same_arms lint.
     #[must_use]
     #[allow(clippy::match_same_arms)]
     pub fn size(&self) -> usize {
@@ -87,12 +87,12 @@ impl ChecksumType {
     }
 
     /// Compute the checksum of `data`. The returned vector has length
-    /// [`Self::size`]. Panics on [`ChecksumType::Unknown`] because there's
-    /// no algorithm to dispatch to.
+    /// [`Self::size`].
     ///
     /// # Panics
     ///
-    /// Panics if invoked on [`ChecksumType::Unknown`].
+    /// Panics on [`ChecksumType::Unknown`], which has no algorithm to
+    /// dispatch to.
     #[must_use]
     pub fn compute(self, data: &[u8]) -> Vec<u8> {
         match self {
@@ -117,8 +117,8 @@ impl ChecksumType {
 
 impl ChecksumType {
     /// Convert to the raw u16 value for on-disk storage.
-    // All btrfs csum type constants fit in u16 (they are small enum values);
-    // the u32 bindgen type is wider than necessary.
+    // All btrfs csum type constants are small enum values that fit in u16.
+    // The u32 bindgen type is wider than necessary.
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn to_raw(self) -> u16 {
@@ -300,10 +300,10 @@ impl Superblock {
 
     /// Serialize the superblock to a 4096-byte buffer.
     ///
-    /// The checksum field is written as-is from `self.csum`; call
+    /// The checksum field is written as-is from `self.csum`. Call
     /// [`csum_superblock`] on the result to recompute it.
     #[must_use]
-    #[allow(clippy::missing_panics_doc)] // Vec is pre-sized; try_into always succeeds
+    #[allow(clippy::missing_panics_doc)] // Vec is pre-sized, so try_into always succeeds.
     pub fn to_bytes(&self) -> [u8; SUPER_INFO_SIZE] {
         type S = raw::btrfs_super_block;
         let mut v = Vec::with_capacity(SUPER_INFO_SIZE);
@@ -382,7 +382,7 @@ impl BackupRoot {
         buf.put_u64_le(self.total_bytes);
         buf.put_u64_le(self.bytes_used);
         buf.put_u64_le(self.num_devices);
-        // unused_64[4] — 32 reserved bytes
+        // unused_64[4]: 32 reserved bytes
         buf.put_bytes(0, 32);
         buf.put_u8(self.tree_root_level);
         buf.put_u8(self.chunk_root_level);
@@ -422,7 +422,7 @@ fn read_raw_superblock(
     Ok(sb)
 }
 
-/// Helper: read a LE u64 field from a packed struct field (avoids misaligned reference).
+/// Read a LE u64 from a packed struct field without taking a misaligned reference.
 macro_rules! le64 {
     ($field:expr) => {{
         let val = $field;
@@ -445,7 +445,7 @@ macro_rules! le16 {
 }
 
 fn parse_dev_item(d: &raw::btrfs_dev_item) -> DeviceItem {
-    // Copy all fields to locals first — the struct is packed.
+    // Copy all fields to locals first, because the struct is packed.
     let devid = le64!(d.devid);
     let total_bytes = le64!(d.total_bytes);
     let bytes_used = le64!(d.bytes_used);
@@ -507,8 +507,8 @@ fn parse_backup_root(r: &raw::btrfs_root_backup) -> BackupRoot {
 
 fn parse_label(raw_label: &[std::os::raw::c_char; 256]) -> String {
     // c_char is u8 on aarch64 Linux but i8 on x86_64. On aarch64 the
-    // cast is a no-op (unnecessary_cast); on x86_64 it's i8 → u8 which
-    // tickles cast_sign_loss. Silence both so the code compiles cleanly
+    // cast is a no-op (unnecessary_cast). On x86_64 it's i8 → u8, which
+    // trips cast_sign_loss. Silence both so the code compiles cleanly
     // on either host.
     #[allow(clippy::unnecessary_cast, clippy::cast_sign_loss)]
     let bytes: Vec<u8> = raw_label
@@ -626,7 +626,7 @@ pub fn read_superblock_bytes_at(
 /// Returns `false` for [`ChecksumType::Unknown`] (no algorithm to verify
 /// against).
 #[must_use]
-#[allow(clippy::missing_panics_doc)] // Slices are bounded by SUPER_INFO_SIZE; try_into always succeeds
+#[allow(clippy::missing_panics_doc)] // Slices are bounded by SUPER_INFO_SIZE, so try_into always succeeds.
 pub fn superblock_is_valid(buf: &[u8; SUPER_INFO_SIZE]) -> bool {
     let magic_off = mem::offset_of!(raw::btrfs_super_block, magic);
     let magic =
@@ -649,7 +649,7 @@ pub fn superblock_is_valid(buf: &[u8; SUPER_INFO_SIZE]) -> bool {
 
 /// Extract the generation field from a raw superblock byte buffer.
 #[must_use]
-#[allow(clippy::missing_panics_doc)] // Slice is bounded by SUPER_INFO_SIZE; try_into always succeeds
+#[allow(clippy::missing_panics_doc)] // Slice is bounded by SUPER_INFO_SIZE, so try_into always succeeds.
 pub fn superblock_generation(buf: &[u8; SUPER_INFO_SIZE]) -> u64 {
     let off = mem::offset_of!(raw::btrfs_super_block, generation);
     u64::from_le_bytes(buf[off..off + 8].try_into().unwrap())
@@ -666,7 +666,7 @@ pub fn superblock_generation(buf: &[u8; SUPER_INFO_SIZE]) -> u64 {
 ///
 /// Returns an error if the superblock's `csum_type` field is unrecognized
 /// (i.e. parses as [`ChecksumType::Unknown`]).
-#[allow(clippy::missing_panics_doc)] // Slice is bounded by SUPER_INFO_SIZE; try_into always succeeds
+#[allow(clippy::missing_panics_doc)] // Slice is bounded by SUPER_INFO_SIZE, so try_into always succeeds.
 pub fn csum_superblock(buf: &mut [u8; SUPER_INFO_SIZE]) -> io::Result<()> {
     let csum_type_off = mem::offset_of!(raw::btrfs_super_block, csum_type);
     let raw_csum_type = u16::from_le_bytes(
@@ -885,7 +885,7 @@ mod tests {
         assert!(read_superblock(&mut cursor, 0).is_err());
     }
 
-    // --- superblock_is_valid / superblock_generation ---
+    // --- superblock_is_valid and superblock_generation ---
 
     fn make_valid_crc32c_buf() -> [u8; SUPER_INFO_SIZE] {
         let mut buf = [0u8; SUPER_INFO_SIZE];
@@ -933,7 +933,7 @@ mod tests {
     fn write_superblock_all_mirrors_updates_bytenr() {
         let buf = make_valid_crc32c_buf();
         // Device large enough for all 3 mirrors (256 GiB + 4096).
-        // Use only primary + secondary (64 MiB + 4096) to keep test fast.
+        // Use only the primary and secondary (64 MiB + 4096) to keep the test fast.
         let device_size = 64 * 1024 * 1024 + SUPER_INFO_SIZE;
         let mut device = vec![0u8; device_size];
         {

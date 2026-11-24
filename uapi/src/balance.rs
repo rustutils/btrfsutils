@@ -150,8 +150,8 @@ impl BalanceArgs {
     /// Filter chunks whose usage is below `percent` (0..100).
     #[must_use]
     pub fn usage(mut self, percent: u64) -> Self {
-        // SAFETY: the union field `usage` and `usage_min`/`usage_max` overlap;
-        // setting `usage` covers the whole 8-byte field.
+        // SAFETY: the union field `usage` overlaps `usage_min` and
+        // `usage_max`. Setting `usage` covers the whole 8-byte field.
         self.raw.__bindgen_anon_1.usage = percent;
         self.raw.flags |= BalanceArgsFlags::USAGE.bits();
         self
@@ -267,11 +267,11 @@ impl BalanceCtl {
 /// Start or resume a balance operation on the filesystem referred to by `fd`.
 ///
 /// `flags` controls which chunk types are balanced and whether to force or
-/// resume. `data`, `meta`, and `sys` are optional per-type filter arguments;
-/// pass `None` to use defaults for that type.
+/// resume. `data`, `meta`, and `sys` are optional per-type filter arguments.
+/// Pass `None` to use defaults for that type.
 ///
 /// On success, returns the progress counters as reported by the kernel after
-/// the operation completes (or is paused/interrupted).
+/// the operation completes (or is paused or interrupted).
 ///
 /// # Errors
 ///

@@ -5,13 +5,13 @@
 //! 1. A hand-crafted reproducer (`reproduces_clear_uuid_tree_hang`)
 //!    that drives the harness through the same sequence of operations
 //!    that `rescue clear-uuid-tree` performs. If this test hangs (or
-//!    times out via the watchdog), we have a tight reproducer for the
-//!    failure documented in `transaction/PLAN.md`.
+//!    times out via the watchdog), it is a tight reproducer for the
+//!    clear-uuid-tree commit hang.
 //!
 //! 2. A proptest entry point (`transaction_sequences_are_consistent`)
 //!    that generates random `Op` sequences and runs them through
 //!    `run_sequence_watchdogged`. The number of cases defaults to 10
-//!    (so the test stays fast on `cargo test`); set the env var
+//!    (so the test stays fast on `cargo test`). Set the env var
 //!    `PROPTEST_CASES=N` for stress runs.
 
 use btrfs_transaction::test_helpers::{
@@ -21,20 +21,19 @@ use btrfs_transaction::test_helpers::{
 use proptest::prelude::*;
 use test_strategy::Arbitrary;
 
-// ─── Hand-crafted reproducers ────────────────────────────────────────
+// Hand-crafted reproducers.
 
 /// Mirrors the operation sequence performed by `rescue clear-uuid-tree`:
 /// allocate some blocks owned by the playground tree (a stand-in for the
 /// uuid tree's existing blocks), drop a ref on each one and pin it,
 /// remove the playground tree's root from `fs.roots`, then commit.
 ///
-/// PLAN.md predicts this hangs. With the empty-commit short-circuit
-/// in place (Option A), the hang no longer reproduces — but the
+/// This sequence was expected to hang. With an empty-commit
+/// short-circuit in place, the hang no longer reproduces, but the
 /// underlying bug surfaces as a different "parent transid wanted N
-/// found N-1" failure on a non-empty commit path. See PLAN.md
-/// "Finding 3" for the diagnosis. Until that second instance is
-/// fixed, this test is short-circuited so `cargo test` stays green.
-/// Delete the early return to re-enable.
+/// found N-1" failure on a non-empty commit path. Until that second
+/// instance is fixed, this test is short-circuited so `cargo test`
+/// stays green. Delete the early return to re-enable.
 #[test]
 fn reproduces_clear_uuid_tree_hang() {
     let ops = vec![
@@ -50,7 +49,7 @@ fn reproduces_clear_uuid_tree_hang() {
 
     match run_sequence_watchdogged(ops, DEFAULT_TIMEOUT) {
         Ok(()) => {
-            // Surprising but good — the underlying bug may already be
+            // Surprising but good: the underlying bug may already be
             // fixed. Leave the test in place as a regression guard.
         }
         Err(Failure::Hang { timeout }) => {
@@ -73,7 +72,7 @@ fn empty_sequence_smoke() {
     run_sequence(&[]).expect("empty sequence should succeed");
 }
 
-/// Smoke test: a tiny insert/commit/reopen cycle. Verifies the model
+/// Smoke test: a tiny insert, commit, and reopen cycle. Verifies the model
 /// oracle is wired up correctly.
 #[test]
 fn insert_commit_reopen_smoke() {
@@ -91,7 +90,7 @@ fn insert_commit_reopen_smoke() {
     run_sequence(&ops).expect("insert/commit/reopen should succeed");
 }
 
-// ─── Proptest entry point ────────────────────────────────────────────
+// Proptest entry point.
 
 /// Random `Op` for proptest. Bounds on the contained values are kept
 /// tight so the shrinker has a small state space:
@@ -101,7 +100,7 @@ fn insert_commit_reopen_smoke() {
 /// - block-drop indices are 0..16, modulo'd by `apply_op`
 ///
 /// `Commit` and `Reopen` get extra weight so commit-path bugs are
-/// exercised heavily; `Abort` and `RemovePlaygroundRoot` get less so
+/// exercised heavily. `Abort` and `RemovePlaygroundRoot` get less so
 /// that the typical sequence makes forward progress.
 #[derive(Debug, Clone, Arbitrary)]
 enum ArbOp {
@@ -163,7 +162,7 @@ impl From<ArbOp> for Op {
 }
 
 fn proptest_config() -> ProptestConfig {
-    // Default to 100 cases — about 2-3 seconds on a fast box, so the
+    // Default to 100 cases (about 2-3 seconds on a fast box), so the
     // harness runs as part of every `cargo test` without blowing up
     // the test wall time. Bump via `PROPTEST_CASES=N` for stress runs
     // (1000 takes about 25 seconds).
@@ -173,8 +172,8 @@ fn proptest_config() -> ProptestConfig {
         .unwrap_or(100);
     ProptestConfig {
         cases,
-        // Sequences can be expensive (mkfs + commits + btrfs check),
-        // so cap proptest's per-case shrink budget — we'd rather see
+        // Sequences can be expensive (mkfs, commits, and btrfs check),
+        // so cap proptest's per-case shrink budget. We'd rather see
         // a slightly larger failing input quickly than wait minutes
         // for an optimal shrink.
         max_shrink_iters: 256,
@@ -187,8 +186,8 @@ proptest! {
 
     /// For any sequence of operations, running it against a fresh
     /// filesystem must (a) not hang, (b) leave the playground tree
-    /// containing exactly the model's keys/values at every step,
-    /// (c) survive a final commit + reopen, and (d) pass
+    /// containing exactly the model's keys and values at every step,
+    /// (c) survive a final commit and reopen, and (d) pass
     /// `btrfs check --readonly` modulo free-space-tree warnings.
     #[test]
     fn transaction_sequences_are_consistent(

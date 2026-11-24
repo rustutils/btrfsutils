@@ -1,4 +1,4 @@
-//! Binary send stream parser for the btrfs send/receive protocol.
+//! Binary send stream parser for the btrfs send and receive protocol.
 //!
 //! Parses the TLV-encoded command stream produced by `btrfs send` (or the
 //! kernel's `BTRFS_IOC_SEND` ioctl). The stream consists of a header followed
@@ -80,11 +80,11 @@ pub enum StreamError {
 
 type Result<T> = std::result::Result<T, StreamError>;
 
-// Maximum number of TLV attribute types we track. (One past the
-// largest `BTRFS_SEND_A_*` constant; updates needed if v4 attrs land.)
+// Number of TLV attribute types tracked: one past the largest
+// `BTRFS_SEND_A_*` constant. Update this if v4 attributes are added.
 const MAX_ATTRS: usize = 36;
 
-/// A timestamp from the send stream (sec + nsec).
+/// A timestamp from the send stream (seconds and nanoseconds).
 #[derive(Debug, Clone, Copy)]
 pub struct Timespec {
     pub sec: u64,
@@ -324,7 +324,7 @@ impl<R: Read> StreamReader<R> {
             .read_exact(&mut self.buf)
             .map_err(StreamError::TruncatedPayload)?;
 
-        // Validate CRC32C over header (with crc field zeroed) + payload.
+        // Validate CRC32C over the header (with the crc field zeroed) and payload.
         // The btrfs send stream uses raw CRC-32C (init=0, xorout=0), not
         // the standard ISO 3309 convention. We compute incrementally to
         // avoid allocating a contiguous buffer for the entire command.
@@ -808,7 +808,7 @@ fn read_exact_or_eof(reader: &mut impl Read, buf: &mut [u8]) -> Result<bool> {
     Ok(true)
 }
 
-/// Attribute storage: for each attribute type index, Option<(offset, len)> into
+/// Attribute storage: for each attribute type index, `Option<(offset, len)>` into
 /// the payload buffer.
 type AttrTable = [Option<(usize, usize)>; MAX_ATTRS];
 
@@ -831,7 +831,7 @@ fn parse_tlv_attrs(payload: &[u8], version: u32) -> Result<AttrTable> {
             return Err(StreamError::InvalidTlvType(tlv_type));
         }
 
-        // In v2+, the DATA attribute has no length field — it extends to the
+        // In v2+, the DATA attribute has no length field: it extends to the
         // end of the command payload.
         let tlv_len = if version >= 2 && tlv_type == BTRFS_SEND_A_DATA {
             payload.len() - pos
@@ -898,7 +898,7 @@ fn attr_string(
     name: &'static str,
 ) -> Result<String> {
     let data = get_attr(buf, attrs, attr_type, name)?;
-    // Strings in the stream are null-terminated; strip the trailing NUL.
+    // Strings in the stream are null-terminated. Strip the trailing NUL.
     let s = if data.last() == Some(&0) {
         &data[..data.len() - 1]
     } else {

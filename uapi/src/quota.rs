@@ -2,11 +2,11 @@
 //!
 //! Quota accounting tracks disk usage per subvolume via qgroups (quota groups).
 //! It must be explicitly enabled before any qgroup limits or usage data are
-//! available.  Once enabled, usage numbers are maintained incrementally by the
-//! kernel; a rescan rebuilds them from scratch if they become inconsistent.
+//! available. Once enabled, the kernel maintains usage numbers incrementally.
+//! A rescan rebuilds them from scratch if they become inconsistent.
 //!
 //! Every subvolume automatically gets a level-0 qgroup whose ID matches the
-//! subvolume ID.  Higher-level qgroups can be created and linked into a
+//! subvolume ID. Higher-level qgroups can be created and linked into a
 //! parent-child hierarchy so that space usage rolls up through the tree.
 //!
 //! Quota status (whether quotas are on, which mode, inconsistency flag) is
@@ -80,7 +80,7 @@ pub fn quota_disable(fd: BorrowedFd) -> nix::Result<()> {
 ///
 /// Returns immediately after kicking off the background scan. Use
 /// [`quota_rescan_wait`] to block until it finishes. If a rescan is already
-/// in progress the kernel returns `EINPROGRESS`; callers that are about to
+/// in progress the kernel returns `EINPROGRESS`. Callers that are about to
 /// wait anyway can treat that as a non-error.
 ///
 /// # Errors
@@ -130,7 +130,7 @@ pub fn quota_rescan_status(fd: BorrowedFd) -> nix::Result<QuotaRescanStatus> {
 
 /// Extract the hierarchy level from a packed qgroup ID.
 ///
-/// `qgroupid = (level << 48) | subvolid`.  Level 0 qgroups correspond
+/// `qgroupid = (level << 48) | subvolid`. Level 0 qgroups correspond
 /// directly to subvolumes.
 #[inline]
 #[must_use]
@@ -190,11 +190,11 @@ pub struct QgroupInfo {
     pub excl: u64,
     /// Exclusively-owned bytes after compression.
     pub excl_cmpr: u64,
-    /// Limit flags — which of the limit fields below are enforced.
+    /// Limit flags: which of the limit fields below are enforced.
     pub limit_flags: QgroupLimitFlags,
-    /// Maximum referenced bytes.  `u64::MAX` when no limit is set.
+    /// Maximum referenced bytes. `u64::MAX` when no limit is set.
     pub max_rfer: u64,
-    /// Maximum exclusive bytes.  `u64::MAX` when no limit is set.
+    /// Maximum exclusive bytes. `u64::MAX` when no limit is set.
     pub max_excl: u64,
     /// IDs of qgroups that are parents of this one in the hierarchy.
     pub parents: Vec<u64>,
@@ -329,12 +329,10 @@ pub fn qgroup_destroy(fd: BorrowedFd, qgroupid: u64) -> nix::Result<()> {
 /// Returns `true` if the kernel indicates that a quota rescan is now needed
 /// (the ioctl returned a positive value).
 ///
-/// Errors: ENOENT if either qgroup does not exist.  EEXIST if the
-/// relationship already exists.
-///
 /// # Errors
 ///
-/// Returns `Err` if the ioctl fails.
+/// Returns `Err` if the ioctl fails: `ENOENT` if either qgroup does not
+/// exist, `EEXIST` if the relationship already exists.
 pub fn qgroup_assign(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
     let mut args: btrfs_ioctl_qgroup_assign_args = unsafe { mem::zeroed() };
     args.assign = 1;
@@ -351,12 +349,10 @@ pub fn qgroup_assign(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
 ///
 /// Returns `true` if the kernel indicates that a quota rescan is now needed.
 ///
-/// Errors: ENOENT if either qgroup does not exist or the relationship
-/// is not present.
-///
 /// # Errors
 ///
-/// Returns `Err` if the ioctl fails.
+/// Returns `Err` if the ioctl fails: `ENOENT` if either qgroup does not
+/// exist or the relationship is not present.
 pub fn qgroup_remove(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
     let mut args: btrfs_ioctl_qgroup_assign_args = unsafe { mem::zeroed() };
     args.assign = 0;
@@ -371,9 +367,9 @@ pub fn qgroup_remove(fd: BorrowedFd, src: u64, dst: u64) -> nix::Result<bool> {
 
 /// Set usage limits on a qgroup.
 ///
-/// Pass `QgroupLimitFlags::MAX_RFER` in `flags` to enforce `max_rfer`, and/or
-/// `QgroupLimitFlags::MAX_EXCL` to enforce `max_excl`.  Clear a limit by
-/// omitting the corresponding flag.
+/// Pass `QgroupLimitFlags::MAX_RFER` in `flags` to enforce `max_rfer`,
+/// `QgroupLimitFlags::MAX_EXCL` to enforce `max_excl`, or both. Clear a limit
+/// by omitting its flag.
 ///
 /// # Errors
 ///
@@ -396,7 +392,7 @@ pub fn qgroup_limit(
     args.qgroupid = qgroupid;
     args.lim = lim;
     // SAFETY: args is fully initialised above and lives for the duration of
-    // the ioctl call.  The ioctl number is #43 (_IOR direction in the kernel
+    // the ioctl call. The ioctl number is #43 (_IOR direction in the kernel
     // header), which reads args from userspace.
     unsafe { btrfs_ioc_qgroup_limit(fd.as_raw_fd(), &raw mut args) }?;
     Ok(())
@@ -416,7 +412,8 @@ pub fn qgroup_list(fd: BorrowedFd) -> nix::Result<QgroupList> {
     let mut builders: HashMap<u64, QgroupEntryBuilder> = HashMap::new();
     let mut status_flags = QgroupStatusFlags::empty();
 
-    // Scan the quota tree for STATUS / INFO / LIMIT / RELATION items in one pass.
+    // Scan the quota tree for STATUS, INFO, LIMIT, and RELATION items in one
+    // pass.
     let quota_key = SearchFilter {
         tree_id: u64::from(BTRFS_QUOTA_TREE_OBJECTID),
         start: Key {
@@ -470,7 +467,7 @@ pub fn qgroup_list(fd: BorrowedFd) -> nix::Result<QgroupList> {
 
     match scan_result {
         Err(Errno::ENOENT) => {
-            // Quota tree does not exist — quotas are disabled.
+            // Quota tree does not exist: quotas are disabled.
             return Ok(QgroupList {
                 status_flags: QgroupStatusFlags::empty(),
                 qgroups: Vec::new(),
@@ -509,7 +506,7 @@ pub fn qgroup_list(fd: BorrowedFd) -> nix::Result<QgroupList> {
 fn collect_subvol_ids(fd: BorrowedFd) -> nix::Result<HashSet<u64>> {
     let mut ids: HashSet<u64> = HashSet::new();
 
-    // BTRFS_LAST_FREE_OBJECTID binds as i32 = -256; cast to u64 gives
+    // BTRFS_LAST_FREE_OBJECTID binds as i32 = -256. Cast to u64, it gives
     // 0xFFFFFFFF_FFFFFF00 as expected.
     #[allow(clippy::cast_sign_loss)]
     let key = SearchFilter::for_objectid_range(
@@ -527,8 +524,7 @@ fn collect_subvol_ids(fd: BorrowedFd) -> nix::Result<HashSet<u64>> {
     Ok(ids)
 }
 
-/// Destroy all "stale" level-0 qgroups — those whose corresponding subvolume
-/// no longer exists.
+/// Destroy all stale level-0 qgroups: those whose subvolume no longer exists.
 ///
 /// In simple-quota mode (`SIMPLE_MODE` flag set), stale qgroups with non-zero
 /// `rfer` or `excl` are retained because they hold accounting information for

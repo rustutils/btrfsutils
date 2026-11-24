@@ -2,8 +2,8 @@
 //!
 //! Each test opens a [`btrfs_fs::Filesystem`] over a per-process fixture
 //! image built once via `mkfs.btrfs --rootdir`, and drives the public
-//! async API directly. No FUSE mount or elevated privileges required;
-//! the only external dependency is a working `mkfs.btrfs` on `$PATH`.
+//! async API directly. No FUSE mount or elevated privileges are
+//! required. The only external dependency is `mkfs.btrfs` on `$PATH`.
 
 use btrfs_fs::{FileKind, Filesystem};
 use std::{
@@ -28,9 +28,9 @@ fn build_fixture(base: &Path) -> PathBuf {
 
     std::os::unix::fs::symlink("hello.txt", src.join("link")).unwrap();
 
-    // Try to set a user xattr; tmpfs and ext4 honour user.* but some
-    // filesystems don't. Failure is silently tolerated and the xattr
-    // tests skip when the list comes back empty.
+    // Try to set a user xattr. tmpfs and ext4 honour user.* but some
+    // filesystems don't. Failure is ignored, and the xattr tests skip
+    // when the list comes back empty.
     let _ = std::process::Command::new("setfattr")
         .args([
             "-n",
@@ -73,8 +73,6 @@ fn open_fixture() -> Filesystem<File> {
     Filesystem::open(file).unwrap()
 }
 
-// ── lookup ──────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn lookup_finds_file_in_root() {
     let fs = open_fixture();
@@ -107,8 +105,6 @@ async fn lookup_finds_symlink() {
     assert_eq!(item.mode & libc::S_IFMT, libc::S_IFLNK);
 }
 
-// ── getattr ─────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn getattr_of_root_is_directory() {
     let fs = open_fixture();
@@ -128,8 +124,6 @@ async fn getattr_returns_none_for_missing_ino() {
     let result = fs.getattr(bogus).await.unwrap();
     assert!(result.is_none());
 }
-
-// ── readdir ─────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn readdir_root_lists_all_entries() {
@@ -169,8 +163,6 @@ async fn readdir_subdir_parent_is_root() {
     assert_eq!(dotdot.ino, root);
     assert!(entries.iter().any(|e| e.name == b"nested.txt"));
 }
-
-// ── read ────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn read_small_file_returns_full_contents() {
@@ -229,8 +221,6 @@ async fn read_nested_file_in_subdir() {
     assert_eq!(data, b"nested content\n");
 }
 
-// ── readlink ────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn readlink_returns_target_path() {
     let fs = open_fixture();
@@ -239,8 +229,6 @@ async fn readlink_returns_target_path() {
     let target = fs.readlink(ino).await.unwrap();
     assert_eq!(target.as_deref(), Some(b"hello.txt".as_slice()));
 }
-
-// ── xattrs ──────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn xattr_list_and_get_if_supported() {
@@ -273,8 +261,6 @@ async fn xattr_get_returns_none_for_missing_name() {
     assert!(value.is_none());
 }
 
-// ── statfs ──────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn statfs_returns_sensible_values() {
     let fs = open_fixture();
@@ -288,10 +274,8 @@ async fn statfs_returns_sensible_values() {
     assert_eq!(s.frsize, 4096);
 }
 
-// ── concurrency ─────────────────────────────────────────────────────
-
-/// Compile-time proof that `Filesystem<File>` is `Send + Sync` (so it
-/// composes with `tokio::spawn`).
+/// Compile-time check that `Filesystem<File>` is `Send + Sync`, so it
+/// works with `tokio::spawn`.
 #[test]
 fn filesystem_handle_is_send_sync() {
     fn assert_send_sync<T: Send + Sync>() {}
@@ -300,8 +284,8 @@ fn filesystem_handle_is_send_sync() {
 
 /// Spawn N async tasks that each clone the filesystem handle, run a
 /// `lookup → read → getattr` chain, and verify they all complete
-/// correctly in parallel. Uses the multi-thread runtime so
-/// `spawn_blocking` workers actually run on different threads.
+/// correctly in parallel. Uses the multi-thread runtime so the
+/// `spawn_blocking` workers run on different threads.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_async_reads() {
     let fs = open_fixture();

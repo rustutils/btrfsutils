@@ -35,7 +35,7 @@ fn sysfs_read_info() {
     );
 }
 
-/// SysfsBtrfs commit_stats should show commits after writes + sync.
+/// SysfsBtrfs commit_stats should show commits after writes and a sync.
 #[test]
 #[ignore = "requires elevated privileges"]
 fn sysfs_commit_stats() {
@@ -54,7 +54,8 @@ fn sysfs_commit_stats() {
     );
 }
 
-/// Quota status should be visible via sysfs after enabling/disabling quotas.
+/// Quota status should be visible via sysfs after enabling and disabling
+/// quotas.
 #[test]
 #[ignore = "requires elevated privileges"]
 fn sysfs_quota_status() {

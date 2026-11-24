@@ -5,9 +5,9 @@
 //! then re-parses the stream with `btrfs_stream::StreamReader` and
 //! asserts the expected sequence of commands appears.
 //!
-//! Doesn't pipe the stream to a real `btrfs receive` — that needs
+//! The stream is not piped to a real `btrfs receive`, which needs
 //! root and lives in the CLI's privileged round-trip test. The
-//! parser-level check catches encoder/walker bugs without
+//! parser-level check catches encoder and walker bugs without
 //! privileges.
 
 use btrfs_fs::Filesystem;
@@ -20,15 +20,15 @@ use std::{
 
 /// Build a small fixture: a regular file, an empty file, a larger
 /// file, a directory with a nested file, and a symlink. Mirrors
-/// `basic.rs::build_fixture` so we exercise the same shapes.
+/// `basic.rs::build_fixture` so both test the same shapes.
 fn build_fixture(base: &Path) -> PathBuf {
     let src = base.join("src");
     fs::create_dir(&src).unwrap();
 
     fs::write(src.join("hello.txt"), b"hello, world\n").unwrap();
     fs::write(src.join("empty.txt"), b"").unwrap();
-    // 100 KiB so we exercise multi-chunk WRITE emission (chunk
-    // size is 48 KiB, so we expect at least 3 WRITE commands).
+    // 100 KiB to exercise multi-chunk WRITE emission. The chunk size
+    // is 48 KiB, so expect at least 3 WRITE commands.
     fs::write(src.join("large.bin"), vec![0x42u8; 100_000]).unwrap();
 
     let sub = src.join("subdir");

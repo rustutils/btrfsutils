@@ -1,7 +1,7 @@
 //! # File defragmentation: rewriting fragmented extents into contiguous runs
 //!
 //! Defragmenting a file rewrites its extents contiguously on disk, which can
-//! improve sequential read performance.  Optionally applies or removes
+//! improve sequential read performance. Optionally applies or removes
 //! transparent compression at the same time.
 
 use crate::raw::{
@@ -17,7 +17,7 @@ use std::{
 /// Compression algorithm to use when defragmenting.
 ///
 /// Corresponds to the `BTRFS_COMPRESS_*` values from `compression.h`.
-/// The numeric values are part of the on-disk/ioctl ABI.
+/// The numeric values are part of the on-disk and ioctl ABI.
 ///
 /// See also [`btrfs_disk::items::CompressionType`] which includes `None` and
 /// `Unknown` variants for parsing on-disk data.
@@ -59,7 +59,7 @@ impl std::str::FromStr for CompressType {
 /// Arguments for a defragmentation operation.
 ///
 /// Construct with [`DefragRangeArgs::new`] and use the builder methods to set
-/// options. All options are optional; the defaults match the kernel's defaults.
+/// options. Every option is optional, and the defaults match the kernel's.
 #[derive(Debug, Clone)]
 pub struct DefragRangeArgs {
     /// Start offset in bytes. Defaults to `0`.
@@ -163,16 +163,12 @@ impl Default for DefragRangeArgs {
 mod tests {
     use super::*;
 
-    // --- CompressType Display ---
-
     #[test]
     fn compress_type_display() {
         assert_eq!(format!("{}", CompressType::Zlib), "zlib");
         assert_eq!(format!("{}", CompressType::Lzo), "lzo");
         assert_eq!(format!("{}", CompressType::Zstd), "zstd");
     }
-
-    // --- CompressType FromStr ---
 
     #[test]
     fn compress_type_from_str() {
@@ -192,8 +188,6 @@ mod tests {
         assert!("lz4".parse::<CompressType>().is_err());
         assert!("".parse::<CompressType>().is_err());
     }
-
-    // --- DefragRangeArgs builder ---
 
     #[test]
     fn defrag_args_defaults() {

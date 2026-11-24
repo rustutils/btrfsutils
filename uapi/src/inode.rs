@@ -19,22 +19,16 @@ use std::{
     os::fd::{AsRawFd, BorrowedFd},
 };
 
-/// Look up the tree ID (root ID) of the subvolume containing the given file or directory.
+/// Look up the tree ID (root ID) of the subvolume containing `fd`.
 ///
-/// For a file or directory, returns the containing tree root ID.
-/// For a subvolume, returns its own tree ID.
-///
-/// # Arguments
-///
-/// * `fd` - File descriptor to a file or directory on the btrfs filesystem
-///
-/// # Returns
-///
-/// The tree ID (root ID) of the containing subvolume
+/// `fd` is open on a file or directory on a btrfs filesystem. For a file or
+/// directory, returns the ID of the containing subvolume. For a subvolume,
+/// returns its own tree ID.
 ///
 /// # Errors
 ///
-/// Returns an error if the ioctl fails (e.g., file descriptor is not on a btrfs filesystem)
+/// Returns an error if the ioctl fails, for example when `fd` is not on a
+/// btrfs filesystem.
 pub fn lookup_path_rootid(fd: BorrowedFd<'_>) -> nix::Result<u64> {
     let mut args = crate::raw::btrfs_ioctl_ino_lookup_args {
         treeid: 0,
@@ -49,31 +43,20 @@ pub fn lookup_path_rootid(fd: BorrowedFd<'_>) -> nix::Result<u64> {
     Ok(args.treeid)
 }
 
-/// Get file system paths for the given inode.
+/// Get the filesystem paths of inode `inum`.
 ///
-/// Returns a vector of path strings relative to the filesystem root that correspond
-/// to the given inode number.
-///
-/// # Arguments
-///
-/// * `fd` - File descriptor to a file or directory on the btrfs filesystem
-/// * `inum` - Inode number to look up
-///
-/// # Returns
-///
-/// A vector of path strings for the given inode
+/// `fd` is open on a file or directory on a btrfs filesystem. Returns every
+/// path, relative to the filesystem root, that refers to the inode.
 ///
 /// # Errors
 ///
-/// Returns an error if the ioctl fails
+/// Returns an error if the ioctl fails.
 pub fn ino_paths(fd: BorrowedFd<'_>, inum: u64) -> nix::Result<Vec<String>> {
     const PATH_MAX: usize = 4096;
 
-    // First, allocate a buffer for the response
-    // The buffer needs to be large enough to hold btrfs_data_container plus the path data
+    // The buffer holds the btrfs_data_container header plus the path data.
     let mut buf = vec![0u8; PATH_MAX];
 
-    // Set up the ioctl arguments
     let mut args = crate::raw::btrfs_ioctl_ino_path_args {
         inum,
         size: PATH_MAX as u64,
@@ -85,8 +68,7 @@ pub fn ino_paths(fd: BorrowedFd<'_>, inum: u64) -> nix::Result<Vec<String>> {
         btrfs_ioc_ino_paths(fd.as_raw_fd(), &raw mut args)?;
     }
 
-    // Parse the results from the data container
-    // The buffer is laid out as: btrfs_data_container header, followed by val[] array
+    // The buffer is a btrfs_data_container header followed by the val[] array.
     // SAFETY: buf is u64-aligned from the Vec<u8> allocation, and the ioctl
     // populated it as a btrfs_data_container. The cast is safe because the
     // buffer was allocated with at least PATH_MAX bytes.
@@ -96,20 +78,18 @@ pub fn ino_paths(fd: BorrowedFd<'_>, inum: u64) -> nix::Result<Vec<String>> {
 
     let mut paths = Vec::new();
 
-    // Each element in val[] is an offset into the data buffer where a path string starts
+    // Each element in val[] is the offset of a path string, relative to the
+    // start of val[].
     for i in 0..container.elem_cnt as usize {
-        // Get the offset from val[i]
         #[allow(clippy::cast_possible_truncation)] // offsets fit in usize
         let val_offset = unsafe {
             let val_ptr = container.val.as_ptr();
             *val_ptr.add(i) as usize
         };
 
-        // The path string starts at the base of val array plus the offset
         let val_base = container.val.as_ptr() as usize;
         let path_ptr = (val_base + val_offset) as *const c_char;
 
-        // Convert C string to Rust String
         let c_str = unsafe { std::ffi::CStr::from_ptr(path_ptr) };
         if let Ok(path_str) = c_str.to_str() {
             paths.push(path_str.to_string());
@@ -119,7 +99,7 @@ pub fn ino_paths(fd: BorrowedFd<'_>, inum: u64) -> nix::Result<Vec<String>> {
     Ok(paths)
 }
 
-/// Result from logical-ino resolution: (inode, offset, root)
+/// One reference to a logical address: inode, file offset, and root.
 #[derive(Debug, Clone)]
 pub struct LogicalInoResult {
     /// Inode number that contains data at the queried logical address.
@@ -132,23 +112,16 @@ pub struct LogicalInoResult {
 
 /// Get inode, offset, and root information for a logical address.
 ///
-/// Resolves a logical address on the filesystem to one or more (inode, offset, root) tuples.
-/// The offset is the position within the file, and the root is the subvolume ID.
+/// Resolves `logical` to every (inode, offset, root) that references it. The
+/// offset is the position within the file, and the root is the subvolume ID.
 ///
-/// # Arguments
-///
-/// * `fd` - File descriptor to a file or directory on the btrfs filesystem
-/// * `logical` - Logical address to resolve
-/// * `ignore_offset` - If true, ignores offsets when matching references
-/// * `bufsize` - Size of buffer to allocate (default 64KB, max 16MB)
-///
-/// # Returns
-///
-/// A vector of (inode, offset, root) tuples
+/// `fd` is open on a file or directory on a btrfs filesystem. When
+/// `ignore_offset` is true, offsets are ignored when matching references.
+/// `bufsize` is the result buffer size (default 64 KiB, max 16 MiB).
 ///
 /// # Errors
 ///
-/// Returns an error if the ioctl fails
+/// Returns an error if the ioctl fails.
 pub fn logical_ino(
     fd: BorrowedFd<'_>,
     logical: u64,
@@ -162,13 +135,11 @@ pub fn logical_ino(
     #[allow(clippy::cast_possible_truncation)] // buffer size fits in usize
     let mut buf = vec![0u8; size as usize];
 
-    // Set up flags for v2 ioctl
     let mut flags = 0u64;
     if ignore_offset {
         flags |= u64::from(crate::raw::BTRFS_LOGICAL_INO_ARGS_IGNORE_OFFSET);
     }
 
-    // Set up the ioctl arguments
     let mut args = crate::raw::btrfs_ioctl_logical_ino_args {
         logical,
         size,
@@ -181,7 +152,6 @@ pub fn logical_ino(
         btrfs_ioc_logical_ino_v2(fd.as_raw_fd(), &raw mut args)?;
     }
 
-    // Parse the results from the data container.
     // SAFETY: buf is correctly sized and was populated by the ioctl.
     #[allow(clippy::cast_ptr_alignment)]
     let container =
@@ -189,7 +159,7 @@ pub fn logical_ino(
 
     let mut results = Vec::new();
 
-    // Each result is 3 consecutive u64 values: inum, offset, root
+    // Each result is 3 consecutive u64 values: inum, offset, root.
     for i in (0..container.elem_cnt as usize).step_by(3) {
         if i + 2 < container.elem_cnt as usize {
             let val_offset_inum = unsafe {
@@ -220,26 +190,18 @@ pub fn logical_ino(
 
 /// Resolve a subvolume ID to its full path on the filesystem.
 ///
-/// Recursively resolves the path to a subvolume by walking the root tree and using
-/// `INO_LOOKUP` to get directory names. The path is built from the subvolume's name
-/// and the names of all parent directories up to the mount point.
+/// Walks the `ROOT_BACKREF` chain in the root tree and uses `INO_LOOKUP` to
+/// get directory names. `fd` is open on a file or directory on a btrfs
+/// filesystem.
 ///
-/// # Arguments
-///
-/// * `fd` - File descriptor to a file or directory on the btrfs filesystem
-/// * `subvol_id` - The subvolume ID to resolve
-///
-/// # Returns
-///
-/// The full path to the subvolume relative to the filesystem root, or an empty string
-/// for the filesystem root itself (`FS_TREE_OBJECTID`).
+/// Returns the path relative to the filesystem root, or an empty string for
+/// the filesystem root itself (`FS_TREE_OBJECTID`).
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// * The ioctl fails (fd is not on a btrfs filesystem)
-/// * The subvolume ID does not exist
-/// * The path buffer overflows
+/// Returns an error if the ioctl fails (for example when `fd` is not on a
+/// btrfs filesystem), if the subvolume ID does not exist, or if a root ref
+/// item is truncated.
 ///
 /// # Example
 ///
@@ -263,16 +225,14 @@ fn subvolid_resolve_sub(
 ) -> nix::Result<()> {
     use crate::raw::BTRFS_FS_TREE_OBJECTID;
 
-    // If this is the filesystem root, we're done (empty path means root)
+    // The filesystem root has an empty path.
     if subvol_id == u64::from(BTRFS_FS_TREE_OBJECTID) {
         return Ok(());
     }
 
-    // Search the root tree for ROOT_BACKREF_KEY entries for this subvolume.
-    // ROOT_BACKREF_KEY (item type 156) has:
-    // - objectid: the subvolume ID
-    // - offset: the parent subvolume ID
-    // - data: btrfs_root_ref struct containing the subvolume name
+    // Search the root tree for this subvolume's ROOT_BACKREF_KEY items
+    // (type 156). The objectid is the subvolume ID, the offset is the parent
+    // subvolume ID, and the data is a btrfs_root_ref with the subvolume name.
     let mut found = false;
 
     tree_search(
@@ -288,10 +248,9 @@ fn subvolid_resolve_sub(
 
             found = true;
 
-            // The parent subvolume ID is stored in the offset field
             let parent_subvol_id = hdr.offset;
 
-            // Recursively resolve the parent path first
+            // Resolve the parent path first.
             subvolid_resolve_sub(fd, path, parent_subvol_id)?;
 
             // data is a packed btrfs_root_ref followed by name bytes.
@@ -318,9 +277,9 @@ fn subvolid_resolve_sub(
 
             let name_bytes = &data[header_size..header_size + name_len];
 
-            // If dirid is not the first free objectid, we need to resolve the directory path too
+            // A subvolume that is not directly in its parent's root directory
+            // also needs the path of the directory that contains it.
             if dirid != u64::from(BTRFS_FIRST_FREE_OBJECTID) {
-                // Look up the directory in the parent subvolume
                 let mut ino_lookup_args =
                     crate::raw::btrfs_ioctl_ino_lookup_args {
                         treeid: parent_subvol_id,
@@ -335,7 +294,8 @@ fn subvolid_resolve_sub(
                     )?;
                 }
 
-                // Get the directory name (it's a null-terminated C string)
+                // INO_LOOKUP returns the directory's path within the parent
+                // subvolume as a null-terminated string.
                 let dir_name = unsafe {
                     std::ffi::CStr::from_ptr(ino_lookup_args.name.as_ptr())
                 }
@@ -350,12 +310,10 @@ fn subvolid_resolve_sub(
                 }
             }
 
-            // Append the subvolume name
             if !path.is_empty() {
                 path.push('/');
             }
 
-            // Convert name bytes to string
             let name_str = std::str::from_utf8(name_bytes)
                 .map_err(|_| nix::errno::Errno::EINVAL)?;
             path.push_str(name_str);
@@ -392,8 +350,8 @@ pub struct InoLookupUserResult {
 /// the fd's subvolume root to that directory.
 ///
 /// Unlike [`subvolid_resolve`], this does not require `CAP_SYS_ADMIN`.
-/// However, it only resolves one level — for nested subvolumes the caller
-/// must walk up the tree.
+/// However, it only resolves one level. For nested subvolumes the caller must
+/// walk up the tree.
 ///
 /// # Errors
 ///

@@ -2,7 +2,7 @@
 //!
 //! A scrub reads every data and metadata block on the filesystem, verifies it
 //! against its stored checksum, and repairs any errors it finds using redundant
-//! copies where available (e.g. RAID profiles).  Scrubbing is the primary way
+//! copies where available (e.g. RAID profiles). Scrubbing is the primary way
 //! to proactively detect silent data corruption.
 //!
 //! Requires `CAP_SYS_ADMIN`.

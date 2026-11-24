@@ -26,7 +26,7 @@ pub struct DedupeTarget {
 /// Result of a single dedupe comparison against one destination.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DedupeResult {
-    /// Deduplication succeeded; the given number of bytes were deduped.
+    /// Deduplication succeeded. Holds the number of bytes deduped.
     Deduped(u64),
     /// The data differs between source and destination.
     DataDiffers,
@@ -44,9 +44,9 @@ pub enum DedupeResult {
 ///
 /// # Errors
 ///
-/// Returns `Err` if the ioctl fails. `EINVAL` if offsets or length are not
-/// sector-aligned, or if `targets` is empty. `EPERM` if destination files
-/// are not writable.
+/// Returns `Err` if the ioctl fails: `EINVAL` if offsets or length are not
+/// sector-aligned or `targets` is empty, `EPERM` if destination files are not
+/// writable.
 #[allow(clippy::cast_possible_wrap)] // BTRFS_SAME_DATA_DIFFERS is 1, fits in i32
 pub fn file_extent_same(
     src_fd: BorrowedFd<'_>,
@@ -56,7 +56,8 @@ pub fn file_extent_same(
 ) -> nix::Result<Vec<DedupeResult>> {
     let count = targets.len();
 
-    // Flexible array member pattern: allocate header + count info entries.
+    // Flexible array member pattern: allocate the header plus `count` info
+    // entries.
     let base_size = mem::size_of::<btrfs_ioctl_same_args>();
     let info_size = mem::size_of::<btrfs_ioctl_same_extent_info>();
     let total_bytes = base_size + count * info_size;

@@ -21,15 +21,15 @@ use bytes::BufMut;
 #[derive(Debug, Clone)]
 pub struct InodeArgs {
     /// NFS-compatible generation number. For new inodes equals the
-    /// transaction id at creation; preserved across COWs.
+    /// transaction id at creation. Preserved across COWs.
     pub generation: u64,
     /// Last-modifying transaction id.
     pub transid: u64,
     /// Logical file size in bytes (`stat::st_size`).
     pub size: u64,
-    /// On-disk bytes used (sum of `EXTENT_DATA.num_bytes` for regular
-    /// extents plus inline payload length; not affected by `disk_num_bytes`
-    /// for compressed extents).
+    /// On-disk bytes used: the sum of `EXTENT_DATA.num_bytes` for regular
+    /// extents plus the inline payload length. Not affected by
+    /// `disk_num_bytes` for compressed extents.
     pub nbytes: u64,
     /// Hard-link count.
     pub nlink: u32,
@@ -37,9 +37,9 @@ pub struct InodeArgs {
     pub uid: u32,
     /// Owner group id.
     pub gid: u32,
-    /// POSIX mode (file type + permissions, e.g. `0o100644`).
+    /// POSIX mode (file type and permissions, e.g. `0o100644`).
     pub mode: u32,
-    /// Device number for character/block-device inodes (`stat::st_rdev`).
+    /// Device number for character and block device inodes (`stat::st_rdev`).
     /// Zero for everything else.
     pub rdev: u64,
     /// Inode flags (`NODATASUM`, `NODATACOW`, `IMMUTABLE`, etc.).

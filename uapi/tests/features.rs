@@ -62,10 +62,10 @@ fn features_set_and_get_roundtrip() {
     // Find a compat_ro flag that is safe to set and not already active.
     let settable = supported.compat_ro_safe_set & !before.compat_ro;
     if settable.is_empty() {
-        // All safe_set flags are already active; try clearing one instead.
+        // All safe_set flags are already active. Try clearing one instead.
         let clearable = supported.compat_ro_safe_clear & before.compat_ro;
         if clearable.is_empty() {
-            // Nothing we can toggle — skip rather than fail.
+            // Nothing we can toggle. Skip rather than fail.
             eprintln!("no toggleable compat_ro flags available, skipping");
             return;
         }

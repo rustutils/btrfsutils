@@ -3,8 +3,8 @@
 //! This crate provides the write-path infrastructure needed to
 //! modify btrfs filesystems from userspace. It builds on
 //! `btrfs-disk` (the read path) and adds mutable tree blocks,
-//! B-tree search, copy-on-write, item insertion / deletion / split
-//! / balance, transaction commit, extent allocation, free-space
+//! B-tree search, copy-on-write, item insertion, deletion, split,
+//! and balance, transaction commit, extent allocation, free-space
 //! tree maintenance, and a layer of high-level helpers (file data,
 //! inodes, dir entries, xattrs, subvolume creation, device-size
 //! patches).
@@ -12,19 +12,19 @@
 //! ## Entry points
 //!
 //! - Single-device: [`Filesystem::open`] takes a device or image
-//!   file open for read+write.
+//!   file open for reading and writing.
 //! - Multi-device: [`filesystem::Filesystem::open_multi`] takes a
 //!   `BTreeMap<devid, handle>`. Used by every multi-device tool
 //!   (mkfs, rescue, tune).
 //!
-//! From there, [`Transaction::start`] opens a transaction;
-//! mutations go through [`search::search_slot`] +
-//! [`items::insert_item`] / [`items::del_items`] /
+//! From there, [`Transaction::start`] opens a transaction.
+//! Mutations go through [`search::search_slot`] with
+//! [`items::insert_item`], [`items::del_items`], or
 //! [`items::update_item`] for raw access, or through the
 //! [`Transaction`] helpers (`create_inode`, `link_dir_entry`,
 //! `set_xattr`, `write_file_data`, `create_empty_tree`,
 //! `insert_root_ref`, `reserve_data_extent`, etc.) for higher-level
-//! patterns. [`Transaction::commit`] closes out the transaction;
+//! patterns. [`Transaction::commit`] closes out the transaction and
 //! [`Transaction::abort`] discards it.
 //!
 //! Whole-tree conversion paths
@@ -35,7 +35,7 @@
 //! [`convert`] module.
 //!
 //! This is a clean-room implementation based on the on-disk format
-//! specification and UAPI headers. It is licensed MIT/Apache-2.0.
+//! specification and UAPI headers. It is licensed MIT or Apache-2.0.
 //!
 //! # Stability
 //!

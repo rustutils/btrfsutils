@@ -71,7 +71,7 @@ fn subvolume_snapshot() {
         1_000_000,
     );
 
-    // Modify the original — snapshot should retain the old content.
+    // Modify the original. The snapshot should retain the old content.
     std::fs::write(mnt.path().join("origin").join("data.bin"), b"overwritten")
         .expect("overwrite failed");
 

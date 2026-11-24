@@ -60,9 +60,7 @@ fn encoded_read_compressed() {
 
     let subvol_path = mnt.path().join("snap-compressed");
 
-    // Enable compression on the subvolume by setting the compress property.
-    // We do this by mounting with compress option or using defrag.
-    // Simplest: write compressible data, then defrag with compression.
+    // Write compressible data, then defrag it with compression below.
     write_compressible_data(&subvol_path, "zeros.bin", 128 * 1024);
     sync(mnt.fd()).unwrap();
 

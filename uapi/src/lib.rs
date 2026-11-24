@@ -29,10 +29,9 @@
 //!
 //! ## Portability
 //!
-//! btrfs is Linux-only; this crate does not support other operating systems.
-//! Some ioctls used here were introduced in relatively recent kernel versions;
-//! this crate targets modern kernels (5.x and later) and does not attempt to
-//! detect or work around missing ioctls on older kernels. It is only tested
+//! btrfs is Linux-only, and so is this crate. Some of the ioctls it uses are
+//! relatively recent. The crate targets modern kernels (5.x and later) and does
+//! not detect or work around missing ioctls on older kernels. It is only tested
 //! on `amd64`, but all architectures supported by the kernel (and Rust) should
 //! work.
 

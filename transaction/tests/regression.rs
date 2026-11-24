@@ -233,9 +233,9 @@ fn push_leaf_right_preserves_offset_ordering() {
     drop(dir);
 }
 
-/// Regression: write_block must write to all stripe copies (DUP/RAID1).
-/// (Bug: only the first stripe was written, causing btrfs check to see
-/// stale data on the second copy — "parent transid verify failed".)
+/// Regression: write_block must write to all stripe copies (DUP, RAID1).
+/// (Bug: only the first stripe was written, so btrfs check saw stale
+/// data on the second copy and reported "parent transid verify failed".)
 #[test]
 fn dup_writes_both_copies() {
     let (dir, img_path) = create_test_image();
@@ -266,8 +266,8 @@ fn dup_writes_both_copies() {
     trans.commit(&mut fs).unwrap();
     drop(fs);
 
-    // btrfs check reads both DUP copies — if only one was written, it
-    // will report "parent transid verify failed"
+    // btrfs check reads both DUP copies. If only one was written, it
+    // reports "parent transid verify failed"
     assert_btrfs_check(&img_path);
     drop(dir);
 }
@@ -480,9 +480,9 @@ fn all_items_searchable_after_split() {
     drop(dir);
 }
 
-/// Coverage: push_leaf_left/right COW branch — sibling from a previous
-/// generation must be COWed, which changes its logical address and
-/// requires updating the parent pointer.
+/// Coverage: push_leaf_left and push_leaf_right COW branch. A sibling
+/// from a previous generation must be COWed, which changes its logical
+/// address and requires updating the parent pointer.
 #[test]
 fn balance_cows_sibling_from_previous_generation() {
     let (dir, img_path) = create_test_image();
@@ -514,9 +514,10 @@ fn balance_cows_sibling_from_previous_generation() {
     }
 
     // Transaction 2: insert more items. The existing leaves have the
-    // previous generation, so split_leaf's push_leaf_left/right will
-    // need to COW the sibling (triggering the left.logical() != left_bytenr
-    // and right.logical() != right_bytenr branches).
+    // previous generation, so split_leaf's push_leaf_left and
+    // push_leaf_right need to COW the sibling (triggering the
+    // left.logical() != left_bytenr and right.logical() != right_bytenr
+    // branches).
     {
         let mut fs = open_rw(&img_path);
         let mut trans = Transaction::start(&mut fs).unwrap();
@@ -568,7 +569,7 @@ fn balance_cows_sibling_from_previous_generation() {
     drop(dir);
 }
 
-/// Coverage: balance_node — deletion from a large tree should trigger
+/// Coverage: balance_node. Deletion from a large tree should trigger
 /// node merging when child nodes become sparse (<25% occupancy).
 /// Also exercises SearchIntent::Delete path in search_slot.
 #[test]
@@ -1234,12 +1235,12 @@ fn cascading_node_split() {
     drop(dir);
 }
 
-/// Option B regression: a no-op commit must legitimately advance
-/// `superblock.generation` AND rewrite the root tree root at the new
-/// generation, so `header.generation == superblock.generation` holds.
-/// Before Option B, no-op commits either had to be short-circuited
-/// (Option A) or would corrupt the filesystem with "parent transid
-/// verify failed: wanted N found N-1". See PLAN.md Finding 3 (I1, I2, I7).
+/// Regression: a no-op commit must advance `superblock.generation`
+/// and rewrite the root tree root at the new generation, so
+/// `header.generation == superblock.generation` holds. Before every
+/// commit force-COWed the root tree root, no-op commits either had to
+/// be short-circuited or would corrupt the filesystem with "parent
+/// transid verify failed: wanted N found N-1".
 #[test]
 fn empty_commit_advances_generation_and_rewrites_root_tree_root() {
     let (dir, img_path) = create_test_image();
@@ -1328,12 +1329,12 @@ fn two_empty_commits_advance_generation_twice() {
     drop(dir);
 }
 
-// ----- Stage I.1: create_empty_tree primitive -----
+// create_empty_tree primitive.
 
 /// Tree id used by tests for the empty-tree primitive. Picks an id
 /// well above the kernel's reserved range (BTRFS_LAST_FREE_OBJECTID
-/// is 0xFFFFFFFFFFFFFF00; everything below 256 is reserved special
-/// trees) and outside the special-cased ones, so a default mkfs.btrfs
+/// is 0xFFFFFFFFFFFFFF00, and everything below 256 is reserved for
+/// special trees) and outside the special-cased ones, so a default mkfs.btrfs
 /// will never have it and btrfs check will not run any tree-specific
 /// consistency rules against it.
 const TEST_EMPTY_TREE_ID: u64 = 12;
@@ -1597,7 +1598,7 @@ fn create_empty_tree_rejects_existing_real_tree() {
     drop(dir);
 }
 
-// ----- Stage I.2: read-only extent-tree walker -----
+// Read-only extent-tree walker.
 
 /// Read every `FREE_SPACE_EXTENT` item in the FST whose key
 /// objectid lies inside `[bg_start, bg_start + bg_length)`. Returns
@@ -1717,7 +1718,7 @@ fn extent_walker_visits_all_allocated_extents_in_data_block_group() {
     let mut fs = open_rw(&img_path);
     let groups = allocation::load_block_groups(&mut fs).unwrap();
     let Some(bg) = groups.iter().find(|g| g.is_data()).cloned() else {
-        // Some mkfs builds skip data BG until first write — accept and bail.
+        // Some mkfs builds skip the data BG until first write. Accept and bail.
         return;
     };
 
@@ -1867,8 +1868,8 @@ fn create_two_empty_trees_in_one_transaction() {
     // transaction does not collide on bytenr or root-item slot.
     // Uses FS-tree-range ids (above BTRFS_FIRST_FREE_OBJECTID), so
     // the resulting image is not whole-image valid and we skip
-    // `btrfs check` here — the assertion is purely in-memory and
-    // round-trip-via-reopen.
+    // `btrfs check` here. The assertion is purely in-memory plus a
+    // round trip through reopen.
     let (dir, img_path) = create_test_image();
     let id_a: u64 = 0x4000;
     let id_b: u64 = 0x4001;
@@ -1895,13 +1896,13 @@ fn create_two_empty_trees_in_one_transaction() {
     drop(dir);
 }
 
-// ----- Stage I.4 prep: bg_tree_override routing primitive -----
+// bg_tree_override routing primitive.
 
 #[test]
 fn block_group_tree_id_auto_detects_then_override_pins() {
     // The routing primitive used by convert-to-block-group-tree.
-    // Four states: (auto, no BGT) -> 2; (auto, BGT registered) -> 11;
-    // (override=Some(2), BGT registered) -> 2; (override cleared, BGT
+    // Four states: (auto, no BGT) -> 2, (auto, BGT registered) -> 11,
+    // (override=Some(2), BGT registered) -> 2, (override cleared, BGT
     // registered) -> 11. Plus a guard-on-drop assertion.
     let (dir, img_path) =
         create_test_image_with_features(&["^block-group-tree"]);
@@ -1912,7 +1913,7 @@ fn block_group_tree_id_auto_detects_then_override_pins() {
     assert_eq!(fs.block_group_tree_id(), 2);
 
     // Register a fake root for tree 11. Auto-detect now flips to 11
-    // even though the bytenr is bogus — this is exactly the
+    // even though the bytenr is bogus. This is exactly the
     // "BGT-just-created" state that breaks the allocator without
     // an override.
     fs.set_root_bytenr(11, 0xDEAD_BEEF);
@@ -1952,7 +1953,7 @@ fn block_group_tree_id_auto_detects_then_override_pins() {
     drop(dir);
 }
 
-// ----- Stage I.3: convert_to_free_space_tree -----
+// convert_to_free_space_tree.
 
 const COMPAT_RO_FREE_SPACE_TREE: u64 = 1 << 0;
 const COMPAT_RO_FREE_SPACE_TREE_VALID: u64 = 1 << 1;
@@ -1986,10 +1987,10 @@ fn convert_to_free_space_tree_basic() {
     assert_eq!(fs.superblock.cache_generation, 0);
     assert!(fs.root_bytenr(10).is_some());
 
-    // Walker / FST cross-check on every block group: derived free
+    // Walker and FST cross-check on every block group: derived free
     // ranges from the extent tree must equal the FST entries we
-    // built. (Same invariant as the I.2 tests, now over our own
-    // newly-built FST.)
+    // built. (Same invariant as the extent-tree walker tests, now
+    // over our own newly built FST.)
     for bg in allocation::load_block_groups(&mut fs).unwrap() {
         let mut walked = Vec::new();
         extent_walk::walk_block_group_extents(
@@ -2038,7 +2039,7 @@ fn convert_to_free_space_tree_rejects_already_enabled() {
 #[test]
 fn convert_to_free_space_tree_idempotent_after_one_run() {
     // Running the conversion a second time on the same filesystem
-    // should fail with "already enabled" — i.e. we never produce
+    // should fail with "already enabled", so we never produce
     // duplicate FST roots.
     let (dir, img_path) =
         create_test_image_with_features(&["^free-space-tree"]);
@@ -2060,11 +2061,11 @@ fn convert_to_free_space_tree_idempotent_after_one_run() {
     drop(dir);
 }
 
-// ----- seed_free_space_tree (extracted helper) -----
+// seed_free_space_tree helper.
 
-/// Insert one item directly into the given tree via search_slot +
+/// Insert one item directly into the given tree via search_slot and
 /// insert_item, mirroring `convert::insert_in_tree`. Used by the
-/// seed/create helper tests to plant pre-existing FST entries before
+/// seed and create helper tests to plant pre-existing FST entries before
 /// invoking the helper.
 fn raw_insert_in_tree(
     trans: &mut Transaction<File>,
@@ -2106,8 +2107,8 @@ fn seed_free_space_tree_empty_fst_populates_every_bg() {
         trans.create_empty_tree(&mut fs, 10).unwrap();
         convert::seed_free_space_tree(&mut trans, &mut fs).unwrap();
         // The FST update step in commit needs the FREE_SPACE_TREE
-        // compat_ro flag to be set; otherwise it skips and our
-        // newly-seeded entries never get touched again, but the
+        // compat_ro flag to be set. Otherwise it skips and our
+        // newly seeded entries never get touched again, but the
         // commit still works.
         fs.superblock.compat_ro_flags |=
             COMPAT_RO_FREE_SPACE_TREE | COMPAT_RO_FREE_SPACE_TREE_VALID;
@@ -2177,7 +2178,7 @@ fn seed_free_space_tree_idempotent() {
             .collect()
     };
 
-    // Second pass: seed again (no create_empty_tree this time —
+    // Second pass: seed again (no create_empty_tree this time,
     // the tree already exists). Should be a no-op per BG.
     {
         let mut fs = open_rw(&img_path);
@@ -2326,8 +2327,8 @@ fn seed_free_space_tree_no_root_errors() {
 
 #[test]
 fn seed_free_space_tree_bitmap_layout_errors() {
-    // Pre-insert a FREE_SPACE_INFO with the USING_BITMAPS flag set;
-    // the helper must reject it (consistent with the FST update
+    // Pre-insert a FREE_SPACE_INFO with the USING_BITMAPS flag set.
+    // The helper must reject it (consistent with the FST update
     // path's bitmap-layout rejection).
     let (dir, img_path) =
         create_test_image_with_features(&["^free-space-tree"]);
@@ -2359,7 +2360,7 @@ fn seed_free_space_tree_bitmap_layout_errors() {
     drop(dir);
 }
 
-// ----- Stage I.4: convert_to_block_group_tree -----
+// convert_to_block_group_tree.
 
 const COMPAT_RO_BLOCK_GROUP_TREE: u64 = 1 << 3;
 
@@ -2466,7 +2467,7 @@ fn convert_to_block_group_tree_basic() {
     // metadata blocks (the BGT root leaf and COWs from the
     // extent-tree deletes) and the convergence loop's
     // update_block_group_used routes those increments through
-    // the just-built BGT — exactly what we want to verify.
+    // the just-built BGT, which is exactly what we want to verify.
     use btrfs_disk::items::BlockGroupItem;
     let post_bgt = collect_bg_items_from(&mut fs, 11);
     assert_eq!(
@@ -2522,7 +2523,7 @@ fn convert_to_block_group_tree_rejects_already_enabled() {
 
 #[test]
 fn convert_to_block_group_tree_rejects_when_fst_missing() {
-    // Without FST, conversion must refuse — kernel requires FST
+    // Without FST, conversion must refuse. The kernel requires FST
     // for BGT.
     let (dir, img_path) =
         create_test_image_with_features(&["^free-space-tree"]);
@@ -2605,9 +2606,9 @@ fn convert_to_block_group_tree_multi_leaf_synthetic() {
     // leaving the real metadata BG free to satisfy the COW
     // allocations triggered during BGT splits.
     //
-    // The result is intentionally not whole-image consistent —
-    // the fake BG records reference bytenrs that no chunk backs —
-    // so this test does NOT run `btrfs check`. Its purpose is to
+    // The result is intentionally not whole-image consistent (the
+    // fake BG records reference bytenrs that no chunk backs), so
+    // this test does NOT run `btrfs check`. Its purpose is to
     // exercise the leaf-split code path under the override.
     use btrfs_disk::items::{BlockGroupFlags, BlockGroupItem};
 
@@ -2683,7 +2684,7 @@ fn convert_to_block_group_tree_multi_leaf_synthetic() {
 
     // Step D: assert the BGT contains every item and that the
     // resulting tree is multi-level (level >= 1, i.e. has at
-    // least one internal node — proves a split actually
+    // least one internal node, which proves a split actually
     // happened).
     let mut fs = open_rw(&img_path);
     assert_ne!(
@@ -2739,7 +2740,7 @@ fn convert_to_block_group_tree_multi_leaf_synthetic() {
 #[test]
 fn convert_to_block_group_tree_idempotent_after_one_run() {
     // Running the conversion a second time on the same image
-    // must fail with "already enabled" — i.e. we never produce
+    // must fail with "already enabled", so we never produce
     // duplicate BGT roots.
     let (dir, img_path) =
         create_test_image_with_features(&["^block-group-tree"]);
@@ -2761,7 +2762,7 @@ fn convert_to_block_group_tree_idempotent_after_one_run() {
     drop(dir);
 }
 
-// ----- create_block_group_tree (extracted helper) -----
+// create_block_group_tree helper.
 
 #[test]
 fn create_block_group_tree_from_empty_extent_bg_state() {
@@ -2878,7 +2879,7 @@ fn create_block_group_tree_routing_flips_after_call() {
     // Verify the BG-tree-id routing is the extent tree pre-call
     // (no BGT root) and BGT post-call (root present, override
     // dropped). The mid-call check (override pinned to extent tree)
-    // is exercised implicitly by the basic test — if it wasn't
+    // is exercised implicitly by the basic test. If it wasn't
     // pinned, the allocator would route to the freshly-created
     // empty BGT and the BG-used updates would land on a tree that
     // doesn't yet have the corresponding BLOCK_GROUP_ITEM rows,
@@ -2913,7 +2914,7 @@ fn create_then_alloc_block_group_tree_passes_btrfs_check() {
     // After create_block_group_tree returns, do a mutating
     // transaction (50 items into the root tree). The commit's
     // flush_delayed_refs must update BG used in BGT (not extent
-    // tree); btrfs check verifies the consistency. This catches the
+    // tree), and btrfs check verifies the consistency. This catches the
     // "BG state landed in the wrong tree" failure mode which the
     // basic test doesn't (basic test commits without subsequent
     // mutations, so BG used updates from later transactions are not
@@ -2970,8 +2971,8 @@ fn create_then_alloc_block_group_tree_passes_btrfs_check() {
 #[test]
 fn convert_to_free_space_tree_then_mutate_and_recommit() {
     // After conversion, ordinary insert transactions must continue
-    // to work and the FST must stay consistent (the existing
-    // Stage F update path must accept our hand-built FST as input).
+    // to work and the FST must stay consistent (the commit's FST
+    // update path must accept our hand-built FST as input).
     let (dir, img_path) =
         create_test_image_with_features(&["^free-space-tree"]);
     {

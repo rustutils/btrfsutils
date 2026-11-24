@@ -108,7 +108,7 @@ pub fn received_subvol_set(
         unsafe { std::mem::zeroed() };
 
     let uuid_bytes = uuid.as_bytes();
-    // uuid field is [c_char; 16]; copy byte-by-byte.
+    // The uuid field is [c_char; 16]. Copy byte by byte.
     for (i, &b) in uuid_bytes.iter().enumerate() {
         args.uuid[i] = b as std::os::raw::c_char;
     }
@@ -127,13 +127,11 @@ pub fn received_subvol_set(
 /// Both files must be on the same btrfs filesystem. The destination file
 /// descriptor `dest_fd` is the ioctl target.
 ///
-/// Errors: EXDEV if source and destination are on different filesystems.
-/// EINVAL if the range is not sector-aligned or extends beyond EOF.
-/// `ETXTBSY` if the destination file is a swap file.
-///
 /// # Errors
 ///
-/// Returns `Err` if the ioctl fails.
+/// Returns `Err` if the ioctl fails: `EXDEV` if source and destination are
+/// on different filesystems, `EINVAL` if the range is not sector-aligned or
+/// extends beyond EOF, `ETXTBSY` if the destination file is a swap file.
 pub fn clone_range(
     dest_fd: BorrowedFd<'_>,
     src_fd: BorrowedFd<'_>,
@@ -161,14 +159,13 @@ pub fn clone_range(
 /// This passes compressed data directly to the filesystem without
 /// decompression, which is more efficient than decompressing and writing.
 ///
-/// Errors: ENOTTY on kernels that do not support encoded writes (pre-5.18).
-/// EINVAL if the compression type, alignment, or lengths are not accepted.
-/// ENOSPC if the filesystem has no room for the encoded extent.  Callers
-/// should fall back to manual decompression + pwrite for any of these.
-///
 /// # Errors
 ///
-/// Returns `Err` if the ioctl fails.
+/// Returns `Err` if the ioctl fails: `ENOTTY` on kernels that do not support
+/// encoded writes (pre-5.18), `EINVAL` if the compression type, alignment, or
+/// lengths are not accepted, `ENOSPC` if the filesystem has no room for the
+/// encoded extent. Callers should fall back to decompressing and writing with
+/// pwrite for any of these.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::cast_possible_wrap)] // offset fits in i64 for filesystem offsets
 pub fn encoded_write(
@@ -229,15 +226,14 @@ pub struct EncodedReadResult {
 ///
 /// This reads the raw compressed extent data without decompressing it,
 /// which is the counterpart to [`encoded_write`]. The caller provides a
-/// buffer to receive the data; the returned [`EncodedReadResult`] describes
+/// buffer to receive the data. The returned [`EncodedReadResult`] describes
 /// the encoding and how many bytes were read.
-///
-/// Errors: ENOTTY on kernels that do not support encoded reads (pre-5.18).
-/// `EINVAL` if the offset or length are not accepted.
 ///
 /// # Errors
 ///
-/// Returns `Err` if the ioctl fails.
+/// Returns `Err` if the ioctl fails: `ENOTTY` on kernels that do not support
+/// encoded reads (pre-5.18), `EINVAL` if the offset or length are not
+/// accepted.
 #[allow(clippy::cast_possible_wrap)] // offset fits in i64
 #[allow(clippy::cast_sign_loss)] // offset and ret are non-negative after successful ioctl
 pub fn encoded_read(
@@ -303,7 +299,7 @@ pub fn subvolume_search_by_received_uuid(
     search_uuid_tree(fd, uuid, raw::BTRFS_UUID_KEY_RECEIVED_SUBVOL)
 }
 
-/// Internal: search the UUID tree for a given key type.
+/// Search the UUID tree for a given key type.
 ///
 /// The UUID tree encodes UUIDs as a compound key: objectid = LE u64 from
 /// bytes [0..8], offset = LE u64 from bytes [8..16]. The item type selects

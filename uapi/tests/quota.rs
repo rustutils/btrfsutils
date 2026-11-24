@@ -59,7 +59,7 @@ fn qgroup_lifecycle() {
     let level1_qgroupid = (1u64 << 48) | 0;
     qgroup_create(mnt.fd(), level1_qgroupid).expect("qgroup_create 1/0 failed");
 
-    // Create a subvolume — the kernel auto-creates a 0/N qgroup for it.
+    // Create a subvolume. The kernel auto-creates a 0/N qgroup for it.
     let name = CStr::from_bytes_with_nul(b"test-subvol\0").unwrap();
     subvolume_create(mnt.fd(), name, &[]).expect("subvolume_create failed");
 
@@ -165,7 +165,8 @@ fn qgroup_clear_stale_test() {
     {
         assert!(qg.stale, "qgroup should be stale after sync wait");
     } else {
-        // Qgroup already gone (kernel cleaned it up itself) — nothing to test.
+        // Qgroup already gone (the kernel cleaned it up itself). Nothing to
+        // test.
         return;
     }
 

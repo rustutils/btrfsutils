@@ -2,23 +2,23 @@
 //!
 //! Writes TLV-framed [`StreamCommand`] values to any `impl Write`,
 //! producing the same wire format the kernel emits via
-//! `BTRFS_IOC_SEND` and that `btrfs receive` consumes. Roundtrips
-//! through [`crate::StreamReader`] cleanly — that's the primary
-//! correctness target (byte-for-byte parity with kernel send is
-//! impossible because command ordering inside a transaction has
-//! flexibility).
+//! `BTRFS_IOC_SEND` and that `btrfs receive` consumes. Output
+//! round-trips cleanly through [`crate::StreamReader`], which is the
+//! primary correctness target. Byte-for-byte parity with kernel send
+//! is impossible because command ordering inside a transaction is not
+//! fixed.
 //!
 //! The protocol versions:
 //!
-//! - **v1**: base set of commands; all encoded data is uncompressed.
+//! - **v1**: base set of commands. All data is uncompressed.
 //! - **v2**: adds `EncodedWrite`, `Fallocate`, `Fileattr`. Commands
-//!   are still framed identically; the writer accepts any version
-//!   and trusts the caller not to mix v2 commands into a v1 stream.
+//!   are framed identically. The writer accepts any version and
+//!   trusts the caller not to mix v2 commands into a v1 stream.
 //! - **v3**: adds `EnableVerity`.
 //!
 //! [`StreamWriter::write_command`] does not enforce that a command
-//! belongs to the negotiated version — that's a correctness concern
-//! at a higher layer (the walker or the CLI). This keeps the encoder
+//! belongs to the negotiated version. That check belongs to a higher
+//! layer (the walker or the CLI). This keeps the encoder
 //! simple and lets callers stream arbitrary command sequences for
 //! testing.
 
@@ -60,7 +60,7 @@ use uuid::Uuid;
 /// [`StreamWriter::write_command`] for each command. Drop or call
 /// [`StreamWriter::finish`] to release the inner writer.
 ///
-/// Symmetric with [`crate::StreamReader`] — round trips of every
+/// Symmetric with [`crate::StreamReader`]. Round trips of every
 /// [`StreamCommand`] variant are unit-tested.
 #[derive(Debug)]
 pub struct StreamWriter<W: Write> {
@@ -70,7 +70,7 @@ pub struct StreamWriter<W: Write> {
 
 impl<W: Write> StreamWriter<W> {
     /// Wrap `inner` and write the 17-byte stream header
-    /// (magic + version). `version` must be 1, 2, or 3.
+    /// (magic and version). `version` must be 1, 2, or 3.
     ///
     /// # Errors
     ///
@@ -142,8 +142,8 @@ impl<W: Write> StreamWriter<W> {
         let mut header = [0u8; CMD_HEADER_LEN];
         header[0..4].copy_from_slice(&payload_len.to_le_bytes());
         header[4..6].copy_from_slice(&cmd_id.to_le_bytes());
-        // CRC field stays zero for the computation; we patch it in
-        // afterwards.
+        // The CRC field stays zero for the computation and is patched
+        // in afterwards.
 
         // raw_crc32c(seed=0, data) == !crc32c::crc32c_append(!0, data).
         // Computed incrementally to avoid copying the whole frame.
@@ -158,15 +158,15 @@ impl<W: Write> StreamWriter<W> {
     }
 }
 
-// ── Per-command encoders ──────────────────────────────────────────
+// Per-command encoders.
 
 /// Encode `cmd`'s attribute payload into `out` and return the wire
 /// command type id.
 ///
 /// `version` controls one wire-format quirk: in v2+, the
-/// `BTRFS_SEND_A_DATA` attribute has no length field — it extends
+/// `BTRFS_SEND_A_DATA` attribute has no length field: it extends
 /// to the end of the command payload. The encoder mirrors that
-/// special case for `Write` / `EncodedWrite` (the only commands
+/// special case for `Write` and `EncodedWrite` (the only commands
 /// that carry DATA), and lets the larger v2 payload size be
 /// addressed by the outer u32 length field.
 #[allow(clippy::too_many_lines)]
@@ -243,7 +243,7 @@ fn encode_command(
             put_attr_str(out, BTRFS_SEND_A_PATH, path)?;
             put_attr_u64(out, BTRFS_SEND_A_FILE_OFFSET, *offset);
             // DATA must be the last attribute in v2+ since it has
-            // no length field there; emitting it last is also fine
+            // no length field there. Emitting it last is also fine
             // for v1.
             put_attr_data(out, data, version)?;
             Ok(BTRFS_SEND_C_WRITE)
@@ -375,7 +375,7 @@ fn path_only(out: &mut Vec<u8>, path: &str, cmd_id: u16) -> io::Result<u16> {
     Ok(cmd_id)
 }
 
-// ── TLV writers ───────────────────────────────────────────────────
+// TLV writers.
 
 /// Write a TLV header (`type: u16 | len: u16`) followed by the
 /// payload bytes. Errors when `data.len() > u16::MAX` since the
@@ -400,11 +400,11 @@ fn put_attr_str(out: &mut Vec<u8>, attr: u16, s: &str) -> io::Result<()> {
     put_attr_bytes(out, attr, s.as_bytes())
 }
 
-/// Encode `BTRFS_SEND_A_DATA` for `Write` / `EncodedWrite`. In v1
-/// streams this is a regular TLV attribute; in v2+ the length
+/// Encode `BTRFS_SEND_A_DATA` for `Write` and `EncodedWrite`. In v1
+/// streams this is a regular TLV attribute. In v2+ the length
 /// field is omitted and the data extends to the end of the
 /// command payload, which lets writes exceed the 64 KiB v1 cap.
-/// MUST be called last for the command — anything emitted after it
+/// Must be called last for the command. Anything emitted after it
 /// would be parsed as part of the data on v2+.
 fn put_attr_data(
     out: &mut Vec<u8>,

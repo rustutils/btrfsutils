@@ -3,7 +3,7 @@
 //!
 //! These helpers create real btrfs filesystem images via `btrfs-mkfs`,
 //! open them as `Filesystem`, and start transactions. This enables unit tests
-//! that exercise the full COW/split/balance pipeline with real on-disk
+//! that exercise the full COW, split, and balance pipeline with real on-disk
 //! structures, without requiring elevated privileges.
 
 use crate::{
@@ -345,15 +345,15 @@ impl std::fmt::Display for Failure {
 
 impl std::error::Error for Failure {}
 
-/// Run `f` on a worker thread; return `Err(())` on timeout.
+/// Run `f` on a worker thread and return `Err(())` on timeout.
 ///
 /// We cannot safely cancel the worker on timeout (it may hold locks on
 /// the image file or be mid-write), so we leak it and let the test
 /// process tear down. Proptest gets the failing input either way and
-/// can shrink it; the leaked thread is acceptable in test contexts.
+/// can shrink it. The leaked thread is acceptable in tests.
 ///
 /// The error type is `()` because there is exactly one failure mode
-/// (timeout); callers turn it into a richer `Failure::Hang` value.
+/// (timeout). Callers turn it into a richer `Failure::Hang` value.
 #[allow(clippy::result_unit_err)]
 pub fn with_watchdog<F, T>(timeout: Duration, f: F) -> Result<T, ()>
 where
@@ -374,7 +374,7 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Apply a single op to the live filesystem and the model in lockstep.
 ///
 /// Returns `Ok(true)` if the caller should restart the transaction
-/// (after Commit, Abort, or Reopen — these consume `trans`), `Ok(false)`
+/// (after Commit, Abort, or Reopen, which consume `trans`), `Ok(false)`
 /// otherwise. When restart is requested, the caller must drop `trans`
 /// before calling `Transaction::start` again.
 ///
@@ -424,7 +424,7 @@ fn apply_op<R: io::Read + io::Write + io::Seek>(
             // Real callers (rescue clear-uuid-tree) only call
             // `fs.remove_root` once the tree is in a "clean" state:
             // ROOT_ITEM is about to be deleted from the root tree, all
-            // owned blocks are queued for drop+pin, and there are no
+            // owned blocks are queued for drop and pin, and there are no
             // dirty in-memory blocks belonging to the tree. The harness
             // does not model the ROOT_ITEM delete or the drop sequence
             // explicitly, so we approximate "clean" as:
@@ -434,16 +434,16 @@ fn apply_op<R: io::Read + io::Write + io::Seek>(
             //   - the tree root bytenr matches the original snapshot
             //     (no in-transaction COW pending).
             //
-            // The second condition is the one Insert+Delete-within-a-
-            // single-transaction exercises: model.kv nets back to
+            // The second condition is the one exercised by an Insert and
+            // Delete within a single transaction: model.kv nets back to
             // empty, but the tree leaf was COWed during the Insert
             // and the new bytenr lives on in `fs.roots` with a pending
             // add_ref that has no corresponding ROOT_ITEM to anchor it.
             // Removing the tree in that state lets `flush_delayed_refs`
             // free the original block (which `ROOT_ITEM[9]` still
             // points at on disk) and commit an orphan METADATA_ITEM
-            // for the new block — exactly the
-            // "ref mismatch / no tree block found" failures
+            // for the new block. That produces exactly the
+            // "ref mismatch" and "no tree block found" failures
             // `btrfs check` reports.
             let model_dirty = model.kv != model.committed_kv
                 || !model.owned_blocks.is_empty();
@@ -459,7 +459,7 @@ fn apply_op<R: io::Read + io::Write + io::Seek>(
             Ok(false)
         }
         Op::Commit | Op::Abort | Op::Reopen => {
-            // Caller handles these — we can't consume `trans` from
+            // The caller handles these, since we can't consume `trans` from
             // behind a `&mut`. Signal restart and let the loop
             // re-dispatch with the right ownership.
             Ok(true)
@@ -573,16 +573,16 @@ fn apply_delete<R: io::Read + io::Write + io::Seek>(
     Ok(())
 }
 
-/// Verify that the playground tree contains exactly the keys/values in
+/// Verify that the playground tree contains the keys and values in
 /// the model. Walks every key in the model and asserts the tree returns
-/// it; does not currently walk the tree to assert there are no extras
-/// (that requires a leaf iterator and is left for v2).
+/// it. Does not walk the tree to assert there are no extras (that
+/// requires a leaf iterator).
 fn check_model_matches<R: io::Read + io::Write + io::Seek>(
     fs: &mut Filesystem<R>,
     model: &Model,
 ) -> Result<(), String> {
     if model.playground_removed {
-        // Tree is gone — nothing to check on disk.
+        // Tree is gone, so there is nothing to check on disk.
         return Ok(());
     }
     for (key, want) in &model.kv {
@@ -660,13 +660,13 @@ pub fn run_sequence(ops: &[Op]) -> Result<(), Failure> {
         if restart {
             // Drain any harness-allocated blocks that were never paired
             // with an explicit DropOwnedBlock. The harness's AllocBlock
-            // primitive *only* reserves an address; unlike a real
+            // primitive *only* reserves an address. Unlike a real
             // `cow_block` caller, it never writes a tree block at that
             // address, so leaving the +1 delayed ref in place would
             // create an EXTENT_ITEM pointing at unwritten garbage and
             // fail `btrfs check` ("tree extent root N has no tree
             // block found"). Mirror what proptest *would* generate if
-            // it had picked a DropOwnedBlock for each: drop_ref + pin
+            // it had picked a DropOwnedBlock for each: drop_ref and pin
             // each owned block before the lifecycle op consumes the
             // transaction.
             if matches!(op, Op::Commit | Op::Abort | Op::Reopen) {
@@ -683,7 +683,7 @@ pub fn run_sequence(ops: &[Op]) -> Result<(), Failure> {
                     model.committed_playground_removed =
                         model.playground_removed;
                     // Owned blocks were freed by the commit's delayed-ref
-                    // flush; harness no longer tracks them.
+                    // flush. The harness no longer tracks them.
                     model.owned_blocks.clear();
                     trans = Transaction::start(&mut fs)
                         .map_err(|e| Failure::Other(format!("restart: {e}")))?;
@@ -737,7 +737,7 @@ pub fn run_sequence(ops: &[Op]) -> Result<(), Failure> {
     })?;
     drop(fs2);
 
-    // `assert_check` panics on errors; we want to surface them as a
+    // `assert_check` panics on errors. We want to surface them as a
     // `Failure` so proptest can shrink.
     let output = Command::new("btrfs")
         .args(["check", "--readonly"])

@@ -90,7 +90,7 @@ struct Entry {
 #[derive(Debug, Default)]
 pub struct DelayedRefQueue {
     // BTreeMap (not HashMap) so `drain` iterates in deterministic
-    // key order — see the comment on `DelayedRefKey`.
+    // key order. See the comment on `DelayedRefKey`.
     refs: BTreeMap<DelayedRefKey, Entry>,
 }
 
@@ -104,7 +104,7 @@ impl DelayedRefQueue {
     /// Queue a reference count increment for a metadata extent.
     ///
     /// `is_metadata` is retained for call-site compatibility and must be
-    /// `true`; data refs use [`add_data_ref`](Self::add_data_ref) instead.
+    /// `true`. Data refs use [`add_data_ref`](Self::add_data_ref) instead.
     pub fn add_ref(
         &mut self,
         bytenr: u64,

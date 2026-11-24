@@ -12,7 +12,7 @@ use std::{
 /// compressible file, and the file content should remain intact.
 // FIXME: defrag_range with COMPRESS flag does not seem to actually compress
 // the data on the test filesystem. Neither extent_thresh(1) nor different
-// compression algorithms help. Needs investigation — possibly a kernel
+// compression algorithms help. Needs investigation: possibly a kernel
 // version issue, or we need to mount with compress-force, or the ioctl
 // flags aren't being set correctly.
 #[test]

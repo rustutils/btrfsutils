@@ -67,11 +67,11 @@ pub enum DeviceSpec<'a> {
 pub struct DeviceStats {
     /// Device ID these stats belong to.
     pub devid: u64,
-    /// Number of write I/O errors (EIO/EREMOTEIO from lower layers).
+    /// Number of write I/O errors (EIO or EREMOTEIO from lower layers).
     pub write_errs: u64,
-    /// Number of read I/O errors (EIO/EREMOTEIO from lower layers).
+    /// Number of read I/O errors (EIO or EREMOTEIO from lower layers).
     pub read_errs: u64,
-    /// Number of flush I/O errors (EIO/EREMOTEIO from lower layers).
+    /// Number of flush I/O errors (EIO or EREMOTEIO from lower layers).
     pub flush_errs: u64,
     /// Number of checksum or bytenr corruption errors detected on read.
     pub corruption_errs: u64,
@@ -149,7 +149,7 @@ fn copy_path_to_name(name: &mut [c_char], path: &CStr) -> nix::Result<()> {
     Ok(())
 }
 
-/// Open `/dev/btrfs-control` for read+write, mapping any `std::io::Error` to
+/// Open `/dev/btrfs-control` read-write, mapping any `std::io::Error` to
 /// the appropriate `nix::errno::Errno`.
 fn open_control() -> nix::Result<std::fs::File> {
     OpenOptions::new()
@@ -241,10 +241,10 @@ pub fn device_add(fd: BorrowedFd, path: &CStr) -> nix::Result<()> {
 /// `BTRFS_IOC_RM_DEV` ioctl on kernels that do not support the v2 variant
 /// (only possible when removing by path). The kernel requires `CAP_SYS_ADMIN`.
 ///
-/// Errors: ENOTTY or EOPNOTSUPP from `RM_DEV_V2` triggers an automatic
-/// fallback to the v1 ioctl (path-based removal only; by-ID removal
-/// requires v2 and will propagate the error).  `EBUSY` if the device holds
-/// the only copy of some data and cannot be removed.
+/// `ENOTTY` or `EOPNOTSUPP` from `RM_DEV_V2` triggers the fallback to the v1
+/// ioctl for path-based removal. Removal by ID requires v2 and propagates the
+/// error. `EBUSY` means the device holds the only copy of some data and cannot
+/// be removed.
 ///
 /// # Errors
 ///
@@ -329,7 +329,7 @@ pub fn device_forget(path: Option<&CStr>) -> nix::Result<()> {
 ///
 /// Opens `/dev/btrfs-control` and issues `BTRFS_IOC_DEVICES_READY`. `path`
 /// must be the path to one of the block devices belonging to the filesystem.
-/// Returns `Ok(())` when all devices are present; returns an error (typically
+/// Returns `Ok(())` when all devices are present, or an error (typically
 /// `ENOENT` or `ENXIO`) if the set is incomplete.
 ///
 /// # Errors

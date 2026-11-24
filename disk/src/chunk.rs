@@ -37,11 +37,11 @@ pub struct ChunkMapping {
     pub logical: u64,
     /// Length of this chunk in bytes.
     pub length: u64,
-    /// Stripe length for striped profiles (RAID0/10/5/6).
+    /// Stripe length for striped profiles (RAID0, RAID10, RAID5, RAID6).
     pub stripe_len: u64,
-    /// Chunk type flags (DATA/METADATA/SYSTEM + RAID profile).
+    /// Chunk type flags (DATA, METADATA, or SYSTEM, plus the RAID profile).
     pub chunk_type: u64,
-    /// Number of stripes (device copies/segments).
+    /// Number of stripes (device copies or segments).
     pub num_stripes: u16,
     /// Sub-stripes for RAID10.
     pub sub_stripes: u16,
@@ -56,16 +56,16 @@ pub struct ChunkMapping {
 /// The number of mirrors is given by `ChunkMapping::num_stripes`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChunkProfile {
-    /// No replication, no striping. One stripe, written/read whole.
+    /// No replication, no striping. One stripe, written and read whole.
     Single,
     /// Two copies on the same device (mostly used for metadata on
     /// single-device filesystems). Both stripes get the same bytes.
     Dup,
     /// Striped across devices, no redundancy. Each row of `stripe_len`
-    /// bytes lands on a single device; consecutive rows round-robin.
+    /// bytes lands on a single device. Consecutive rows round-robin.
     Raid0,
-    /// Mirrored across N devices (`num_stripes` = 2/3/4 for
-    /// RAID1 / RAID1C3 / RAID1C4). Every stripe gets the same bytes.
+    /// Mirrored across N devices (`num_stripes` is 2, 3, or 4 for
+    /// RAID1, RAID1C3, or RAID1C4). Every stripe gets the same bytes.
     Raid1,
     /// Striped mirrors. `num_stripes / sub_stripes` data groups, each
     /// mirrored `sub_stripes`-ways (always 2 in practice).
@@ -79,8 +79,8 @@ pub enum ChunkProfile {
 impl ChunkProfile {
     /// Decode the RAID profile bits of an on-disk `chunk_type` field.
     ///
-    /// SINGLE is the absence of any profile bit. The data/metadata/system
-    /// bits are ignored — only the RAID profile bits matter for routing.
+    /// SINGLE is the absence of any profile bit. The data, metadata, and
+    /// system bits are ignored. Only the RAID profile bits matter for routing.
     #[must_use]
     pub fn from_chunk_type(chunk_type: u64) -> Self {
         if chunk_type & u64::from(raw::BTRFS_BLOCK_GROUP_RAID0) != 0 {
@@ -135,18 +135,18 @@ pub struct StripePlacement {
 
 /// Result of [`ChunkTreeCache::plan_write`].
 ///
-/// Non-parity profiles (SINGLE / DUP / RAID1* / RAID0 / RAID10) produce a
+/// Non-parity profiles (SINGLE, DUP, RAID1*, RAID0, RAID10) produce a
 /// `Plain` plan: a flat list of placements, each a slice of the caller's
 /// buffer to a `(devid, physical)` location. RAID5 and RAID6 produce a
 /// `Parity` plan: per-row descriptors that the executor must read into
 /// scratch buffers, mix with the caller's bytes, compute parity over,
-/// then write data + parity slices to the device columns.
+/// then write the data and parity slices to the device columns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WritePlan {
-    /// SINGLE / DUP / RAID1* / RAID0 / RAID10 placements. The caller
+    /// SINGLE, DUP, RAID1*, RAID0, and RAID10 placements. The caller
     /// just iterates the vec and writes slices of its buffer.
     Plain(Vec<StripePlacement>),
-    /// RAID5 / RAID6 placements. The caller must run the parity
+    /// RAID5 and RAID6 placements. The caller must run the parity
     /// executor: preread every data column slot of every touched row,
     /// overlay caller bytes, compute P (and Q for RAID6), then write
     /// the overlaid byte ranges and the parity slots.
@@ -159,7 +159,7 @@ impl WritePlan {
     ///
     /// # Panics
     ///
-    /// Panics if the plan is `Parity` — used in test code where the
+    /// Panics if the plan is `Parity`. Used in test code where the
     /// profile under test should never produce a parity plan.
     #[cfg(test)]
     #[must_use]
@@ -171,26 +171,25 @@ impl WritePlan {
     }
 }
 
-/// Per-row write plan for RAID5/RAID6 chunks.
+/// Per-row write plan for RAID5 and RAID6 chunks.
 ///
-/// All rows share `stripe_len` (every data column slot is exactly
-/// `stripe_len` bytes; every parity slot is exactly `stripe_len`
-/// bytes). The executor allocates `stripe_len`-sized scratch buffers
-/// per data column per row.
+/// All rows share `stripe_len`: every data column slot and every
+/// parity slot is exactly `stripe_len` bytes. The executor allocates
+/// `stripe_len`-sized scratch buffers per data column per row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParityPlan {
-    /// Bytes per column slot. Same for every row; convenient to carry
-    /// once at the plan level.
+    /// Bytes per column slot. Same for every row, so it is carried once
+    /// at the plan level.
     pub stripe_len: u32,
     /// One descriptor per physical row touched by the write.
     pub rows: Vec<ParityRow>,
 }
 
-/// One physical row of a RAID5/RAID6 chunk that the write touches.
+/// One physical row of a RAID5 or RAID6 chunk that the write touches.
 ///
 /// `data_columns` lists the data column slots in the row (length
 /// `num_stripes - nparity`). Every entry is a full `stripe_len` slot
-/// on a device; the executor must preread the slot, optionally
+/// on a device. The executor must preread the slot, optionally
 /// overlay caller bytes, then both write the overlaid range back to
 /// the device (if the overlay is non-empty) and use the assembled
 /// slot for parity computation.
@@ -236,8 +235,8 @@ pub struct CallerOverlay {
 
 /// One parity column slot to write.
 ///
-/// The bytes themselves are computed by the executor — this struct
-/// only carries the destination.
+/// The executor computes the bytes. This struct only carries the
+/// destination.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParityTarget {
     /// `P` (XOR) or `Q` (Reed-Solomon).
@@ -287,13 +286,13 @@ impl ChunkTreeCache {
     /// Resolve a logical address to `(devid, physical)` for the first stripe.
     ///
     /// For read-only access the first stripe is sufficient on SINGLE, DUP,
-    /// and any mirroring profile. RAID0/5/6/10 striping would need stripe
-    /// index calculation, but for tree blocks (always `nodesize <= stripe_len`)
-    /// the whole block lives in one stripe slot, so this works for the
-    /// common case.
+    /// and any mirroring profile. RAID0, RAID5, RAID6, and RAID10 would need
+    /// stripe index calculation, but a tree block (always `nodesize <=
+    /// stripe_len`) lives in one stripe slot, so this works for the common
+    /// case.
     ///
     /// Callers using a multi-device `BlockReader` look up the device handle
-    /// by `devid`; single-device callers ignore it.
+    /// by `devid`. Single-device callers ignore it.
     #[must_use]
     pub fn resolve(&self, logical: u64) -> Option<(u64, u64)> {
         let mapping = self.lookup(logical)?;
@@ -310,7 +309,7 @@ impl ChunkTreeCache {
     ///
     /// **Use [`plan_write`](Self::plan_write) for actual write routing.**
     /// `resolve_all` ignores the chunk's RAID profile and assumes every
-    /// stripe should receive the same bytes; that is correct for DUP /
+    /// stripe should receive the same bytes. That is correct for DUP and
     /// RAID1* but wrong for RAID0 (each row goes to one device only) and
     /// RAID10 (each row goes to one mirror pair, not all pairs). Kept
     /// for diagnostics and read-only callers that only need a list of
@@ -334,24 +333,24 @@ impl ChunkTreeCache {
     ///
     /// Returns a [`WritePlan`]: a `Plain` variant (a flat vec of
     /// [`StripePlacement`]s) for non-parity profiles, and a `Parity`
-    /// variant ([`ParityPlan`]) for RAID5/RAID6.
+    /// variant ([`ParityPlan`]) for RAID5 and RAID6.
     ///
     /// Per-profile fan-out for a single row of a non-parity profile:
     ///
     /// - SINGLE: one placement (column 0).
-    /// - DUP / RAID1 / RAID1C3 / RAID1C4: `num_stripes` placements
+    /// - DUP, RAID1, RAID1C3, RAID1C4: `num_stripes` placements
     ///   (every stripe gets the same bytes).
     /// - RAID0: one placement (column = `stripe_nr % num_stripes`).
     /// - RAID10: `sub_stripes` placements (the mirror pair for the row).
     ///
-    /// For RAID5/RAID6 the plan instead names every data column slot of
-    /// every touched physical row plus the rotating parity column(s);
-    /// the caller must run a parity executor that prereads the data
+    /// For RAID5 and RAID6 the plan instead names every data column slot
+    /// of every touched physical row plus the rotating parity columns.
+    /// The caller must run a parity executor that prereads the data
     /// slots, mixes in caller bytes, computes parity, then writes data
-    /// + parity to the device.
+    /// and parity to the device.
     ///
     /// Buffers larger than `stripe_len - stripe_offset` span multiple
-    /// rows; each row's placements are appended in order.
+    /// rows. Each row's placements are appended in order.
     ///
     /// Returns `None` if `logical` is unmapped or if `logical + len`
     /// exceeds the chunk.
@@ -370,9 +369,9 @@ impl ChunkTreeCache {
     /// Plan the per-device reads needed to fetch `len` bytes from the
     /// logical address `logical`. Returns exactly one placement per row
     /// (the first stripe of each row, or the row's data column for
-    /// RAID5/RAID6) — the caller assembles the bytes in order.
+    /// RAID5 and RAID6). The caller assembles the bytes in order.
     ///
-    /// Reads on RAID5/RAID6 ignore parity columns: the data column
+    /// RAID5 and RAID6 reads ignore parity columns: the data column
     /// owning each row's bytes is read directly. Degraded reads
     /// (reconstructing a missing data column from parity) are out of
     /// scope.
@@ -423,8 +422,8 @@ impl ChunkTreeCache {
 /// first column of the row's mirror group) and false for write planning
 /// (every column of the row's mirror group).
 ///
-/// RAID5/RAID6 must be routed via [`plan_parity_write`] /
-/// [`plan_parity_read`] — this function panics on those profiles in
+/// RAID5 and RAID6 must be routed via [`plan_parity_write`] or
+/// [`plan_parity_read`]. This function panics on those profiles in
 /// debug builds and returns `None` in release builds.
 fn plan_io(
     mapping: &ChunkMapping,
@@ -453,7 +452,7 @@ fn plan_io(
     debug_assert!(stripe_len > 0, "chunk stripe_len must be non-zero");
 
     // Depending on the profile, only some columns of `mapping.stripes`
-    // are independently addressable. SINGLE/DUP/RAID1*: 1 column (the
+    // are independently addressable. SINGLE, DUP, RAID1*: 1 column (the
     // others are mirrors). RAID0: every column carries different rows.
     // RAID10: sub_stripes columns per group, num_stripes/sub_stripes
     // groups total.
@@ -526,9 +525,9 @@ fn fill_row_columns(
     stripe_nr: u64,
     cols: &mut [u16; 4],
 ) -> usize {
-    // num_stripes / sub_stripes / column indices all fit in u16 (the
-    // profile fan-out is at most 4 — RAID1C4); the cast asserts here
-    // are documentation that they cannot truncate in practice.
+    // num_stripes, sub_stripes, and column indices all fit in u16 (the
+    // profile fan-out is at most 4, for RAID1C4). The cast asserts here
+    // document that they cannot truncate in practice.
     match profile {
         ChunkProfile::Single => {
             cols[0] = 0;
@@ -571,8 +570,8 @@ fn fill_row_columns(
     }
 }
 
-/// Compute the rotating parity column(s) for a physical row of a
-/// RAID5/RAID6 chunk.
+/// Compute the rotating parity columns for a physical row of a
+/// RAID5 or RAID6 chunk.
 ///
 /// Returns `(p_col, q_col)`. For RAID5, `q_col == p_col` (only one
 /// parity column exists). For RAID6, `p_col` and `q_col` are the two
@@ -597,7 +596,7 @@ fn parity_columns(num_stripes: u64, nparity: u64, phys_row: u64) -> (u16, u16) {
     )
 }
 
-/// Walk `0..num_stripes`, skip the parity slot(s), and return the
+/// Walk `0..num_stripes`, skip the parity slots, and return the
 /// physical column index of the `data_col_in_row`-th data slot.
 fn nth_data_col(
     num_stripes: u16,
@@ -620,7 +619,7 @@ fn nth_data_col(
 }
 
 /// Build the per-data-column descriptors for one physical row of a
-/// RAID5/RAID6 plan.
+/// RAID5 or RAID6 plan.
 #[allow(clippy::too_many_arguments)]
 fn build_parity_data_columns(
     mapping: &ChunkMapping,
@@ -701,14 +700,14 @@ fn build_parity_targets(
 /// builds:
 /// - one [`ParityDataColumn`] per data column, with the optional
 ///   caller-byte overlay describing what (if anything) the caller is
-///   writing into that column slot;
+///   writing into that column slot.
 /// - one [`ParityTarget`] per parity column (1 for RAID5, 2 for
 ///   RAID6).
 ///
 /// The executor must preread every data column slot of every touched
-/// row to compute parity (since even single-tree-block writes only
-/// cover a fraction of one data column slot, the rest of the row is
-/// untouched but still feeds parity).
+/// row to compute parity. Even a single tree block write covers only
+/// a fraction of one data column slot, and the untouched rest of the
+/// row still feeds parity.
 fn plan_parity_write(
     mapping: &ChunkMapping,
     logical: u64,
@@ -857,7 +856,7 @@ fn plan_parity_read(
     Some(placements)
 }
 
-/// Parse a chunk item (`btrfs_chunk` + stripes) from a raw byte buffer.
+/// Parse a chunk item (`btrfs_chunk` plus stripes) from a raw byte buffer.
 ///
 /// Returns the chunk mapping and the total number of bytes consumed.
 /// `logical` is the logical start address from the key's offset field.
@@ -944,7 +943,7 @@ pub fn seed_from_sys_chunk_array(array: &[u8], size: u32) -> ChunkTreeCache {
 }
 
 /// Serialize a [`ChunkMapping`] into the on-disk `btrfs_chunk` byte
-/// layout (48-byte fixed header + `num_stripes * 32`-byte stripes).
+/// layout (48-byte fixed header plus `num_stripes * 32`-byte stripes).
 ///
 /// `sector_size` is written into the chunk's `io_align`, `io_width`,
 /// and `sector_size` fields (all three are conventionally equal to the
@@ -1019,8 +1018,8 @@ pub fn sys_chunk_array_contains(
 /// `Ok(new_size)` is returned. Returns `Err` if the record would
 /// overflow the 2048-byte `sys_chunk_array`.
 ///
-/// `bg_start` is the chunk's logical start address; it becomes the
-/// `offset` field of the `BTRFS_FIRST_CHUNK_TREE_OBJECTID / CHUNK_ITEM`
+/// `bg_start` is the chunk's logical start address. It becomes the
+/// `offset` field of the `(BTRFS_FIRST_CHUNK_TREE_OBJECTID, CHUNK_ITEM)`
 /// disk key.
 ///
 /// # Errors
@@ -1165,7 +1164,7 @@ mod tests {
     fn resolve_returns_first_stripe_only() {
         // For a multi-stripe mapping, the single-result `resolve` always
         // picks stripe[0]'s (devid, physical). Useful for read paths
-        // where any mirror is fine; write paths use `resolve_all`.
+        // where any mirror is fine. Write paths use `resolve_all`.
         let mut cache = ChunkTreeCache::default();
         cache.insert(make_multi_stripe_mapping(
             1000,
@@ -1388,12 +1387,12 @@ mod tests {
         assert!(parse_chunk_item(&buf, 0).is_none());
     }
 
-    // --- ChunkProfile decoding ---
+    // ChunkProfile decoding
 
     #[test]
     fn profile_from_chunk_type_basic() {
         use ChunkProfile::*;
-        // SINGLE: no profile bit set (only DATA/SYSTEM/METADATA bits).
+        // SINGLE: no profile bit set (only DATA, SYSTEM, or METADATA bits).
         assert_eq!(
             ChunkProfile::from_chunk_type(u64::from(
                 raw::BTRFS_BLOCK_GROUP_DATA
@@ -1423,7 +1422,7 @@ mod tests {
         assert_eq!(ChunkProfile::from_chunk_type(c4), ChunkProfile::Raid1);
     }
 
-    // --- plan_write / plan_read shared helpers ---
+    // plan_write and plan_read shared helpers
 
     /// Build a chunk mapping at logical 0 with the given profile and
     /// stripe layout.
@@ -1460,7 +1459,7 @@ mod tests {
         c
     }
 
-    // --- SINGLE ---
+    // SINGLE
 
     #[test]
     fn plan_write_single_one_row() {
@@ -1496,20 +1495,20 @@ mod tests {
         assert_eq!(placements[0].physical, 0x10000 + 32 * 1024);
         assert_eq!(placements[0].buf_offset, 0);
         assert_eq!(placements[0].len, 32 * 1024);
-        // Row 1: 64K bytes, starting at the next stripe (stripe_nr=1, factor=1
-        // so per_device_stripe_nr=1; physical = base + 64K).
+        // Row 1: 64K bytes, starting at the next stripe (stripe_nr=1, factor=1,
+        // so per_device_stripe_nr=1 and physical = base + 64K).
         assert_eq!(placements[1].devid, 1);
         assert_eq!(placements[1].physical, 0x10000 + 65536);
         assert_eq!(placements[1].buf_offset, 32 * 1024);
         assert_eq!(placements[1].len, 64 * 1024);
     }
 
-    // --- DUP / RAID1 mirroring ---
+    // DUP and RAID1 mirroring
 
     #[test]
     fn plan_write_dup_writes_both_copies_same_buf_slice() {
         // DUP: 2 stripes both on devid 1 at distinct physicals. Same
-        // buf_offset/len for each placement (identical bytes).
+        // buf_offset and len for each placement (identical bytes).
         let m = make_chunk(
             raw::BTRFS_BLOCK_GROUP_DUP,
             2,
@@ -1586,7 +1585,7 @@ mod tests {
         assert_eq!(placements[3].devid, 4);
     }
 
-    // --- RAID0 striping ---
+    // RAID0 striping
 
     #[test]
     fn plan_write_raid0_routes_first_row_to_column_zero() {
@@ -1611,7 +1610,7 @@ mod tests {
     #[test]
     fn plan_write_raid0_second_row_routes_to_second_device() {
         // Same chunk, write at logical = STRIPE_LEN (row 1) goes to stripe[1].
-        // The per-device stripe number is row 1 / factor(2) = 0; physical
+        // The per-device stripe number is row 1 / factor(2) = 0, so physical
         // = base + 0 = base.
         let m = make_chunk(
             raw::BTRFS_BLOCK_GROUP_RAID0,
@@ -1669,10 +1668,10 @@ mod tests {
             assert_eq!(p.buf_offset, i * 65536);
             assert_eq!(p.len, 65536);
         }
-        // All three rows are stripe_nr 0, 1, 2; per_device_stripe_nr = 0.
+        // All three rows are stripe_nr 0, 1, 2, and per_device_stripe_nr = 0.
         for p in &placements {
-            // Each device's base physical is 0x{i+1}_0000; per-device
-            // offset within is 0.
+            // Each device's base physical is 0x{i+1}_0000. The per-device
+            // offset within it is 0.
             assert_eq!(p.physical & 0xFFFF, 0);
         }
     }
@@ -1706,7 +1705,7 @@ mod tests {
         assert_eq!(placements[1].len, 64 * 1024);
     }
 
-    // --- RAID10 striped mirrors ---
+    // RAID10 striped mirrors
 
     #[test]
     fn plan_write_raid10_first_row_writes_pair_zero() {
@@ -1773,7 +1772,7 @@ mod tests {
         assert_eq!(placements[1].physical, 0x20000 + 65536);
     }
 
-    // --- plan_read ---
+    // plan_read
 
     #[test]
     fn plan_read_picks_first_mirror_per_row() {
@@ -1833,7 +1832,7 @@ mod tests {
         assert_eq!(r, w);
     }
 
-    // --- Bounds and error cases ---
+    // Bounds and error cases
 
     #[test]
     fn plan_write_out_of_chunk_returns_none() {
@@ -1872,9 +1871,9 @@ mod tests {
         }
     }
 
-    // --- RAID5 / RAID6 plan_write parity routing ---
+    // RAID5 and RAID6 plan_write parity routing
 
-    /// Helper for parity-plan tests: build a RAID5/RAID6 chunk with
+    /// Helper for parity-plan tests: build a RAID5 or RAID6 chunk with
     /// per-device offsets that match the column index, so a column's
     /// physical address tells you which devid (and therefore which
     /// column) the executor will write to.
@@ -2001,8 +2000,8 @@ mod tests {
     fn plan_write_raid5_spanning_two_data_columns_in_one_row() {
         // 3-device RAID5: row 0 has 2 data slots (each 64K of logical).
         // Logical 0..128K covers both data columns of row 0 fully.
-        // Both data columns should have overlay covering full slot;
-        // one row total.
+        // Both data columns should have an overlay covering the full slot,
+        // in one row total.
         let m =
             make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID5, 3, 65536, 3 << 20);
         let cache = cache_with(m);
@@ -2024,8 +2023,8 @@ mod tests {
     #[test]
     fn plan_write_raid5_spans_two_physical_rows() {
         // 3-device RAID5: logical_per_phys_row = 128K. Write 192K
-        // starting at 64K: covers (logical 64K..128K, dat col 1 of row 0)
-        // + (logical 128K..256K, both data cols of row 1).
+        // starting at 64K: covers (logical 64K..128K, data col 1 of row 0)
+        // and (logical 128K..256K, both data cols of row 1).
         let m =
             make_parity_chunk(raw::BTRFS_BLOCK_GROUP_RAID5, 3, 65536, 3 << 20);
         let cache = cache_with(m);
@@ -2055,7 +2054,7 @@ mod tests {
         }
     }
 
-    // --- RAID5 / RAID6 plan_read ---
+    // RAID5 and RAID6 plan_read
 
     #[test]
     fn plan_read_raid5_routes_to_data_column() {

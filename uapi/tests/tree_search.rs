@@ -178,8 +178,8 @@ fn tree_search_large_result_no_duplicates() {
         );
     }
 
-    // No duplicates — each (objectid, offset) pair should be unique.
-    // Duplicate pairs would indicate the cursor advance bug (infinite loop
+    // No duplicates: each (objectid, offset) pair should be unique.
+    // Duplicate pairs would indicate a cursor advance bug (an infinite loop
     // re-yielding already-seen items).
     let mut seen = std::collections::HashSet::new();
     let mut dup_count = 0;

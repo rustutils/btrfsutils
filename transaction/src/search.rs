@@ -117,7 +117,7 @@ pub enum SearchIntent {
 /// - `trans`: transaction handle (needed if `cow` is true to COW blocks)
 /// - `tree_id`: which tree to search
 /// - `key`: the key to search for
-/// - `path`: receives the search path (must be empty/released)
+/// - `path`: receives the search path (must be empty or released)
 /// - `intent`: controls preemptive splitting and rebalancing during descent
 /// - `cow`: if true, COW each block along the path
 ///
@@ -251,7 +251,7 @@ pub fn search_slot<R: Read + Write + Seek>(
                     trans, fs_info, &mut eb, slot, tree_id,
                 )?
             {
-                // Node was merged — the parent's nritems changed.
+                // Node was merged, so the parent's nritems changed.
                 // Re-search to find the correct child slot.
                 fs_info.mark_dirty(&eb);
             }

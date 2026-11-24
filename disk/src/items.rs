@@ -2,7 +2,7 @@
 //!
 //! Each on-disk item type has a corresponding struct with a `parse` method
 //! that reads from a raw byte buffer using safe LE reader helpers. These
-//! structs are the public API for item data; display formatting lives in
+//! structs are the public API for item data. Display formatting lives in
 //! the `cli` crate.
 
 /// Read a UUID (16 bytes) from a `Buf` cursor, advancing it by 16 bytes.
@@ -17,7 +17,7 @@ use std::{fmt, mem};
 use uuid::Uuid;
 
 bitflags::bitflags! {
-    /// Block group / chunk type flags: the combination of chunk type
+    /// Block group and chunk type flags: the combination of chunk type
     /// (DATA, SYSTEM, METADATA) and RAID profile stored in on-disk chunk
     /// items and block group items.
     ///
@@ -148,7 +148,7 @@ impl fmt::Display for InodeFlags {
         }
     }
 }
-/// Btrfs timestamp (seconds + nanoseconds since Unix epoch).
+/// Btrfs timestamp (seconds and nanoseconds since the Unix epoch).
 #[derive(Debug, Clone, Copy)]
 pub struct Timespec {
     /// Seconds since 1970-01-01 00:00:00 UTC.
@@ -165,7 +165,7 @@ impl Timespec {
         }
     }
 
-    /// Serialize to 12 bytes (8-byte sec + 4-byte nsec).
+    /// Serialize to 12 bytes (8-byte seconds, 4-byte nanoseconds).
     fn write_to(&self, buf: &mut Vec<u8>) {
         buf.put_u64_le(self.sec);
         buf.put_u32_le(self.nsec);
@@ -174,8 +174,8 @@ impl Timespec {
 
 /// Compression type for file extents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// See also `btrfs_uapi::defrag::CompressType` which omits `None`/`Unknown`
-/// for use in ioctl requests.
+/// See also `btrfs_uapi::defrag::CompressType`, which omits `None` and
+/// `Unknown` for use in ioctl requests.
 pub enum CompressionType {
     /// No compression.
     None,
@@ -358,9 +358,9 @@ pub struct InodeItem {
     pub uid: u32,
     /// Owner group ID.
     pub gid: u32,
-    /// POSIX file mode (type + permissions).
+    /// POSIX file mode (type and permissions).
     pub mode: u32,
-    /// Device number (for character/block device inodes).
+    /// Device number (for character and block device inodes).
     pub rdev: u64,
     /// Inode flags (NODATASUM, COMPRESS, etc.).
     pub flags: InodeFlags,
@@ -424,9 +424,9 @@ pub struct InodeItemArgs {
     pub uid: u32,
     /// Owner group ID.
     pub gid: u32,
-    /// POSIX file mode (type + permissions).
+    /// POSIX file mode (type and permissions).
     pub mode: u32,
-    /// Timestamp for atime/ctime/mtime/otime.
+    /// Timestamp used for atime, ctime, mtime, and otime.
     pub time: Timespec,
 }
 
@@ -645,14 +645,14 @@ impl fmt::Display for RootItemFlags {
 ///
 /// Stored in the root tree with key `(tree_objectid, ROOT_ITEM, 0)`. Contains
 /// the root block pointer, subvolume UUIDs, and transaction timestamps needed
-/// for snapshot management and send/receive.
+/// for snapshot management and send and receive.
 #[derive(Debug, Clone)]
 pub struct RootItem {
     /// Raw bytes of the embedded `btrfs_inode_item` (160 bytes).
     ///
     /// The on-disk `ROOT_ITEM` starts with an embedded inode describing the
     /// root directory of the subvolume. This is preserved as raw bytes to
-    /// avoid losing data during parse/serialize round-trips, since the
+    /// avoid losing data when parsing and serializing again, since the
     /// embedded inode fields are not otherwise tracked by this struct.
     pub inode_data: Vec<u8>,
     /// Generation when this root was last modified.
@@ -683,7 +683,7 @@ pub struct RootItem {
     pub uuid: Uuid,
     /// UUID of the parent subvolume (for snapshots).
     pub parent_uuid: Uuid,
-    /// UUID of the subvolume this was received from (for send/receive).
+    /// UUID of the subvolume this was received from (for send and receive).
     pub received_uuid: Uuid,
     /// Transaction ID of the last change to this subvolume.
     pub ctransid: u64,
@@ -706,7 +706,7 @@ pub struct RootItem {
 impl RootItem {
     /// Parse a root item from a raw byte buffer. Handles both v1 (shorter)
     /// and v2 (full) root item formats gracefully, defaulting missing fields
-    /// to zero/nil.
+    /// to zero or nil.
     #[must_use]
     #[allow(clippy::too_many_lines)]
     pub fn parse(data: &[u8]) -> Option<Self> {
@@ -855,7 +855,7 @@ impl RootItem {
     /// Create a minimal root item for internal trees (not subvolumes).
     ///
     /// Sets generation, bytenr, level, and refs=1. All other fields are
-    /// zeroed/nil.
+    /// zeroed or nil.
     #[must_use]
     pub fn new_internal(generation: u64, bytenr: u64, level: u8) -> Self {
         Self {
@@ -898,7 +898,7 @@ impl RootItem {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(496);
 
-        // btrfs_inode_item (160 bytes) — preserved from the original on-disk
+        // btrfs_inode_item (160 bytes): preserved from the original on-disk
         // data, or zeroed for newly created root items.
         buf.extend_from_slice(&self.inode_data);
 
@@ -1026,14 +1026,14 @@ pub struct FileExtentItem {
 /// Body of a file extent: either inline data or a reference to a disk extent.
 #[derive(Debug, Clone)]
 pub enum FileExtentBody {
-    /// Data is stored directly in the tree leaf (small files/tails).
+    /// Data is stored directly in the tree leaf (small files or file tails).
     Inline {
         /// Number of bytes of inline data following the extent header.
         inline_size: usize,
     },
     /// Data is stored in a separate disk extent.
     Regular {
-        /// Logical byte address of the extent on disk (0 = hole/sparse).
+        /// Logical byte address of the extent on disk (0 for a hole).
         disk_bytenr: u64,
         /// Size of the on-disk extent in bytes (compressed size if compressed).
         disk_num_bytes: u64,
@@ -1083,7 +1083,7 @@ impl FileExtentItem {
     }
 
     /// Size of the fixed `btrfs_file_extent_item` header (the bytes before
-    /// `disk_bytenr` / inline data).
+    /// `disk_bytenr` or the inline data).
     pub const HEADER_SIZE: usize = 21;
 
     /// Size of a regular or prealloc `EXTENT_DATA` item: 21-byte header plus
@@ -1127,7 +1127,7 @@ impl FileExtentItem {
     }
 
     /// Serialize an inline `EXTENT_DATA` item: 21-byte header followed by
-    /// `data` bytes (raw or already-compressed/framed payload).
+    /// `data` bytes (raw, or an already compressed and framed payload).
     ///
     /// `ram_bytes` is the uncompressed file size covered by this inline
     /// extent. `compression` indicates whether `data` is compressed.
@@ -1162,7 +1162,7 @@ pub fn extent_data_ref_hash(root: u64, objectid: u64, offset: u64) -> u64 {
     (u64::from(high_crc) << 31) ^ u64::from(low_crc)
 }
 
-/// Inline reference types found inside `EXTENT_ITEM`/`METADATA_ITEM`.
+/// Inline reference types found inside `EXTENT_ITEM` and `METADATA_ITEM`.
 #[derive(Debug, Clone)]
 pub enum InlineRef {
     /// Direct backref from a metadata extent to the tree that owns it.
@@ -1257,7 +1257,7 @@ impl InlineRef {
 ///
 /// Returns `None` if `type_byte` is not a recognized inline ref type.
 ///
-/// - `TREE_BLOCK_REF`/`EXTENT_OWNER_REF`: 1 (tag) + 8 (root) = 9
+/// - `TREE_BLOCK_REF`, `EXTENT_OWNER_REF`: 1 (tag) + 8 (root) = 9
 /// - `SHARED_BLOCK_REF`: 1 (tag) + 8 (parent) = 9
 /// - `EXTENT_DATA_REF`: 1 (tag) + 28 (`btrfs_extent_data_ref`) = 29
 /// - `SHARED_DATA_REF`: 1 (tag) + 8 (parent) + 4 (count) = 13
@@ -1396,7 +1396,7 @@ impl ExtentItem {
                     });
                 }
                 raw::BTRFS_EXTENT_DATA_REF_KEY => {
-                    // EXTENT_DATA_REF has no 8-byte offset field; the struct
+                    // EXTENT_DATA_REF has no 8-byte offset field. The struct
                     // starts directly after the type byte. The 8 bytes we
                     // speculatively consumed are actually the first field
                     // (root) of the struct, so reinterpret them.
@@ -1405,8 +1405,8 @@ impl ExtentItem {
                         let oid = buf.get_u64_le();
                         let off = buf.get_u64_le();
                         let count = buf.get_u32_le();
-                        // The C tool prints a CRC hash for the display offset;
-                        // compute it the same way: hash(root, objectid, offset).
+                        // The C tool prints a CRC hash for the display offset.
+                        // Compute it the same way: hash(root, objectid, offset).
                         let hash = extent_data_ref_hash(root, oid, off);
                         inline_refs.push(InlineRef::ExtentDataBackref {
                             ref_offset: hash,
@@ -1495,7 +1495,7 @@ impl ExtentItem {
         buf.put_u64_le(refs);
         buf.put_u64_le(generation);
         buf.put_u64_le(ExtentFlags::TREE_BLOCK.bits());
-        // tree_block_info: first key + level
+        // tree_block_info: first key and level
         let key_off = buf.len();
         buf.extend_from_slice(&[0u8; 17]);
         write_disk_key(&mut buf[key_off..], 0, first_key);
@@ -2006,8 +2006,8 @@ impl QgroupInfo {
 
 /// Quota group limits.
 ///
-/// Key: `(level/subvolid, QGROUP_LIMIT, 0)`. Caps referenced and/or exclusive
-/// space usage for a qgroup.
+/// Key: `(level/subvolid, QGROUP_LIMIT, 0)`. Caps referenced space,
+/// exclusive space, or both for a qgroup.
 #[derive(Debug, Clone)]
 pub struct QgroupLimit {
     /// Bitmask of which limits are active.
@@ -2074,7 +2074,7 @@ impl DeviceStats {
     }
 }
 
-/// UUID tree entry mapping a subvolume UUID to its objectid(s).
+/// UUID tree entry mapping a subvolume UUID to its objectids.
 ///
 /// Key: `(upper_half_of_uuid, UUID_KEY_SUBVOL, lower_half_of_uuid)`.
 #[derive(Debug, Clone)]
@@ -2119,7 +2119,7 @@ pub enum ItemPayload {
     OrphanItem,
     /// Tree root descriptor (subvolume, snapshot, or internal tree).
     RootItem(RootItem),
-    /// Root forward or back reference (`ROOT_REF` / `ROOT_BACKREF`).
+    /// Root forward or back reference (`ROOT_REF` or `ROOT_BACKREF`).
     RootRef(RootRef),
     /// File extent descriptor.
     FileExtentItem(FileExtentItem),
@@ -2130,9 +2130,10 @@ pub enum ItemPayload {
     },
     /// Extent allocation record (`EXTENT_ITEM` or `METADATA_ITEM`).
     ExtentItem(ExtentItem),
-    /// Standalone tree block backref (no data payload; the key offset is the root).
+    /// Standalone tree block backref. No data payload: the key offset is the root.
     TreeBlockRef,
-    /// Standalone shared block backref (no data payload; the key offset is the parent bytenr).
+    /// Standalone shared block backref. No data payload: the key offset is the
+    /// parent bytenr.
     SharedBlockRef,
     /// Standalone data extent backref.
     ExtentDataRef(ExtentDataRef),
@@ -2147,7 +2148,7 @@ pub enum ItemPayload {
     BlockGroupItem(BlockGroupItem),
     /// Free space info for a block group.
     FreeSpaceInfo(FreeSpaceInfo),
-    /// Free space extent (no data payload; key encodes start and length).
+    /// Free space extent. No data payload: the key encodes start and length.
     FreeSpaceExtent,
     /// Free space bitmap (data payload is the bitmap).
     FreeSpaceBitmap,
@@ -2163,7 +2164,8 @@ pub enum ItemPayload {
     QgroupInfo(QgroupInfo),
     /// Quota group limits.
     QgroupLimit(QgroupLimit),
-    /// Quota group relation (no data payload; parent/child encoded in key).
+    /// Quota group relation. No data payload: parent and child are encoded in
+    /// the key.
     QgroupRelation,
     /// Per-device I/O error statistics.
     DeviceStats(DeviceStats),
@@ -2180,7 +2182,7 @@ pub enum ItemPayload {
     StringItem(Vec<u8>),
     /// RAID stripe extent mapping.
     RaidStripe(RaidStripeItem),
-    /// Unrecognized item type; raw data preserved.
+    /// Unrecognized item type. The raw data is preserved.
     Unknown(Vec<u8>),
 }
 
@@ -2416,7 +2418,7 @@ pub fn parse_item_payload(key: &DiskKey, data: &[u8]) -> ItemPayload {
 mod tests {
     use super::*;
 
-    // ── Enum round-trips ──────────────────────────────────────────────
+    // Enum round-trips
 
     #[test]
     fn compression_type_round_trip() {
@@ -2490,7 +2492,7 @@ mod tests {
         assert_eq!(FileType::Other(200).name(), "UNKNOWN");
     }
 
-    // ── Simple struct parsers ─────────────────────────────────────────
+    // Simple struct parsers
 
     #[test]
     fn block_group_item_parse() {
@@ -2716,7 +2718,7 @@ mod tests {
         assert!(RaidStripeItem::parse(&[0; 7]).is_none());
     }
 
-    // ── Variable-length parsers ───────────────────────────────────────
+    // Variable-length parsers
 
     #[test]
     fn inode_ref_parse_single() {
@@ -2885,7 +2887,7 @@ mod tests {
         assert_eq!(ds.values[1].1, 20);
     }
 
-    // ── FileExtentItem ────────────────────────────────────────────────
+    // FileExtentItem
 
     #[test]
     fn file_extent_item_inline() {
@@ -2893,7 +2895,7 @@ mod tests {
         buf[0..8].copy_from_slice(&7u64.to_le_bytes()); // generation
         buf[8..16].copy_from_slice(&10u64.to_le_bytes()); // ram_bytes
         buf[16] = 0; // compression = none
-        // bytes 17-19 are encryption/other_encoding (unused)
+        // bytes 17-19 are encryption and other_encoding (unused)
         buf[20] = 0; // extent_type = inline
         buf[21..31].copy_from_slice(&[0xAA; 10]); // inline data
         let fei = FileExtentItem::parse(&buf).unwrap();
@@ -3028,7 +3030,7 @@ mod tests {
         assert_eq!(&bytes[FileExtentItem::HEADER_SIZE..], payload);
     }
 
-    // ── Helper functions ──────────────────────────────────────────────
+    // Helper functions
 
     #[test]
     fn raw_crc32c_known_value() {
@@ -3134,7 +3136,7 @@ mod tests {
             offset: 0,
         };
         let non_skinny = ExtentItem::to_bytes_non_skinny(1, 42, 5, &key, 0);
-        // First 24 bytes (refs + generation + flags) identical
+        // First 24 bytes (refs, generation, flags) identical
         assert_eq!(&skinny[..24], &non_skinny[..24]);
     }
 

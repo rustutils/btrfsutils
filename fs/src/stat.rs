@@ -26,7 +26,7 @@ pub struct Stat {
     pub mtime: SystemTime,
     pub ctime: SystemTime,
     /// btrfs creation time (`otime`), exposed for callers that surface
-    /// `birthtime` / `crtime`.
+    /// `birthtime` or `crtime`.
     pub btime: SystemTime,
     /// Permission bits (mode & 0o7777).
     pub perm: u16,

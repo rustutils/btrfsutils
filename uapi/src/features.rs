@@ -250,7 +250,7 @@ mod tests {
             incompat_flags: 0xFFFF_FFFF_FFFF_FFFF,
         };
         let flags = parse_feature_flags(&raw);
-        // Should not panic; unknown bits are silently dropped.
+        // Should not panic. Unknown bits are silently dropped.
         assert!(!flags.compat_ro.is_empty());
         assert!(!flags.incompat.is_empty());
     }

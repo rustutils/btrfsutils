@@ -1,16 +1,16 @@
 //! File read path: inline and regular extent resolution with decompression.
 //!
 //! The on-disk layout for each `EXTENT_DATA` item:
-//! - Fixed 21-byte header: generation (8) + `ram_bytes` (8) + compression (1)
-//!   + encryption (1) + `other_encoding` (2) + `extent_type` (1).
+//! - Fixed 21-byte header: generation (8), `ram_bytes` (8), compression (1),
+//!   encryption (1), `other_encoding` (2), `extent_type` (1).
 //! - Inline: raw (or compressed) file bytes follow immediately.
-//! - Regular/prealloc: `disk_bytenr` (8) + `disk_num_bytes` (8) + offset (8)
-//!   + `num_bytes` (8).
+//! - Regular and prealloc: `disk_bytenr` (8), `disk_num_bytes` (8),
+//!   offset (8), `num_bytes` (8).
 //!
 //! LZO framing: the on-disk data starts with a 4-byte LE total-size header,
-//! followed by sector-sized chunks each prefixed with a 4-byte LE segment
-//! length. If fewer than 4 bytes remain before the next sector boundary, skip
-//! to align. The sector size is the filesystem `sectorsize` field.
+//! followed by sector-sized chunks, each prefixed with a 4-byte LE segment
+//! length. If fewer than 4 bytes remain before the next sector boundary, they
+//! are skipped. The sector size is the filesystem `sectorsize` field.
 
 use crate::cache::ExtentRecord;
 use btrfs_disk::{
@@ -25,8 +25,8 @@ const EXTENT_HEADER_SIZE: usize = 21;
 
 /// Decompress btrfs LZO format.
 ///
-/// On-disk layout: 4-byte LE total size, then per-sector segments each with
-/// a 4-byte LE length prefix followed by LZO1X compressed data. Segments are
+/// On-disk layout: 4-byte LE total size, then per-sector segments, each a
+/// 4-byte LE length prefix followed by LZO1X compressed data. Segments are
 /// padded to `sector_size` boundaries.
 fn decompress_lzo(
     data: &[u8],
@@ -99,7 +99,7 @@ fn decompress_lzo(
 /// Decompress a btrfs file extent payload.
 ///
 /// `data` is the raw compressed bytes, `ram_bytes` is the expected
-/// uncompressed size, and `sector_size` is the filesystem sectorsize (needed
+/// uncompressed size, and `sector_size` is the filesystem sector size (needed
 /// for LZO per-sector framing).
 fn decompress(
     data: &[u8],
@@ -123,11 +123,10 @@ fn decompress(
             Ok(out)
         }
         CompressionType::Zstd => {
-            // btrfs slices each compressed extent into independent
-            // 128 KiB frames; `bulk::decompress` rejects the trailing
-            // bytes after the first frame. The streaming decoder
-            // handles concatenated frames and ignores trailing
-            // sector padding.
+            // btrfs splits each compressed extent into independent
+            // 128 KiB frames, and `bulk::decompress` rejects the bytes
+            // after the first frame. The streaming decoder handles
+            // concatenated frames and ignores trailing sector padding.
             let mut decoder =
                 zstd::stream::read::Decoder::new(data).map_err(|e| {
                     io::Error::new(
@@ -156,9 +155,9 @@ fn decompress(
 
 /// Read the target bytes of a symbolic link.
 ///
-/// Symlink targets are stored as inline `EXTENT_DATA` items, typically
-/// uncompressed. `sector_size` is used if the (unusual) case of a compressed
-/// inline symlink is encountered.
+/// Symlink targets are stored as inline `EXTENT_DATA` items, usually
+/// uncompressed. `sector_size` is only needed for the unusual case of a
+/// compressed inline symlink.
 pub(crate) fn read_symlink<R: io::Read + io::Seek>(
     reader: &mut BlockReader<R>,
     fs_tree_root: u64,
@@ -192,7 +191,7 @@ pub(crate) fn read_symlink<R: io::Read + io::Seek>(
             if ext.extent_type == FileExtentType::Inline {
                 let payload = &raw[EXTENT_HEADER_SIZE..];
                 result = Some(if ext.compression == CompressionType::None {
-                    // `ram_bytes` is the logical size; the on-disk payload
+                    // `ram_bytes` is the logical size. The on-disk payload
                     // may be padded (e.g. mkfs.btrfs --rootdir stores a
                     // trailing NUL after symlink targets).
                     #[allow(clippy::cast_possible_truncation)]
@@ -214,11 +213,11 @@ pub(crate) fn read_symlink<R: io::Read + io::Seek>(
 }
 
 /// Walk the FS tree and collect every `EXTENT_DATA` item belonging to
-/// `oid`. The returned records are in tree-walk order (i.e. ascending
-/// file position, since the tree is key-sorted).
+/// `oid`. The records come back in tree-walk order, which is ascending
+/// file position since the tree is key-sorted.
 ///
-/// Used by [`crate::Filesystem`]'s extent-map cache so subsequent
-/// reads on the same inode reuse the parsed records.
+/// Feeds [`crate::Filesystem`]'s extent-map cache, so later reads of
+/// the same inode reuse the parsed records.
 pub(crate) fn collect_extents<R: io::Read + io::Seek>(
     reader: &mut BlockReader<R>,
     fs_tree_root: u64,
@@ -259,8 +258,8 @@ pub(crate) fn collect_extents<R: io::Read + io::Seek>(
 /// `file_size`. Inline, regular (compressed and uncompressed), and
 /// prealloc extents are all handled. Sparse holes return zeros.
 ///
-/// The extent map is supplied by the caller (typically built once via
-/// [`collect_extents`] and cached) so repeated reads of the same file
+/// The caller supplies the extent map (usually built once with
+/// [`collect_extents`] and cached), so repeated reads of the same file
 /// don't re-walk the FS tree.
 #[allow(clippy::too_many_lines)] // inherently complex: 4 extent variants × range math
 pub(crate) fn read_file_with_map<R: io::Read + io::Seek>(
@@ -292,11 +291,10 @@ pub(crate) fn read_file_with_map<R: io::Read + io::Seek>(
                 FileExtentType::Inline,
                 FileExtentBody::Inline { inline_size: _ },
             ) => {
-                // For inline extents `inline_size` is the on-disk
-                // payload length (i.e. the compressed size for
-                // compressed extents). The *logical* extent length
-                // is always `ram_bytes`, which is what the read
-                // range math must clamp against.
+                // For inline extents, `inline_size` is the on-disk
+                // payload length (the compressed size for compressed
+                // extents). The logical extent length is always
+                // `ram_bytes`, so the range math clamps against that.
                 let ext_end = ext_start + rec.item.ram_bytes;
                 let read_start = file_offset.max(ext_start);
                 let read_end = req_end.min(ext_end);
@@ -359,7 +357,7 @@ pub(crate) fn read_file_with_map<R: io::Read + io::Seek>(
                         rec.item.ram_bytes,
                         sector_size,
                     )?;
-                    // disk_off is the offset within the decompressed data
+                    // `disk_off` is the offset in the decompressed data
                     // where this file extent's bytes begin.
                     let src_off =
                         (disk_off + (read_start - ext_start)) as usize;

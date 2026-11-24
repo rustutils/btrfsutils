@@ -70,7 +70,7 @@ pub fn btrfs_name_hash(name: &[u8]) -> u32 {
     raw_crc32c(!1u32, name)
 }
 
-/// Standard CRC32C matching the kernel's `hash_crc32c()` / btrfs on-disk
+/// Standard CRC32C matching the kernel's `hash_crc32c()`, the btrfs on-disk
 /// checksum format.
 ///
 /// This is the function used for all on-disk checksums: superblocks, tree
