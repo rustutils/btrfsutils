@@ -2,24 +2,21 @@
 default:
     @just --list
 
-# Build integration test binaries and run them with root privileges.
-# Arguments are passed on to the test binaries. To only run a specific
-# test, run `just test <test-name>`. To show standard output/error, use
-# `just test --nocapture`.
+# Run unit tests, then integration tests as root. Arguments go to the
+# test binaries, e.g. `just test <test-name>` or `just test --nocapture`.
 #
 # Requires: jq, sudo, btrfs-progs
 test *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    # clear all env variables that influence the btrfs command output
-    # format.
+    # Clear env variables that change btrfs output format.
     unset BTRFS_OUTPUT_FORMAT
 
-    # Build first so the user sees compile progress/warnings on stderr.
+    # Build first so compile progress and warnings show on stderr.
     cargo test --all-features -- {{ ARGS }}
 
-    # Then extract the binary paths from the JSON output.
+    # Collect the test binary paths.
     mapfile -t binaries < <(
         cargo test \
             --all-features \
@@ -33,8 +30,8 @@ test *ARGS:
         exit 1
     fi
 
-    # --preserve-env=LLVM_PROFILE_FILE is a no-op when the var is unset,
-    # but allows `just coverage` to forward it through sudo.
+    # Lets `just coverage` pass LLVM_PROFILE_FILE through sudo. No-op
+    # when unset.
     export INSTA_WORKSPACE_ROOT="$PWD"
     failed=0
     for binary in "${binaries[@]}"; do
@@ -42,7 +39,7 @@ test *ARGS:
             "$binary" --ignored --test-threads=1 {{ ARGS }} || failed=1
     done
 
-    # anything that we might write when running tests, change back to us.
+    # Give files written as root back to the user.
     sudo chown -R "$(id -u):$(id -g)" \
         cli/tests/snapshots/ \
         cli/tests/commands/snapshots \
@@ -54,16 +51,14 @@ test *ARGS:
         exit 1
     fi
 
-# Build instrumented test binaries, run them with root privileges, and
-# generate an HTML coverage report.
+# Run all tests with coverage instrumentation and write an HTML report.
 #
 # Requires: jq, sudo, btrfs-progs, cargo-llvm-cov
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
-    # ran into an issue where building coverage left instrumented binaries in target,
-    # which would then spam .profraw files when I run regular tests, so we use a separate
-    # target dir for coverage builds.
+    # Separate target dir, so instrumented binaries don't leave .profraw
+    # files during regular test runs.
     export CARGO_TARGET_DIR=target/coverage
     eval "$(cargo llvm-cov show-env --sh --no-cfg-coverage)"
     cargo llvm-cov clean --workspace
@@ -75,12 +70,12 @@ coverage:
 gen:
     cargo run --package btrfs-gen
 
-# run code formatter
+# Format code
 format:
     cargo +nightly fmt --all
     taplo fmt
 
-# run static linters
+# Run static checks
 check:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -90,10 +85,9 @@ check:
     RUSTDOCFLAGS="-Dwarnings" cargo doc --no-deps
     cargo +stable clippy --all-features -- -Dwarnings
 
-    # Detect the host arch and check both libc variants. The musl
-    # variant needs `<arch>-linux-musl-gcc` because zstd-sys / lzo-sys
-    # build scripts invoke a C compiler; skip musl when that compiler
-    # isn't on PATH so `just check` works on a stock developer machine.
+    # Check both libc variants for the host arch. musl needs
+    # `<arch>-linux-musl-gcc` for the zstd-sys and lzo-sys build
+    # scripts, so skip it when that compiler isn't on PATH.
     host_arch=$(uname -m)
     case "$host_arch" in
       x86_64)  triple_prefix=x86_64-unknown-linux  ;;
@@ -111,18 +105,16 @@ check:
     cargo check --features tune
     cargo check --features fuse
 
-    # Verify each crate's declared `rust-version` actually compiles.
-    # cargo-msrv's verify subcommand reads `rust-version` from each
-    # workspace member's Cargo.toml and tries `cargo +<that-version>
-    # check`. Skip dev-only / non-published crates (test-utils, gen).
+    # Verify each published crate builds with its declared
+    # `rust-version`. Skips test-utils and gen.
     for member in disk uapi transaction stream mkfs cli tune fs fuse; do
       cargo msrv verify --manifest-path "${member}/Cargo.toml"
     done
 
-# Cross-compile static musl release artifacts into target/dist/ for
-# every supported architecture. For each arch, produces:
-#   - btrfs-<arch>.zst         (raw multicall binary, zstd-compressed)
-#   - btrfsutils-<arch>.tar.zst (tarball: bin/btrfs + symlinks + docs)
+# Cross-compile static musl release artifacts into target/dist/. Per
+# arch:
+#   - btrfs-<arch>.zst          (multicall binary, zstd-compressed)
+#   - btrfsutils-<arch>.tar.zst (binary, symlinks, docs)
 #   - btrfsutils_<ver>_<arch>.deb
 #   - btrfsutils-<ver>-1.<arch>.rpm
 #
@@ -134,46 +126,42 @@ package:
     rm -rf target/dist
     mkdir -p target/dist
 
-    # Generate man pages and shell completions once (arch-independent).
-    # The output goes to target/gen/ which is arch-shared; the just
-    # script copies it into target/<triple>/gen/ per arch so the
-    # cargo-deb / cargo-generate-rpm path substitution finds it.
+    # Generate man pages and completions once into target/gen/. Each
+    # arch gets a copy in target/<triple>/gen/ for the packagers.
     cargo run --quiet --package btrfs-gen
 
     for arch in x86_64 aarch64 riscv64gc; do
       target="$arch-unknown-linux-musl"
 
-      # Build the multicall btrfs binary statically with all features.
+      # Static multicall binary with all features.
       cargo zigbuild \
         --release \
         --target "$target" \
         --package btrfs-cli \
         --features mkfs,tune,fuse,multicall
 
-      # Per-target symlinks dir for cargo-deb to scoop into /usr/bin/.
+      # Symlinks for cargo-deb to install into /usr/bin/.
       rm -rf "target/$target/symlinks"
       mkdir -p "target/$target/symlinks"
       for tool in mkfs.btrfs btrfs-mkfs btrfstune btrfs-tune; do
         ln -s ./btrfs "target/$target/symlinks/$tool"
       done
 
-      # Per-target gen/ dir so the cargo-deb `--target` path
-      # substitution (`target/release/` → `target/<triple>/release/`)
-      # resolves to a real path. cp instead of ln -s because cargo-deb
-      # follows symlinks but the assets list expects plain files.
+      # cargo-deb `--target` rewrites target/release/ to
+      # target/<triple>/release/, so gen/ must exist there. Copied, not
+      # symlinked, because the assets list expects plain files.
       rm -rf "target/$target/gen"
       cp -r target/gen "target/$target/gen"
 
-      # .deb (cargo-deb takes the cargo crate name)
+      # .deb (cargo-deb takes the crate name)
       cargo deb \
         --package btrfs-cli \
         --target "$target" \
         --no-build \
         --output target/dist/
 
-      # .rpm (cargo-generate-rpm takes the manifest directory name,
-      # not the crate name — the two only line up by accident in
-      # most projects)
+      # .rpm (cargo-generate-rpm takes the manifest directory, not the
+      # crate name)
       cargo generate-rpm \
         --package cli \
         --target "$target" \
@@ -183,9 +171,8 @@ package:
       cp "target/$target/release/btrfs" "target/dist/btrfs-$arch"
       zstd --rm "target/dist/btrfs-$arch"
 
-      # Tarball: bin/btrfs + multicall symlinks + LICENSE + README +
-      # CHANGELOG. Staged into a per-arch directory so the tarball
-      # extracts cleanly into `btrfsutils-<arch>/`.
+      # Tarball with bin/btrfs, symlinks, LICENSE, README, and
+      # CHANGELOG. Extracts into `btrfsutils-<arch>/`.
       stage="target/dist/btrfsutils-$arch"
       rm -rf "$stage"
       mkdir -p "$stage/bin"

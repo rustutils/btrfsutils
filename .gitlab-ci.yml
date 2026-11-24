@@ -1,18 +1,16 @@
 # GitLab CI for btrfsutils.
 #
-# Pipeline shape:
-#   lint     -> rustfmt + clippy + cargo doc warnings
-#   test     -> cargo test --workspace (unit tests; sudo-only integration
-#               tests stay manual-local until we have a privileged runner)
-#   package  -> just package (.deb / .rpm / tarball / raw-binary x 3 archs)
-#   release  -> GitLab release on tag, links package artifacts
+# Stages:
+#   lint           -> rustfmt, clippy, cargo doc warnings
+#   test           -> unit tests (privileged integration tests run locally)
+#   package        -> just package (deb, rpm, tarball, raw binary, 3 archs)
+#   release        -> GitLab release on tag, links package artifacts
 #   release-github -> mirror release to github.com/rustutils/btrfsutils
-#   deploy   -> mdbook -> GitLab Pages (master only)
+#   deploy         -> mdbook to GitLab Pages (master only)
 #
-# Rust jobs run on rust:slim-trixie (Debian + rustup); the toolchain
-# pin in rust-toolchain.toml is picked up automatically on first
-# invocation. Debian rather than Alpine because bindgen needs to
-# dlopen libclang and musl rustc can't.
+# Rust jobs run on rust:slim-trixie and pick up rust-toolchain.toml on
+# first use. Debian, not Alpine, because bindgen dlopens libclang and
+# musl rustc can't.
 
 stages:
   - lint
@@ -31,47 +29,38 @@ variables:
   RUSTUP_HOME: $CI_PROJECT_DIR/.rustup
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
-  # sccache caches per-rustc-invocation outputs in the shared
-  # rustutils-cache S3 bucket on Hetzner. SCCACHE_BUCKET, _ENDPOINT,
-  # and _REGION come from the rustutils group's CI variables;
-  # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are protected, so only
-  # protected refs (master + version tags) can write to the cache.
-  # Unprotected branches fall through to anonymous reads (see .rust
-  # before_script). No key prefix — common deps (serde, tokio, ...) are
-  # shared across rustutils projects.
+  # sccache stores rustc outputs in the shared rustutils-cache S3 bucket
+  # on Hetzner. SCCACHE_BUCKET, _ENDPOINT, and _REGION come from the
+  # rustutils group CI variables. The AWS keys are protected, so only
+  # master and version tags write to the cache. Other branches read
+  # anonymously (see .rust before_script). No key prefix, so common
+  # deps are shared across rustutils projects.
   RUSTC_WRAPPER: sccache
-  # Pinned versions of cargo-installed packaging tools. Bump to upgrade;
-  # `cargo install --version` is a no-op when the cached install matches.
+  # Pinned packaging tool versions. `cargo install --version` is a no-op
+  # when the cached install matches.
   CARGO_DEB_VERSION: "3.6.4"
   CARGO_GENERATE_RPM_VERSION: "0.20.0"
   CARGO_ZIGBUILD_VERSION: "0.20.0"
-  # Bookworm's `zig` package is 0.10 (too old for cargo-zigbuild,
-  # which needs >=0.11); we download the upstream tarball instead.
+  # Upstream Zig tarball. cargo-zigbuild needs 0.11 or later.
   ZIG_VERSION: "0.13.0"
-  # Bookworm's `sccache` is 0.4, which lacks the modern S3 backend
-  # config and errors out as "cache type is not enabled" against the
-  # rustutils-group bucket variables. Pull the upstream musl-static
-  # release tarball — works fine on glibc Debian.
+  # Upstream static sccache. Older Debian packages lack the S3 backend
+  # config and fail with "cache type is not enabled".
   SCCACHE_VERSION: "0.15.0"
   ALPINE_VERSION: "3.23"
 
-# Cache definitions, split by invalidation cadence. Composed per-job
-# via YAML anchors — extends:cache array merging is finicky in GitLab
-# CI, anchors are unambiguous.
+# Caches, split by how often they invalidate. Jobs compose them with
+# YAML anchors because extends:cache array merging is unreliable.
 #
-# - registry: downloaded crate sources + index. Invalidates on
-#   Cargo.lock change. Small (~tens of MB), shared across all Rust jobs.
-# - bin: cargo-installed binaries (cargo-deb, cargo-generate-rpm).
-#   Invalidates on .gitlab-ci.yml change (where versions are pinned).
-#   Only the package job needs these.
+# - registry: crate sources and index. Keyed on Cargo.lock. Shared by
+#   all Rust jobs.
+# - bin: cargo-deb and cargo-generate-rpm. Keyed on .gitlab-ci.yml,
+#   where their versions are pinned. Package job only.
 #
-# target/ is deliberately not cached — sccache handles per-rustc cache
-# hits across runs, which makes target/ reconstruction cheap. The 2GB
-# upload was eating a full minute per job (per git-lfs experience).
+# target/ is not cached. sccache makes rebuilding it cheap, and the
+# 2 GB upload cost about a minute per job.
 #
-# .rustup is also not cached — rustup-init from apk + a fresh download
-# of the stable toolchain is ~30-60s, on par with what cache restore
-# would cost for ~300MB. Not worth the upload churn.
+# .rustup is not cached either. Downloading the toolchain takes about
+# as long as restoring a 300 MB cache.
 .cache-defs:
   cache:
     - &cache-registry
@@ -88,13 +77,9 @@ variables:
         - .cargo/.crates.toml
         - .cargo/.crates2.json
 
-# Base template for jobs that need a Rust toolchain. Debian (glibc)
-# rather than Alpine because bindgen needs to dlopen libclang at
-# build time and the Alpine musl rustc can't dlopen arbitrary shared
-# libs ("Dynamic loading not supported"). rust:slim-bookworm has
-# rustup already; we still override CARGO_HOME/RUSTUP_HOME into
-# $CI_PROJECT_DIR so the registry + per-pipeline toolchain land in
-# the cache scope.
+# Base template for Rust jobs. CARGO_HOME and RUSTUP_HOME point into
+# $CI_PROJECT_DIR so the registry and toolchain are inside the cache
+# scope.
 .rust:
   image: rust:slim-trixie
   cache:
@@ -104,11 +89,9 @@ variables:
     - apt-get install -y --no-install-recommends git ca-certificates libclang-dev clang curl
     - curl -fsSL "https://github.com/mozilla/sccache/releases/download/v$SCCACHE_VERSION/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl.tar.gz" | tar xz -C /opt
     - export PATH="/opt/sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl:$CARGO_HOME/bin:$PATH"
-    # Read-only sccache fallback when the protected AWS credentials
-    # are absent (i.e. on unprotected branches). NO_CREDENTIALS forces
-    # anonymous mode — reads work against the public bucket, writes
-    # silently fail. On protected refs, AWS_ACCESS_KEY_ID is set and
-    # we leave it unset so sccache uses the credentials normally.
+    # Without the protected AWS credentials (unprotected branches),
+    # NO_CREDENTIALS makes sccache read the public bucket anonymously.
+    # Writes fail silently.
     - if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then export SCCACHE_S3_NO_CREDENTIALS=true; fi
     - rustup show
 
@@ -128,52 +111,45 @@ test:
   stage: test
   before_script:
     - !reference [.rust, before_script]
-    # btrfs-fs basic tests shell out to mkfs.btrfs to build a
-    # backing image (no privileges needed — just a tool dep).
+    # btrfs-fs tests run mkfs.btrfs to build a backing image. No
+    # privileges needed.
     - apt-get install -y --no-install-recommends btrfs-progs
   script:
-    # Unit tests only — integration tests (#[ignore]) need root for
-    # loopback mount + privileged ioctls, which the shared runners
-    # don't have. See TODO.md "job to run privileged tests".
+    # Unit tests only. The #[ignore] integration tests need root for
+    # loopback mounts and privileged ioctls, which shared runners lack.
     #
-    # `btrfs-fuse` excluded because its tests spawn `btrfs-fuse` as
-    # a child and wait for the FUSE mount to surface — the FUSE-in-
-    # Docker interaction on the shared runners makes them hang.
-    # Runs locally via `cargo test -p btrfs-fuse`. See TODO.md.
+    # btrfs-fuse is excluded: its tests mount through FUSE, which hangs
+    # in Docker on the shared runners. Run `cargo test -p btrfs-fuse`
+    # locally.
     - cargo test --workspace --all-features --exclude btrfs-fuse
     - sccache --show-stats || true
 
 package:
   extends: .rust
   stage: package
-  # Override the .rust cache list to add the bin cache, which only
-  # this job needs (cargo-deb, cargo-generate-rpm). YAML anchors keep
-  # the registry entry in sync with the .rust default.
+  # Adds the bin cache to the .rust default.
   cache:
     - *cache-registry
     - *cache-bin
   rules:
-    # Auto on tags — feeds the release job.
+    # Automatic on tags, feeds the release job.
     - if: $CI_COMMIT_TAG
       when: on_success
-    # Manual button on branch pushes so you can verify packaging
-    # without cutting a tag. allow_failure keeps the pipeline green
-    # when nobody clicks.
+    # Manual on branches, to test packaging without a tag.
+    # allow_failure keeps the pipeline green when skipped.
     - when: manual
       allow_failure: true
   before_script:
     - !reference [.rust, before_script]
     - apt-get install -y --no-install-recommends zstd just curl xz-utils
-    # Bookworm ships an older Zig; pull the upstream tarball for the
-    # version cargo-zigbuild expects.
+    # Upstream Zig, at the version cargo-zigbuild expects.
     - curl -sL "https://ziglang.org/download/$ZIG_VERSION/zig-linux-x86_64-$ZIG_VERSION.tar.xz" | tar xJ -C /opt
     - export PATH="/opt/zig-linux-x86_64-$ZIG_VERSION:$PATH"
     - cargo install --locked --version "$CARGO_ZIGBUILD_VERSION" cargo-zigbuild
     - cargo install --locked --version "$CARGO_DEB_VERSION" cargo-deb
     - cargo install --locked --version "$CARGO_GENERATE_RPM_VERSION" cargo-generate-rpm
-    # Ensure the rust-toolchain.toml channel has the musl targets the
-    # package script asks for (zigbuild adds the linker, cargo still
-    # needs the std crate for each target).
+    # Install std for each musl target. zigbuild only provides the
+    # linker.
     - rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl riscv64gc-unknown-linux-musl
   script:
     - export PATH="/opt/zig-linux-x86_64-$ZIG_VERSION:$PATH"
@@ -182,13 +158,11 @@ package:
   artifacts:
     paths:
       - target/dist/
-    # Linked from the GitLab release page — keep indefinitely so the
-    # download links don't 404 once the default artifact expiry hits.
+    # Linked from the release page, so never expire.
     expire_in: never
 
-# Tag-only. scripts/release.rb reads the matching CHANGELOG block,
-# attaches every artifact under target/dist/ as a release asset link,
-# and shells out to release-cli. See the script for details.
+# Tags only. scripts/release.rb reads the matching CHANGELOG section,
+# links every artifact in target/dist/, and calls release-cli.
 release:
   stage: release
   image: registry.gitlab.com/gitlab-org/release-cli:latest
@@ -201,10 +175,9 @@ release:
     - apk add --no-cache ruby
     - ruby scripts/release.rb
 
-# Mirror release to github.com/<CI_PROJECT_PATH> via gh CLI. Independent
-# of the GitLab release above (different blast radius — a GitHub flake
-# shouldn't fail the GitLab side). Requires GITHUB_TOKEN as an org-level
-# protected variable on the rustutils group.
+# Mirror the release to github.com/<CI_PROJECT_PATH> with gh. Separate
+# from the GitLab release so a GitHub failure doesn't affect it. Needs
+# GITHUB_TOKEN as a protected rustutils group variable.
 release-github:
   stage: release
   image: alpine:$ALPINE_VERSION

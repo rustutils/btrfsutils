@@ -1,5 +1,5 @@
 {
-  description = "btrfsutils — Rust reimplementation of the btrfs CLI tool";
+  description = "btrfsutils: Rust reimplementation of the btrfs CLI tool";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -42,8 +42,8 @@
 
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-          # Common source filtering — keep Rust files, C headers (for bindgen),
-          # snapshot files (for insta tests), and fixture images.
+          # Keep Rust files, C headers (bindgen), insta snapshots, and
+          # fixture images.
           src = pkgs.lib.cleanSourceWith {
             src = ./.;
             filter = path: type:
@@ -75,19 +75,19 @@
             BINDGEN_EXTRA_CLANG_ARGS = "-isystem ${pkgs.linuxHeaders}/include";
           };
 
-          # Build dependencies separately so they're cached across rebuilds
+          # Build dependencies separately so rebuilds reuse them.
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
           btrfs = craneLib.buildPackage (commonArgs // {
             inherit cargoArtifacts;
 
-            # Tests are run separately via `nix flake check` (cargo-test).
+            # Tests run in `nix flake check` (cargo-test).
             doCheck = false;
 
-            # After building, generate man pages and install them
+            # Generate and install man pages.
             postInstall = ''
-              # btrfs-gen is publish=false and not in default-members, so the
-              # binary won't be in $out/bin. Build and run it manually.
+              # btrfs-gen isn't in default-members, so build and run it
+              # here.
               cargo run --package btrfs-gen -- gen-output
               installManPage gen-output/man/*.1
               installShellCompletion --bash gen-output/completions/btrfs.bash gen-output/completions/mkfs.btrfs.bash
@@ -124,7 +124,7 @@
 
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-          # Nightly toolchain for rustfmt (we use nightly formatting features).
+          # Nightly rustfmt, for nightly-only format options.
           rustNightly = pkgs.rust-bin.nightly.latest.default.override {
             extensions = [ "rustfmt" ];
           };
@@ -213,7 +213,7 @@
               targets = toolchainToml.toolchain.targets or [];
             };
 
-          # Nightly just for cargo fmt (Justfile runs `cargo +nightly fmt`)
+          # Nightly for `cargo +nightly fmt` only.
           rustNightly = pkgs.rust-bin.nightly.latest.default.override {
             extensions = [ "rustfmt" ];
           };
@@ -224,11 +224,11 @@
               rustToolchain
               rustNightly
 
-              # bindgen needs libclang
+              # libclang for bindgen
               pkgs.llvmPackages.libclang
               pkgs.clang
 
-              # build/dev tools
+              # build and dev tools
               pkgs.just
               pkgs.jq
               pkgs.cargo-insta
@@ -238,7 +238,7 @@
             ];
 
             env = {
-              # Tell bindgen where to find libclang
+              # Point bindgen at libclang
               LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
             };
           };
