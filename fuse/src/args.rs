@@ -12,6 +12,7 @@ use std::path::PathBuf;
 /// Mount a btrfs image or block device read-only via FUSE.
 #[derive(Parser, Debug, Clone)]
 #[command(version, arg_required_else_help = true, max_term_width = 100)]
+#[allow(clippy::doc_markdown)] // clap help is plain prose, no backticks
 pub struct MountArgs {
     /// Path to the btrfs image file or block device.
     pub image: PathBuf,
