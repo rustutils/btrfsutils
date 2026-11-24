@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.13.1
+
+A packaging fix. The 0.13.0 `.rpm` declared `Obsoletes: btrfs-progs`, so
+`dnf upgrade` on any machine with the repository enabled tried to replace
+btrfs-progs with btrfsutils, even when btrfsutils wasn't installed. Where a
+package requires btrfs-progs (for example `libblockdev-btrfs`), the upgrade
+failed with a conflict instead.
+
+### Fixed
+
+- `.rpm`: drop `Obsoletes: btrfs-progs` and add `Provides: btrfs-progs`,
+  matching the `.deb`. `Conflicts: btrfs-progs` stays. Switching is now
+  opt-in with `dnf swap btrfs-progs btrfsutils`.
+
+### Changed
+
+- Documentation, code comments, and help text were corrected to match the
+  code. `btrfs check --help` now states that checking is always read-only,
+  and `mkfs.btrfs --help` shows its long description.
+
 ## 0.13.0
 
 btrfsutils 0.13 completes the read side. A new `btrfs-fs` crate takes the
