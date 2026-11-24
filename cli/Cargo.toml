@@ -179,8 +179,12 @@ if [ "$1" = 0 ]; then
 fi
 """
 
+# Both packages ship /usr/bin/btrfs, so they conflict. Provides lets
+# `dnf swap btrfs-progs btrfsutils` satisfy packages that require
+# btrfs-progs. No Obsoletes: it would make dnf replace btrfs-progs on
+# every upgrade, even when nobody asked for btrfsutils.
 [package.metadata.generate-rpm.conflicts]
 "btrfs-progs" = "*"
 
-[package.metadata.generate-rpm.obsoletes]
+[package.metadata.generate-rpm.provides]
 "btrfs-progs" = "*"
