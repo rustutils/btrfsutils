@@ -18,21 +18,21 @@ use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
 pub struct DeviceRemoveCommand {
-    /// One or more devices to remove (path, devid, "missing", or "cancel"),
-    /// followed by the filesystem mount point
-    ///
-    /// Example: btrfs device remove /dev/sdb 3 missing /mnt/data
     /// Wait if another exclusive operation is running, rather than failing
     #[clap(long)]
     pub enqueue: bool,
 
+    /// One or more devices to remove (path, devid, "missing", or "cancel"),
+    /// followed by the filesystem mount point
+    ///
+    /// Example: btrfs device remove /dev/sdb 3 missing /mnt/data
     #[clap(required = true, num_args = 2..)]
     pub args: Vec<String>,
 }
 
 impl Runnable for DeviceRemoveCommand {
     fn run(&self, _ctx: &RunContext) -> Result<()> {
-        // The last argument is the mount point; everything before it is a device spec.
+        // The last argument is the mount point. Everything before it is a device spec.
         // split_last() returns (&last, &[..rest]), so mount_str is first.
         let (mount_str, specs) = self
             .args
@@ -87,8 +87,9 @@ impl Runnable for DeviceRemoveCommand {
 /// Attempt to remove a single device identified by `spec_str` from the
 /// filesystem open on `fd`.
 ///
-/// If `spec_str` parses as a `u64` it is treated as a device ID; otherwise it
-/// is treated as a path (or the special strings `"missing"` / `"cancel"`).
+/// If `spec_str` parses as a `u64` it is treated as a device ID. Otherwise it
+/// is treated as a path or one of the special strings `"missing"` and
+/// `"cancel"`.
 fn remove_one(fd: std::os::unix::io::BorrowedFd, spec_str: &str) -> Result<()> {
     if let Ok(devid) = spec_str.parse::<u64>() {
         device_remove(fd, &DeviceSpec::Id(devid))

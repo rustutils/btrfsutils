@@ -685,7 +685,7 @@ fn subvolume_create_over_file_fails() {
     assert_ne!(code, 0, "create over existing file should fail");
 }
 
-// ── subvolume create with mixed valid/invalid paths ─────────────────
+// ── subvolume create with mixed valid and invalid paths ─────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -983,7 +983,7 @@ fn property_force_clear_received_uuid() {
     );
 }
 
-// ── send / receive ───────────────────────────────────────────────────
+// ── send and receive ─────────────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -1056,17 +1056,17 @@ fn send_receive_roundtrip() {
 /// `btrfs send --offline`, feed the stream to a real `btrfs
 /// receive` on a separate kernel-mounted filesystem, and verify
 /// the received subvolume reproduces the source files. Tests the
-/// full encoder + walker + CLI wiring against a kernel receiver,
-/// which is the strictest correctness check we can run for tier 1
-/// send.
+/// encoder, walker, and CLI wiring together against a kernel
+/// receiver, which is the strictest correctness check we can run
+/// for full offline sends.
 #[test]
 #[ignore = "requires elevated privileges"]
 fn send_offline_round_trips_through_kernel_receive() {
     use tempfile::TempDir;
 
     // Build the source as a directory tree, then mkfs an image
-    // around it. Stays unprivileged on its own; the receive at
-    // the end is what needs root.
+    // around it. This part is unprivileged. Only the receive at
+    // the end needs root.
     let src_td = TempDir::new().expect("tempdir for src");
     let src = src_td.path().join("src");
     fs::create_dir(&src).unwrap();
@@ -1111,7 +1111,7 @@ fn send_offline_round_trips_through_kernel_receive() {
     btrfs_ok(&["receive", "-f", stream_file.to_str().unwrap(), mp_recv]);
 
     // mkfs.btrfs --rootdir without --subvol puts everything into
-    // the default FS_TREE; our send uses "subvol-5" as the receive
+    // the default FS_TREE. Our send uses "subvol-5" as the receive
     // path since FS_TREE has no name.
     let received = format!("{mp_recv}/subvol-5");
     assert!(
@@ -1475,7 +1475,7 @@ fn device_add_enqueue() {
     );
 }
 
-// ── device scan / ready ──────────────────────────────────────────────
+// ── device scan and ready ────────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -1600,7 +1600,7 @@ fn inspect_dump_super() {
     assert!(out.contains("nodesize"), "expected nodesize:\n{out}");
 }
 
-// ── quota / qgroup ───────────────────────────────────────────────────
+// ── quota and qgroup ─────────────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -1616,7 +1616,7 @@ fn quota_enable_disable() {
         "expected enabled status:\n{out}"
     );
 
-    // Verify via uapi/sysfs
+    // Verify via uapi (sysfs)
     let fs_info = filesystem_info(mnt.fd()).unwrap();
     let sysfs = btrfs_uapi::sysfs::SysfsBtrfs::new(&fs_info.uuid);
     let status = sysfs.quota_status().unwrap();
@@ -1624,7 +1624,7 @@ fn quota_enable_disable() {
 
     btrfs_ok(&["quota", "disable", mp]);
 
-    // Verify disabled via uapi/sysfs
+    // Verify disabled via uapi (sysfs)
     let status = sysfs.quota_status().unwrap();
     assert!(!status.enabled, "quota should be disabled via sysfs");
 }
@@ -1797,7 +1797,7 @@ fn quota_rescan() {
     // Start a rescan and wait for completion.
     btrfs_ok(&["quota", "rescan", "-w", mp]);
 
-    // Query rescan status — should report no rescan in progress.
+    // Query rescan status. It should report no rescan in progress.
     let out = btrfs_ok(&["quota", "rescan", "-s", mp]);
     assert!(
         out.contains("rescan") || out.contains("quota"),
@@ -1807,7 +1807,7 @@ fn quota_rescan() {
     btrfs_ok(&["quota", "disable", mp]);
 }
 
-// ── scrub limit / resume ─────────────────────────────────────────────
+// ── scrub limit and resume ───────────────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -1832,7 +1832,7 @@ fn scrub_limit() {
         "expected limit value in output:\n{out}"
     );
 
-    // Clear the limit (set to 0 = unlimited).
+    // Clear the limit (0 means unlimited).
     btrfs_ok(&["scrub", "limit", "-a", "-l", "0", mp]);
 }
 
@@ -1842,9 +1842,9 @@ fn scrub_resume_no_scrub() {
     let (_td, mnt) = single_mount();
     let mp = mnt.path().to_str().unwrap();
 
-    // Resume when no scrub has been started — may succeed (starts a new
-    // scrub) or fail gracefully depending on kernel state. Either way it
-    // should not crash.
+    // Resume when no scrub has been started. This may succeed (starting a
+    // new scrub) or fail gracefully, depending on kernel state. Either way
+    // it should not crash.
     let (_, _, code) = btrfs(&["scrub", "resume", mp]);
     assert!(code == 0 || code == 1, "unexpected exit code: {code}");
 }
@@ -1898,7 +1898,7 @@ fn device_scan_forget_stale() {
     );
 }
 
-// ── subvolume create/delete with multiple paths ──────────────────────
+// ── subvolume create and delete with multiple paths ──────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -2028,7 +2028,7 @@ fn subvolume_delete_verbose() {
     );
 }
 
-// ── replace start/status/cancel ─────────────────────────────────────
+// ── replace start, status, and cancel ───────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -2045,10 +2045,10 @@ fn replace_start_and_status() {
     let target_dev = LoopbackDevice::new(target_file);
     let target_path = target_dev.path().to_str().unwrap();
 
-    // Replace devid 1 with the target device; -B waits for completion.
+    // Replace devid 1 with the target device. -B waits for completion.
     btrfs_ok(&["replace", "start", "-B", "-f", "1", target_path, mp]);
 
-    // After completion, status should show finished/completed.
+    // After completion, status should show that it finished.
     let out = btrfs_ok(&["replace", "status", mp]);
     assert!(
         out.contains("finished")
@@ -2076,7 +2076,7 @@ fn replace_cancel_not_running() {
     );
 }
 
-// ── send/receive: special files ─────────────────────────────────────
+// ── send and receive: special files ─────────────────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
@@ -2446,7 +2446,7 @@ fn send_receive_fallocate() {
     let meta = fs::metadata(&recv_file).unwrap();
     assert_eq!(meta.len(), 256 * 1024);
 
-    // Read the hole region — should be zeros.
+    // Read the hole region. It should be zeros.
     let mut f = fs::File::open(&recv_file).unwrap();
     f.seek(SeekFrom::Start(65536)).unwrap();
     let mut hole = vec![0u8; 65536];
@@ -2558,7 +2558,7 @@ fn mkfs_rootdir_shrink() {
 }
 
 /// Test --rootdir with LZO compression: data should still be readable.
-/// LZO uses a per-sector framing format that differs from zlib/zstd.
+/// LZO uses a per-sector framing format that differs from zlib and zstd.
 #[test]
 #[ignore = "requires elevated privileges"]
 fn mkfs_rootdir_lzo_compressed() {
@@ -2592,11 +2592,11 @@ fn mkfs_rootdir_lzo_compressed() {
 
 /// Test --rootdir hardlink and xattr handling end-to-end.
 ///
-/// Hardlinks exercise the post-walk `set_inode_nlink` fixup path; xattrs
+/// Hardlinks exercise the post-walk `set_inode_nlink` fixup path. Xattrs
 /// exercise the inline `set_xattr` calls. Mount and verify both
 /// inode-number equality (for hardlinks) and the xattr round-trip.
 ///
-/// Hardlinks are placed in *different* parent directories — multiple
+/// Hardlinks are placed in *different* parent directories. Multiple
 /// hardlinks under the same parent need a single appended `INODE_REF`
 /// item (or `INODE_EXTREF` spill), which neither the legacy mkfs walker
 /// nor the new transactional walker supports today. The cross-parent
@@ -2608,7 +2608,7 @@ fn mkfs_rootdir_hardlinks_and_xattrs() {
     let rootdir = td.path().join("rootdir");
     std::fs::create_dir_all(&rootdir).unwrap();
 
-    // Hardlink across directories: original at root, second + third
+    // Hardlink across directories: original at root, second and third
     // links in two distinct subdirs. Each link lives under a different
     // parent inode, so each emits a separate INODE_REF item and the
     // duplicate-key path is never hit.
@@ -2652,10 +2652,10 @@ fn mkfs_rootdir_hardlinks_and_xattrs() {
 /// Test --rootdir --subvol end-to-end: rw, ro, and nested subvols
 /// land as real kernel subvolumes after mount.
 ///
-/// Verifies: each declared subvol appears in `btrfs subvolume list`
-/// (real subvol, not just a plain directory); files inside the
-/// subvol are readable; the ro subvol rejects writes; nested
-/// subvols nest correctly.
+/// Verifies that each declared subvol appears in `btrfs subvolume list`
+/// (a real subvol, not a plain directory), files inside the subvol are
+/// readable, the ro subvol rejects writes, and nested subvols nest
+/// correctly.
 #[test]
 #[ignore = "requires elevated privileges"]
 fn mkfs_rootdir_subvols() {
@@ -2752,8 +2752,8 @@ fn mkfs_rootdir_reflink_on_btrfs() {
     let workspace_mnt = Mount::new(workspace_lo, &workspace_base);
     let workspace = workspace_mnt.path();
 
-    // Source rootdir + 1 MB payload (large enough to need a regular
-    // extent rather than going inline).
+    // Source rootdir with a 1 MB payload (large enough to need a
+    // regular extent rather than going inline).
     let rootdir = workspace.join("rootdir");
     std::fs::create_dir_all(&rootdir).unwrap();
     let payload = vec![0xCDu8; 1024 * 1024];
@@ -2775,7 +2775,7 @@ fn mkfs_rootdir_reflink_on_btrfs() {
     assert_eq!(read.len(), payload.len());
     assert_eq!(read, payload);
 
-    // Drop the inner mount + loop device + image (which lives inside
+    // Drop the inner mount, loop device, and image (which lives inside
     // the workspace mount) explicitly, with a `sync` between, so the
     // workspace mount has nothing holding it open by the time the
     // outer Mount RAII guard runs its umount.

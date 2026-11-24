@@ -14,15 +14,14 @@ Usage: delete [OPTIONS] <ARGS> <ARGS>...
 
 Arguments:
   <ARGS> <ARGS>...
-          
-
-Options:
-      --enqueue
           One or more devices to remove (path, devid, "missing", or "cancel"),
           followed by the filesystem mount point
           
-          Example: btrfs device remove /dev/sdb 3 missing /mnt/data Wait if
-          another exclusive operation is running, rather than failing
+          Example: btrfs device remove /dev/sdb 3 missing /mnt/data
+
+Options:
+      --enqueue
+          Wait if another exclusive operation is running, rather than failing
 
   -h, --help
           Print help (see a summary with '-h')

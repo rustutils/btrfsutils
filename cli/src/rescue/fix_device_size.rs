@@ -31,19 +31,18 @@ const DEV_ITEM_TOTAL_BYTES_OFFSET: usize = 8;
 
 /// Re-align device and super block sizes
 ///
-/// Recomputes each device's `total_bytes` from its physical size and
-/// the device extent layout, updates the corresponding `DEV_ITEM` in
-/// the chunk tree (and the embedded `dev_item` in the superblock),
-/// and rewrites the superblock's `total_bytes` to match the sum.
+/// Recomputes each device's total_bytes from its physical size and
+/// the device extent layout, updates the matching DEV_ITEM in the
+/// chunk tree (and the dev_item embedded in the superblock), and
+/// rewrites the superblock's total_bytes to match the sum.
 ///
-/// Cases handled:
+/// A device size that is not aligned to the sector size is rounded
+/// down.
 ///
-/// - `dev_item.total_bytes` is misaligned to `sectorsize`: round it
-///   down.
-/// - `dev_item.total_bytes` is larger than the underlying block
-///   device or backing file: shrink it to the actual size, but only
-///   if no `DEV_EXTENT` covers or extends past that boundary
-///   (otherwise we'd lose data).
+/// A device size larger than the underlying block device or backing
+/// file is shrunk to the actual size, but only if no DEV_EXTENT
+/// covers or extends past that boundary. Otherwise data would be
+/// lost.
 ///
 /// The device must not be mounted.
 #[derive(Parser, Debug)]
@@ -217,8 +216,8 @@ fn collect_device_fixes<R: Read + Write + Seek>(
 }
 
 /// Sum the (corrected) `total_bytes` of every device in the chunk
-/// tree. For devices listed in `fixes`, use the new value; for the
-/// rest, use the on-disk value as-is.
+/// tree. For devices listed in `fixes`, use the new value. For the
+/// rest, use the on-disk value.
 fn sum_corrected_total_bytes<R: Read + Write + Seek>(
     fs: &mut Filesystem<R>,
     fixes: &[DeviceFix],

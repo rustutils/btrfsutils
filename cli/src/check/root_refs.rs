@@ -19,7 +19,7 @@ struct RefEntry {
     name: Vec<u8>,
 }
 
-/// Check `ROOT_REF`/`ROOT_BACKREF` consistency in the root tree.
+/// Check `ROOT_REF` and `ROOT_BACKREF` consistency in the root tree.
 ///
 /// For every `ROOT_REF` (parent → child) there must be a matching
 /// `ROOT_BACKREF` (child → parent) with identical dirid, sequence, and

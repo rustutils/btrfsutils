@@ -1,9 +1,9 @@
 //! # btrfs-cli: the btrfs command-line tool
 //!
 //! This crate provides the `btrfs` command-line binary, an alternative
-//! implementation of btrfs-progs written in Rust. It is built on top of `btrfs-uapi` for kernel communication,
-//! `btrfs-disk` for direct on-disk structure parsing, and `btrfs-stream` for
-//! send/receive stream processing.
+//! implementation of btrfs-progs written in Rust. It uses `btrfs-uapi` for
+//! kernel communication, `btrfs-disk` for parsing on-disk structures, and
+//! `btrfs-stream` for send and receive streams.
 //!
 //! Not all commands from btrfs-progs are implemented yet. Run `btrfs help` to
 //! see what is available. Most commands require root privileges or
@@ -11,13 +11,12 @@
 //!
 //! # Stability
 //!
-//! This is a pre-1.0 release. Read-only commands are stable. The
-//! mutating commands that go through the new `btrfs-transaction`
-//! crate (offline `filesystem resize`, the `rescue` subcommands,
-//! and the `tune` conversions when built with the `tune` feature)
-//! are experimental and may have edge cases that testing doesn't
-//! cover. Take a backup before running them on filesystems you
-//! care about.
+//! This is a pre-1.0 release. Read-only commands are stable. Mutating
+//! commands built on the new `btrfs-transaction` crate (offline
+//! `filesystem resize`, the `rescue` subcommands, and the `tune`
+//! conversions when built with the `tune` feature) are experimental and
+//! may have edge cases that tests don't cover. Take a backup before
+//! running them on filesystems you care about.
 
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
@@ -134,7 +133,7 @@ pub struct GlobalOptions {
     #[clap(global = true, short, long, help_heading = GLOBAL_OPTIONS)]
     pub quiet: bool,
 
-    /// If supported, do not do any active/changing actions
+    /// If supported, do not make any changes
     #[clap(global = true, long, help_heading = GLOBAL_OPTIONS)]
     pub dry_run: bool,
 
@@ -149,7 +148,7 @@ pub struct GlobalOptions {
 
 /// Runtime context passed to every command.
 pub struct RunContext {
-    /// Output format (text or json).
+    /// Output format.
     pub format: Format,
     /// Whether the user requested a dry run.
     pub dry_run: bool,

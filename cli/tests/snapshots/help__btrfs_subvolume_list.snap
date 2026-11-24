@@ -5,7 +5,7 @@ expression: text
 List subvolumes and snapshots in the filesystem
 
 The default output format matches btrfs-progs: ID NNN gen NNN top level NNN path
-NAME
+NAME.
 
 Optional flags enable additional columns or filter the results.
 
@@ -35,8 +35,8 @@ Field selection:
           Print ogeneration (generation at creation) column
 
   -g, --generation
-          Print generation column (already shown by default; kept for
-          compatibility with btrfs-progs CLI)
+          Print generation column (already shown by default, kept for
+          compatibility with btrfs-progs)
 
   -u, --uuid
           Print UUID column

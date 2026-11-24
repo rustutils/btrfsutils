@@ -80,7 +80,7 @@ fn redact(output: &str, mnt: &common::Mount) -> String {
     s
 }
 
-/// Replace only mount/device paths (for fixture tests where everything
+/// Replace only mount and device paths (for fixture tests where everything
 /// else is deterministic).
 fn redact_paths(output: &str, mnt: &common::Mount) -> String {
     let mp = mnt.path().to_str().unwrap();

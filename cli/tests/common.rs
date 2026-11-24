@@ -1,8 +1,8 @@
 #![allow(dead_code)]
-//! Re-exports of the shared test harness from `btrfs-test-utils`, plus cli-
-//! specific glue: fixture image paths rooted under this crate, and the
-//! `btrfs-mkfs` binary lookup (which needs `env!("CARGO_BIN_EXE_btrfs")`
-//! and therefore can only run inside this crate).
+//! Re-exports of the shared test harness from `btrfs-test-utils`, plus
+//! glue specific to the cli crate: fixture image paths rooted under this
+//! crate, and the `btrfs-mkfs` binary lookup, which needs
+//! `env!("CARGO_BIN_EXE_btrfs")` and so only works inside this crate.
 
 pub use btrfs_test_utils::{
     BackingFile, LoopbackDevice, Mount, cache_gzipped_image,
@@ -50,7 +50,7 @@ pub fn cached_broken_image() -> PathBuf {
 /// Mount the pre-built fixture image read-only. The decompressed image is
 /// cached in `target/test-fixtures/` so only the first test pays the gunzip
 /// cost. Each test attaches its own loopback device directly to the shared
-/// cached file — no copy needed since we mount read-only.
+/// cached file. No copy is needed since we mount read-only.
 pub fn fixture_mount() -> (tempfile::TempDir, Mount) {
     mount_existing_readonly(&cached_fixture_image())
 }

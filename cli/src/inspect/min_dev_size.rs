@@ -34,7 +34,7 @@ pub struct MinDevSizeCommand {
     pub offline: bool,
 
     /// Path to a file or directory on the btrfs filesystem, or a block
-    /// device / image file when --offline is used
+    /// device or image file when --offline is used
     path: PathBuf,
 }
 

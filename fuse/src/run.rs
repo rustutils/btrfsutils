@@ -9,7 +9,7 @@ use std::{fs::File, path::Path};
 
 /// Mount a btrfs image read-only via FUSE according to `args`.
 ///
-/// Resolves `--subvol` / `--subvolid` to a [`SubvolId`], constructs
+/// Resolves `--subvol` or `--subvolid` to a [`SubvolId`], constructs
 /// the [`BtrfsFuse`] adapter with the requested cache sizes, builds
 /// the FUSE [`Config`] from `--allow-other` and
 /// `--no-default-permissions`, and hands the result to
@@ -45,9 +45,9 @@ pub fn run_mount(args: &MountArgs) -> Result<()> {
             .context("bootstrapping btrfs filesystem")?,
     };
 
-    // `Config` is `#[non_exhaustive]`, so we can't use a struct
-    // literal even with `..default()` from outside the crate;
-    // mutate fields instead.
+    // `Config` is `#[non_exhaustive]`, so a struct literal (even with
+    // `..default()`) isn't allowed outside its crate. Set fields
+    // instead.
     let mut config = Config::default();
     let mut mount_options = vec![
         MountOption::RO,
@@ -75,10 +75,9 @@ pub fn run_mount(args: &MountArgs) -> Result<()> {
 /// Resolve a slash-separated subvolume path (relative to the FS root)
 /// to its [`SubvolId`] via [`Filesystem::resolve_subvol_path`].
 ///
-/// Opens the image in a temporary capacity for the lookup; the FUSE
-/// mount itself reopens the file. (Collapsing to a single open would
-/// require threading a `Filesystem` into `BtrfsFuse::from_filesystem`
-/// — left as future work.)
+/// Opens the image just for the lookup. The FUSE mount reopens the
+/// file. A single open would need a `Filesystem` passed into
+/// `BtrfsFuse::from_filesystem`, which is future work.
 fn resolve_subvol_path(image: &Path, path: &str) -> Result<SubvolId> {
     let file = File::open(image)
         .with_context(|| format!("opening {}", image.display()))?;

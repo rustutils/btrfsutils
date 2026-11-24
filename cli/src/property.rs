@@ -257,21 +257,21 @@ mod tests {
 
     #[test]
     fn classify_subvolume_info_ok_but_wrong_ino() {
-        // subvolume_info succeeds but inode is not 256 — should not detect as subvol.
+        // subvolume_info succeeds but inode is not 256: not a subvol.
         let types = classify_object(&attrs(false, 500, true, false));
         assert_eq!(types, vec![PropertyObjectType::Inode]);
     }
 
     #[test]
     fn classify_ino_256_but_not_subvolume() {
-        // Inode 256 but subvolume_info fails — should not detect as subvol.
+        // Inode 256 but subvolume_info fails: not a subvol.
         let types = classify_object(&attrs(false, 256, false, false));
         assert_eq!(types, vec![PropertyObjectType::Inode]);
     }
 
     #[test]
     fn classify_fs_root_requires_subvolume() {
-        // is_fs_root but not a subvolume — filesystem type should not appear.
+        // is_fs_root but not a subvolume: no filesystem type.
         let types = classify_object(&attrs(false, 256, false, true));
         assert_eq!(types, vec![PropertyObjectType::Inode]);
     }

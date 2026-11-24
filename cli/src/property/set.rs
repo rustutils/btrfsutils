@@ -152,10 +152,10 @@ fn set_readonly_property(
         format!("failed to set flags for '{}'", path.display())
     })?;
 
-    // Clear received_uuid after flipping ro→rw with force.  This must
+    // Clear received_uuid after flipping ro→rw with force. This must
     // happen after the flag change (the kernel rejects SET_RECEIVED_SUBVOL
-    // on a read-only subvolume). If it fails, warn but don't error —
-    // matching the C reference behaviour.
+    // on a read-only subvolume). If it fails, warn but don't error, to
+    // match the C reference.
     if is_readonly && !new_readonly && force {
         let info = btrfs_uapi::subvolume::subvolume_info(file.as_fd()).ok();
         if let Some(info) = info

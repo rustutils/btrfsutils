@@ -18,7 +18,8 @@ pub struct SubvolumeSnapshotCommand {
     /// Path to the source subvolume
     pub source: PathBuf,
 
-    /// Destination: either an existing directory (snapshot will be named after the source) or a full path for the new snapshot
+    /// Destination: an existing directory (the snapshot is named after the
+    /// source) or a full path for the new snapshot
     pub dest: PathBuf,
 }
 

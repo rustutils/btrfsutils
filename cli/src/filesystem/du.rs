@@ -1,12 +1,12 @@
 //! Implementation of `btrfs filesystem du`.
 //!
 //! Uses [`btrfs_uapi::fiemap::file_extents`] to query the physical extent
-//! layout of each file.  For each file we report:
+//! layout of each file. For each file we report:
 //!
-//! * **Total** — sum of all non-skipped extent lengths
-//! * **Exclusive** — bytes not marked `FIEMAP_EXTENT_SHARED`
-//! * **Set shared** — at the top-level only: physical bytes shared with at
-//!   least one other file in the same argument's subtree, computed by
+//! * **Total**: sum of all non-skipped extent lengths
+//! * **Exclusive**: bytes not marked `FIEMAP_EXTENT_SHARED`
+//! * **Set shared**: top level only. Physical bytes shared with at least
+//!   one other file in the same argument's subtree, computed by
 //!   collecting all shared physical ranges, sorting, and merging overlaps.
 //!   Always `-` for non-top-level lines.
 //!
@@ -33,9 +33,12 @@ use std::{
 ///
 /// For each path, prints three columns:
 ///
-///   Total      — logical bytes used by non-inline extents
-///   Exclusive  — bytes not shared with any other file
-///   Set shared — (top-level only) physical bytes shared within this subtree
+/// Total: logical bytes used by non-inline extents.
+///
+/// Exclusive: bytes not shared with any other file.
+///
+/// Set shared: physical bytes shared within this subtree (top-level paths
+/// only).
 #[derive(Parser, Debug)]
 pub struct FilesystemDuCommand {
     /// Display only a total for each argument, not per-file lines
@@ -162,8 +165,6 @@ impl Runnable for FilesystemDuCommand {
     }
 }
 
-// ── Modern output (cols tree) ──────────────────────────────────────────
-
 #[derive(Clone, Cols)]
 struct DuRow {
     #[column(header = "TOTAL", right)]
@@ -194,7 +195,7 @@ fn collect_tree(
     let root_dev = meta.dev();
 
     let (total, file_shared, children) = if meta.is_file() {
-        // Skip open() + FIEMAP for zero-length files (no extents).
+        // Skip open() and FIEMAP for zero-length files (no extents).
         if meta.len() == 0 {
             (0, 0, Vec::new())
         } else {
@@ -304,9 +305,9 @@ fn collect_entry_sizes(
 
     for (entry_path, meta) in items {
         if meta.is_file() {
-            // Zero-length files have no extents, so skip the open() +
+            // Zero-length files have no extents, so skip the open() and
             // FIEMAP syscalls. This avoids two syscalls per empty file,
-            // which adds up on large trees with many small/empty files.
+            // which adds up on large trees with many small or empty files.
             if meta.len() == 0 {
                 entries.push(DuEntry {
                     path: entry_path.clone(),
@@ -373,8 +374,6 @@ fn collect_entry_sizes(
     Ok(entries)
 }
 
-// ── Legacy text output ─────────────────────────────────────────────────
-
 fn print_top_level(
     path: &Path,
     max_depth: Option<usize>,
@@ -389,7 +388,7 @@ fn print_top_level(
     let root_dev = meta.dev();
 
     let (total, file_shared) = if meta.is_file() {
-        // Skip open() + FIEMAP for zero-length files (no extents).
+        // Skip open() and FIEMAP for zero-length files (no extents).
         if meta.len() == 0 {
             (0, 0)
         } else {
@@ -478,9 +477,9 @@ fn print_walk_dir(
         }
 
         if meta.is_file() {
-            // Zero-length files have no extents, so skip the open() +
+            // Zero-length files have no extents, so skip the open() and
             // FIEMAP syscalls. This avoids two syscalls per empty file,
-            // which adds up on large trees with many small/empty files.
+            // which adds up on large trees with many small or empty files.
             if meta.len() == 0 {
                 if show {
                     println!(
@@ -560,8 +559,6 @@ fn print_walk_dir(
     Ok((dir_total, dir_shared))
 }
 
-// ── Shared helpers ─────────────────────────────────────────────────────
-
 /// Collect and filter directory entries, returning sorted (path, metadata) pairs.
 fn collect_dir_entries(
     dir: &Path,
@@ -610,15 +607,13 @@ fn collect_dir_entries(
     Ok(items)
 }
 
-/// Extract the file/directory name from a path (last component).
+/// Extract the file or directory name from a path (last component).
 fn path_name(path: &Path) -> String {
     path.file_name().map_or_else(
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     )
 }
-
-// ── JSON output ────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 struct DuEntryJson {
@@ -731,9 +726,9 @@ fn collect_json_walk(
         }
 
         if meta.is_file() {
-            // Zero-length files have no extents, so skip the open() +
+            // Zero-length files have no extents, so skip the open() and
             // FIEMAP syscalls. This avoids two syscalls per empty file,
-            // which adds up on large trees with many small/empty files.
+            // which adds up on large trees with many small or empty files.
             if meta.len() == 0 {
                 if show {
                     out.push(DuEntryJson {

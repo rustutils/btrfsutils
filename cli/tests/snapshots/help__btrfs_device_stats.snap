@@ -14,7 +14,7 @@ Usage: stats [OPTIONS] <PATH>
 
 Arguments:
   <PATH>
-          Path to a mounted btrfs filesystem or a device/image file
+          Path to a mounted btrfs filesystem or a device or image file
 
 Options:
   -c, --check

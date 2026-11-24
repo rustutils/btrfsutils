@@ -48,7 +48,7 @@ pub enum ScrubSubcommand {
     Limit(ScrubLimitCommand),
 }
 
-/// Format a bytes-per-second limit for display; `0` means unlimited.
+/// Format a bytes-per-second limit for display. `0` means unlimited.
 fn format_limit(limit: u64, mode: &SizeFormat) -> String {
     if limit == 0 {
         "unlimited".to_owned()

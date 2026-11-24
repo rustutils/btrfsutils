@@ -6,11 +6,10 @@ Completely remove the v1 or v2 free space cache
 
 For v2, drops the FREE_SPACE_TREE root and clears the FREE_SPACE_TREE and
 FREE_SPACE_TREE_VALID compat_ro flags so that the kernel rebuilds the tree on
-the next mount with `space_cache=v2`.
+the next mount with space_cache=v2.
 
-For v1, see Stage G in transaction/PLAN.md: clearing v1 requires freeing data
-extents owned by the hidden free-space-cache inodes, which the transaction crate
-does not yet support.
+For v1, frees the data extents owned by each block group's hidden free space
+cache inode and deletes the cache items.
 
 The device must not be mounted.
 

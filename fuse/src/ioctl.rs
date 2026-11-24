@@ -1,17 +1,16 @@
 //! btrfs ioctl handlers exposed through the FUSE protocol.
 //!
-//! Each `BTRFS_IOC_*` request that arrives at the FUSE driver is
-//! decoded here, dispatched to the corresponding read on
-//! [`btrfs_fs::Filesystem`], and the response is serialised back
-//! into the on-disk C struct layout that userspace tools (the
-//! upstream `btrfs` CLI, our `btrfs-cli`, libbtrfsutil, ...) expect.
+//! Each `BTRFS_IOC_*` request that reaches the FUSE driver is decoded
+//! here, dispatched to the matching read on [`btrfs_fs::Filesystem`],
+//! and the response is serialised into the C struct layout that
+//! userspace tools (the upstream `btrfs` CLI, `btrfs-cli`,
+//! libbtrfsutil, ...) expect.
 //!
-//! The kernel ioctl numbers are computed at compile time via
-//! `ior` / `iow` / `iowr` const helpers rather than imported from
-//! bindgen output — `bindgen` does not expand the `_IOR` macro
-//! family, so the numbers don't appear as constants in
-//! `btrfs_disk::raw`. This is the only place in the project that
-//! re-derives them.
+//! The ioctl numbers are computed at compile time with `const`
+//! helpers rather than imported from bindgen output. `bindgen` does
+//! not expand the `_IOR` macro family, so the numbers aren't
+//! constants in `btrfs_disk::raw`. This is the only place in the
+//! project that re-derives them.
 //!
 //! Currently implemented:
 //! - `BTRFS_IOC_FS_INFO` (F6.1)
@@ -20,9 +19,9 @@
 //! - `BTRFS_IOC_DEV_INFO` (F6.2)
 //! - `BTRFS_IOC_INO_LOOKUP` (F6.2)
 //! - `BTRFS_IOC_TREE_SEARCH` (F6.3, fixed 4 KiB)
-//! - `BTRFS_IOC_TREE_SEARCH_V2` (F6.3, code path uses retry — see
-//!   note below; works only from callers that opt into
-//!   `FUSE_IOCTL_UNRESTRICTED`)
+//! - `BTRFS_IOC_TREE_SEARCH_V2` (F6.3, code path uses retry, see
+//!   the note below. Works only from callers that opt into
+//!   `FUSE_IOCTL_UNRESTRICTED`.)
 //! - `BTRFS_IOC_GET_SUBVOL_ROOTREF` (F6.3, fixed 4 KiB)
 //!
 //! Not implemented over FUSE: `BTRFS_IOC_INO_PATHS` and
@@ -31,9 +30,9 @@
 //! `FUSE_IOCTL_UNRESTRICTED` set. The standard libc `ioctl(2)` path
 //! the `btrfs` CLI takes does not set that flag, so a retry response
 //! is rejected with `-EIO` before the FUSE driver is re-entered.
-//! The same restriction means our `TREE_SEARCH_V2` retry handler is
-//! effectively unreachable in practice today; v1 (fits in the
-//! cmd-encoded 4 KiB) remains the working path. See
+//! The same restriction makes the `TREE_SEARCH_V2` retry handler
+//! unreachable in practice. v1, which fits in the cmd-encoded 4 KiB,
+//! is the working path. See
 //! `fs/PLAN.md` § F6.3 for next steps (kernel relaxation, CUSE
 //! init, or a custom FUSE protocol implementation).
 
@@ -41,8 +40,6 @@ use btrfs_fs::{Filesystem, Inode, RootRef, SearchFilter, SubvolId};
 use bytes::{Buf, BufMut};
 use fuser::Errno;
 use std::fs::File;
-
-// ── ioctl number encoding ─────────────────────────────────────────
 
 const IOC_NRSHIFT: u32 = 0;
 const IOC_TYPESHIFT: u32 = 8;
@@ -83,13 +80,13 @@ const DEV_INFO_SIZE: u32 = 4096;
 const INO_LOOKUP_SIZE: u32 = 4096;
 /// Size of `struct btrfs_ioctl_search_args` (v1): `key`
 /// (`btrfs_ioctl_search_key`, 104) + `buf[3992]` = 4096 bytes.
-/// Fixed-size — no retry needed.
+/// Fixed size, so no retry is needed.
 const SEARCH_ARGS_V1_SIZE: u32 = 4096;
 /// Size of the `buf` area in v1: 4096 - 104 = 3992 bytes.
 const SEARCH_ARGS_V1_BUF: usize = 3992;
 /// Size of `struct btrfs_ioctl_search_args_v2`: `key`
 /// (`btrfs_ioctl_search_key`, 104) + `buf_size`(8) + `buf[0]`(0) =
-/// 112 bytes. The trailing `buf[0]` is a flexible array — the
+/// 112 bytes. The trailing `buf[0]` is a flexible array: the
 /// userspace caller passes 112 + `buf_size` bytes, which exceeds
 /// the 14-bit cap and requires the FUSE retry mechanism.
 const SEARCH_ARGS_V2_SIZE: u32 = 112;
@@ -98,19 +95,19 @@ const SEARCH_ARGS_V2_SIZE: u32 = 112;
 const SEARCH_KEY_SIZE: usize = 104;
 /// Size of `struct btrfs_ioctl_search_header`: `transid`(8) +
 /// `objectid`(8) + `offset`(8) + `type`(4) + `len`(4) = 32 bytes.
-/// Written between each item in the response buf area; the items
-/// are emitted directly so the constant is documentary, but the
-/// `Filesystem::tree_search` caller uses the same value internally
-/// when calculating `max_buf_size` budget.
+/// Written before each item in the response buffer. The items are
+/// written directly, so this constant is only documentation.
+/// `Filesystem::tree_search` uses the same value internally for the
+/// `max_buf_size` budget.
 #[allow(dead_code)]
 const SEARCH_HEADER_SIZE: usize = 32;
 /// Size of `struct btrfs_ioctl_get_subvol_rootref_args`:
-/// `min_treeid`(8) + `rootref[255]`(255 * 16 = 4080) + `num_items`(1)
-/// + `align[7]`(7) = 4096 bytes. Fixed-size — no retry needed.
+/// `min_treeid`(8) + `rootref[255]`(255 * 16 = 4080) + `num_items`(1) +
+/// `align[7]`(7) = 4096 bytes. Fixed size, so no retry is needed.
 const SUBVOL_ROOTREF_SIZE: u32 = 4096;
 /// `BTRFS_MAX_ROOTREF_BUFFER_NUM`: kernel cap on entries returned per
 /// `GET_SUBVOL_ROOTREF` call. Userspace pages through by setting
-/// `min_treeid` to the next id past the last returned one.
+/// `min_treeid` to the id after the last one returned.
 const MAX_ROOTREF_BUFFER_NUM: usize = 255;
 
 pub const BTRFS_IOC_FS_INFO: u32 = ior(BTRFS_MAGIC, 31, FS_INFO_SIZE);
@@ -127,8 +124,6 @@ pub const BTRFS_IOC_TREE_SEARCH_V2: u32 =
 pub const BTRFS_IOC_GET_SUBVOL_ROOTREF: u32 =
     iowr(BTRFS_MAGIC, 61, SUBVOL_ROOTREF_SIZE);
 
-// ── handlers ──────────────────────────────────────────────────────
-
 /// Outcome of an ioctl dispatch: bytes to return to userspace, or
 /// an [`Errno`] for the FUSE adapter to forward.
 pub enum IoctlOutcome {
@@ -137,9 +132,9 @@ pub enum IoctlOutcome {
 }
 
 /// Decode `cmd` and dispatch to the matching handler. Unknown ioctls
-/// produce `ENOTTY`, the standard "no such ioctl" return. `in_data`
-/// carries the input portion (`devid` for `DEV_INFO`,
-/// `treeid`+`objectid` for `INO_LOOKUP`, etc.).
+/// produce `ENOTTY`, the standard "no such ioctl" error. `in_data`
+/// carries the input (`devid` for `DEV_INFO`, `treeid` and
+/// `objectid` for `INO_LOOKUP`, etc.).
 pub async fn dispatch(
     fs: &Filesystem<File>,
     target: Inode,
@@ -164,15 +159,15 @@ pub async fn dispatch(
 }
 
 /// `BTRFS_IOC_FS_INFO`: filesystem-wide identity and geometry. All
-/// fields come straight off the parsed superblock.
+/// fields come from the parsed superblock.
 fn fs_info(fs: &Filesystem<File>) -> IoctlOutcome {
     let sb = fs.superblock();
     let mut buf: Vec<u8> = Vec::with_capacity(FS_INFO_SIZE as usize);
 
     // For a single-device image the highest devid is the one in the
-    // superblock's embedded `dev_item`. We don't currently expose it
-    // on Superblock, but `num_devices` is the right ceiling here too
-    // (devids are dense from 1).
+    // superblock's embedded `dev_item`. It isn't exposed on
+    // Superblock, but `num_devices` is the right ceiling too (devids
+    // are dense from 1).
     let max_id = sb.num_devices.max(1);
 
     buf.put_u64_le(max_id);
@@ -184,7 +179,7 @@ fn fs_info(fs: &Filesystem<File>) -> IoctlOutcome {
     buf.put_u16_le(sb.csum_type.to_raw());
     #[allow(clippy::cast_possible_truncation)]
     buf.put_u16_le(sb.csum_type.size() as u16);
-    buf.put_u64_le(0); // flags (in/out — no flags set on read)
+    buf.put_u64_le(0); // flags (in/out, none set on read)
     buf.put_u64_le(sb.generation);
     buf.put_slice(sb.metadata_uuid.as_bytes());
 
@@ -195,7 +190,7 @@ fn fs_info(fs: &Filesystem<File>) -> IoctlOutcome {
 }
 
 /// `BTRFS_IOC_GET_FEATURES`: three feature flag words
-/// (`compat` / `compat_ro` / `incompat`).
+/// (`compat`, `compat_ro`, `incompat`).
 fn get_features(fs: &Filesystem<File>) -> IoctlOutcome {
     let sb = fs.superblock();
     let mut buf: Vec<u8> = Vec::with_capacity(FEATURE_FLAGS_SIZE as usize);
@@ -208,8 +203,8 @@ fn get_features(fs: &Filesystem<File>) -> IoctlOutcome {
 
 /// `BTRFS_IOC_GET_SUBVOL_INFO`: full metadata for the subvolume the
 /// ioctl was issued against. The subvolume id comes from the FUSE
-/// inode that was used to open the file descriptor; we map FUSE
-/// inode → btrfs `Inode` upstream and pass the `subvol` field here.
+/// inode the file descriptor was opened on. The caller maps it to a
+/// btrfs `Inode` and passes its `subvol` field here.
 async fn get_subvol_info(
     fs: &Filesystem<File>,
     subvol: SubvolId,
@@ -242,10 +237,10 @@ async fn get_subvol_info(
     buf.put_slice(info.received_uuid.as_bytes());
     buf.put_u64_le(info.ctransid);
     buf.put_u64_le(info.otransid);
-    buf.put_u64_le(0); // stransid (send) — not tracked by SubvolInfo yet
+    buf.put_u64_le(0); // stransid (send), not tracked by SubvolInfo yet
     buf.put_u64_le(0); // rtransid (receive)
 
-    // 4 × btrfs_ioctl_timespec — { sec: u64, nsec: u32, _pad: u32 } each.
+    // 4 × btrfs_ioctl_timespec, each { sec: u64, nsec: u32, _pad: u32 }.
     write_timespec(&mut buf, info.ctime);
     write_timespec(&mut buf, info.otime);
     write_timespec(&mut buf, std::time::SystemTime::UNIX_EPOCH); // stime
@@ -270,10 +265,10 @@ fn write_timespec(buf: &mut Vec<u8>, t: std::time::SystemTime) {
 }
 
 /// `BTRFS_IOC_DEV_INFO`: per-device geometry. Userspace passes the
-/// `devid` (or all-zero `uuid` to look up by id); the kernel fills
-/// in `path`, `bytes_used`, `total_bytes`. We only support
-/// single-device images today, so any `devid != 1` (or unmatched
-/// uuid) returns `ENODEV`.
+/// `devid` (or all-zero `uuid` to look up by id), and the kernel
+/// fills in `path`, `bytes_used`, and `total_bytes`. Only
+/// single-device images are supported, so any `devid != 1` (or
+/// unmatched uuid) returns `ENODEV`.
 fn dev_info(fs: &Filesystem<File>, in_data: &[u8]) -> IoctlOutcome {
     if in_data.len() < DEV_INFO_SIZE as usize {
         return IoctlOutcome::Err(Errno::EINVAL);
@@ -288,7 +283,7 @@ fn dev_info(fs: &Filesystem<File>, in_data: &[u8]) -> IoctlOutcome {
     let dev = if req_devid != 0 {
         fs.dev_info(req_devid)
     } else {
-        // Lookup by UUID. Single-device only — match against the
+        // Lookup by UUID. Single-device only, so match against the
         // primary device's uuid.
         let primary = fs.dev_info(1);
         primary.filter(|d| d.uuid.as_bytes() == &req_uuid)
@@ -304,8 +299,8 @@ fn dev_info(fs: &Filesystem<File>, in_data: &[u8]) -> IoctlOutcome {
     buf.put_u64_le(dev.total_bytes);
     // `unused[379]` reserved padding before `path`.
     buf.resize(buf.len() + 379 * 8, 0);
-    // path: 1024 bytes, NUL-padded. We don't have a real device path
-    // (the FS sees a backing file, not a /dev node); leave empty.
+    // path: 1024 bytes, NUL-padded. Left empty because there is no
+    // real device path (the FS sees a backing file, not a /dev node).
     buf.resize(DEV_INFO_SIZE as usize, 0);
     debug_assert_eq!(buf.len(), DEV_INFO_SIZE as usize);
     IoctlOutcome::Ok(buf)
@@ -399,20 +394,19 @@ async fn tree_search_v1(
 
 /// `BTRFS_IOC_TREE_SEARCH_V2`: cannot be served over FUSE.
 ///
-/// v2 needs the kernel's `FUSE_IOCTL_RETRY` round-trip to extend
+/// v2 needs the kernel's `FUSE_IOCTL_RETRY` round trip to extend
 /// the result buffer past the 14-bit cmd-encoded size, but Linux
 /// only honours that retry response when the original request set
-/// `FUSE_IOCTL_UNRESTRICTED` — which standard `ioctl(2)` callers
-/// never do. Returning `ENOPROTOOPT` is our private signal to
-/// `btrfs-uapi`'s `tree_search_auto` wrapper, which catches it
-/// and falls back to v1 (fixed 4 KiB buffer, paginated). v1 is
-/// fully supported on this driver and matches v2's semantics.
+/// `FUSE_IOCTL_UNRESTRICTED`, which standard `ioctl(2)` callers
+/// never do. `ENOPROTOOPT` signals `btrfs-uapi`'s
+/// `tree_search_auto` wrapper to fall back to v1 (fixed 4 KiB
+/// buffer, paginated). v1 is fully supported on this driver and
+/// has the same semantics as v2.
 ///
-/// `ENOPROTOOPT` was picked over the more common `ENOTSUP` /
+/// `ENOPROTOOPT` was chosen over the more common `ENOTSUP` or
 /// `EOPNOTSUPP` because nothing else in the btrfs ioctl surface
-/// returns it, so it acts as a private channel: if uapi sees it
-/// here, it's overwhelmingly *us* speaking. See
-/// `fs/PLAN.md` § F6.4.
+/// returns it, so if uapi sees it here it almost certainly comes
+/// from this driver. See `fs/PLAN.md` § F6.4.
 fn tree_search_v2() -> IoctlOutcome {
     IoctlOutcome::Err(Errno::ENOPROTOOPT)
 }
@@ -422,11 +416,11 @@ fn tree_search_v2() -> IoctlOutcome {
 /// 255 entries each.
 ///
 /// Userspace fills in `min_treeid` (8 bytes at the start of the
-/// args struct) to begin or resume iteration. We walk `ROOT_REF`
+/// args struct) to begin or resume iteration. This walks `ROOT_REF`
 /// entries in the root tree where `objectid == current_subvol` and
-/// `offset >= min_treeid`, emit up to 255 `(treeid, dirid)` pairs,
-/// and update `min_treeid` to the next id past the last entry —
-/// callers that want full enumeration loop until `num_items < 255`.
+/// `offset >= min_treeid`, emits up to 255 `(treeid, dirid)` pairs,
+/// and updates `min_treeid` to the id after the last entry. Callers
+/// that want every entry loop until `num_items < 255`.
 async fn get_subvol_rootref(
     fs: &Filesystem<File>,
     current_subvol: SubvolId,
@@ -437,9 +431,9 @@ async fn get_subvol_rootref(
     }
     let min_treeid = u64::from_le_bytes(in_data[..8].try_into().unwrap());
 
-    // ROOT_REF_KEY = 156. We pull at most one extra so we know when
-    // there are more entries beyond the buffer cap (the kernel signals
-    // this via the updated `min_treeid` field on the next iteration).
+    // ROOT_REF_KEY = 156. Fetch one extra item to tell whether more
+    // entries exist beyond the buffer cap (the kernel signals this
+    // through the updated `min_treeid` field).
     let filter = SearchFilter {
         tree_id: 1,
         min_objectid: current_subvol.0,
@@ -464,10 +458,9 @@ async fn get_subvol_rootref(
         }
     };
 
-    // Compound-key search returns items whose compound (objectid,
-    // type, offset) lies in the configured range; with both objectid
-    // and type pinned, every returned item is the right shape, but
-    // belt-and-braces filter on the type just in case.
+    // The compound-key search returns items whose (objectid, type,
+    // offset) lies in the range. With objectid and type both pinned,
+    // every item should match, but filter on both anyway.
     let mut entries: Vec<(u64, u64)> = Vec::new();
     let mut next_min_treeid = min_treeid;
     for item in items
@@ -475,8 +468,8 @@ async fn get_subvol_rootref(
         .filter(|it| it.objectid == current_subvol.0 && it.item_type == 156)
     {
         if entries.len() >= MAX_ROOTREF_BUFFER_NUM {
-            // Buffer full: the kernel sets min_treeid to the next id
-            // past the last included entry so the next call resumes
+            // Buffer full: the kernel sets `min_treeid` to the id
+            // after the last included entry, so the next call resumes
             // there.
             next_min_treeid = item.offset;
             break;
@@ -503,9 +496,9 @@ async fn get_subvol_rootref(
     IoctlOutcome::Ok(out)
 }
 
-/// Snapshot of the raw fields read from the search key, kept around
-/// so [`write_search_key`] can echo them back unchanged in the
-/// response (only `nr_items` and `buf_size` are mutated).
+/// Raw fields read from the search key, kept so [`write_search_key`]
+/// can echo them back unchanged in the response (only `nr_items` and
+/// `buf_size` change).
 struct RawSearchKey {
     min_objectid: u64,
     max_objectid: u64,
@@ -571,9 +564,9 @@ fn parse_search_key(
 }
 
 /// Write the 104-byte search key back into `out`, with `nr_items`
-/// updated to the actual count returned. For v2 the trailing
-/// `buf_size` field is appended (pass `Some(buf_size)`); v1 stops
-/// at the 104-byte key (pass `None`).
+/// set to the number of items returned. For v2, pass
+/// `Some(buf_size)` to append the trailing `buf_size` field. For v1,
+/// pass `None` to stop at the 104-byte key.
 fn write_search_key(
     out: &mut Vec<u8>,
     tree_id: u64,
@@ -592,8 +585,8 @@ fn write_search_key(
     out.put_u32_le(raw.max_type);
     #[allow(clippy::cast_possible_truncation)]
     out.put_u32_le(actual_items as u32);
-    // Reserved fields after nr_items: u32 unused, then 4 × u64
-    // unused (see `btrfs_ioctl_search_key` layout).
+    // Reserved fields after `nr_items`: one unused u32, then four
+    // unused u64s (see the `btrfs_ioctl_search_key` layout).
     out.put_u32_le(0); // unused
     for _ in 0..4 {
         out.put_u64_le(0); // unused1..unused4

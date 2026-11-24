@@ -16,12 +16,11 @@ pub fn open_path(path: &Path) -> Result<File> {
         .with_context(|| format!("failed to open '{}'", path.display()))
 }
 
-/// Return `true` if `device` appears as a source in `/proc/mounts`.
+/// Return `true` if `device` appears as a mount source in `/proc/mounts`.
 ///
-/// Compares canonical paths so symlinks in `/dev/disk/by-*` are handled
-/// Check whether a device path appears as a mount source in `/proc/mounts`.
-///
-/// Delegates to [`btrfs_uapi::filesystem::is_mounted`].
+/// Compares canonical paths, so symlinks in `/dev/disk/by-*` are handled.
+/// Errors count as not mounted. Delegates to
+/// [`btrfs_uapi::filesystem::is_mounted`].
 pub fn is_mounted(device: &Path) -> bool {
     btrfs_uapi::filesystem::is_mounted(device).unwrap_or(false)
 }
@@ -296,7 +295,7 @@ mod tests {
 
     #[test]
     fn human_bytes_u64_max() {
-        // Should not panic; lands in PiB range
+        // Should not panic. Lands in the PiB range.
         let s = human_bytes(u64::MAX);
         assert!(s.ends_with("PiB"), "expected PiB suffix, got: {s}");
     }

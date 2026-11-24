@@ -1,10 +1,10 @@
 //! Argument types for the `btrfs-fuse` mount entry point.
 //!
-//! Mirrors the `mkfs` / `tune` split: the clap-derived [`MountArgs`]
-//! struct lives here in the library so the standalone `btrfs-fuse`
-//! binary, the embedded `btrfs fuse` subcommand in `btrfs-cli`, and
-//! any other front-end can share a single source of truth for the
-//! flags. The actual mount logic lives in [`crate::run::run_mount`].
+//! Same split as `mkfs` and `tune`: the clap-derived [`MountArgs`]
+//! struct lives in the library, so the standalone `btrfs-fuse` binary,
+//! the embedded `btrfs fuse` subcommand in `btrfs-cli`, and any other
+//! front-end share one definition of the flags. The mount logic lives
+//! in [`crate::run::run_mount`].
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -25,31 +25,31 @@ pub struct MountArgs {
     pub allow_other: bool,
     /// Mount the named subvolume as the root of the FUSE filesystem.
     ///
-    /// The path is interpreted relative to the filesystem root, e.g.
-    /// `--subvol home/snapshots/2025-01-01`. Mutually exclusive with
-    /// `--subvolid`.
+    /// The path is relative to the filesystem root, for example
+    /// --subvol home/snapshots/2025-01-01. Mutually exclusive with
+    /// --subvolid.
     #[arg(long)]
     pub subvol: Option<String>,
     /// Mount the subvolume with this tree id.
     ///
-    /// Use the value reported by `btrfs subvolume list`. Mutually
-    /// exclusive with `--subvol`.
+    /// Use the value reported by btrfs subvolume list. Mutually
+    /// exclusive with --subvol.
     #[arg(long, conflicts_with = "subvol")]
     pub subvolid: Option<u64>,
-    /// Don't ask the kernel to enforce file mode/uid/gid permissions
-    /// against the calling user.
+    /// Don't have the kernel check file mode and ownership against the
+    /// calling user.
     ///
-    /// By default the FUSE mount uses
-    /// `default_permissions` so a non-root mounter can't read root-
-    /// owned files in the image — matching kernel btrfs semantics.
-    /// Pass this flag to bypass that check, e.g. when inspecting an
-    /// image whose stored ownership doesn't match your local UIDs.
+    /// By default the FUSE mount uses default_permissions, so a
+    /// non-root user can't read root-owned files in the image, as with
+    /// kernel btrfs. Pass this flag to skip that check, for example
+    /// when inspecting an image whose stored ownership doesn't match
+    /// your local UIDs.
     #[arg(long)]
     pub no_default_permissions: bool,
     /// Number of tree blocks to cache (~16 KiB each).
     ///
-    /// Set to 1 to effectively disable; large values trade RAM for fewer disk
-    /// reads on tree walks.
+    /// Set to 1 to effectively disable the cache. Larger values trade RAM
+    /// for fewer disk reads on tree walks.
     #[arg(long, default_value_t = 4096)]
     pub cache_tree_blocks: usize,
     /// Number of parsed inode items to cache.
@@ -57,7 +57,7 @@ pub struct MountArgs {
     pub cache_inodes: usize,
     /// Number of per-inode extent maps to cache.
     ///
-    /// Each map is one entry per `EXTENT_DATA` item in the file.
+    /// Each map holds one entry per EXTENT_DATA item in the file.
     #[arg(long, default_value_t = 1024)]
     pub cache_extent_maps: usize,
 }

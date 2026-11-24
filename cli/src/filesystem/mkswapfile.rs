@@ -28,8 +28,8 @@ pub struct FilesystemMkswapfileCommand {
     #[clap(long, short, default_value = "2G")]
     pub size: String,
 
-    /// UUID to embed in the swap header (clear, random, time, or explicit UUID;
-    /// default: random)
+    /// UUID to embed in the swap header: clear, random (default), time, or an
+    /// explicit UUID
     #[clap(long = "uuid", short = 'U')]
     pub uuid: Option<ParsedUuid>,
 

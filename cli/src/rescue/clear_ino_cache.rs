@@ -31,7 +31,7 @@ const FREE_SPACE_OBJECTID: u64 =
 
 /// True if `objectid` names a regular filesystem tree (the default
 /// subvolume or a user-created subvolume), as opposed to a
-/// system/internal tree.
+/// system or internal tree.
 fn is_fs_tree(objectid: u64) -> bool {
     objectid == FS_TREE_OBJECTID
         || (FIRST_FREE_OBJECTID..=LAST_FREE_OBJECTID).contains(&objectid)
@@ -40,13 +40,11 @@ fn is_fs_tree(objectid: u64) -> bool {
 /// Remove leftover items pertaining to the deprecated inode cache feature
 ///
 /// For every fs tree (the default subvolume and every user
-/// subvolume), walks the items keyed under
-/// `BTRFS_FREE_INO_OBJECTID` (and historically also
-/// `BTRFS_FREE_SPACE_OBJECTID`, which old kernels used for the
-/// per-inode cache bitmap), drops every referenced data extent via
-/// the delayed-ref queue, and deletes the items themselves. The
-/// transaction crate's data-ref drop path also trims the csum tree
-/// for any fully-freed extent.
+/// subvolume), walks the items keyed under BTRFS_FREE_INO_OBJECTID
+/// (and BTRFS_FREE_SPACE_OBJECTID, which old kernels used for the
+/// per-inode cache bitmap), drops every referenced data extent
+/// through the delayed-ref queue, and deletes the items. Dropping a
+/// data ref also trims the csum tree for any fully freed extent.
 ///
 /// The device must not be mounted.
 #[derive(Parser, Debug)]
@@ -93,7 +91,7 @@ impl Runnable for RescueClearInoCacheCommand {
         // loaded into the in-memory roots map.
         let fs_tree_ids = collect_fs_tree_ids(&mut fs)?;
 
-        // Pass 2: per fs tree, scan + apply within a single
+        // Pass 2: per fs tree, scan and apply within a single
         // transaction so the data-ref drops and item deletions
         // commit atomically.
         let mut total_subvols = 0usize;

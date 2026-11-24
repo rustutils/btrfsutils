@@ -2,7 +2,7 @@
 //!
 //! The image at `commands/fixture.img.gz` has a fixed UUID, label,
 //! subvolumes, and file content, so command output is fully deterministic.
-//! Only mount/device paths need redaction.
+//! Only mount and device paths need redaction.
 //!
 //! Image contents:
 //!   - UUID: deadbeef-dead-beef-dead-beefdeadbeef
@@ -507,15 +507,15 @@ fn inspect_dump_super_full() {
     );
 }
 
-// ── inspect-internal (inode/subvolid resolve) ────────────────────────
+// ── inspect-internal (inode and subvolid resolve) ────────────────────
 
 #[test]
 #[ignore = "requires elevated privileges"]
 fn inspect_inode_resolve() {
     let (_td, mnt) = fixture_mount();
     let mp = mnt.path().to_str().unwrap();
-    // Inode 257 (BTRFS_FIRST_FREE_OBJECTID) is the first user inode — should
-    // resolve to a file in the top-level subvolume.
+    // Inode 257 (BTRFS_FIRST_FREE_OBJECTID) is the first user inode. It
+    // should resolve to a file in the top-level subvolume.
     let out = btrfs_ok(&["inspect-internal", "inode-resolve", "257", mp]);
     assert!(!out.is_empty(), "expected at least one path for inode 257");
     snap!(
@@ -808,7 +808,7 @@ fn device_stats_offline_modern() {
     assert!(lines[0].contains("ID"), "header should contain ID: {out}");
 }
 
-// ── restore (no privileges needed — reads raw image) ─────────────────
+// ── restore (no privileges needed, reads raw image) ──────────────────
 
 #[test]
 fn restore_list_roots() {
@@ -860,7 +860,7 @@ fn restore_subvolume_files() {
     assert!(tmp.path().join("toplevel.txt").exists());
 }
 
-// ── check (no privileges needed — reads raw image) ───────────────────
+// ── check (no privileges needed, reads raw image) ────────────────────
 
 /// Replace the fixture image path with `<IMG>` in output strings.
 fn redact_img(output: &str, img: &std::path::Path) -> String {

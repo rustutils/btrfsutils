@@ -30,7 +30,7 @@ Length: logical length of the chunk (shared by all its stripes).
 PEnd: physical byte offset of the end of this stripe (PStart + Length).
 
 LNumber: logical chunk index for this device, ordered by logical start offset
-(1-based); DUP stripes share the same value.
+(1-based). DUP stripes share the same value.
 
 LStart: logical byte offset of the chunk in the filesystem address space.
 
@@ -42,7 +42,7 @@ Usage: list-chunks [OPTIONS] <PATH>
 Arguments:
   <PATH>
           Path to a file or directory on the btrfs filesystem, or a block device
-          / image file when --device is used
+          or image file when --offline is used
 
 Options:
       --raw

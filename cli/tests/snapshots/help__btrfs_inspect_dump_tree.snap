@@ -6,8 +6,8 @@ Dump tree blocks from a btrfs device or image file.
 
 Reads raw btrfs tree blocks from a block device or filesystem image and prints
 their contents in a human-readable format. By default all trees are printed. Use
--t to select a specific tree, -b to print a specific block, or -e/-d/-u to print
-subsets.
+-t to select a specific tree, -b to print a specific block, or -e, -d, or -u to
+print subsets.
 
 Usage: dump-tree [OPTIONS] <PATH>
 

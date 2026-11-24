@@ -4,8 +4,8 @@ expression: text
 ---
 Resume a previously cancelled or interrupted scrub
 
-Scrubs all devices sequentially. This command blocks until the scrub completes;
-use Ctrl-C to cancel.
+Scrubs all devices sequentially. This command blocks until the scrub completes.
+Use Ctrl-C to cancel.
 
 Usage: resume [OPTIONS] <PATH>
 

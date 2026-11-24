@@ -6,7 +6,7 @@ use clap::Parser;
 use nix::errno::Errno;
 use std::{os::unix::io::AsFd, path::PathBuf};
 
-/// Show status of running or paused balance operation.
+/// Show status of running or paused balance operation
 #[derive(Parser, Debug)]
 pub struct BalanceStatusCommand {
     pub path: PathBuf,

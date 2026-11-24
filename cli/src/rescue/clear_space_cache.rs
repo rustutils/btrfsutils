@@ -32,9 +32,9 @@ const ROOT_TREE_OBJECTID: u64 = 1;
 const FREE_SPACE_OBJECTID: u64 =
     (raw::BTRFS_FREE_SPACE_OBJECTID as i64).cast_unsigned();
 
-/// The v1 free space header item is stored under key type 0 (no
-/// dedicated `KeyType` variant; this matches the kernel and
-/// btrfs-progs).
+/// The v1 free space header item is stored under key type 0, which
+/// has no dedicated `KeyType` variant. This matches the kernel and
+/// btrfs-progs.
 const FREE_SPACE_HEADER_KEY_TYPE: u8 = 0;
 
 /// Free space cache version to clear.
@@ -48,11 +48,10 @@ pub enum SpaceCacheVersion {
 ///
 /// For v2, drops the FREE_SPACE_TREE root and clears the
 /// FREE_SPACE_TREE and FREE_SPACE_TREE_VALID compat_ro flags so that
-/// the kernel rebuilds the tree on the next mount with `space_cache=v2`.
+/// the kernel rebuilds the tree on the next mount with space_cache=v2.
 ///
-/// For v1, see Stage G in transaction/PLAN.md: clearing v1 requires
-/// freeing data extents owned by the hidden free-space-cache inodes,
-/// which the transaction crate does not yet support.
+/// For v1, frees the data extents owned by each block group's hidden
+/// free space cache inode and deletes the cache items.
 ///
 /// The device must not be mounted.
 #[derive(Parser, Debug)]
@@ -264,7 +263,8 @@ struct V1CacheEntry {
 struct V1Extent {
     /// File offset key for this `EXTENT_DATA` item.
     file_offset: u64,
-    /// Disk bytenr of the referenced extent (0 = hole/inline, skip).
+    /// Disk bytenr of the referenced extent (0 for holes and inline
+    /// extents, which are skipped).
     disk_bytenr: u64,
     /// On-disk byte length of the referenced extent.
     disk_num_bytes: u64,
@@ -336,7 +336,7 @@ impl RescueClearSpaceCacheCommand {
             // when the delayed refs flush.
             for ext in &entry.extents {
                 if ext.disk_bytenr == 0 {
-                    continue; // hole or inline; nothing to free
+                    continue; // hole or inline, nothing to free
                 }
                 trans.delayed_refs.drop_data_ref(
                     ext.disk_bytenr,

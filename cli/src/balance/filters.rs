@@ -6,18 +6,19 @@ use btrfs_uapi::{balance::BalanceArgs, space::BlockGroupFlags};
 /// Parse a comma-separated filter string into a `BalanceArgs`.
 ///
 /// Supported filters:
-///   profiles=name|name|...   — RAID profile bitmask (single, raid0, raid1, raid10,
-///                               raid5, raid6, raid1c3, raid1c4, dup)
-///   usage=N                  — chunks below N% usage (0-100)
-///   usage=min..max           — chunks with usage in range
-///   devid=N                  — chunks on device N
-///   drange=start..end        — physical byte range on device
-///   vrange=start..end        — virtual (logical) byte range
-///   convert=profile          — convert to target profile
-///   soft                     — with convert, skip already-converted chunks
-///   limit=N                  — process at most N chunks
-///   limit=min..max           — process between min and max chunks
-///   stripes=min..max         — filter by stripe count range
+///
+/// - `profiles=name|name|...`: RAID profile bitmask (single, raid0, raid1,
+///   raid10, raid5, raid6, raid1c3, raid1c4, dup)
+/// - `usage=N`: chunks below N% usage (0-100)
+/// - `usage=min..max`: chunks with usage in range
+/// - `devid=N`: chunks on device N
+/// - `drange=start..end`: physical byte range on device
+/// - `vrange=start..end`: virtual (logical) byte range
+/// - `convert=profile`: convert to target profile
+/// - `soft`: with convert, skip already-converted chunks
+/// - `limit=N`: process at most N chunks
+/// - `limit=min..max`: process between min and max chunks
+/// - `stripes=min..max`: filter by stripe count range
 pub fn parse_filters(filter_str: &str) -> Result<BalanceArgs> {
     let mut args = BalanceArgs::new();
 
@@ -169,7 +170,7 @@ fn parse_range_u32(s: &str) -> Result<Option<(u32, u32)>> {
     Ok(Some((min, max)))
 }
 
-/// Parse a `start..end` range of u64 values. Both sides required.
+/// Parse a `start..end` range of u64 values. Both sides are required.
 fn parse_range_u64(s: &str) -> Result<(u64, u64)> {
     let (left, right) = s.split_once("..").ok_or_else(|| {
         anyhow::anyhow!("expected range 'start..end', got: {s}")

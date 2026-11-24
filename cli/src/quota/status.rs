@@ -14,7 +14,7 @@ use uuid::Uuid;
 /// Enabled: whether quota accounting is active on this filesystem.
 ///
 /// Mode: the accounting mode. "qgroup" (full accounting) tracks every
-/// extent backref and provides accurate shared/exclusive byte counts.
+/// extent backref and provides accurate shared and exclusive byte counts.
 /// "squota" (simple quotas, kernel 6.7+) uses lighter-weight lifetime
 /// tracking that avoids the overhead of full backref walking but does
 /// not distinguish shared vs exclusive usage.

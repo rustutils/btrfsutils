@@ -39,7 +39,7 @@ pub struct DeviceStatsCommand {
     #[clap(long)]
     pub offline: bool,
 
-    /// Path to a mounted btrfs filesystem or a device/image file
+    /// Path to a mounted btrfs filesystem or a device or image file
     pub path: PathBuf,
 }
 

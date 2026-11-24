@@ -22,7 +22,7 @@ use std::{
 /// Start a new scrub on the filesystem or a device.
 ///
 /// Scrubs all devices sequentially. This command blocks until the scrub
-/// completes; use Ctrl-C to cancel.
+/// completes. Use Ctrl-C to cancel.
 #[derive(Parser, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ScrubStartCommand {

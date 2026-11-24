@@ -5,14 +5,13 @@
 //! Field positions are derived from the bindgen structs in
 //! `btrfs_disk::raw` via `offset_of!` and `size_of`.
 //!
-//! Used by the bootstrap path in [`crate::mkfs`] (the
-//! `build_root_tree` / `build_extent_tree` / `build_chunk_tree` /
-//! `build_dev_tree` / `build_superblock_with_params` family).
-//! Post-bootstrap and `--rootdir` use the transaction crate's own
-//! item helpers (`btrfs_disk::items::*` parsers / serialisers and
-//! the `Transaction::insert_*` family). A handful of serializers
-//! here are unused by the current bootstrap (kept as utility
-//! exports for any future caller that wants them).
+//! Used by the bootstrap path in [`crate::mkfs`] (`build_root_tree`,
+//! `build_extent_tree`, `build_chunk_tree`, `build_dev_tree`, and
+//! `build_superblock_with_params`). Post-bootstrap and `--rootdir` use
+//! the transaction crate's own item helpers (the `btrfs_disk::items::*`
+//! parsers and serializers and the `Transaction::insert_*` family). A
+//! few serializers here are unused by the current bootstrap and are kept
+//! as utility exports.
 
 use crate::tree::Key;
 use btrfs_disk::raw;
@@ -95,7 +94,7 @@ pub fn chunk_tree_root_item(
 /// inline `TREE_BLOCK_REF`.
 ///
 /// For skinny metadata (the default), the layout is:
-///   24 bytes `btrfs_extent_item` + 9 bytes inline ref (type + `root_objectid`)
+///   24 bytes `btrfs_extent_item` + 9 bytes inline ref (type and `root_objectid`)
 /// For non-skinny, it also includes `btrfs_tree_block_info` before the ref.
 ///
 /// The inline ref eliminates the need for a separate `TREE_BLOCK_REF` item
@@ -207,7 +206,7 @@ pub fn chunk_item(
     buf
 }
 
-/// Serialize the bootstrap system `CHUNK_ITEM` (uses sectorsize for `io_align`/`io_width`).
+/// Serialize the bootstrap system `CHUNK_ITEM` (uses sectorsize for `io_align` and `io_width`).
 #[must_use]
 pub fn chunk_item_bootstrap(
     length: u64,
@@ -293,7 +292,7 @@ pub fn qgroup_info_zeroed() -> Vec<u8> {
     vec![0u8; mem::size_of::<raw::btrfs_qgroup_info_item>()]
 }
 
-/// Serialize a `QGROUP_INFO_ITEM` with the given referenced/exclusive bytes.
+/// Serialize a `QGROUP_INFO_ITEM` with the given referenced and exclusive bytes.
 #[must_use]
 pub fn qgroup_info(
     generation: u64,
@@ -451,7 +450,7 @@ pub fn dir_item(
 /// Same layout as a `dir_item` but with a zeroed location key, `data_len` set
 /// to the xattr value length, and value bytes appended after the name.
 #[must_use]
-#[allow(clippy::cast_possible_truncation)] // name/value lengths fit in u16, type fits in u8
+#[allow(clippy::cast_possible_truncation)] // name and value lengths fit in u16, type fits in u8
 pub fn xattr_item(name: &[u8], value: &[u8]) -> Vec<u8> {
     let zeroed_location = Key::new(0, 0, 0);
     let mut buf = Vec::with_capacity(30 + name.len() + value.len());

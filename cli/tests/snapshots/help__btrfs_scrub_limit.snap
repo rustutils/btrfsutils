@@ -21,7 +21,7 @@ Options:
           Select a single device by devid
 
   -l, --limit <SIZE>
-          Set the throughput limit (e.g. 100m, 1g); 0 removes the limit
+          Set the throughput limit (e.g. 100m, 1g), or 0 to remove it
 
       --raw
           Show raw numbers in bytes

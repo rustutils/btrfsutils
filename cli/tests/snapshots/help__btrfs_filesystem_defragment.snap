@@ -39,7 +39,7 @@ Range:
           Defragment only this many bytes
 
   -t, --target <TARGET>
-          Target extent size threshold in bytes; extents larger than this are
+          Target extent size threshold in bytes. Extents larger than this are
           considered already defragmented
 
       --step <STEP>

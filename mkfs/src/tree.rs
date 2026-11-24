@@ -111,7 +111,7 @@ impl LeafBuilder {
         }
     }
 
-    /// Available space for more items (item descriptors + data payloads).
+    /// Available space for more items (item descriptors and data payloads).
     #[must_use]
     pub fn space_left(&self) -> usize {
         self.data_end.saturating_sub(self.item_offset + ITEM_SIZE)
@@ -123,7 +123,7 @@ impl LeafBuilder {
     ///
     /// Returns an error if the key is not greater than the previous key,
     /// or if there is not enough space in the leaf.
-    #[allow(clippy::cast_possible_truncation)] // data offsets/sizes fit in u32
+    #[allow(clippy::cast_possible_truncation)] // data offsets and sizes fit in u32
     pub fn push(&mut self, key: Key, data: &[u8]) -> Result<(), LeafError> {
         if let Some(last) = self.last_key
             && key <= last
@@ -169,7 +169,7 @@ impl LeafBuilder {
     /// Finalize the leaf block: write nritems to the header and return the
     /// raw block bytes.
     ///
-    /// The checksum field (bytes 0..32) is left zeroed -- the caller must
+    /// The checksum field (bytes 0..32) is left zeroed. The caller must
     /// compute and fill it before writing to disk.
     #[must_use]
     pub fn finish(mut self) -> Vec<u8> {
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn leaf_full_error() {
-        // With nodesize 256 and header 101, we have 155 bytes for items+data.
+        // With nodesize 256 and header 101, we have 155 bytes for items and data.
         // Each item descriptor is 25 bytes. So we can fit at most a few items.
         let mut leaf = LeafBuilder::new(256, &test_header());
         // Fill it up: 155 bytes / 25 bytes per empty item = 6 items max

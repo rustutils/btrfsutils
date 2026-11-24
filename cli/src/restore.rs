@@ -71,7 +71,7 @@ pub struct RestoreCommand {
     #[clap(short = 'c', long)]
     ignore_case: bool,
 
-    /// Find dir
+    /// Find the first directory and restore from it
     #[clap(short = 'd', long)]
     find_dir: bool,
 
@@ -253,9 +253,9 @@ impl Runnable for RestoreCommand {
             "",
         )?;
 
-        // Restore snapshots if requested (handled inline via RootItem
-        // entries during traversal above, but also restore any trees
-        // that weren't reachable from the FS tree's directory structure).
+        // Restore snapshots if requested. Most are handled inline via
+        // RootItem entries during the walk above. This also restores
+        // trees not reachable from the FS tree's directory structure.
         if self.snapshots {
             for (&oid, &(bytenr, _)) in &open.tree_roots {
                 #[allow(clippy::cast_sign_loss)]
@@ -475,11 +475,11 @@ fn restore_dir<R: Read + Seek>(
                 continue;
             }
 
-            // Subvolume/snapshot entries have location.key_type == RootItem.
+            // Subvolume and snapshot entries have location.key_type == RootItem.
             // Their data lives in a separate tree.
             if entry.location.key_type == KeyType::RootItem {
                 if opts.snapshots {
-                    // Restore the snapshot/subvolume inline.
+                    // Restore the snapshot or subvolume inline.
                     let subvol_oid = entry.location.objectid;
                     if let Some(&(bytenr, _)) = opts.tree_roots.get(&subvol_oid)
                         && let Err(e) = restore_snapshot(
@@ -607,7 +607,7 @@ fn restore_dir<R: Read + Seek>(
     Ok(())
 }
 
-/// Restore a snapshot/subvolume by loading its separate tree.
+/// Restore a snapshot or subvolume by loading its separate tree.
 fn restore_snapshot<R: Read + Seek>(
     reader: &mut reader::BlockReader<R>,
     bytenr: u64,
@@ -728,7 +728,7 @@ fn restore_file<R: Read + Seek>(
                 num_bytes,
             } => {
                 if *disk_bytenr == 0 {
-                    // Hole — seek past it.
+                    // Hole: seek past it.
                     continue;
                 }
 
@@ -884,7 +884,7 @@ fn restore_symlink(
     Ok(())
 }
 
-/// Restore extended attributes for a file/directory/symlink.
+/// Restore extended attributes for a file, directory, or symlink.
 fn restore_xattrs(
     items: &FsTreeItems,
     ino: u64,
@@ -1027,8 +1027,9 @@ fn decompress(
 
 /// Decompress btrfs LZO format: sector-by-sector LZO1X compression.
 ///
-/// Format: 4-byte LE total length, then per-sector: 4-byte LE segment
-/// length + compressed data, padded to sector boundaries.
+/// Format: 4-byte LE total length, then for each sector a 4-byte LE
+/// segment length followed by compressed data, padded to sector
+/// boundaries.
 fn decompress_lzo(data: &[u8], output_len: usize) -> Result<Vec<u8>> {
     const SECTOR_SIZE: usize = 4096;
 

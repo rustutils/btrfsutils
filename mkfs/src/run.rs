@@ -19,7 +19,7 @@ use uuid::Uuid;
 ///
 /// Returns an error if argument validation fails or filesystem creation fails.
 #[allow(clippy::too_many_lines)]
-#[allow(clippy::cast_possible_truncation)] // nodesize/sectorsize/devid fit in u32/u64
+#[allow(clippy::cast_possible_truncation)] // nodesize, sectorsize, devid fit in u32 or u64
 #[allow(clippy::cast_precision_loss)] // f64 display of byte sizes
 pub fn run(args: &Arguments) -> Result<()> {
     let nodesize = args.nodesize.map_or(16384, |s| s.0 as u32);

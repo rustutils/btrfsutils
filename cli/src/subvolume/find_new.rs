@@ -14,7 +14,7 @@ use std::{os::unix::io::AsFd, path::PathBuf};
 /// List the recently modified files in a subvolume
 ///
 /// Prints all files that have been modified since the given generation number.
-/// The generation can be found with `btrfs subvolume show`.
+/// The generation can be found with btrfs subvolume show.
 #[derive(Parser, Debug)]
 pub struct SubvolumeFindNewCommand {
     /// Path to the subvolume to search
@@ -43,7 +43,7 @@ impl Runnable for SubvolumeFindNewCommand {
         let max_gen = info.generation;
 
         // Search tree 0 (the subvolume's own tree, relative to the fd) for
-        // EXTENT_DATA_KEY items.  The min_transid filter restricts results to
+        // EXTENT_DATA_KEY items. The min_transid filter restricts results to
         // items whose metadata block was written at or after last_gen.
         let mut key = SearchFilter::for_type(0, BTRFS_EXTENT_DATA_KEY);
         key.min_transid = self.last_gen;

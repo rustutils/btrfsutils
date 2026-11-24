@@ -1,7 +1,7 @@
 //! `BtrfsFuse`: a thin `fuser::Filesystem` adapter on top of [`btrfs_fs`].
 //!
 //! All filesystem semantics live in the [`btrfs_fs`] crate. This module
-//! is responsible for the FUSE protocol mapping only:
+//! only handles the FUSE protocol mapping:
 //!
 //! - inode-number translation (FUSE root = 1 ⇄ btrfs root dir = 256),
 //! - converting [`btrfs_fs::Stat`] → [`fuser::FileAttr`] and
@@ -34,13 +34,13 @@ pub struct BtrfsFuse {
     fs: Filesystem<File>,
     blksize: u32,
     /// Subvolume that the FUSE root inode (`1`) maps onto. This is
-    /// whatever `Filesystem` was opened with — the default `FS_TREE`
+    /// whatever `Filesystem` was opened with: the default `FS_TREE`
     /// for `BtrfsFuse::open`, or a user-selected subvolume for
     /// `BtrfsFuse::open_subvol`.
     mount_subvol: SubvolId,
-    /// Tokio runtime used to drive async [`Filesystem`] ops. Each FUSE
-    /// callback `spawn`s a task here; the FUSE worker thread itself
-    /// returns immediately.
+    /// Tokio runtime that drives async [`Filesystem`] ops. Each FUSE
+    /// callback spawns a task here, and the FUSE worker thread returns
+    /// immediately.
     runtime: Runtime,
 }
 
@@ -134,22 +134,22 @@ fn to_file_attr(fuse_ino: u64, stat: &Stat) -> FileAttr {
 }
 
 impl FuserFilesystem for BtrfsFuse {
-    /// Negotiate kernel capabilities at mount time. We opt into the
-    /// extras that benefit a read-only filesystem; attribute caching
-    /// is left at the default since the underlying image is
-    /// immutable and the kernel can hold attributes indefinitely.
+    /// Negotiate kernel capabilities at mount time. Opts into the
+    /// extras that help a read-only filesystem. Attribute caching is
+    /// left at the default since the image is immutable and the kernel
+    /// can hold attributes indefinitely.
     ///
-    /// - `FUSE_DO_READDIRPLUS` advertises that we serve `readdirplus`
-    ///   so the kernel coalesces `readdir + lookup-per-entry` into a
-    ///   single round trip — major speedup for `ls -l`.
-    /// - `FUSE_AUTO_INVAL_DATA` lets the kernel auto-invalidate page
-    ///   cache when our `getattr` reports a changed `mtime`/`size`,
-    ///   so callers see fresh data without explicit `O_DIRECT`.
-    /// - `FUSE_SPLICE_READ` / `FUSE_SPLICE_WRITE` enable zero-copy
+    /// - `FUSE_DO_READDIRPLUS` advertises `readdirplus`, so the kernel
+    ///   combines `readdir` and a `lookup` per entry into one round
+    ///   trip. A large speedup for `ls -l`.
+    /// - `FUSE_AUTO_INVAL_DATA` lets the kernel invalidate the page
+    ///   cache when `getattr` reports a changed `mtime` or `size`, so
+    ///   callers see fresh data without `O_DIRECT`.
+    /// - `FUSE_SPLICE_READ` and `FUSE_SPLICE_WRITE` enable zero-copy
     ///   data transfer between FUSE and the kernel page cache.
     ///
-    /// Capabilities the kernel doesn't advertise are silently
-    /// skipped; we don't fail the mount over a missing extra.
+    /// Capabilities the kernel doesn't advertise are skipped. A
+    /// missing extra doesn't fail the mount.
     fn init(
         &mut self,
         _req: &Request,
@@ -162,20 +162,18 @@ impl FuserFilesystem for BtrfsFuse {
             InitFlags::FUSE_SPLICE_WRITE,
         ] {
             // `add_capabilities` returns `Err` only when the kernel
-            // doesn't advertise the cap; gracefully drop it instead
-            // of failing the mount.
+            // doesn't advertise the cap. Drop it instead of failing
+            // the mount.
             let _ = config.add_capabilities(cap);
         }
         Ok(())
     }
 
-    /// Drop a single inode from our caches once the kernel says it
-    /// no longer references it. Without this we'd hold cached
-    /// `InodeItem`s and `ExtentMap`s until LRU eviction; with it,
-    /// they're freed eagerly so memory tracks the kernel's
-    /// working set. The default `batch_forget` impl in fuser
-    /// loops over each `ForgetOne` and calls this method, so we
-    /// don't override `batch_forget` separately.
+    /// Drop a single inode from the caches once the kernel no longer
+    /// references it. Cached `InodeItem`s and `ExtentMap`s are then
+    /// freed right away instead of at LRU eviction, so memory tracks
+    /// the kernel's working set. fuser's default `batch_forget` calls
+    /// this method for each `ForgetOne`, so it isn't overridden.
     fn forget(&self, _req: &Request, ino: INodeNo, _nlookup: u64) {
         self.fs.forget(self.fuse_inode(ino.0));
     }
@@ -450,11 +448,11 @@ impl FuserFilesystem for BtrfsFuse {
         );
     }
 
-    /// `SEEK_HOLE` / `SEEK_DATA` support. The kernel only forwards
-    /// these whence values via `FUSE_LSEEK` — `SEEK_SET`,
-    /// `SEEK_CUR`, `SEEK_END` are handled in-kernel against the
-    /// file's current position and size, so we never see them here.
-    /// Other whence values get `EINVAL`.
+    /// `SEEK_HOLE` and `SEEK_DATA` support. The kernel only forwards
+    /// these whence values via `FUSE_LSEEK`. It handles `SEEK_SET`,
+    /// `SEEK_CUR`, and `SEEK_END` itself against the file's current
+    /// position and size, so they never arrive here. Other whence
+    /// values get `EINVAL`.
     fn lseek(
         &self,
         _req: &Request,
@@ -485,9 +483,9 @@ impl FuserFilesystem for BtrfsFuse {
         self.runtime.spawn(async move {
             match fs.seek_hole_data(target, offset, whence).await {
                 Ok(pos) => {
-                    // Cap the response to i64::MAX since lseek
-                    // returns off_t (signed). File sizes that
-                    // exceed this are pathological and should fail.
+                    // `lseek` returns a signed `off_t`, so offsets
+                    // above `i64::MAX` fail. Such file sizes are
+                    // pathological.
                     if let Ok(signed) = i64::try_from(pos) {
                         reply.offset(signed);
                     } else {
@@ -497,7 +495,7 @@ impl FuserFilesystem for BtrfsFuse {
                 Err(e) => {
                     // ENXIO is the expected outcome for offset >=
                     // file_size and for SEEK_DATA with no data
-                    // beyond the offset; don't spam logs for it.
+                    // beyond the offset. Don't log it.
                     let raw = e.raw_os_error().unwrap_or(0);
                     if raw != libc::ENXIO {
                         log::warn!(

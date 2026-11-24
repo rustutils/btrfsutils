@@ -1,15 +1,14 @@
 //! Shared helpers for the FUSE mount integration tests.
 //!
-//! Each test gets its own [`MountedFuse`] instance — fresh mountpoint,
-//! fresh `btrfs-fuse` child process — so test isolation is preserved
-//! while parallel test execution still works. The fixture image is
-//! built once per test process via `OnceLock` and shared.
+//! Each test gets its own [`MountedFuse`] (fresh mountpoint, fresh
+//! `btrfs-fuse` child process), so tests stay isolated and can run in
+//! parallel. The fixture image is built once per test process via
+//! `OnceLock` and shared.
 //!
 //! These tests are unprivileged: `fusermount` is setuid root on every
-//! distro the project supports, which is enough to mount/unmount
+//! distro the project supports, which is enough to mount and unmount
 //! FUSE filesystems as a normal user. If `fusermount` is unavailable
-//! on a CI runner, mark the test `#[ignore]` rather than reaching for
-//! sudo.
+//! on a CI runner, mark the test `#[ignore]` rather than using sudo.
 
 #![allow(dead_code)] // each test file uses a subset of the helpers
 
@@ -32,8 +31,8 @@ const READY_POLL: Duration = Duration::from_millis(50);
 /// Build a source directory under `base` with a known set of files,
 /// then format `base/test.img` as btrfs using `mkfs.btrfs --rootdir`.
 ///
-/// Mirrors `fs/tests/basic.rs::build_fixture` deliberately: the two
-/// suites should be free to evolve independently for now.
+/// Deliberately duplicates `fs/tests/basic.rs::build_fixture` so the
+/// two suites can evolve independently.
 fn build_fixture(base: &Path) -> PathBuf {
     let src = base.join("src");
     fs::create_dir(&src).unwrap();
@@ -48,8 +47,8 @@ fn build_fixture(base: &Path) -> PathBuf {
 
     std::os::unix::fs::symlink("hello.txt", src.join("link")).unwrap();
 
-    // user.* xattrs may be rejected by the underlying tmpfs; the
-    // xattr test handles a missing xattr gracefully.
+    // The underlying tmpfs may reject user.* xattrs. The xattr test
+    // handles a missing xattr.
     let _ = Command::new("setfattr")
         .args([
             "-n",
@@ -88,7 +87,7 @@ pub fn fixture_path() -> &'static Path {
     path
 }
 
-/// Build a fixture with multiple subvolumes for the `--subvol` /
+/// Build a fixture with multiple subvolumes for the `--subvol` and
 /// `--subvolid` mount tests.
 fn build_multi_subvol_fixture(base: &Path) -> PathBuf {
     let src = base.join("src");
@@ -130,9 +129,9 @@ pub fn multi_subvol_fixture_path() -> &'static Path {
 }
 
 /// RAII guard around a running `btrfs-fuse` child process and its
-/// mountpoint. Constructed via [`MountedFuse::mount`]; on `Drop` it
-/// unmounts (lazy, so a still-busy mount doesn't wedge cleanup) and
-/// reaps the child.
+/// mountpoint. Constructed via [`MountedFuse::mount`]. On `Drop` it
+/// unmounts (lazily, so a busy mount doesn't block cleanup) and reaps
+/// the child.
 pub struct MountedFuse {
     /// Tempdir holding the mountpoint. Kept alive so it isn't deleted
     /// before unmount.
@@ -142,16 +141,16 @@ pub struct MountedFuse {
 }
 
 impl MountedFuse {
-    /// Mount the default fixture image and wait for the kernel to
-    /// surface its contents. Panics on timeout or spawn failure.
+    /// Mount the default fixture image and wait until its contents are
+    /// visible. Panics on timeout or spawn failure.
     pub fn mount() -> Self {
         Self::mount_with(fixture_path(), &[], "hello.txt")
     }
 
     /// Spawn `btrfs-fuse` against `image` with `extra_args` appended,
     /// and wait until `ready_file` becomes visible at the mountpoint.
-    /// Used by tests that exercise `--subvol` / `--subvolid` and need
-    /// to assert against a non-default fixture.
+    /// Used by tests that exercise `--subvol` and `--subvolid` against
+    /// a non-default fixture.
     pub fn mount_with(
         image: &Path,
         extra_args: &[&str],
@@ -187,8 +186,8 @@ impl MountedFuse {
 
     /// Poll the mountpoint until `ready_file` appears, or panic after
     /// [`READY_TIMEOUT`]. Polling `read_dir` doubles as a liveness
-    /// probe — if the child died during bootstrap we surface the
-    /// failure here rather than later in an opaque test assertion.
+    /// probe: if the child died during bootstrap, the failure shows up
+    /// here rather than later in an opaque test assertion.
     fn wait_until_ready(&mut self, ready_file: &str) {
         let start = Instant::now();
         loop {
@@ -219,9 +218,9 @@ impl MountedFuse {
 impl Drop for MountedFuse {
     fn drop(&mut self) {
         // `-z` (lazy) detaches even if the mount is still busy with
-        // FDs from a panicked test thread. Without it, a panic
-        // mid-test could leave the mountpoint stuck and break
-        // cleanup of the tempdir.
+        // FDs from a panicked test thread. Without it, a panic in a
+        // test could leave the mountpoint stuck and break cleanup of
+        // the tempdir.
         let _ = Command::new("fusermount")
             .args(["-u", "-z"])
             .arg(&self.mountpoint)

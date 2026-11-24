@@ -44,7 +44,7 @@ pub struct FilesystemDefragCommand {
     #[clap(long, help_heading = HEADING_RANGE)]
     pub len: Option<u64>,
 
-    /// Target extent size threshold in bytes; extents larger than this are
+    /// Target extent size threshold in bytes. Extents larger than this are
     /// considered already defragmented
     #[clap(long, short, help_heading = HEADING_RANGE)]
     pub target: Option<u64>,

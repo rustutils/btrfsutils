@@ -112,7 +112,7 @@ impl Runnable for ReceiveCommand {
                     }
                 }
                 Ok(None) => {
-                    // EOF — finalize and exit.
+                    // EOF: finalize and exit.
                     break;
                 }
                 Ok(Some(StreamCommand::End)) => {
@@ -124,10 +124,8 @@ impl Runnable for ReceiveCommand {
                         return Ok(());
                     }
 
-                    // Try to read the next stream header for multi-stream input.
-                    // If there's more data, the next call to next_command() on a
-                    // new reader will pick it up. We re-create the reader with the
-                    // remaining input.
+                    // Multi-stream input: re-create the reader on the
+                    // remaining input to read the next stream header, if any.
                     let inner = reader.into_inner();
                     match StreamReader::new(inner) {
                         Ok(new_reader) => {

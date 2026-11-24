@@ -25,7 +25,7 @@ pub struct ScrubLimitCommand {
     #[clap(long, short, requires = "limit")]
     pub devid: Option<u64>,
 
-    /// Set the throughput limit (e.g. 100m, 1g); 0 removes the limit
+    /// Set the throughput limit (e.g. 100m, 1g), or 0 to remove it
     #[clap(long, short, value_name = "SIZE", value_parser = parse_size_with_suffix, requires = "target")]
     pub limit: Option<u64>,
 

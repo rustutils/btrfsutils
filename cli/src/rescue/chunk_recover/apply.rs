@@ -49,7 +49,6 @@ pub fn apply_chunk_tree(
     let mut fs = Filesystem::open_with_chunk_cache(file, 0, chunk_cache)
         .context("failed to open filesystem with reconstructed chunk cache")?;
 
-    // Start a transaction.
     let mut trans =
         Transaction::start(&mut fs).context("failed to start transaction")?;
 
@@ -87,7 +86,6 @@ pub fn apply_chunk_tree(
         .commit(&mut fs)
         .context("failed to commit chunk tree rebuild")?;
 
-    // Sync to disk.
     fs.sync().context("failed to sync filesystem")?;
 
     Ok(())

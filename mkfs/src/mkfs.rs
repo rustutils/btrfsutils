@@ -1,18 +1,18 @@
 //! # Mkfs: orchestrate filesystem creation
 //!
 //! Top-level entry points for creating a btrfs filesystem. See the
-//! crate-level docs for the three-phase pipeline (bootstrap +
-//! [`crate::post_bootstrap`] + [`crate::rootdir::walk_to_transaction`])
+//! crate-level docs for the three-phase pipeline (bootstrap,
+//! [`crate::post_bootstrap`], [`crate::rootdir::walk_to_transaction`])
 //! and which phase each entry point invokes.
 //!
-//! - [`make_btrfs`]: bootstrap + post-bootstrap. Produces a valid
+//! - [`make_btrfs`]: bootstrap and post-bootstrap. Produces a valid
 //!   empty filesystem.
 //! - [`make_btrfs_with_rootdir`]: also runs rootdir population on
 //!   top.
 //!
-//! Hand-built tree-block construction in this module (the
-//! `build_root_tree` / `build_extent_tree` / `build_chunk_tree` /
-//! `build_dev_tree` / `build_superblock_with_params` family) is
+//! Hand-built tree-block construction in this module
+//! (`build_root_tree`, `build_extent_tree`, `build_chunk_tree`,
+//! `build_dev_tree`, and `build_superblock_with_params`) is
 //! the only piece of the pipeline that does not yet go through the
 //! transaction crate.
 
@@ -145,7 +145,7 @@ impl MkfsConfig {
             | u64::from(raw::BTRFS_FEATURE_INCOMPAT_NO_HOLES)
     }
 
-    /// Default `compat_ro` feature flags (free-space-tree + block-group-tree).
+    /// Default `compat_ro` feature flags (free-space-tree and block-group-tree).
     #[must_use]
     pub fn default_compat_ro_flags() -> u64 {
         u64::from(raw::BTRFS_FEATURE_COMPAT_RO_FREE_SPACE_TREE)
@@ -301,7 +301,7 @@ impl MkfsConfig {
 
     /// Set incompat flags implied by the chosen RAID profiles.
     ///
-    /// RAID5/6 requires the RAID56 incompat flag in the superblock.
+    /// RAID5 and RAID6 require the RAID56 incompat flag in the superblock.
     pub fn apply_profile_flags(&mut self) {
         use crate::args::Profile;
         if matches!(self.metadata_profile, Profile::Raid5 | Profile::Raid6)
@@ -326,7 +326,7 @@ impl MkfsConfig {
 #[allow(clippy::cast_possible_truncation)] // key types fit in u8, devid-1 fits usize
 #[allow(clippy::cast_sign_loss)] // DATA_RELOC_TREE_OBJECTID is positive
 pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
-    // Validate nodesize/sectorsize.
+    // Validate nodesize and sectorsize.
     if !cfg.sectorsize.is_power_of_two() || cfg.sectorsize < 4096 {
         bail!(
             "invalid sectorsize {}: must be a power of 2 >= 4096",
@@ -406,9 +406,9 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
     };
 
     // Build the bootstrap tree blocks. mkfs writes only the four
-    // always-present trees here (Root, Extent, Chunk, Dev); every
-    // other tree (FS, csum, data-reloc, UUID, plus the optional
-    // FST / BG-tree / quota when their features are enabled) is
+    // always-present trees here (Root, Extent, Chunk, Dev). Every
+    // other tree (FS, csum, data-reloc, UUID, and the optional FST,
+    // BG tree, and quota tree when their features are enabled) is
     // created by `post_bootstrap` over the resulting image. The BG
     // items live in the extent tree at this stage and get migrated
     // to BGT inside post-bootstrap when the feature is on.
@@ -430,7 +430,7 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
     ];
 
     // Initial bytes_used for the superblock: only the 4 bootstrap
-    // trees mkfs wrote above. Post-bootstrap's commit will rewrite
+    // trees mkfs wrote above. Post-bootstrap's commit rewrites
     // the superblock with the final value once it allocates the
     // remaining trees.
     let bootstrap_bytes_used = layout.system_used()
@@ -494,13 +494,13 @@ pub fn make_btrfs(cfg: &MkfsConfig) -> Result<()> {
 /// Build an empty filesystem with `make_btrfs`, then populate it from
 /// `rootdir` via the transaction crate.
 ///
-/// Two atomic commits: `make_btrfs` produces the bootstrap layout +
-/// runs `post_bootstrap` (creates empty FS / csum / data-reloc / UUID
-/// trees, plus FST and BGT when those features are enabled). This
-/// function then opens the resulting filesystem, starts a fresh
-/// transaction, walks `rootdir` via [`rootdir::walk_to_transaction`]
-/// (which emits `INODE_ITEM` / `DIR_ITEM` / `DIR_INDEX` / `INODE_REF`
-/// / `XATTR_ITEM` and inline / regular `EXTENT_DATA` records via the
+/// Two atomic commits. `make_btrfs` produces the bootstrap layout and
+/// runs `post_bootstrap`, which creates the empty FS, csum, data-reloc,
+/// and UUID trees, plus FST and BGT when those features are enabled.
+/// This function then opens the resulting filesystem, starts a fresh
+/// transaction, walks `rootdir` with [`rootdir::walk_to_transaction`]
+/// (which emits `INODE_ITEM`, `DIR_ITEM`, `DIR_INDEX`, `INODE_REF`,
+/// `XATTR_ITEM`, and inline or regular `EXTENT_DATA` records through the
 /// transaction crate's high-level helpers), and commits.
 ///
 /// `opts.shrink` (single-device only) patches the device's
@@ -642,8 +642,8 @@ fn make_btrfs_with_rootdir_via_transaction(
 
     // Truncate the image after sync so a crash leaves either the
     // pre-shrink superblock (image still longer than the new
-    // total_bytes — kernel ignores the tail) or the post-shrink one
-    // (image already truncated — also consistent).
+    // total_bytes, and the kernel ignores the tail) or the post-shrink
+    // one (image already truncated, also consistent).
     if let Some(shrunk) = shrunk_size {
         let f = OpenOptions::new()
             .write(true)
@@ -663,8 +663,8 @@ fn make_btrfs_with_rootdir_via_transaction(
 /// Compute the smallest size the single device can be truncated to
 /// without losing any chunk data. Mirrors the legacy `--shrink`
 /// computation in `make_btrfs_with_rootdir`: walk the chunk layout
-/// to find the last physical byte used by any chunk, then sectorsize-
-/// align.
+/// to find the last physical byte used by any chunk, then align to
+/// sectorsize.
 fn compute_shrunk_size(cfg: &MkfsConfig) -> Result<u64> {
     debug_assert_eq!(cfg.devices.len(), 1);
     let dev = &cfg.devices[0];
@@ -742,7 +742,7 @@ pub fn make_btrfs_with_rootdir(
     )
 }
 
-/// Add root tree directory items: `INODE_ITEM` + `INODE_REF` for objectid 6,
+/// Add root tree directory items: `INODE_ITEM` and `INODE_REF` for objectid 6,
 /// and a `DIR_ITEM` for "default" pointing to the given root objectid.
 #[allow(clippy::cast_possible_truncation)] // key type fits in u8
 fn add_root_tree_dir_items(
@@ -806,7 +806,7 @@ fn build_root_tree(
         root_items.push((key, data));
     }
 
-    // Root tree directory: INODE_ITEM + INODE_REF for objectid 6,
+    // Root tree directory: INODE_ITEM and INODE_REF for objectid 6,
     // DIR_ITEM "default" pointing to the FS tree.
     add_root_tree_dir_items(
         &mut root_items,
@@ -839,13 +839,13 @@ fn build_extent_tree(
 
     // Collect all items into a Vec, then sort by key before pushing.
     // Tree blocks span two different chunks (system and metadata),
-    // so addresses are not monotonically increasing — we must sort.
+    // so addresses are not monotonically increasing and must be sorted.
     let mut extent_items: Vec<(Key, Vec<u8>)> = Vec::new();
 
     // mkfs's bootstrap writes METADATA_ITEM entries for the four
     // always-present trees only. post_bootstrap's commit inserts the
     // METADATA_ITEMs for any trees it creates (FS, csum, data-reloc,
-    // UUID, plus optional FST / BGT / quota) via the standard
+    // UUID, plus the optional FST, BGT, and quota trees) via the standard
     // delayed-ref pipeline.
     let all_trees: Vec<(TreeId, u64)> = TreeId::ALL
         .iter()
@@ -864,11 +864,11 @@ fn build_extent_tree(
         extent_items.push((key, data));
     }
 
-    // BLOCK_GROUP_ITEMs for system, metadata, and data chunks. Live
-    // in the extent tree at this stage; post-bootstrap migrates them
+    // BLOCK_GROUP_ITEMs for system, metadata, and data chunks. They
+    // live in the extent tree at this stage. Post-bootstrap migrates them
     // to the BG tree when that feature is enabled. The metadata
     // block group's `bytes_used` reflects only the four bootstrap
-    // tree blocks; post-bootstrap rewrites it as it allocates more.
+    // tree blocks. Post-bootstrap rewrites it as it allocates more.
     extent_items.push((
         Key::new(
             SYSTEM_GROUP_OFFSET,
@@ -1021,7 +1021,7 @@ fn build_dev_tree(
     let mut leaf = LeafBuilder::new(cfg.nodesize, &leaf_header(TreeId::Dev));
 
     // Collect all items, then sort by key before pushing. Items span
-    // multiple devids and offsets, so we must sort to satisfy btrfs's
+    // multiple devids and offsets, so sort them to satisfy btrfs's
     // sorted-key requirement.
     let mut dev_items: Vec<(Key, Vec<u8>)> = Vec::new();
 
@@ -1274,7 +1274,7 @@ pub fn discard_device(path: &Path, size: u64) -> Result<()> {
 }
 
 /// Minimum device size for the default single-device layout (DUP
-/// metadata + SINGLE data). Must fit the system group (5 MiB),
+/// metadata, SINGLE data). Must fit the system group (5 MiB),
 /// metadata DUP (2 x 8 MiB), and data SINGLE (8 MiB): 29 MiB.
 #[must_use]
 pub fn minimum_device_size(nodesize: u32) -> u64 {

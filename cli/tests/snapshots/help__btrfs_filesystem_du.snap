@@ -6,9 +6,11 @@ Summarize disk usage of each file, showing shared extents
 
 For each path, prints three columns:
 
-Total      — logical bytes used by non-inline extents Exclusive  — bytes not
-shared with any other file Set shared — (top-level only) physical bytes shared
-within this subtree
+Total: logical bytes used by non-inline extents.
+
+Exclusive: bytes not shared with any other file.
+
+Set shared: physical bytes shared within this subtree (top-level paths only).
 
 Usage: du [OPTIONS] <PATHS>...
 

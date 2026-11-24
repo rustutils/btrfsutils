@@ -4,12 +4,11 @@ use btrfs_uapi::subvolume::{subvolume_info_by_id, subvolume_list};
 use clap::Parser;
 use std::{os::unix::io::AsFd, path::PathBuf, thread, time::Duration};
 
-/// Wait until given subvolume(s) are completely removed from the filesystem
+/// Wait until given subvolumes are completely removed from the filesystem
 ///
-/// Wait until given subvolume(s) are completely removed from the filesystem
-/// after deletion. If no subvolume id is given, wait until all current
-/// deletion requests are completed, but do not wait for subvolumes deleted
-/// meanwhile. The status of subvolume ids is checked periodically.
+/// If no subvolume id is given, wait until all current deletion requests
+/// are completed, but do not wait for subvolumes deleted in the meantime.
+/// The status of subvolume ids is checked periodically.
 #[derive(Parser, Debug)]
 pub struct SubvolumeSyncCommand {
     /// Path to the btrfs filesystem mount point
@@ -30,8 +29,8 @@ impl Runnable for SubvolumeSyncCommand {
         let interval = Duration::from_secs(self.sleep.unwrap_or(1));
 
         let mut ids: Vec<u64> = if self.subvolids.is_empty() {
-            // No IDs given: find all deleted subvolumes (those with parent_id == 0
-            // in subvolume_list, meaning no ROOT_BACKREF — pending deletion).
+            // No IDs given: find all deleted subvolumes. In subvolume_list
+            // these have parent_id == 0 (no ROOT_BACKREF, pending deletion).
             let items = subvolume_list(file.as_fd())
                 .with_context(|| "failed to list subvolumes")?;
             items

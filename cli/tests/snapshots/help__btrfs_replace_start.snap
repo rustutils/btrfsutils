@@ -29,7 +29,7 @@ Options:
           btrfs filesystem
 
   -B, --no-background
-          Do not background the replace operation; wait for it to finish
+          Do not background the replace operation, wait for it to finish
 
       --enqueue
           Wait if there's another exclusive operation running, instead of

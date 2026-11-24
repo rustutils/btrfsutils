@@ -68,7 +68,7 @@ impl Runnable for RescueSuperRecoverCommand {
                     }
                 }
                 Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                    // Mirror offset is beyond end of device — skip silently.
+                    // Mirror offset is beyond the end of the device: skip silently.
                 }
                 Err(e) => {
                     return Err(e).with_context(|| {

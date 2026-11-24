@@ -25,8 +25,8 @@ pub fn check_superblocks<R: Read + Seek>(
                 }
             }
             Err(e) => {
-                // Mirror may be beyond device size — not an error for
-                // mirrors 1 and 2 on small devices.
+                // Mirror may be beyond the device size. That is not an
+                // error for mirrors 1 and 2 on small devices.
                 if mirror == 0 {
                     results.report(CheckError::SuperblockInvalid {
                         mirror,

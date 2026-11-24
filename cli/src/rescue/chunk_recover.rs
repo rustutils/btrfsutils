@@ -102,8 +102,6 @@ impl Runnable for RescueChunkRecoverCommand {
     }
 }
 
-// --- Shared types ---
-
 /// Where a recovered record came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordSource {

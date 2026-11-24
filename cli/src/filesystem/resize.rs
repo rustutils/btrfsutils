@@ -108,7 +108,7 @@ impl Runnable for FilesystemResizeCommand {
 ///
 /// Only grow is supported. Only single-device filesystems are
 /// supported. The filesystem must not be mounted. The amount is
-/// parsed with [`parse_resize_amount`]; the `cancel` keyword is
+/// parsed with [`parse_resize_amount`]. The `cancel` keyword is
 /// rejected (there is no pending operation to cancel). A `devid:`
 /// prefix is accepted as long as it names the sole device.
 ///
@@ -176,7 +176,7 @@ fn run_offline(path: &Path, amount: &str, ctx: &RunContext) -> Result<()> {
         ResizeAmount::Max => {
             // For images and block devices, "max" means the full
             // backing size. For block devices we would need to
-            // query the partition size via ioctl; for regular
+            // query the partition size via ioctl. For regular
             // files we use the file length.
             if is_regular_file {
                 metadata.len()
@@ -271,7 +271,7 @@ fn run_offline(path: &Path, amount: &str, ctx: &RunContext) -> Result<()> {
     bpath.release();
 
     // Update the in-memory superblock. The commit step writes it
-    // back to all mirrors; the embedded dev_item is kept in sync so
+    // back to all mirrors. The embedded dev_item is kept in sync so
     // a subsequent mount sees consistent bootstrap values.
     fs.superblock.total_bytes = new_total_bytes;
     fs.superblock.dev_item.total_bytes = new_device_bytes;

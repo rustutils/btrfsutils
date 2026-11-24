@@ -1,7 +1,7 @@
 //! # Post-bootstrap transactions on a freshly-built mkfs image
 //!
 //! After [`mkfs::make_btrfs`](crate::mkfs::make_btrfs) finishes
-//! writing its bootstrap (Root / Extent / Chunk / Dev + superblock),
+//! writing its bootstrap (Root, Extent, Chunk, Dev, and the superblock),
 //! this module reopens the image with the transaction crate, starts
 //! a single transaction, and creates every always-present empty
 //! tree the bootstrap omits. The resulting filesystem is
@@ -11,38 +11,38 @@
 //! works whether the bootstrap or a previous post-bootstrap run
 //! created the tree):
 //!
-//! 1. Block-group tree (objectid 11) — when the
+//! 1. Block-group tree (objectid 11), when the
 //!    `BLOCK_GROUP_TREE` `compat_ro` flag is set. Migrates every
 //!    `BLOCK_GROUP_ITEM` from the extent tree to BGT via
 //!    [`btrfs_transaction::convert::create_block_group_tree`]. Must
 //!    come first so subsequent allocations route correctly.
-//! 2. FS tree (objectid 5) — empty subvolume shape: inode 256
-//!    with `INODE_ROOT_ITEM_INIT`, ".." `INODE_REF`, `ROOT_ITEM`
-//!    patched to mirror the inode plus a fsid-derived UUID and
-//!    ctime/otime.
-//! 3. Csum tree (objectid 7) — empty leaf.
-//! 4. Data-reloc tree (objectid -9) — same subvolume shape as the
+//! 2. FS tree (objectid 5): empty subvolume shape. Inode 256
+//!    with `INODE_ROOT_ITEM_INIT`, a ".." `INODE_REF`, and a
+//!    `ROOT_ITEM` patched to mirror the inode, with a fsid-derived
+//!    UUID, ctime, and otime.
+//! 3. Csum tree (objectid 7): empty leaf.
+//! 4. Data-reloc tree (objectid -9): same subvolume shape as the
 //!    FS tree, but without `INODE_ROOT_ITEM_INIT` or a UUID
 //!    (matches mkfs convention).
-//! 5. Quota tree (objectid 8) — when `-O quota` or `-O squota` is
-//!    set. STATUS + INFO + LIMIT items for the FS tree's qgroupid
+//! 5. Quota tree (objectid 8), when `-O quota` or `-O squota` is
+//!    set. STATUS, INFO, and LIMIT items for the FS tree's qgroupid
 //!    (0/5).
-//! 6. Free-space tree (objectid 10) — when the
+//! 6. Free-space tree (objectid 10), when the
 //!    `FREE_SPACE_TREE` `compat_ro` flag is set. Created empty,
-//!    then seeded with `FREE_SPACE_INFO` + `FREE_SPACE_EXTENT`
+//!    then seeded with `FREE_SPACE_INFO` and `FREE_SPACE_EXTENT`
 //!    items derived from the current extent-tree state via
 //!    [`btrfs_transaction::convert::seed_free_space_tree`].
-//! 7. UUID tree (objectid 9) — empty leaf. Kernel populates
-//!    entries lazily on snapshot/send.
+//! 7. UUID tree (objectid 9): empty leaf. The kernel populates
+//!    entries lazily on snapshot and send.
 //!
 //! Also exposes a `create_subvolume_shape` helper (used by the FS
 //! tree step here and by the rootdir walker for user `--subvol`
-//! trees) so the same allocate-leaf + populate-256 + ".." +
-//! `ROOT_ITEM` pattern doesn't get reimplemented.
+//! trees), so the pattern of allocating the leaf, populating inode 256,
+//! adding "..", and patching `ROOT_ITEM` lives in one place.
 //!
 //! ## Why a separate module
 //!
-//! mkfs's bootstrap (`tree.rs` + `treebuilder.rs` + raw `pwrite`)
+//! mkfs's bootstrap (`tree.rs`, `treebuilder.rs`, and raw `pwrite`)
 //! is GPL-2.0 territory and was written looking at btrfs-progs.
 //! This module is the bridge to the MIT/Apache-licensed transaction
 //! crate: it opens the bootstrap image, runs a transaction against
@@ -74,10 +74,10 @@ use uuid::Uuid;
 /// works end-to-end (transaction crate opens the image cleanly, the
 /// commit lands, and `btrfs check` passes).
 ///
-/// All seven RAID profiles are now supported. `BlockReader::write_block`
-/// routes per the chunk's profile via `ChunkTreeCache::plan_write`,
-/// which covers SINGLE / DUP / RAID0 / RAID1* / RAID10 directly and
-/// RAID5 / RAID6 via the parity-aware executor (`compute_p` /
+/// Every profile is supported. `BlockReader::write_block` routes by the
+/// chunk's profile through `ChunkTreeCache::plan_write`, which handles
+/// SINGLE, DUP, RAID0, the RAID1 variants, and RAID10 directly, and
+/// RAID5 and RAID6 through the parity-aware executor (`compute_p` and
 /// `compute_p_q` in the `disk` crate's `raid56` module).
 fn profile_supported(profile: Profile) -> bool {
     matches!(
@@ -97,7 +97,7 @@ fn profile_supported(profile: Profile) -> bool {
 /// Decide whether to run the post-bootstrap transaction for `cfg`.
 ///
 /// Returns `false` only if a profile lands outside the support matrix
-/// of [`profile_supported`] — currently impossible since every defined
+/// of [`profile_supported`]. That cannot happen today because every
 /// `Profile` variant is supported. Kept as a hook so future profiles
 /// (e.g. `raid-stripe-tree`) can be gated here without changing
 /// callers.
@@ -116,7 +116,7 @@ fn should_run(cfg: &MkfsConfig) -> bool {
 ///
 /// Opens the device(s), starts a transaction, applies the post-bootstrap
 /// additions, commits, and syncs. Returns `Ok(())` without doing anything
-/// for unsupported profile/feature combinations.
+/// for unsupported profile and feature combinations.
 ///
 /// # Errors
 ///
@@ -149,9 +149,9 @@ pub fn run(cfg: &MkfsConfig) -> Result<()> {
         run_transaction(&mut fs, cfg)?;
         fs.sync().context("post_bootstrap: fsync")?;
     } else {
-        // Multi-device: build {devid -> handle} keyed by each device's
-        // own superblock dev_item.devid (so a caller passing devices in
-        // a different order than mkfs assigned them still opens cleanly).
+        // Multi-device: map devid to handle, keyed by each device's own
+        // superblock dev_item.devid, so devices passed in a different
+        // order than mkfs assigned them still open cleanly.
         let mut handles: BTreeMap<u64, std::fs::File> = BTreeMap::new();
         for path in &paths {
             let mut file = OpenOptions::new()
@@ -214,7 +214,7 @@ pub fn run_transaction(
 ///   tree, csum tree, data-reloc tree)
 /// - the `make_btrfs_with_rootdir` path, where mkfs creates the FS,
 ///   csum, and data-reloc trees itself (because rootdir populates
-///   them with directory/extent/csum items at bootstrap time), so
+///   them with directory, extent, and csum items at bootstrap time), so
 ///   the create-if-missing calls are no-ops
 fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
     fs: &mut Filesystem<R>,
@@ -223,12 +223,12 @@ fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
 ) -> Result<()> {
     let now = cfg.now_secs();
 
-    // The block-group tree (objectid 11) MUST come first. mkfs's
-    // bootstrap (when post_bootstrap will run) leaves all
-    // BLOCK_GROUP_ITEM rows in the extent tree. Materialising BGT
-    // and migrating the items must happen before any other
-    // allocation in this transaction so subsequent BG-update calls
-    // route to BGT, not the extent tree.
+    // The block-group tree (objectid 11) must come first. When
+    // post_bootstrap will run, mkfs's bootstrap leaves all
+    // BLOCK_GROUP_ITEM rows in the extent tree. Creating BGT and
+    // migrating the items must happen before any other allocation in
+    // this transaction so later BG updates go to BGT, not the extent
+    // tree.
     if cfg.has_block_group_tree() {
         ensure_block_group_tree(fs, trans)?;
     }
@@ -236,11 +236,11 @@ fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
     // The FS tree (objectid 5) is the main user-visible tree:
     // subvolume root, root dir inode 256, dir entries, file inodes.
     // For the no-rootdir path it's just the empty subvolume shape
-    // (root dir + ".." INODE_REF).
+    // (root dir and ".." INODE_REF).
     ensure_fs_tree(fs, trans, now)?;
 
     // btrfs-progs creates the csum tree as an empty leaf at mkfs
-    // time. mkfs's no-rootdir path now defers that to here so the
+    // time. mkfs's no-rootdir path defers that to here so the
     // tree allocation, ROOT_ITEM, and METADATA_ITEM go through the
     // transaction crate. The rootdir path keeps creating it directly
     // because it has csum items to insert at bootstrap time.
@@ -248,13 +248,13 @@ fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
 
     // The data-reloc tree (objectid -9, equivalent unsigned
     // 0xFFFFFFFF_FFFFFFF7) holds inode 256's INODE_ITEM and a
-    // ".." INODE_REF self-reference, like an empty subvolume. mkfs's
-    // hand-built bootstrap built this tree itself; the no-rootdir path
-    // now defers it to here.
+    // ".." INODE_REF self-reference, like an empty subvolume. The
+    // no-rootdir path defers it to here instead of building it in the
+    // hand-built bootstrap.
     ensure_data_reloc_tree(fs, trans)?;
 
     // The quota tree (objectid 8) is created when `-O quota` or
-    // `-O squota` is set. Holds STATUS + INFO + LIMIT items for the
+    // `-O squota` is set. Holds STATUS, INFO, and LIMIT items for the
     // FS tree's qgroupid (0/5).
     if cfg.has_quota_tree() {
         ensure_quota_tree(fs, trans, cfg)?;
@@ -262,17 +262,17 @@ fn apply_in_transaction<R: std::io::Read + std::io::Write + std::io::Seek>(
 
     // The free-space tree (objectid 10) is created when the
     // `free-space-tree` feature is enabled (default). Created
-    // empty, then seeded with FREE_SPACE_INFO + FREE_SPACE_EXTENT
-    // items derived from the current extent tree state. Subsequent
-    // commit's update_free_space_tree pass will apply any deltas
-    // accumulated during this transaction.
+    // empty, then seeded with FREE_SPACE_INFO and FREE_SPACE_EXTENT
+    // items derived from the current extent tree state. The commit's
+    // update_free_space_tree pass applies any deltas accumulated
+    // during this transaction.
     if cfg.has_free_space_tree() {
         ensure_free_space_tree(fs, trans)?;
     }
 
-    // btrfs-progs creates a UUID tree by default; mkfs's hand-built
+    // btrfs-progs creates a UUID tree by default. mkfs's hand-built
     // bootstrap doesn't. The kernel populates entries lazily on
-    // snapshot/send.
+    // snapshot and send.
     ensure_empty_tree(fs, trans, u64::from(BTRFS_UUID_TREE_OBJECTID), "UUID")?;
 
     Ok(())
@@ -300,7 +300,7 @@ fn ensure_block_group_tree<
 }
 
 /// Idempotently create the free-space tree (objectid 10) and seed
-/// it with `FREE_SPACE_INFO` + `FREE_SPACE_EXTENT` items for every
+/// it with `FREE_SPACE_INFO` and `FREE_SPACE_EXTENT` items for every
 /// block group. Wraps
 /// [`btrfs_transaction::convert::seed_free_space_tree`], which is
 /// per-BG idempotent (so this can run after a partial seed without
@@ -358,8 +358,8 @@ fn ensure_fs_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
 /// a regular directory, and the `ROOT_ITEM` patch keeps `btrfs check`
 /// happy by mirroring the inode metadata into the root item.
 ///
-/// `now` is used as ctime/mtime/atime/otime for the inode and as
-/// ctime/otime in the `ROOT_ITEM`. `uuid` lands in `ROOT_ITEM.uuid`.
+/// `now` is used as ctime, mtime, atime, and otime for the inode and as
+/// ctime and otime in the `ROOT_ITEM`. `uuid` lands in `ROOT_ITEM.uuid`.
 ///
 /// # Errors
 ///
@@ -463,7 +463,7 @@ fn ensure_data_reloc_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
     //    nbytes = nodesize matches mkfs's directory inode convention:
     //    a directory's "data" lives in the tree leaf, which is one
     //    nodesize block. Mode = S_IFDIR | 0755. Timestamps start at
-    //    zero (`InodeArgs::new` default) — there's no meaningful
+    //    zero (`InodeArgs::new` default) because there's no meaningful
     //    creation time for the data-reloc tree's special root.
     let mut inode_args = InodeArgs::new(trans.transid, 0o040_755);
     inode_args.nbytes = u64::from(fs.nodesize);
@@ -496,12 +496,12 @@ fn ensure_data_reloc_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
 /// `ROOT_ITEM` and `INODE_ITEM` for subvolume-shaped trees.
 ///
 /// `uuid` overrides the `ROOT_ITEM`'s `uuid` field when `Some`. The FS
-/// tree uses a UUID derived from the filesystem fsid; the data-reloc
+/// tree uses a UUID derived from the filesystem fsid. The data-reloc
 /// tree leaves it nil.
 ///
 /// `time` overrides the `ROOT_ITEM`'s `ctime` and `otime` fields when
 /// `Some`. The FS tree sets these to `cfg.now_secs()` to match
-/// btrfs-progs's convention; the data-reloc tree leaves them zero.
+/// btrfs-progs's convention. The data-reloc tree leaves them zero.
 #[allow(clippy::too_many_arguments)]
 fn patch_root_item_subvol_dir<R>(
     fs: &mut Filesystem<R>,
@@ -567,7 +567,7 @@ where
 /// Insert a single `INODE_REF` item at
 /// `(child_ino, INODE_REF, parent_ino)` with the given index and name.
 /// Used directly (rather than via `link_dir_entry`) when the parent
-/// has no real `DIR_ITEM`/`DIR_INDEX` entries to add — e.g. the
+/// has no real `DIR_ITEM` or `DIR_INDEX` entries to add, such as the
 /// self-pointing ".." ref at the root of a subvolume-shaped tree.
 fn insert_inode_ref<R: std::io::Read + std::io::Write + std::io::Seek>(
     fs: &mut Filesystem<R>,
@@ -635,7 +635,7 @@ fn insert_raw_item<R: std::io::Read + std::io::Write + std::io::Seek>(
 /// qgroupid (0/5).
 ///
 /// Distinguishes between regular quota (`-O quota`, INCONSISTENT
-/// flag, zeroed info — kernel will rescan) and simple quota
+/// flag, zeroed info that the kernel will rescan) and simple quota
 /// (`-O squota`, `SIMPLE_MODE` flag, info pre-populated with the FS
 /// tree's nodesize usage and `enable_gen` set).
 fn ensure_quota_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
@@ -681,7 +681,7 @@ fn ensure_quota_tree<R: std::io::Read + std::io::Write + std::io::Seek>(
         "QGROUP_STATUS",
     )?;
 
-    // QGROUP_INFO at (0, INFO, 5) — for the FS tree.
+    // QGROUP_INFO at (0, INFO, 5) for the FS tree.
     let fs_tree_qgroupid = u64::from(btrfs_disk::raw::BTRFS_FS_TREE_OBJECTID);
     let info_data = if cfg.squota {
         crate::items::qgroup_info(

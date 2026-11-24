@@ -48,7 +48,7 @@ Options:
           Ignore case (used with --path-regex)
 
   -d, --find-dir
-          Find dir
+          Find the first directory and restore from it
 
   -l, --list-roots
           List tree roots

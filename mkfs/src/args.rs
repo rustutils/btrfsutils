@@ -27,7 +27,6 @@ const HEADING_ROOTDIR: &str = "Rootdir population";
 )]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Arguments {
-    // ── Block layout ────────────────────────────────────────────────
     /// Data block group profile.
     ///
     /// Valid values are raid0, raid1, raid1c3, raid1c4, raid5, raid6,
@@ -77,7 +76,6 @@ pub struct Arguments {
         help_heading = HEADING_LAYOUT)]
     pub byte_count: Option<SizeArg>,
 
-    // ── Features ────────────────────────────────────────────────────
     /// Checksum algorithm.
     ///
     /// Valid values are crc32c (default), xxhash, sha256, or blake2.
@@ -100,7 +98,6 @@ pub struct Arguments {
     )]
     pub features: Vec<FeatureArg>,
 
-    // ── Identity ────────────────────────────────────────────────────
     /// Filesystem label (maximum 255 bytes).
     #[arg(short = 'L', long = "label", value_name = "LABEL",
         help_heading = HEADING_IDENTITY)]
@@ -118,7 +115,6 @@ pub struct Arguments {
         help_heading = HEADING_IDENTITY)]
     pub device_uuid: Option<Uuid>,
 
-    // ── Rootdir population ──────────────────────────────────────────
     /// Copy files from a directory into the filesystem image.
     #[arg(short = 'r', long = "rootdir", value_name = "DIR",
         help_heading = HEADING_ROOTDIR)]
@@ -156,7 +152,6 @@ pub struct Arguments {
     #[arg(long, help_heading = HEADING_ROOTDIR)]
     pub shrink: bool,
 
-    // ── General options ─────────────────────────────────────────────
     /// Force overwrite of an existing filesystem.
     #[arg(short = 'f', long)]
     pub force: bool,
@@ -496,7 +491,7 @@ impl std::str::FromStr for SubvolArg {
                 "default" => SubvolType::Default,
                 "default-ro" => SubvolType::DefaultRo,
                 _ => {
-                    // Not a known type prefix — treat the whole string as a path.
+                    // Not a known type prefix: treat the whole string as a path.
                     return Ok(SubvolArg {
                         subvol_type: SubvolType::Rw,
                         path: PathBuf::from(s),

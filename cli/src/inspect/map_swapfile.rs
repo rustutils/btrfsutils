@@ -20,9 +20,9 @@ use std::{
 /// suitable as swapfile.
 ///
 /// All conditions of swapfile extents are verified if they could pass
-/// kernel tests. Use the value of resume offset for
-/// /sys/power/resume_offset, this depends on the page size that is
-/// detected on this system.
+/// kernel tests. Use the resume offset value for
+/// /sys/power/resume_offset. It depends on the page size detected on
+/// this system.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
 pub struct MapSwapfileCommand {

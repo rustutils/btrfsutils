@@ -10,13 +10,12 @@ type Filters = String;
 
 /// Balance chunks across the devices
 ///
-/// Balance and/or convert (change allocation profile of) chunks that
-/// passed all filters in a comma-separated list of filters for a
-/// particular chunk type.  If filter list is not given balance all
-/// chunks of that type.  In case none of the -d, -m or -s options is
-/// given balance all chunks in a filesystem. This is potentially
-/// long operation and the user is warned before this start, with
-/// a delay to stop it.
+/// Balance or convert (change the allocation profile of) chunks that pass
+/// all filters in a comma-separated filter list for a particular chunk
+/// type. If no filter list is given, balance all chunks of that type. If
+/// none of the -d, -m or -s options is given, balance all chunks in the
+/// filesystem. This can take a long time, so the user is warned before it
+/// starts and given a delay to stop it.
 #[derive(Parser, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct BalanceStartCommand {
@@ -91,7 +90,7 @@ impl Runnable for BalanceStartCommand {
         };
 
         if !has_filters {
-            // No type filters specified — relocate everything.
+            // No type filters specified: relocate everything.
             flags |= BalanceFlags::DATA
                 | BalanceFlags::METADATA
                 | BalanceFlags::SYSTEM;
@@ -136,7 +135,7 @@ impl Runnable for BalanceStartCommand {
             }
             Err(Errno::ECANCELED) => {
                 // The kernel sets ECANCELED when the balance was paused or
-                // cancelled mid-run; this is not an error from the user's
+                // cancelled mid-run. This is not an error from the user's
                 // perspective.
                 eprintln!("Balance was paused or cancelled by user.");
                 Ok(())

@@ -4,8 +4,10 @@ use btrfs_uapi::reflink;
 use clap::Parser;
 use std::{fs::OpenOptions, os::fd::AsFd, path::PathBuf};
 
-/// Toolbox for reflink operations: lightweight file copies that
-/// share data extents instead of copying bytes.
+/// Toolbox for reflink operations
+///
+/// Reflinks are lightweight file copies that share data extents instead
+/// of copying bytes.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
 #[clap(arg_required_else_help = true)]
@@ -27,10 +29,12 @@ pub enum ReflinkSubcommand {
     Clone(ReflinkCloneCommand),
 }
 
-/// Lightweight file copy: data extents are shared between source
-/// and target instead of physically copied. Subsequent modifications
-/// are copy-on-write, so reading from the clone is fast and storage
-/// is only consumed once until the files diverge.
+/// Clone a file, or byte ranges of it, without copying data
+///
+/// Data extents are shared between source and target instead of being
+/// copied. Later modifications are copy-on-write, so reading from the
+/// clone is fast and storage is only consumed once until the files
+/// diverge.
 ///
 /// With no -r flags, the entire source file is cloned to the target
 /// (which is created or truncated as needed). With one or more
@@ -40,16 +44,16 @@ pub enum ReflinkSubcommand {
 ///
 /// RANGESPEC has three parts: SRCOFF:LENGTH:DESTOFF, where SRCOFF
 /// is the byte offset in the source file, LENGTH is the number of
-/// bytes (0 = up to end-of-source), and DESTOFF is the byte offset
-/// in the target file. All three values accept the size suffix
-/// k/m/g/t/p/e (case-insensitive). Offsets and length must be
+/// bytes (0 means up to the end of the source), and DESTOFF is the byte
+/// offset in the target file. All three values accept the size suffixes
+/// k, m, g, t, p, and e (case-insensitive). Offsets and length must be
 /// block-aligned (typically 4 KiB) except when the source range
 /// reaches end-of-file.
 #[derive(Parser, Debug)]
 #[allow(clippy::doc_markdown)]
 pub struct ReflinkCloneCommand {
     /// Reflink only this range: SRCOFF:LENGTH:DESTOFF. May be
-    /// specified more than once; ranges are processed in order.
+    /// specified more than once. Ranges are processed in order.
     #[clap(short = 'r', long = "range", value_name = "RANGESPEC")]
     ranges: Vec<String>,
 
@@ -78,7 +82,7 @@ impl Runnable for ReflinkCloneCommand {
             .read(true)
             .write(true)
             .create(true)
-            // Truncate only when cloning the whole file; explicit
+            // Truncate only when cloning the whole file. Explicit
             // ranges target an existing layout and would lose data
             // if we truncated underneath them.
             .truncate(ranges.is_empty())

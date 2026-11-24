@@ -11,7 +11,7 @@ const HEADING_CONVERT: &str = "Format conversions";
 
 /// Modify btrfs filesystem parameters and features on an unmounted device.
 ///
-/// These commands work by by writing directly to the on-disk superblock
+/// These commands work by writing directly to the on-disk superblock
 /// and tree structures.
 ///
 /// Operations are grouped into feature flags, UUID changes, and seeding.
@@ -77,18 +77,21 @@ pub struct Arguments {
         help_heading = HEADING_SEEDING)]
     pub seeding: Option<bool>,
 
-    /// Convert the filesystem to use the free space tree (v2 cache).
+    /// Convert the filesystem to use the free space tree (v2 cache)
+    ///
     /// The filesystem must not already have the free-space-tree
     /// feature enabled, must not have a stale free space tree root,
     /// and must not have any v1 free-space-cache items present
-    /// (clear them with `btrfs rescue clear-space-cache` first).
+    /// (clear them with btrfs rescue clear-space-cache first).
     #[arg(long, help_heading = HEADING_CONVERT)]
     pub convert_to_free_space_tree: bool,
 
-    /// Convert the filesystem to use the block group tree. The
-    /// filesystem must not already have the block-group-tree feature
-    /// enabled and must already have the free-space-tree feature
-    /// enabled (the kernel requires FST for BGT). When combined with
+    /// Convert the filesystem to use the block group tree
+    ///
+    /// The filesystem must not already have the block-group-tree
+    /// feature enabled and must already have the free-space-tree
+    /// feature enabled (the kernel requires the free space tree for
+    /// the block group tree). When combined with
     /// --convert-to-free-space-tree, both conversions run in
     /// sequence.
     #[arg(long, help_heading = HEADING_CONVERT)]

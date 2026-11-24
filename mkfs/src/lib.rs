@@ -1,7 +1,7 @@
 //! # Filesystem creation for btrfs
 //!
 //! Creates a new btrfs filesystem on one or more block devices or image
-//! files. Does not call any ioctls; uses raw `pwrite` for the bootstrap
+//! files. Does not call any ioctls. Uses raw `pwrite` for the bootstrap
 //! and the `btrfs-transaction` crate's commit pipeline for everything
 //! else.
 //!
@@ -14,34 +14,34 @@
 //!
 //! Creation runs in three phases:
 //!
-//! 1. **Bootstrap** — write the four always-present trees (Root,
-//!    Extent, Chunk, Dev) plus the superblock to disk via raw
-//!    `pwrite`. Uses [`tree::LeafBuilder`] / [`treebuilder::TreeBuilder`]
+//! 1. **Bootstrap**: write the four always-present trees (Root,
+//!    Extent, Chunk, Dev) and the superblock to disk with raw
+//!    `pwrite`. Uses [`tree::LeafBuilder`] and [`treebuilder::TreeBuilder`]
 //!    to construct in-memory leaves, [`layout::ChunkLayout`] to
 //!    decide chunk geometry, and [`layout::BlockLayout`] to assign
 //!    static addresses for the bootstrap blocks. The result is the
 //!    minimum on-disk state that the transaction crate's
 //!    `Filesystem::open` will accept.
 //!
-//! 2. **Post-bootstrap** ([`post_bootstrap`]) — reopen the bootstrap
+//! 2. **Post-bootstrap** ([`post_bootstrap`]): reopen the bootstrap
 //!    image with [`btrfs_transaction::Filesystem`], start a
 //!    transaction, and create the always-present empty trees the
 //!    bootstrap omits: block-group tree (when enabled), FS tree
-//!    (with inode 256 + ".." `INODE_REF` + `ROOT_ITEM` patches),
+//!    (with inode 256, the ".." `INODE_REF`, and `ROOT_ITEM` patches),
 //!    csum tree, data-reloc tree, quota tree (when enabled),
-//!    free-space tree (when enabled), UUID tree. Commit + sync.
+//!    free-space tree (when enabled), UUID tree. Commit and sync.
 //!
-//! 3. **Rootdir population** ([`rootdir::walk_to_transaction`]) —
+//! 3. **Rootdir population** ([`rootdir::walk_to_transaction`]):
 //!    only for `--rootdir`. Reopen the freshly-built empty
 //!    filesystem, start a transaction, walk the source directory
-//!    depth-first, and emit `INODE_ITEM` / `DIR_ITEM` / `DIR_INDEX`
-//!    / `INODE_REF` / `XATTR_ITEM` / inline-or-regular `EXTENT_DATA`
-//!    records via the transaction crate's high-level helpers. Handles
+//!    depth-first, and emit `INODE_ITEM`, `DIR_ITEM`, `DIR_INDEX`,
+//!    `INODE_REF`, `XATTR_ITEM`, and inline or regular `EXTENT_DATA`
+//!    records through the transaction crate's high-level helpers. Handles
 //!    `--subvol`, `--reflink` (FICLONERANGE), `--shrink`, and
-//!    `--inode-flags`. Commit + sync.
+//!    `--inode-flags`. Commit and sync.
 //!
-//! Phase 1 is the only piece that still hand-builds tree blocks;
-//! migrating it would require a `Filesystem::create` primitive in
+//! Phase 1 is the only piece that still hand-builds tree blocks.
+//! Migrating it would require a `Filesystem::create` primitive in
 //! the transaction crate. Phases 2 and 3 are the steady-state
 //! shape: every modification goes through the same `Transaction`
 //! pipeline as the rest of the codebase.
@@ -56,7 +56,7 @@
 //! - Free-space-tree and block-group-tree feature flags
 //! - Device validation (mounted check, existing FS detection, TRIM)
 //! - `--rootdir` with subvolumes, reflink, shrink, inode flags, and
-//!   zlib / zstd / LZO compression
+//!   zlib, zstd, or LZO compression
 
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]

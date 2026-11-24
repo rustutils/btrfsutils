@@ -258,8 +258,8 @@ fn print_usage(
         format!("failed to get space info for '{}'", path.display())
     })?;
 
-    // Per-device chunk allocations from the chunk tree.  This requires
-    // CAP_SYS_ADMIN; if it fails we degrade gracefully and note it below.
+    // Per-device chunk allocations from the chunk tree. This requires
+    // CAP_SYS_ADMIN. If it fails we degrade gracefully and note it below.
     let chunk_allocs = device_chunk_allocations(fd).ok();
 
     // Map devid -> path for display.
@@ -335,7 +335,7 @@ fn print_usage(
         );
 
         // Per-device lines: one row per device that holds stripes for this
-        // exact profile.  Sorted by devid for stable output.
+        // exact profile. Sorted by devid for stable output.
         if let Some(allocs) = &chunk_allocs {
             let mut profile_allocs: Vec<_> =
                 allocs.iter().filter(|a| a.flags == s.flags).collect();
@@ -359,8 +359,6 @@ fn print_usage(
 
     Ok(())
 }
-
-// -- Modern output -----------------------------------------------------------
 
 #[derive(Cols)]
 struct OverallRow {

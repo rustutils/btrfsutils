@@ -51,7 +51,7 @@ impl Runnable for QuotaRescanCommand {
         }
 
         if self.wait_norescan {
-            // Just wait — do not start a new rescan.
+            // Only wait. Do not start a new rescan.
             btrfs_uapi::quota::quota_rescan_wait(fd).with_context(|| {
                 format!(
                     "failed to wait for quota rescan on '{}'",
@@ -61,14 +61,14 @@ impl Runnable for QuotaRescanCommand {
             return Ok(());
         }
 
-        // Start the rescan.  If one is already running and the caller asked to
+        // Start the rescan. If one is already running and the caller asked to
         // wait, treat EINPROGRESS as a non-error and proceed to the wait step.
         match btrfs_uapi::quota::quota_rescan(fd) {
             Ok(()) => {
                 println!("quota rescan started");
             }
             Err(Errno::EINPROGRESS) if self.wait => {
-                // Already running; we'll still wait below.
+                // Already running. We still wait below.
             }
             Err(e) => {
                 return Err(e).with_context(|| {

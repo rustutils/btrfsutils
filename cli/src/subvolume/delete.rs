@@ -16,10 +16,10 @@ use std::{ffi::CString, fs::File, os::unix::io::AsFd, path::PathBuf};
 /// corresponding directory is removed instantly but the data blocks are
 /// removed later.
 ///
-/// The deletion does not involve full commit by default due to performance
-/// reasons (as a consequence, the subvolume may appear again after a crash).
-/// Use one of the --commit options to wait until the operation is safely
-/// stored on the media.
+/// By default the deletion does not wait for a full commit, for performance
+/// reasons. As a consequence, the subvolume may reappear after a crash. Use
+/// one of the --commit options to wait until the operation is safely stored
+/// on the media.
 #[derive(Parser, Debug)]
 pub struct SubvolumeDeleteCommand {
     /// Wait for transaction commit at the end of the operation
@@ -266,7 +266,7 @@ impl SubvolumeDeleteCommand {
     }
 }
 
-/// Initiate a sync and wait for it to complete (`start_sync` + `wait_sync`).
+/// Initiate a sync and wait for it to complete (`start_sync`, then `wait_sync`).
 fn wait_for_commit(fd: std::os::unix::io::BorrowedFd) -> Result<()> {
     let transid = start_sync(fd).context("start_sync failed")?;
     wait_sync(fd, transid).context("wait_sync failed")?;

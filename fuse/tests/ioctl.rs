@@ -1,10 +1,10 @@
 //! End-to-end ioctl tests against a mounted FUSE driver.
 //!
 //! Each test mounts the fixture image, opens the mountpoint, issues
-//! a btrfs ioctl via raw `libc::ioctl`, and asserts the response
-//! parses the way it should. Verifies the FUSE_IOCTL plumbing
-//! end-to-end: kernel → fuser → BtrfsFuse → ioctl::dispatch →
-//! Filesystem → response back through the same path.
+//! a btrfs ioctl via raw `libc::ioctl`, and checks that the response
+//! parses correctly. This covers the FUSE_IOCTL plumbing end to end:
+//! kernel → fuser → BtrfsFuse → ioctl::dispatch → Filesystem, and the
+//! response back through the same path.
 //!
 //! F6.1 covers `BTRFS_IOC_FS_INFO`, `BTRFS_IOC_GET_FEATURES`, and
 //! `BTRFS_IOC_GET_SUBVOL_INFO`. F6.2 will add the variable-size
@@ -16,7 +16,7 @@ use bytes::Buf;
 use common::MountedFuse;
 use std::{fs::File, os::fd::AsRawFd};
 
-// ── ioctl number encoding (kept in sync with src/ioctl.rs) ────────
+// ioctl number encoding, kept in sync with src/ioctl.rs.
 
 const fn ioc_ior(magic: u8, nr: u8, size: u32) -> u32 {
     (2u32 << 30) | ((magic as u32) << 8) | (nr as u32) | (size << 16)
@@ -44,8 +44,8 @@ unsafe fn run_read_ioctl<P: AsRef<std::path::Path>>(
 ) -> std::io::Result<Vec<u8>> {
     let f = File::open(path)?;
     let mut buf = vec![0u8; out_size];
-    // SAFETY: `cmd` is a valid btrfs ioctl number; `buf` has the
-    // exact size encoded in `cmd`; FUSE forwards the buffer through
+    // SAFETY: `cmd` is a valid btrfs ioctl number, `buf` has the
+    // exact size encoded in `cmd`, and FUSE forwards the buffer
     // unchanged for unrestricted ioctls.
     let rc = unsafe {
         libc::ioctl(
@@ -59,8 +59,6 @@ unsafe fn run_read_ioctl<P: AsRef<std::path::Path>>(
     }
     Ok(buf)
 }
-
-// ── BTRFS_IOC_FS_INFO ─────────────────────────────────────────────
 
 #[test]
 fn ioctl_fs_info_returns_superblock_geometry() {
@@ -81,12 +79,10 @@ fn ioctl_fs_info_returns_superblock_geometry() {
     assert_eq!(max_id, 1);
     assert_eq!(sectorsize, 4096);
     assert_eq!(clone_alignment, 4096);
-    // Default mkfs.btrfs nodesize for our fixture sizes is 16 KiB.
+    // The default mkfs.btrfs nodesize for this fixture size is 16 KiB.
     assert_eq!(nodesize, 16_384);
     assert_ne!(fsid, [0u8; 16], "fsid should be populated");
 }
-
-// ── BTRFS_IOC_GET_FEATURES ────────────────────────────────────────
 
 #[test]
 fn ioctl_get_features_returns_three_flag_words() {
@@ -100,13 +96,11 @@ fn ioctl_get_features_returns_three_flag_words() {
 
     // mkfs.btrfs by default sets several incompat flags:
     //   MIXED_BACKREF (0x1), EXTENDED_IREF (0x40), SKINNY_METADATA (0x100),
-    //   NO_HOLES (0x200) — at minimum.
+    //   NO_HOLES (0x200), at minimum.
     assert_ne!(incompat, 0, "expected non-zero incompat flags");
     assert_eq!(compat, 0, "no compat flags set by default mkfs");
-    let _ = compat_ro; // can be set (FREE_SPACE_TREE etc.) — don't pin
+    let _ = compat_ro; // may be set (FREE_SPACE_TREE etc.), don't pin
 }
-
-// ── BTRFS_IOC_GET_SUBVOL_INFO ─────────────────────────────────────
 
 #[test]
 fn ioctl_get_subvol_info_for_default_subvol() {
@@ -132,12 +126,10 @@ fn ioctl_get_subvol_info_for_default_subvol() {
     assert_eq!(flags & 1, 0, "default subvol is not read-only");
 }
 
-// ── BTRFS_IOC_TREE_SEARCH ─────────────────────────────────────────
-
 /// `BTRFS_IOC_TREE_SEARCH` (v1, 4096-byte fixed): walk the root
-/// tree (id 1) for `ROOT_ITEM` keys and check that we get back the
-/// expected number of subvolumes from a multi-subvol fixture
-/// (default FS_TREE id 5 + 3 user subvols).
+/// tree (id 1) for `ROOT_ITEM` keys and check that the expected
+/// number of subvolumes comes back from a multi-subvol fixture
+/// (default FS_TREE id 5 and 3 user subvols).
 #[test]
 fn ioctl_tree_search_root_items_in_root_tree() {
     let m = MountedFuse::mount_with(
@@ -146,7 +138,7 @@ fn ioctl_tree_search_root_items_in_root_tree() {
         "at_root.txt",
     );
 
-    // Build a 4096-byte input: search_key (104) + buf (3992 zeros).
+    // Build a 4096-byte input: search_key (104) and buf (3992 zeros).
     // tree_id = 1 (BTRFS_ROOT_TREE_OBJECTID),
     // type range = ROOT_ITEM_KEY (132) only,
     // objectid range = 0..u64::MAX, offset range = 0..u64::MAX,
@@ -169,21 +161,21 @@ fn ioctl_tree_search_root_items_in_root_tree() {
 
     // Read nr_items from the response key (offset 64..68).
     let nr_items = u32::from_le_bytes(buf[64..68].try_into().unwrap()) as usize;
-    // Default FS_TREE (5) + 3 user subvolumes (sub plus internal
+    // Default FS_TREE (5) and 3 user subvolumes (sub, plus internal
     // tombstones for system trees can also produce ROOT_ITEM
-    // entries depending on mkfs). Just assert ≥ 2 — the default
-    // and at least the `sub` subvol should both appear.
+    // entries depending on mkfs). Only assert ≥ 2: the default and
+    // at least the `sub` subvol should both appear.
     assert!(
         nr_items >= 2,
         "expected ≥ 2 ROOT_ITEM entries, got {nr_items}",
     );
 
-    // Parse the items: each is 32-byte header + payload. The kernel
-    // (and our impl) treats `(objectid, type, offset)` as a single
-    // compound key — items whose type falls outside the range CAN
-    // be returned when their compound key is between min and max.
-    // Callers filter by type themselves; the test does too.
-    let mut cursor = 104; // key prefix is 104 bytes; buf starts here for v1
+    // Parse the items: each is a 32-byte header and a payload. The
+    // kernel (and this driver) treats `(objectid, type, offset)` as a
+    // single compound key, so items whose type is outside the range
+    // can be returned when their compound key is between min and max.
+    // Callers filter by type themselves, and so does the test.
+    let mut cursor = 104; // key prefix is 104 bytes, v1 buf starts here
     let mut found_fs_tree_root_item = false;
     for _ in 0..nr_items {
         if cursor + 32 > buf.len() {
@@ -209,16 +201,13 @@ fn ioctl_tree_search_root_items_in_root_tree() {
     );
 }
 
-// ── CLI-driven end-to-end ─────────────────────────────────────────
-
-/// `btrfs subvolume show` against our fuse mount issues
-/// `BTRFS_IOC_GET_SUBVOL_INFO` and prints the response. If our
-/// ioctl plumbing is right end-to-end, the upstream-compatible
-/// output should appear without errors. Skips gracefully when the
-/// `btrfs` binary isn't built (it lives in another workspace
-/// package, so cargo doesn't set `CARGO_BIN_EXE_btrfs` for the
-/// fuse test target — we look for it in the same target dir as the
-/// fuse binary).
+/// `btrfs subvolume show` on the fuse mount issues
+/// `BTRFS_IOC_GET_SUBVOL_INFO` and prints the response. If the ioctl
+/// plumbing is right end to end, the upstream-compatible output
+/// appears without errors. Skips when the `btrfs` binary isn't built.
+/// It lives in another workspace package, so cargo doesn't set
+/// `CARGO_BIN_EXE_btrfs` for the fuse test target. The test looks for
+/// it in the same target dir as the fuse binary.
 #[test]
 fn our_btrfs_cli_subvolume_show_against_fuse_mount() {
     let fuse_bin = std::path::Path::new(env!("CARGO_BIN_EXE_btrfs-fuse"));
@@ -246,7 +235,7 @@ fn our_btrfs_cli_subvolume_show_against_fuse_mount() {
         String::from_utf8_lossy(&output.stderr),
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Spot-check the key fields. Order/format mirrors btrfs-progs.
+    // Spot-check the key fields. Order and format match btrfs-progs.
     assert!(stdout.contains("Subvolume ID:"), "stdout: {stdout}");
     assert!(stdout.contains("UUID:"), "stdout: {stdout}");
     assert!(stdout.contains("Generation:"), "stdout: {stdout}");
@@ -258,7 +247,7 @@ fn our_btrfs_cli_subvolume_show_against_fuse_mount() {
     );
 }
 
-/// `btrfs subvolume list` against our fuse mount issues
+/// `btrfs subvolume list` on the fuse mount issues
 /// `BTRFS_IOC_TREE_SEARCH` (v1) on the root tree. The output should
 /// list the user subvolumes of the multi-subvol fixture.
 #[test]
@@ -291,9 +280,8 @@ fn our_btrfs_cli_subvolume_list_against_fuse_mount() {
         String::from_utf8_lossy(&output.stderr),
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // Multi-subvol fixture contains a `sub` subvolume — the CLI's
-    // output format mirrors btrfs-progs and should mention it
-    // somewhere.
+    // The multi-subvol fixture contains a `sub` subvolume, and the
+    // CLI output (same format as btrfs-progs) should mention it.
     assert!(
         stdout.contains("sub"),
         "expected `sub` in subvolume list output:\n{stdout}",
@@ -303,8 +291,8 @@ fn our_btrfs_cli_subvolume_list_against_fuse_mount() {
 /// `btrfs inspect-internal rootid` calls
 /// `lookup_path_rootid(fd)` which issues `BTRFS_IOC_INO_LOOKUP` with
 /// `objectid = BTRFS_FIRST_FREE_OBJECTID` to discover the
-/// subvolume id of the file's containing tree. Exercises our
-/// INO_LOOKUP plumbing end-to-end through real CLI consumer code.
+/// subvolume id of the file's containing tree. Exercises the
+/// INO_LOOKUP plumbing end to end through real CLI code.
 #[test]
 fn our_btrfs_cli_inspect_rootid_against_fuse_mount() {
     let fuse_bin = std::path::Path::new(env!("CARGO_BIN_EXE_btrfs-fuse"));
@@ -338,9 +326,7 @@ fn our_btrfs_cli_inspect_rootid_against_fuse_mount() {
     );
 }
 
-// ── BTRFS_IOC_DEV_INFO ────────────────────────────────────────────
-
-/// `unsafe` wrapper for `_IOWR` ioctls: pre-fills `buf` with the
+/// `unsafe` wrapper for `_IOWR` ioctls: fills `buf` with the
 /// caller's input bytes and reads the response back from the same
 /// buffer.
 unsafe fn run_iowr_ioctl<P: AsRef<std::path::Path>>(
@@ -393,8 +379,6 @@ fn ioctl_dev_info_unknown_devid_returns_enodev() {
     assert_eq!(err.raw_os_error(), Some(libc::ENODEV));
 }
 
-// ── BTRFS_IOC_INO_LOOKUP ──────────────────────────────────────────
-
 #[test]
 fn ioctl_ino_lookup_subvol_root_returns_empty_path() {
     let m = MountedFuse::mount();
@@ -414,11 +398,9 @@ fn ioctl_ino_lookup_subvol_root_returns_empty_path() {
     assert_eq!(buf[16], 0, "subvol root should produce empty path");
 }
 
-// ── BTRFS_IOC_GET_SUBVOL_ROOTREF ──────────────────────────────────
-
 #[test]
 fn ioctl_get_subvol_rootref_lists_child_subvolumes() {
-    // Multi-subvol fixture: FS_TREE (5) is parent of one subvolume
+    // Multi-subvol fixture: FS_TREE (5) is the parent of one subvolume
     // named `sub`. From the mount root the ioctl should report exactly
     // one rootref entry pointing at it.
     let m = MountedFuse::mount_with(
@@ -452,18 +434,16 @@ fn ioctl_get_subvol_rootref_lists_child_subvolumes() {
     input[0] = 0;
 }
 
-// ── tree_search_v2 → tree_search_auto fallback ────────────────────
-
-/// End-to-end coverage for the F6.4 fallback path: our FUSE driver
+/// End-to-end coverage for the F6.4 fallback path. The FUSE driver
 /// can't serve `BTRFS_IOC_TREE_SEARCH_V2` (the kernel rejects the
-/// `FUSE_IOCTL_RETRY` round-trip needed for it), so the driver
-/// signals that with `ENOPROTOOPT` and `tree_search_auto` in the
-/// uapi crate transparently re-runs the search through v1.
+/// `FUSE_IOCTL_RETRY` round trip it needs), so the driver returns
+/// `ENOPROTOOPT` and `tree_search_auto` in the uapi crate re-runs
+/// the search through v1.
 ///
 /// Three assertions in one test:
 ///
 /// 1. `tree_search_v2` directly → `Err(ENOPROTOOPT)`. Confirms the
-///    FUSE driver returns the agreed-upon signal.
+///    FUSE driver returns the expected signal.
 /// 2. `tree_search_auto` → `Ok` with results. Confirms the
 ///    fallback fires and runs to completion through v1.
 /// 3. Items from `tree_search_auto` match items from a direct v1
@@ -475,8 +455,8 @@ fn tree_search_auto_falls_back_to_v1_on_fuse_mount() {
     };
     use std::os::fd::AsFd;
 
-    // ROOT_ITEM_KEY is the natural test target — a handful per
-    // multi-subvol fixture, fits comfortably in v1's 4 KiB buffer.
+    // ROOT_ITEM_KEY is a good target: the multi-subvol fixture has
+    // a handful, which fit easily in v1's 4 KiB buffer.
     let m = MountedFuse::mount_with(
         common::multi_subvol_fixture_path(),
         &[],
@@ -500,7 +480,7 @@ fn tree_search_auto_falls_back_to_v1_on_fuse_mount() {
         max_transid: u64::MAX,
     };
 
-    // 1) v2 directly: must surface ENOPROTOOPT from our driver.
+    // 1) v2 directly: the driver must return ENOPROTOOPT.
     let v2_err = tree_search_v2(f.as_fd(), filter.clone(), None, |_, _| Ok(()))
         .expect_err("tree_search_v2 must fail on a FUSE mount");
     assert_eq!(
@@ -509,7 +489,7 @@ fn tree_search_auto_falls_back_to_v1_on_fuse_mount() {
         "FUSE driver should signal ENOPROTOOPT for v2",
     );
 
-    // 2) auto: must succeed via fallback to v1.
+    // 2) auto: must succeed by falling back to v1.
     let mut auto_items: Vec<(u64, u32, u64)> = Vec::new();
     tree_search_auto(f.as_fd(), filter.clone(), None, |hdr, _data| {
         auto_items.push((hdr.objectid, hdr.item_type, hdr.offset));
@@ -533,8 +513,6 @@ fn tree_search_auto_falls_back_to_v1_on_fuse_mount() {
         "auto fallback should yield identical items to direct v1",
     );
 }
-
-// ── unknown ioctl error ───────────────────────────────────────────
 
 #[test]
 fn unknown_ioctl_returns_enotty() {

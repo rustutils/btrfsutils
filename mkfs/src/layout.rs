@@ -59,7 +59,7 @@ impl TreeId {
     /// the base trees when present in mkfs's bootstrap. The
     /// post-bootstrap-creatable trees are "optional" only in the
     /// sense that mkfs may skip them when post-bootstrap will run and
-    /// create them instead — the final filesystem always has all of
+    /// create them instead. The final filesystem always has all of
     /// them.
     pub const ALL: [TreeId; 4] =
         [TreeId::Root, TreeId::Extent, TreeId::Chunk, TreeId::Dev];
@@ -161,10 +161,10 @@ impl BlockLayout {
     /// tree, data-reloc tree, quota tree).
     ///
     /// `has_fs_tree`, `has_csum_tree`, and `has_data_reloc_tree`
-    /// reflect whether mkfs's bootstrap creates these (always true
-    /// today for unsupported-by-post-bootstrap profiles like
-    /// RAID5/RAID6 and for the rootdir path; false when post-bootstrap
-    /// will create them instead).
+    /// reflect whether mkfs's bootstrap creates these. They are true
+    /// for profiles post-bootstrap does not support (RAID5, RAID6) and
+    /// for the rootdir path, and false when post-bootstrap creates the
+    /// trees instead.
     // Six booleans is more than clippy::fn_params_excessive_bools
     // would like, but each bool has a clear meaning and call sites
     // (in `make_btrfs` and `build_extent_tree`) read naturally.
@@ -202,7 +202,7 @@ impl BlockLayout {
     }
 }
 
-/// 64 KiB -- default stripe length for btrfs chunks.
+/// Default stripe length for btrfs chunks (64 KiB).
 /// From kernel-shared/volumes.h: `BTRFS_STRIPE_LEN`
 pub const STRIPE_LEN: u64 = 64 * 1024;
 
@@ -522,7 +522,7 @@ impl ChunkLayout {
     /// Returns `(devid, physical_offset)` pairs.
     /// System chunk: always device 1, logical == physical.
     /// Mirror profiles: one pair per stripe (all get identical data).
-    /// RAID0/RAID5/RAID6: one pair (the single data stripe owning that offset).
+    /// RAID0, RAID5, RAID6: one pair (the single data stripe owning that offset).
     /// RAID10: two pairs (the mirror pair for that stripe group).
     ///
     /// # Panics
@@ -711,7 +711,7 @@ mod tests {
         assert_eq!(layout.block_addr(TreeId::Chunk), SYSTEM_GROUP_OFFSET);
 
         // The 3 always-present trees are sequential in the metadata
-        // chunk. Fs, Csum, and DataReloc are now optional and live in
+        // chunk. Fs, Csum, and DataReloc are optional and live in
         // the optional slot region after them.
         assert_eq!(layout.block_addr(TreeId::Root), meta_logical);
         assert_eq!(layout.block_addr(TreeId::Extent), meta_logical + 16384);

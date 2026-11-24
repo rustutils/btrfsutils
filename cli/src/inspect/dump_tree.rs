@@ -14,7 +14,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 /// Reads raw btrfs tree blocks from a block device or filesystem image and
 /// prints their contents in a human-readable format. By default all trees
 /// are printed. Use -t to select a specific tree, -b to print a specific
-/// block, or -e/-d/-u to print subsets.
+/// block, or -e, -d, or -u to print subsets.
 #[derive(Parser, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct DumpTreeCommand {
@@ -139,7 +139,7 @@ impl Runnable for DumpTreeCommand {
             return Ok(());
         }
 
-        // --roots / --backups: print short root info
+        // --roots and --backups: print short root info
         if self.roots || self.backups {
             print_roots(sb, tree_roots);
             if self.backups {

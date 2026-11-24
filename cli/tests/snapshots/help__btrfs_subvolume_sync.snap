@@ -2,11 +2,10 @@
 source: cli/tests/help.rs
 expression: text
 ---
-Wait until given subvolume(s) are completely removed from the filesystem
+Wait until given subvolumes are completely removed from the filesystem
 
-Wait until given subvolume(s) are completely removed from the filesystem after
-deletion. If no subvolume id is given, wait until all current deletion requests
-are completed, but do not wait for subvolumes deleted meanwhile. The status of
+If no subvolume id is given, wait until all current deletion requests are
+completed, but do not wait for subvolumes deleted in the meantime. The status of
 subvolume ids is checked periodically.
 
 Usage: sync [OPTIONS] <PATH> [SUBVOLIDS]...

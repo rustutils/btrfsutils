@@ -11,7 +11,7 @@ Usage: set-default <SUBVOL_OR_ID> [PATH]
 
 Arguments:
   <SUBVOL_OR_ID>
-          Subvolume path OR numeric subvolume ID
+          Subvolume path or numeric subvolume ID
 
   [PATH]
           Filesystem mount point (required when first arg is a numeric ID)

@@ -16,8 +16,8 @@ impl Runnable for BalanceResumeCommand {
     fn run(&self, _ctx: &RunContext) -> Result<()> {
         let file = open_path(&self.path)?;
 
-        // Resume is just a balance start with the RESUME flag and no type
-        // filters; the kernel picks up where it left off.
+        // Resume is a balance start with the RESUME flag and no type
+        // filters. The kernel picks up where it left off.
         match balance(file.as_fd(), BalanceFlags::RESUME, None, None, None) {
             Ok(progress) => {
                 println!(

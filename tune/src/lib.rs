@@ -10,7 +10,7 @@
 //! - **Legacy feature flags** (`-r`, `-x`, `-n`): enable `extref`,
 //!   `skinny-metadata`, or `no-holes`. These features are now defaults on
 //!   new filesystems but may be absent on older ones.
-//! - **Seeding** (`-S 0`/`-S 1`): mark or unmark a filesystem as a seed
+//! - **Seeding** (`-S 0` or `-S 1`): mark or unmark a filesystem as a seed
 //!   device for sprouted filesystems.
 //! - **Metadata UUID** (`-m`, `-M UUID`): change the user-visible fsid via
 //!   the lightweight `metadata_uuid` mechanism (superblock-only, no tree walk).
@@ -48,7 +48,7 @@
 
 /// Argument parsing for the `btrfs-tune` binary.
 pub mod args;
-/// Entry point logic, callable from both standalone binary and CLI subcommand.
+/// Entry point logic, callable from both the standalone binary and the CLI subcommand.
 pub mod run;
-/// Core tuning operations: feature flags, seeding, UUID changes.
+/// Core tuning operations: feature flags, seeding, and UUID changes.
 pub mod tune;

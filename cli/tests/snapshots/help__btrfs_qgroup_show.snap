@@ -29,9 +29,8 @@ this limit fail with EDQUOT. Shows "none" if no limit is set.
 max_excl: the configured limit on exclusive bytes. Shows "none" if no limit is
 set.
 
-In --format modern, the qgroup hierarchy is shown as a tree: higher- level
-qgroups appear as parents with their member qgroups nested below using tree
-connectors.
+With --format modern, the qgroup hierarchy is shown as a tree. Higher-level
+qgroups appear as parents, with their member qgroups nested below them.
 
 Usage: show [OPTIONS] <PATH>
 

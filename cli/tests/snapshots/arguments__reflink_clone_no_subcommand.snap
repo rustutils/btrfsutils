@@ -2,5 +2,4 @@
 source: cli/tests/arguments.rs
 expression: "parse_err(&[\"btrfs\", \"reflink\"])"
 ---
-Toolbox for reflink operations: lightweight file copies that share data extents instead of copying
-bytes
+Toolbox for reflink operations

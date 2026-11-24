@@ -164,7 +164,7 @@ pub fn update_seeding_flag(
 /// Three cases are handled:
 /// 1. First change: copy current fsid to `metadata_uuid`, set new fsid,
 ///    enable `METADATA_UUID` incompat flag.
-/// 2. Already changed, new fsid differs from `metadata_uuid`: just update fsid.
+/// 2. Already changed, new fsid differs from `metadata_uuid`: update fsid only.
 /// 3. Already changed, new fsid equals `metadata_uuid`: restore original state
 ///    by clearing the `METADATA_UUID` flag and zeroing `metadata_uuid`.
 ///
@@ -223,7 +223,7 @@ pub fn set_metadata_uuid(
         write_u64(&mut buf, incompat_off, incompat_flags & !metadata_uuid_flag);
         write_uuid(&mut buf, metadata_uuid_off, Uuid::nil());
     } else if fsid_changed {
-        // Already has METADATA_UUID set, just change the visible fsid.
+        // METADATA_UUID is already set: only change the visible fsid.
         write_uuid(&mut buf, fsid_off, new_fsid);
     } else {
         // First time: save the original fsid as metadata_uuid.
@@ -261,7 +261,7 @@ pub fn set_metadata_uuid(
 /// # Errors
 ///
 /// Returns an error if the filesystem cannot be opened, the extent tree root
-/// is missing, or any block read/write fails.
+/// is missing, or any block read or write fails.
 #[allow(clippy::too_many_lines)] // fsid rewrite is a single logical operation
 pub fn change_uuid<R: Read + Write + Seek>(
     file: R,
@@ -397,7 +397,7 @@ pub fn change_uuid<R: Read + Write + Seek>(
 }
 
 /// Read the superblock, validate it, apply a mutation, and write it back
-/// to all mirrors. Returns the buffer so callers can inspect it after.
+/// to all mirrors. Returns the buffer so callers can inspect it afterwards.
 fn read_validate_mutate_write(
     file: &mut (impl Read + Write + Seek),
     f: impl FnOnce(&mut [u8; 4096]),

@@ -2,12 +2,11 @@
 //!
 //! Each test spawns the `btrfs-fuse` binary against a fixture image
 //! and exercises the mounted filesystem through ordinary POSIX calls
-//! (`std::fs`, `xattr` crate). Behaviour is verified at the FUSE
-//! protocol boundary, which is what `fs/tests/basic.rs` cannot reach
-//! — inode translation (FUSE root = 1 ⇄ btrfs root dir = 256),
-//! `Stat` → `FileAttr` mapping, the deferred-reply / spawn-task
-//! pattern, and the kernel ↔ fuser ↔ `Filesystem` ↔ `BlockReader`
-//! round-trip.
+//! (`std::fs`, `xattr` crate). This checks behaviour at the FUSE
+//! protocol boundary, which `fs/tests/basic.rs` cannot reach: inode
+//! translation (FUSE root = 1 ⇄ btrfs root dir = 256), `Stat` →
+//! `FileAttr` mapping, the spawn-a-task deferred reply pattern, and
+//! the kernel ↔ fuser ↔ `Filesystem` ↔ `BlockReader` round trip.
 
 mod common;
 
@@ -17,8 +16,8 @@ use std::{fs, path::Path, thread, time::Duration};
 #[test]
 fn mount_then_unmount_clean() {
     let _m = MountedFuse::mount();
-    // `Drop` performs the unmount; if it fails we'll leak the
-    // mountpoint and the next test invocation surfaces the issue.
+    // `Drop` performs the unmount. If it fails the mountpoint leaks
+    // and the next test run surfaces the issue.
 }
 
 #[test]
@@ -39,7 +38,7 @@ fn read_root_listing() {
 
 /// `large.bin` is a dense 100 KiB file (all `0x42`), so it has no
 /// holes. `SEEK_HOLE` from offset 0 should report the virtual hole
-/// at EOF (offset 100_000); `SEEK_DATA` from offset 0 should report
+/// at EOF (offset 100_000). `SEEK_DATA` from offset 0 should report
 /// 0 (the start of the file is data).
 #[test]
 fn lseek_seek_hole_data_on_dense_file() {
@@ -53,8 +52,8 @@ fn lseek_seek_hole_data_on_dense_file() {
     let fd = f.as_raw_fd();
 
     // SAFETY: fd is open and owned by `f` for the duration of these
-    // calls; SEEK_HOLE/SEEK_DATA are well-defined whence values on
-    // Linux.
+    // calls. SEEK_HOLE and SEEK_DATA are well-defined whence values
+    // on Linux.
     let hole_off = unsafe { libc::lseek(fd, 0, SEEK_HOLE) };
     assert_eq!(
         hole_off, 100_000,
@@ -74,17 +73,17 @@ fn lseek_seek_hole_data_on_dense_file() {
 
 /// Walks the directory and inspects each entry's `metadata` (kind,
 /// size, link target). On a mount where `FUSE_DO_READDIRPLUS` is
-/// negotiated, this drives the kernel through our `readdirplus`
-/// callback rather than falling back to per-entry `lookup`.
+/// negotiated, this drives the kernel through the `readdirplus`
+/// callback rather than a `lookup` per entry.
 /// Verifies that the attributes returned alongside the entry name
 /// agree with what an explicit `getattr` would return.
 #[test]
 fn read_root_listing_with_metadata() {
     let m = MountedFuse::mount();
     // Iterating with `DirEntry::file_type()` and `metadata()` is
-    // exactly what `ls -l` does; on Linux it triggers `getdents64`,
-    // which the kernel routes through `readdirplus` when the FUSE
-    // driver advertises support for it.
+    // what `ls -l` does. On Linux it triggers `getdents64`, which the
+    // kernel routes through `readdirplus` when the FUSE driver
+    // advertises support for it.
     let mut by_name: std::collections::HashMap<String, fs::Metadata> =
         Default::default();
     for entry in fs::read_dir(m.path()).unwrap() {
@@ -105,11 +104,11 @@ fn read_root_listing_with_metadata() {
     let subdir = by_name.get("subdir").expect("subdir present");
     assert!(subdir.is_dir());
 
-    // `DirEntry::metadata()` does NOT follow symlinks (it uses
-    // `fstatat(..., AT_SYMLINK_NOFOLLOW)`), so the readdirplus-emitted
-    // attr for `link` is the symlink itself. Cross-check that an
-    // explicit `fs::metadata` (which DOES follow) returns the file
-    // it points at.
+    // `DirEntry::metadata()` does not follow symlinks (it uses
+    // `fstatat(..., AT_SYMLINK_NOFOLLOW)`), so the attr readdirplus
+    // returns for `link` is the symlink itself. Cross-check that an
+    // explicit `fs::metadata` (which does follow) returns the file it
+    // points at.
     let link_meta = by_name.get("link").expect("link present");
     assert!(
         link_meta.file_type().is_symlink(),
@@ -160,8 +159,8 @@ fn stat_returns_correct_metadata() {
          (verifies the 1↔256 inode swap)",
     );
 
-    // `symlink_metadata` follows no links — confirms `link` itself
-    // is reported as a symlink, not the target file.
+    // `symlink_metadata` follows no links, which confirms `link`
+    // itself is reported as a symlink, not the target file.
     let link_meta = fs::symlink_metadata(m.path().join("link")).unwrap();
     assert!(link_meta.file_type().is_symlink());
 }
@@ -211,8 +210,6 @@ fn xattr_get_returns_none_for_missing_name() {
     assert!(result.is_none());
 }
 
-// ── --subvol / --subvolid ─────────────────────────────────────────
-
 /// `--subvol PATH` mounts the named subvolume at the FUSE root, so
 /// the contents of `sub/` should be directly visible at the
 /// mountpoint root (not nested under `sub/`).
@@ -231,8 +228,8 @@ fn mount_with_subvol_path_arg() {
         names.iter().any(|n| n == "inside.txt"),
         "subvol root should contain inside.txt; got {names:?}",
     );
-    // The default-subvol's `at_root.txt` should NOT be visible —
-    // we mounted `sub` only.
+    // The default subvolume's `at_root.txt` must not be visible,
+    // since only `sub` is mounted.
     assert!(
         !names.iter().any(|n| n == "at_root.txt"),
         "default-subvol files should not leak through; got {names:?}",
@@ -243,12 +240,11 @@ fn mount_with_subvol_path_arg() {
 }
 
 /// `--subvolid <ID>` selects a subvolume by tree id rather than by
-/// path. We don't know the id upfront, so this test mounts the
-/// default first to discover it (via `subvolume list`-style data) —
-/// here using `btrfs inspect-internal` would be heavyweight, so we
-/// just confirm a known id (`5` = default `FS_TREE`) round-trips
-/// correctly. With the default subvol explicitly selected, the
-/// fixture's top-level `at_root.txt` should be visible.
+/// path. The user subvolume's id isn't known upfront, and discovering
+/// it with `btrfs inspect-internal` would be heavyweight, so this
+/// only checks that a known id (`5`, the default `FS_TREE`) works.
+/// With the default subvolume selected explicitly, the fixture's
+/// top-level `at_root.txt` should be visible.
 #[test]
 fn mount_with_subvolid_default_round_trips() {
     let m = common::MountedFuse::mount_with(
@@ -274,9 +270,9 @@ fn mount_with_subvolid_default_round_trips() {
 /// 16 OS threads × 50 reads each. If the fuse adapter's spawn-a-task
 /// pattern double-replies, drops a `Reply*`, or deadlocks under
 /// concurrent FUSE callbacks, this test exposes it. The kernel
-/// serialises operations on the same FUSE session more aggressively
-/// than user-space async calls would, so even a single mountpoint
-/// is enough to stress the dispatch path.
+/// serialises operations on one FUSE session more aggressively than
+/// userspace async calls would, so a single mountpoint is enough to
+/// stress the dispatch path.
 #[test]
 fn concurrent_reads_dont_deadlock_or_corrupt() {
     let m = MountedFuse::mount();
@@ -294,8 +290,8 @@ fn concurrent_reads_dont_deadlock_or_corrupt() {
         })
         .collect();
 
-    // Bound the total wait so a deadlock surfaces as a test failure
-    // rather than hanging CI forever.
+    // Bound the total wait so a deadlock fails the test rather than
+    // hanging CI.
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     for h in handles {
         let now = std::time::Instant::now();

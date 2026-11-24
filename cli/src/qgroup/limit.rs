@@ -53,12 +53,12 @@ impl Runnable for QgroupLimitCommand {
     fn run(&self, _ctx: &RunContext) -> Result<()> {
         let (fs_path, qgroupid) = match &self.path {
             None => {
-                // target is the path; apply limit to the subvolume that fd refers to (qgroupid 0)
+                // target is the path. Apply the limit to the subvolume fd refers to (qgroupid 0).
                 let path = PathBuf::from(&self.target);
                 (path, 0u64)
             }
             Some(path) => {
-                // target is the qgroup ID string
+                // target is the qgroup ID string.
                 let qgroupid = parse_qgroupid(&self.target)?;
                 (path.clone(), qgroupid)
             }

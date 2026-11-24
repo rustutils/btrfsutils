@@ -21,19 +21,19 @@ use std::{
 
 /// Csum tree id.
 const CSUM_TREE_OBJECTID: u64 = raw::BTRFS_CSUM_TREE_OBJECTID as u64;
-/// Special objectid that holds EXTENT_CSUM keys in the csum tree
-/// (binds as `i32 = -10`; the kernel treats it as `-10ULL`, i.e.
-/// `0xFFFFFFFF_FFFFFFF6`).
+/// Special objectid that holds EXTENT_CSUM keys in the csum tree.
+/// Binds as `i32 = -10`, which the kernel treats as `-10ULL`
+/// (`0xFFFFFFFF_FFFFFFF6`).
 #[allow(clippy::cast_sign_loss)]
 const EXTENT_CSUM_OBJECTID: u64 = raw::BTRFS_EXTENT_CSUM_OBJECTID as u64;
 
 /// Fix data checksum mismatches
 ///
 /// Walks the csum tree, recomputes the CRC32C of every covered data
-/// block, and reports any mismatches. With `--mirror N`, mismatched
-/// csums are rewritten in place using the data from mirror N (only
-/// mirror 1 is currently supported; reading from a specific mirror
-/// of a multi-device filesystem is not yet wired up here).
+/// block, and reports any mismatches. With --mirror N, mismatched
+/// csums are rewritten in place using the data from mirror N. Only
+/// mirror 1 is supported: reading from a specific mirror of a
+/// multi-device filesystem is not implemented yet.
 ///
 /// The device must not be mounted.
 #[derive(Parser, Debug)]
@@ -242,7 +242,7 @@ fn apply_csum_updates<R: Read + Write + Seek>(
         )?;
 
         // The csum item key.offset is the logical address of the
-        // *first* sector in the item; if our exact key wasn't found,
+        // *first* sector in the item. If our exact key wasn't found,
         // step back one slot to land on the containing item.
         if !found && path.slots[0] > 0 {
             path.slots[0] -= 1;

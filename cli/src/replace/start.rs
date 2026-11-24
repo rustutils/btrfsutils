@@ -38,7 +38,7 @@ pub struct ReplaceStartCommand {
     #[clap(short = 'f', long)]
     pub force: bool,
 
-    /// Do not background the replace operation; wait for it to finish
+    /// Do not background the replace operation, wait for it to finish
     #[clap(short = 'B', long)]
     pub no_background: bool,
 
@@ -95,8 +95,8 @@ impl Runnable for ReplaceStartCommand {
             );
         }
 
-        // Resolve source: if it parses as a number, treat it as a devid;
-        // otherwise treat it as a device path.
+        // Resolve source: if it parses as a number, treat it as a devid.
+        // Otherwise treat it as a device path.
         let source = if let Ok(devid) = self.source.parse::<u64>() {
             ReplaceSource::DevId(devid)
         } else {

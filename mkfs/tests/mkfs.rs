@@ -184,9 +184,9 @@ fn mkfs_superblock_has_label() {
 fn mkfs_superblock_generation_increments_through_post_bootstrap() {
     // Bootstrap writes generation=1, then the post-bootstrap
     // transaction (UUID tree creation) commits at generation=2.
-    // For unsupported profiles (RAID0/5/10) post_bootstrap is a
-    // no-op so the bootstrap generation is left at 1; this test
-    // uses the default DUP/SINGLE profile which is supported.
+    // For unsupported profiles (RAID0, RAID5, RAID10) post_bootstrap
+    // is a no-op, so the bootstrap generation stays at 1. This test
+    // uses the default DUP and SINGLE profiles, which are supported.
     let image = create_image(MIN_SIZE);
     let mut cfg = test_config(MIN_SIZE);
     make_btrfs_on(&image, &mut cfg);
@@ -298,9 +298,8 @@ fn mkfs_with_no_free_space_tree() {
     assert_eq!(sb.compat_ro_flags & fst_bit, 0);
 
     // The root tree should not contain a ROOT_ITEM for the FST
-    // objectid (10). Before the FST omit work, mkfs left a stale
-    // ROOT_ITEM + empty FST leaf on disk even when the feature was
-    // disabled.
+    // objectid (10). mkfs used to leave a stale ROOT_ITEM and empty
+    // FST leaf on disk even when the feature was disabled.
     let fst_oid = u64::from(btrfs_disk::raw::BTRFS_FREE_SPACE_TREE_OBJECTID);
     let fst_root_items = walk_root_tree_items(image.path(), |oid, kt, _, _| {
         oid == fst_oid && kt == KeyType::RootItem
@@ -315,8 +314,8 @@ fn mkfs_with_no_free_space_tree() {
 /// The default-profile (Single + Dup) image has its csum tree created
 /// by `post_bootstrap` rather than by mkfs's bootstrap. Verify the
 /// csum tree exists in the root tree and points to a valid (block
-/// reachable, generation-2) leaf — the defining signal that
-/// post_bootstrap created it.
+/// reachable, generation-2) leaf, which shows that post_bootstrap
+/// created it.
 #[test]
 fn default_profile_csum_tree_created_by_post_bootstrap() {
     let image = create_image(MIN_SIZE);
@@ -329,7 +328,7 @@ fn default_profile_csum_tree_created_by_post_bootstrap() {
     });
     assert_eq!(entries.len(), 1, "expected exactly one csum tree ROOT_ITEM");
     let ri = RootItem::parse(&entries[0].3).unwrap();
-    // mkfs's bootstrap is generation 1; post_bootstrap commits
+    // mkfs's bootstrap is generation 1. post_bootstrap commits
     // generation 2. A csum tree at generation 2 confirms it came
     // from the post-bootstrap transaction (and not from a stale
     // mkfs-generated entry).
@@ -370,7 +369,7 @@ fn default_profile_fs_tree_created_by_post_bootstrap() {
         !ri.uuid.is_nil(),
         "FS ROOT_ITEM.uuid must be non-nil (derived from fsid)",
     );
-    // ctime/otime mirror cfg.now_secs() — non-zero unless fixed to 0.
+    // ctime and otime mirror cfg.now_secs(), non-zero unless fixed to 0.
     assert!(ri.otime.sec > 0, "FS ROOT_ITEM.otime should be set");
 }
 
@@ -416,7 +415,7 @@ fn default_profile_free_space_tree_created_by_post_bootstrap() {
 
 /// `mkfs -O quota` with a default profile produces a quota tree
 /// created by post-bootstrap, with all three items (STATUS, INFO,
-/// LIMIT) and the ON+INCONSISTENT status flags.
+/// LIMIT) and the ON and INCONSISTENT status flags.
 #[test]
 fn default_profile_quota_tree_created_by_post_bootstrap() {
     let image = create_image(MIN_SIZE);
@@ -442,8 +441,8 @@ fn default_profile_quota_tree_created_by_post_bootstrap() {
 
 /// Same as [`default_profile_csum_tree_created_by_post_bootstrap`] but
 /// for the data-reloc tree. Additionally checks that the ROOT_ITEM's
-/// `root_dirid` is set to 256 (the canonical subvolume root inode) —
-/// without that fixup, btrfs check rejects the tree.
+/// `root_dirid` is set to 256 (the canonical subvolume root inode).
+/// Without that fixup, btrfs check rejects the tree.
 #[test]
 fn default_profile_data_reloc_tree_created_by_post_bootstrap() {
     let image = create_image(MIN_SIZE);
@@ -474,7 +473,7 @@ fn default_profile_data_reloc_tree_created_by_post_bootstrap() {
     );
 }
 
-/// RAID5 metadata images now go through `post_bootstrap`. Most trees
+/// RAID5 metadata images go through `post_bootstrap`. Most trees
 /// were already built by mkfs's fallback (idempotent ensures), but
 /// the UUID tree is the one that proves the parity-aware
 /// `plan_write` actually round-trips: it didn't exist before
@@ -1062,7 +1061,7 @@ fn check_squota() {
     make_and_check(&mut cfg);
 }
 
-// --- Quota/squota tests ---
+// --- Quota and squota tests ---
 
 #[test]
 fn mkfs_quota_creates_valid_image() {
@@ -1351,7 +1350,7 @@ fn btrfs_check(image: &Path) {
 /// Create image files for all devices, format, run btrfs check, then mount
 /// and verify the filesystem is accessible.
 fn make_check_mount_verify(cfg: &mut MkfsConfig) {
-    // Use random UUIDs so concurrent/sequential tests don't collide
+    // Use random UUIDs so concurrent or sequential tests don't collide
     // in the kernel's device registry (which keys on fsid).
     cfg.fs_uuid = Uuid::new_v4();
     cfg.chunk_tree_uuid = Uuid::new_v4();
@@ -1479,7 +1478,7 @@ fn mixed_mode_requires_equal_nodesize_sectorsize() {
     );
 }
 
-/// Unaligned nodesize/sectorsize combos are rejected (test 008).
+/// Unaligned nodesize and sectorsize combos are rejected (test 008).
 #[test]
 fn invalid_unaligned_sectorsize_rejected() {
     // 8191 is not a power of two.
@@ -1542,7 +1541,7 @@ fn nodesize_too_large_rejected() {
 /// Valid aligned sectorsize and nodesize combinations work (test 008).
 #[test]
 fn valid_sectorsize_nodesize_combos() {
-    // 4K sector, 16K node — standard.
+    // 4K sector, 16K node: the standard layout.
     let image = create_image(MIN_SIZE);
     let mut cfg = test_config(MIN_SIZE);
     cfg.sectorsize = 4096;
@@ -1572,7 +1571,7 @@ fn large_sectorsize_64k_works() {
     assert_eq!(sb.nodesize, 65536);
 }
 
-// --- Nodesize/sectorsize combination tests (adapted from test 007) ---
+// --- Nodesize and sectorsize combination tests (adapted from test 007) ---
 
 /// Various valid nodesize >= sectorsize combos produce valid superblocks.
 #[test]
@@ -1880,7 +1879,7 @@ fn walk_root_tree_items(
 }
 
 /// Multi-device variant of [`walk_root_tree_items`]. Required for
-/// non-mirror metadata profiles (RAID0 / RAID10 / RAID5 / RAID6)
+/// non-mirror metadata profiles (RAID0, RAID10, RAID5, RAID6)
 /// where the root tree's chunks span multiple devices.
 fn walk_root_tree_items_multi(
     image_paths: &[&Path],
@@ -2080,7 +2079,7 @@ fn rootdir_inode_flags_nodatacow_nodatasum() {
     )
     .unwrap();
 
-    // Check nocow.bin has NODATACOW + NODATASUM flags.
+    // Check nocow.bin has NODATACOW and NODATASUM flags.
     let nocow_ino = name_to_ino
         .get(&b"nocow.bin"[..])
         .expect("nocow.bin not found in FS tree");
@@ -2135,7 +2134,7 @@ fn rootdir_reflink_produces_valid_image() {
 
     match result {
         Ok(()) => {
-            // Reflink succeeded — verify the image has a valid superblock.
+            // Reflink succeeded: verify the image has a valid superblock.
             let mut file = File::open(image.path()).unwrap();
             let sb = read_superblock(&mut file, 0).unwrap();
             assert!(sb.magic_is_valid());
@@ -2143,8 +2142,8 @@ fn rootdir_reflink_produces_valid_image() {
         }
         Err(e) => {
             let msg = format!("{e:#}");
-            // FICLONERANGE fails on filesystems that don't support it —
-            // skip gracefully rather than failing the test.
+            // FICLONERANGE fails on filesystems that don't support it.
+            // Skip gracefully rather than failing the test.
             if msg.contains("FICLONERANGE") {
                 eprintln!(
                     "skipping reflink test: filesystem does not support \
@@ -2203,7 +2202,7 @@ fn rootdir_lzo_compression_produces_valid_image() {
 #[test]
 fn rootdir_unaligned_size_passes_btrfs_check() {
     let rootdir = tempdir().unwrap();
-    // 5000 bytes — larger than max_inline (~4095) so a regular extent
+    // 5000 bytes: larger than max_inline (~4095) so a regular extent
     // is used, smaller than two sectors so the tail is unaligned.
     let payload = vec![0x42u8; 5000];
     write(rootdir.path().join("unaligned.bin"), &payload).unwrap();

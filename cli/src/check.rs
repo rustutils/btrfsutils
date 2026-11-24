@@ -174,7 +174,7 @@ impl Runnable for CheckCommand {
             );
         }
 
-        // Phase 4: Chunk / block group / device extent cross-checks.
+        // Phase 4: chunk, block group, and device extent cross-checks.
         eprintln!("[4/7] checking free space tree");
         let block_group_tree_root = if sb.compat_ro_flags
             & u64::from(raw::BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE)

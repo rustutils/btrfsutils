@@ -12,7 +12,7 @@ use std::{os::unix::io::AsFd, path::PathBuf};
 /// Resume a previously cancelled or interrupted scrub
 ///
 /// Scrubs all devices sequentially. This command blocks until the scrub
-/// completes; use Ctrl-C to cancel.
+/// completes. Use Ctrl-C to cancel.
 #[derive(Parser, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ScrubResumeCommand {
@@ -46,8 +46,8 @@ pub struct ScrubResumeCommand {
 
 impl Runnable for ScrubResumeCommand {
     fn run(&self, _ctx: &RunContext) -> Result<()> {
-        // Resume uses the same ioctl as start; the kernel tracks where it left
-        // off via the scrub state on disk.
+        // Resume uses the same ioctl as start. The kernel tracks where it
+        // left off via the scrub state on disk.
         let file = open_path(&self.path)?;
         let fd = file.as_fd();
 

@@ -120,8 +120,8 @@ fn scan_all() -> Result<()> {
 
 /// Parse /proc/partitions and return /dev/ paths for all block devices.
 ///
-/// /proc/partitions has a two-line header followed by lines of the form:
-///   major minor #blocks name
+/// /proc/partitions has a two-line header followed by lines of the form
+/// `major minor #blocks name`.
 fn block_devices_from_proc_partitions() -> Result<Vec<PathBuf>> {
     let contents = fs::read_to_string("/proc/partitions")
         .context("failed to read /proc/partitions")?;

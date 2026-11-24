@@ -61,8 +61,8 @@ pub struct DeviceUsageCommand {
     pub tbytes: bool,
 }
 
-/// Try to get the physical block device size.  Returns 0 on failure (e.g.
-/// device path is empty, inaccessible, or not a block device).
+/// Try to get the physical block device size. Returns 0 on failure (e.g.
+/// the device path is empty, inaccessible, or not a block device).
 fn physical_device_size(path: &str) -> u64 {
     if path.is_empty() {
         return 0;

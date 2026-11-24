@@ -47,9 +47,9 @@ const HEADING_SIZE_UNITS: &str = "Size units";
 /// max_excl: the configured limit on exclusive bytes. Shows "none" if
 /// no limit is set.
 ///
-/// In --format modern, the qgroup hierarchy is shown as a tree: higher-
-/// level qgroups appear as parents with their member qgroups nested
-/// below using tree connectors.
+/// With --format modern, the qgroup hierarchy is shown as a tree.
+/// Higher-level qgroups appear as parents, with their member qgroups
+/// nested below them.
 #[derive(Parser, Debug)]
 #[allow(clippy::struct_excessive_bools, clippy::doc_markdown)]
 pub struct QgroupShowCommand {
@@ -252,7 +252,7 @@ impl Runnable for QgroupShowCommand {
 
     #[allow(clippy::too_many_lines)]
     fn run(&self, ctx: &RunContext) -> Result<()> {
-        // filter_all / filter_direct: not implemented, ignored
+        // filter_all and filter_direct are not implemented and are ignored.
         let _ = self.filter_all;
         let _ = self.filter_direct;
 

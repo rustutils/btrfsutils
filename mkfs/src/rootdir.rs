@@ -2,8 +2,8 @@
 //!
 //! Implements `--rootdir` for mkfs. The walker traverses a host source
 //! directory depth-first and, for every entry, calls into the transaction
-//! crate to emit the matching `INODE_ITEM` / `DIR_ITEM` / `DIR_INDEX` /
-//! `INODE_REF` / `XATTR_ITEM` / inline-or-regular `EXTENT_DATA` records
+//! crate to emit the matching `INODE_ITEM`, `DIR_ITEM`, `DIR_INDEX`,
+//! `INODE_REF`, `XATTR_ITEM`, and inline or regular `EXTENT_DATA` records
 //! against an open filesystem. Subvolumes (`--subvol`), reflink
 //! (`--reflink` via `FICLONERANGE`), shrink (`--shrink`), and per-path
 //! inode flags (`--inode-flags`) are all handled here.
@@ -24,7 +24,7 @@ use std::{
 /// Uses the `FICLONERANGE` ioctl to share extents at the filesystem level
 /// instead of copying bytes. Both file descriptors must be on the same
 /// filesystem (or a filesystem that supports cross-file reflink).
-#[allow(clippy::cast_possible_wrap)] // ioctl request codes and fd fit in c_int/c_long
+#[allow(clippy::cast_possible_wrap)] // ioctl request codes and fd fit in c_int or c_long
 fn ficlonerange(
     src_fd: std::os::unix::io::RawFd,
     src_offset: u64,
@@ -256,17 +256,17 @@ fn read_xattrs(path: &Path) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
 
 /// `--reflink` path for one file: reserve a data extent in the
 /// destination, FICLONERANGE the source bytes into each stripe's
-/// backing device, then insert `EXTENT_DATA` + `EXTENT_CSUM`
+/// backing device, then insert `EXTENT_DATA` and `EXTENT_CSUM`
 /// records and bump `INODE.nbytes`.
 ///
-/// Compression is unsupported on this path (the recorded extent
+/// Compression is unsupported on this path. The recorded extent
 /// `compression` byte would have to match the on-disk bytes, but
-/// FICLONERANGE clones source bytes verbatim — the result would be
-/// inconsistent). RAID5 / RAID6 are unsupported: the new bytes
-/// would land in the data column but parity isn't recomputed by
-/// FICLONERANGE.
+/// FICLONERANGE clones source bytes verbatim, so the result would be
+/// inconsistent. RAID5 and RAID6 are unsupported: the new bytes
+/// would land in the data column but FICLONERANGE doesn't recompute
+/// parity.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_lines)] // chunked loop with reserve / clone / csum / extent / nbytes steps
+#[allow(clippy::too_many_lines)] // chunked loop with reserve, clone, csum, extent, nbytes steps
 #[allow(clippy::cast_possible_truncation)] // aligned_size fits in usize for any practical chunk
 fn reflink_file_to_transaction<R>(
     fs: &mut btrfs_transaction::Filesystem<R>,
@@ -405,26 +405,26 @@ where
 /// Walk `rootdir` depth-first and apply each entry to an open
 /// filesystem via the transaction crate.
 ///
-/// Emits items via [`Transaction::create_inode`] / [`link_dir_entry`]
-/// / [`set_xattr`] / [`write_file_data`] / [`link_subvol_entry`] /
+/// Emits items with [`Transaction::create_inode`], [`link_dir_entry`],
+/// [`set_xattr`], [`write_file_data`], [`link_subvol_entry`], and
 /// [`insert_root_ref`], so the filesystem can be reopened, populated,
-/// and committed using only the transaction crate's B-tree
-/// search/insert/commit pipeline — no hand-built tree blocks.
+/// and committed using only the transaction crate's B-tree search,
+/// insert, and commit pipeline, with no hand-built tree blocks.
 ///
 /// `subvol_args` declares which subdirectories of `rootdir` should
-/// become separate subvolumes (with optional `ro` / `default`
+/// become separate subvolumes (with optional `ro` and `default`
 /// flags). Subvolume IDs are assigned starting at
 /// `BTRFS_FIRST_FREE_OBJECTID` (256). Nested subvolumes are
 /// supported.
 ///
 /// Callers must:
 /// 1. Build the empty filesystem first (via [`mkfs::make_btrfs`]).
-/// 2. Open it with [`Filesystem::open`] / `open_multi`.
+/// 2. Open it with [`Filesystem::open`] or `open_multi`.
 /// 3. `Transaction::start`, then call this function, then `commit`.
 ///
 /// # Errors
 ///
-/// Returns an error if any host-side stat/open/read fails or any
+/// Returns an error if any host-side stat, open, or read fails, or any
 /// transaction-crate call fails.
 ///
 /// [`Transaction::create_inode`]: btrfs_transaction::Transaction::create_inode
@@ -453,7 +453,7 @@ where
 
     // Assign subvol IDs starting at BTRFS_FIRST_FREE_OBJECTID (256),
     // matching the legacy walker's policy. Each --subvol arg gets a
-    // unique tree id; the path-to-id mapping drives boundary
+    // unique tree id. The path-to-id mapping drives boundary
     // detection in the per-tree walker.
     let first_subvol_id = u64::from(raw::BTRFS_FIRST_FREE_OBJECTID);
     let mut subvol_id_map: HashMap<PathBuf, (u64, SubvolType)> = HashMap::new();
@@ -487,11 +487,11 @@ where
         reflink_handles,
     )?;
 
-    // Process deferred subvolumes; nested subvols append to the
+    // Process deferred subvolumes. Nested subvols append to the
     // queue as they're discovered during each subvol's walk.
     while let Some(def) = deferred.pop() {
-        // 1. Allocate the subvol tree, populate inode 256 + ".."
-        //    INODE_REF + ROOT_ITEM patch.
+        // 1. Allocate the subvol tree, populate inode 256, the ".."
+        //    INODE_REF, and the ROOT_ITEM patch.
         crate::post_bootstrap::create_subvolume_shape(
             fs,
             trans,
@@ -500,7 +500,7 @@ where
             Uuid::new_v4(),
         )?;
 
-        // 2. Insert ROOT_REF (parent → child) + ROOT_BACKREF
+        // 2. Insert ROOT_REF (parent → child) and ROOT_BACKREF
         //    (child → parent) in the root tree (tree id 1).
         trans
             .insert_root_ref(
@@ -547,7 +547,7 @@ where
         )?;
         deferred.extend(nested);
 
-        // 4. Apply ro / default flags after population so any
+        // 4. Apply ro and default flags after population so any
         //    intra-subvol writes go in unrestricted.
         if matches!(def.subvol_type, SubvolType::Ro | SubvolType::DefaultRo) {
             trans
@@ -606,8 +606,8 @@ where
     let mut next_ino: u64 = root_ino + 1; // 257
 
     // (host_dev, host_ino) -> btrfs_ino, for hardlink coalescing
-    // within this tree only (the legacy walker scopes hardlink maps
-    // per-subvol; cross-subvol hardlinks are out of scope).
+    // within this tree only. Hardlink maps are scoped per subvolume, as
+    // in the legacy walker. Cross-subvol hardlinks are out of scope.
     let mut hardlink_map: HashMap<(u64, u64), u64> = HashMap::new();
     let mut nlink_count: HashMap<u64, u32> = HashMap::new();
     let mut dir_index_map: HashMap<u64, u64> = HashMap::new();
@@ -655,9 +655,9 @@ where
             v
         };
 
-        // Subvol boundary: emit DIR_ITEM + DIR_INDEX in parent
-        // pointing at (subvol_id, ROOT_ITEM, 0), defer the actual
-        // subvol creation + walk to the caller.
+        // Subvol boundary: emit DIR_ITEM and DIR_INDEX in the parent
+        // pointing at (subvol_id, ROOT_ITEM, 0), and defer the actual
+        // subvol creation and walk to the caller.
         let rel_to_tree =
             host_path.strip_prefix(tree_root).unwrap_or(&host_path);
         if meta.is_dir()
@@ -857,8 +857,8 @@ where
                 // Compression is incompatible with reflink (the extent
                 // bytes on disk would be the source's uncompressed
                 // bytes regardless of the recorded compression byte),
-                // so we ignore the user's compress setting here and
-                // store the raw bytes uncompressed.
+                // so the user's compress setting is ignored here and
+                // the raw bytes are stored uncompressed.
                 reflink_file_to_transaction(
                     fs,
                     trans,

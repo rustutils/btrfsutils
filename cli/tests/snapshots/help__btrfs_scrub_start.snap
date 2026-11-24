@@ -4,8 +4,8 @@ expression: text
 ---
 Start a new scrub on the filesystem or a device.
 
-Scrubs all devices sequentially. This command blocks until the scrub completes;
-use Ctrl-C to cancel.
+Scrubs all devices sequentially. This command blocks until the scrub completes.
+Use Ctrl-C to cancel.
 
 Usage: start [OPTIONS] <PATH>
 

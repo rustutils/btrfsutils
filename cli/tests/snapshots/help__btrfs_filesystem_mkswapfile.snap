@@ -17,8 +17,8 @@ Options:
           [default: 2G]
 
   -U, --uuid <UUID>
-          UUID to embed in the swap header (clear, random, time, or explicit
-          UUID; default: random)
+          UUID to embed in the swap header: clear, random (default), time, or an
+          explicit UUID
 
   -h, --help
           Print help

@@ -244,7 +244,7 @@ fn process_extent_item(
         }
 
         // Block group items (and any other key types) are not relevant
-        // for extent ref counting — block groups are checked in chunks.rs.
+        // for extent ref counting. Block groups are checked in chunks.rs.
         _ => {}
     }
 }

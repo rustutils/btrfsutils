@@ -17,8 +17,8 @@ use std::{os::unix::io::AsFd, path::PathBuf, time::SystemTime};
 
 /// Show detailed information about a subvolume
 ///
-/// Displays UUIDs, generation numbers, creation time, flags, and send/receive
-/// transaction IDs for the subvolume that contains the given path.
+/// Displays UUIDs, generation numbers, creation time, flags, and send and
+/// receive transaction IDs for the subvolume that contains the given path.
 ///
 /// The subvolume can be specified by path (default), or by root id or UUID
 /// that are looked up relative to the given path.

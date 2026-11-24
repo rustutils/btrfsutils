@@ -11,7 +11,7 @@ use std::{fs::OpenOptions, mem, path::PathBuf};
 ///
 /// The log tree is used for fsync durability. If it becomes corrupted it can
 /// prevent the filesystem from mounting. Clearing it forces a full fsync of
-/// all previously synced data on the next mount. No data is lost — only the
+/// all previously synced data on the next mount. No data is lost, only the
 /// durability guarantee of uncommitted fsyncs.
 ///
 /// The device must not be mounted.

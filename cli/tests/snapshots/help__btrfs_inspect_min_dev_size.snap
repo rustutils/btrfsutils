@@ -13,7 +13,7 @@ Usage: min-dev-size [OPTIONS] <PATH>
 Arguments:
   <PATH>
           Path to a file or directory on the btrfs filesystem, or a block device
-          / image file when --offline is used
+          or image file when --offline is used
 
 Options:
       --id <DEVID>

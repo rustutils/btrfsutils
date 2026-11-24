@@ -21,8 +21,8 @@ const HEADING_SORTING: &str = "Sorting";
 
 /// List subvolumes and snapshots in the filesystem
 ///
-/// The default output format matches btrfs-progs:
-///   ID NNN gen NNN top level NNN path NAME
+/// The default output format matches btrfs-progs: ID NNN gen NNN top level
+/// NNN path NAME.
 ///
 /// Optional flags enable additional columns or filter the results.
 #[derive(Parser, Debug)]
@@ -45,8 +45,8 @@ pub struct SubvolumeListCommand {
     #[clap(short = 'c', long, help_heading = HEADING_FIELD_SELECTION)]
     ogeneration: bool,
 
-    /// Print generation column (already shown by default; kept for
-    /// compatibility with btrfs-progs CLI)
+    /// Print generation column (already shown by default, kept for
+    /// compatibility with btrfs-progs)
     #[clap(short, long, help_heading = HEADING_FIELD_SELECTION)]
     generation: bool,
 
@@ -156,7 +156,7 @@ impl Runnable for SubvolumeListCommand {
         // Apply filters.
         //
         // Deleted subvolumes have parent_id == 0 (no ROOT_BACKREF found).
-        // By default they are hidden; -d shows only deleted; -a shows all.
+        // By default they are hidden. -d shows only deleted ones, -a shows all.
         if self.deleted {
             items.retain(|item| item.parent_id == 0);
         } else if !self.all {

@@ -117,7 +117,7 @@ fn get_compression_property(file: &File, path: &Path) -> Result<()> {
     if result < 0 {
         let errno = nix::errno::Errno::last_raw();
         if errno == ENODATA {
-            // Attribute doesn't exist; compression not set
+            // Attribute doesn't exist, so compression is not set
             return Ok(());
         }
         return Err(anyhow::anyhow!(

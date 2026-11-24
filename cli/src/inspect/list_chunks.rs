@@ -51,7 +51,7 @@ use std::{
 /// PEnd: physical byte offset of the end of this stripe (PStart + Length).
 ///
 /// LNumber: logical chunk index for this device, ordered by logical start
-/// offset (1-based); DUP stripes share the same value.
+/// offset (1-based). DUP stripes share the same value.
 ///
 /// LStart: logical byte offset of the chunk in the filesystem address space.
 ///
@@ -76,7 +76,7 @@ pub struct ListChunksCommand {
     pub offline: bool,
 
     /// Path to a file or directory on the btrfs filesystem, or a block
-    /// device / image file when --device is used
+    /// device or image file when --offline is used
     path: PathBuf,
 }
 

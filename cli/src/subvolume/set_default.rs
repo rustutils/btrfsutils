@@ -12,7 +12,7 @@ use std::{fs::File, os::unix::io::AsFd, path::PathBuf};
 /// or a numeric ID with a filesystem path (btrfs subvolume set-default 256 /mnt/fs).
 #[derive(Parser, Debug)]
 pub struct SubvolumeSetDefaultCommand {
-    /// Subvolume path OR numeric subvolume ID
+    /// Subvolume path or numeric subvolume ID
     #[clap(required = true)]
     subvol_or_id: String,
 

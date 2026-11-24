@@ -1,15 +1,14 @@
 //! Inode-number translation between FUSE and btrfs.
 //!
 //! FUSE requires the root directory to have inode `1`. In btrfs, the root
-//! directory of a subvolume is `BTRFS_FIRST_FREE_OBJECTID = 256`. For v1 we
-//! expose a single subvolume, so the mapping is just a swap of `1` and `256`;
-//! every other objectid passes through unchanged.
+//! directory of a subvolume is `BTRFS_FIRST_FREE_OBJECTID = 256`. With a
+//! single subvolume exposed, the mapping is a swap of `1` and `256`. Every
+//! other objectid passes through unchanged.
 //!
-//! When we add multi-subvolume support, this module should grow into a real
-//! `(subvol_id, objectid) -> fuse_ino` table. Keep all translation here so
-//! that change is localised.
+//! Multi-subvolume support needs a real `(subvol_id, objectid) -> fuse_ino`
+//! table. Keep all translation here so that change stays local.
 
-/// btrfs `BTRFS_FIRST_FREE_OBJECTID` — root directory of a subvolume.
+/// btrfs `BTRFS_FIRST_FREE_OBJECTID`: root directory of a subvolume.
 pub const BTRFS_ROOT_DIR: u64 = 256;
 
 /// FUSE inode number for the filesystem root.

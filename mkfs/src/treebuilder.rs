@@ -1,13 +1,13 @@
 //! # Multi-leaf tree builder
 //!
-//! Packs sorted items into btrfs tree blocks (leaves + internal
+//! Packs sorted items into btrfs tree blocks (leaves and internal
 //! nodes). Used by mkfs's bootstrap path (the four always-present
 //! trees in [`crate::mkfs::make_btrfs`]) when a tree has too many
 //! items for a single leaf. Post-bootstrap and `--rootdir` go
-//! through the transaction crate, which has its own search/insert/
-//! split pipeline; this module is bootstrap-only and would be
-//! deletable if the bootstrap migrated to a `Filesystem::create`
-//! transaction-crate primitive.
+//! through the transaction crate, which has its own search, insert,
+//! and split pipeline. This module is bootstrap-only and could be
+//! deleted if the bootstrap moved to a `Filesystem::create`
+//! primitive in the transaction crate.
 
 use crate::tree::{Key, LeafBuilder, LeafHeader, NodeBuilder, NodeHeader};
 use uuid::Uuid;
@@ -60,7 +60,7 @@ impl TreeBuilder {
     /// Build a complete tree from sorted items.
     ///
     /// Items must be in strictly ascending key order. Returns a set of tree
-    /// blocks (leaves + internal nodes) with placeholder bytenr fields that
+    /// blocks (leaves and internal nodes) with placeholder bytenr fields that
     /// the caller must patch after assigning logical addresses.
     ///
     /// If `items` is empty, returns a single empty leaf.
@@ -91,7 +91,7 @@ impl TreeBuilder {
         for (key, data) in items {
             let needed = ITEM_SIZE + data.len();
             if leaf.space_left() < needed && !leaf.is_empty() {
-                // Current leaf is full — finalize it and start a new one.
+                // Current leaf is full: finalize it and start a new one.
                 blocks.push(TreeBlockBuf {
                     level: 0,
                     first_key,
@@ -152,7 +152,7 @@ impl TreeBuilder {
                 for (j, block) in blocks[i..batch_end].iter().enumerate() {
                     node.push(
                         block.first_key,
-                        0, // placeholder blockptr — patched later
+                        0, // placeholder blockptr, patched later
                         self.generation,
                     )
                     .expect("too many children for internal node");
