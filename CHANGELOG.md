@@ -36,7 +36,7 @@ and mirrored to GitHub on every `vX.Y.Z` tag.
   from an unmounted image without the `BTRFS_IOC_SEND` ioctl. It needs no
   `CAP_SYS_ADMIN` and no kernel mount, and the FUSE retry restriction doesn't
   apply. Select the subvolume with `--offline-subvol PATH` or
-  `--offline-subvolid ID` (default: the default subvolume). Only full sends are
+  `--offline-subvolid ID` (default: `FS_TREE`). Only full sends are
   supported. Clap rejects incremental sends, clone sources, `--no-data`, other
   protocol versions, and compressed-data passthrough in offline mode.
 - `btrfs-fs`: `Filesystem::resolve_subvol_path(path) -> Option<SubvolId>`
@@ -309,7 +309,7 @@ and mirrored to GitHub on every `vX.Y.Z` tag.
   integration tests and a new `mkfs_rootdir_hardlinks_and_xattrs` test that
   mounts the result and checks shared inode numbers, `nlink`, and xattrs.
 - `btrfs-transaction`: subvolume creation helpers, groundwork for moving
-  `--rootdir` onto the transaction crate. Five new helpers, all built on
+  `--rootdir` onto the transaction crate. Four new helpers, all built on
   `search_slot`, `insert_item`, and `update_item`.
   `Transaction::set_inode_nlink(tree, ino, nlink)` patches an inode's `nlink`
   in place (like `update_inode_nbytes`).
