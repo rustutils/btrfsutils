@@ -1,43 +1,40 @@
 # Extent Tree and Backrefs
 
-This document describes the btrfs extent tree: how every allocated byte
-on disk is tracked, how reference counting works, and how backreferences
-link extents to the trees and files that use them.
+This document describes the btrfs extent tree: how every allocated byte on
+disk is tracked, how reference counting works, and how backreferences link
+extents to the trees and files that use them.
 
 All multi-byte integers in btrfs on-disk structures are little-endian.
 
 
 ## Purpose
 
-The extent tree is the central allocator of the btrfs filesystem. It
-records every contiguous range of allocated disk space (both data extents
-used by files and metadata blocks used by trees) and tracks who references
-each extent.
+The extent tree is the central allocator of a btrfs filesystem. It records
+every contiguous range of allocated disk space (data extents used by files
+and metadata blocks used by trees) and tracks who references each extent.
 
-The extent tree serves three purposes:
+It serves three purposes:
 
 1. **Allocation tracking.** The set of extent items defines which logical
    byte ranges are in use. The free-space tree (or free-space cache) is
    derived from the gaps between extent items.
 
 2. **Reference counting.** Each extent has a declared reference count.
-   Snapshots and clones share extents by incrementing this count rather
-   than copying data. When the count drops to zero, the extent can be
-   freed.
+   Snapshots and clones share extents by incrementing this count instead
+   of copying data. When the count drops to zero, the extent can be freed.
 
 3. **Backreferences.** Each extent stores references back to the trees,
-   inodes, and file offsets that use it. This enables the filesystem to
-   find all users of an extent (for relocation during balance, for
-   example) and to verify consistency (during `btrfs check`).
+   inodes, and file offsets that use it. This lets the filesystem find all
+   users of an extent (for example, to relocate it during balance) and
+   verify consistency (during `btrfs check`).
 
-The extent tree is stored in tree objectid 2
-(`BTRFS_EXTENT_TREE_OBJECTID`). Its root pointer is stored in the root
-tree via a `ROOT_ITEM` entry.
+The extent tree is tree objectid 2 (`BTRFS_EXTENT_TREE_OBJECTID`). Its root
+pointer is stored in the root tree as a `ROOT_ITEM`.
 
 
 ## EXTENT_ITEM vs METADATA_ITEM
 
-There are two key types used to record allocated extents:
+Two key types record allocated extents.
 
 ### EXTENT_ITEM (type 168)
 
@@ -51,7 +48,7 @@ Key: (bytenr, EXTENT_ITEM, length)
 For data extents, `length` is the extent's size on disk. For metadata
 extents (tree blocks), `length` equals the filesystem's `nodesize`.
 
-### METADATA_ITEM (type 169) --- Skinny Metadata
+### METADATA_ITEM (type 169): Skinny Metadata
 
 When the `SKINNY_METADATA` incompat feature is enabled (the default since
 Linux 3.10), metadata extents use a more compact key:
@@ -61,13 +58,13 @@ Key: (bytenr, METADATA_ITEM, level)
       objectid = logical start    type = 169    offset = tree level (0..7)
 ```
 
-The extent's length is implicitly `nodesize` (not stored in the key).
-The level field in the key offset records the B-tree level of the tree
-block, which is useful for verification without reading the block itself.
+The extent's length is implicitly `nodesize` and is not stored in the key.
+The key offset holds the B-tree level of the tree block, which allows
+verification without reading the block itself.
 
-Skinny metadata items are called "skinny refs" because they eliminate the
-need for the `btrfs_tree_block_info` structure that non-skinny
-`EXTENT_ITEM` entries for tree blocks carry.
+Skinny metadata items are called "skinny refs" because they drop the
+`btrfs_tree_block_info` structure that non-skinny `EXTENT_ITEM` entries for
+tree blocks carry.
 
 ### Key Differences
 
@@ -76,9 +73,9 @@ need for the `btrfs_tree_block_info` structure that non-skinny
 | Key type          | 168                           | 169                         |
 | Key offset        | nodesize                      | tree level (0..7)           |
 | Item body         | extent_item + tree_block_info + inline refs | extent_item + inline refs |
-| When used         | Always for data; metadata only without skinny_metadata | Metadata only, with skinny_metadata |
+| When used         | Always for data, and for metadata without skinny_metadata | Metadata only, with skinny_metadata |
 
-In mkfs, the choice is controlled by the `skinny_metadata()` config flag:
+In mkfs, the `skinny_metadata()` config flag controls the choice:
 
 ```rust
 let (item_type, offset) = if skinny {
@@ -91,8 +88,8 @@ let (item_type, offset) = if skinny {
 
 ## The Extent Item Header
 
-Both `EXTENT_ITEM` and `METADATA_ITEM` share the same header structure,
-`btrfs_extent_item` (24 bytes):
+`EXTENT_ITEM` and `METADATA_ITEM` share the same header, `btrfs_extent_item`
+(24 bytes):
 
 | Field | Offset | Size | Description |
 |-------|--------|------|-------------|
@@ -111,16 +108,16 @@ The `flags` field uses these bits:
 | FULL_BACKREF   | 0x80  | Uses shared (parent-based) backrefs only   |
 
 A data extent has `flags = DATA` (0x01). A metadata extent has
-`flags = TREE_BLOCK` (0x02). The `FULL_BACKREF` flag is set when the
-extent uses shared backreferences (after a snapshot) rather than normal
-tree backreferences.
+`flags = TREE_BLOCK` (0x02). `FULL_BACKREF` is set when the extent uses
+shared backreferences (after a snapshot) instead of normal tree
+backreferences.
 
 The `ExtentFlags` type in `disk/src/items.rs` represents these flags as a
 `bitflags` struct.
 
 ### Tree Block Info (Non-Skinny Only)
 
-For non-skinny `EXTENT_ITEM` entries with `TREE_BLOCK` flag, the header
+For non-skinny `EXTENT_ITEM` entries with the `TREE_BLOCK` flag, the header
 is followed by `btrfs_tree_block_info` (25 bytes):
 
 | Field | Offset | Size | Description |
@@ -128,9 +125,8 @@ is followed by `btrfs_tree_block_info` (25 bytes):
 | `key` | 0 | 17 | First key in the tree block (`btrfs_disk_key`) |
 | `level` | 17 | 1 | B-tree level of the block |
 
-This structure is omitted when using `METADATA_ITEM` (skinny metadata),
-since the level is stored in the key offset and the first key is not
-needed.
+`METADATA_ITEM` (skinny metadata) omits this structure, because the level is
+stored in the key offset and the first key is not needed.
 
 ### Full Item Layout
 
@@ -162,15 +158,14 @@ For a data extent item with one inline EXTENT_DATA_REF:
 
 ## Inline Backrefs
 
-After the extent item header (and tree_block_info for non-skinny
-metadata), zero or more inline backreferences are packed contiguously.
-Each inline ref starts with a 1-byte type code, followed by
-type-specific data.
+After the extent item header (and tree_block_info for non-skinny metadata),
+zero or more inline backreferences are packed contiguously. Each inline ref
+starts with a 1-byte type code followed by type-specific data.
 
-Inline refs are the common case: they are stored directly inside the
-extent item, avoiding the overhead of separate B-tree items. When an
-extent item grows too large to fit in a leaf (due to many references),
-backrefs are stored as standalone items instead.
+Inline refs are the common case. They live inside the extent item and avoid
+the overhead of separate B-tree items. When an extent item would grow too
+large to fit in a leaf (because of many references), backrefs are stored as
+standalone items instead.
 
 ### TREE_BLOCK_REF (type 176)
 
@@ -182,16 +177,15 @@ Direct backref from a metadata extent to the tree that owns it.
 | root objectid | 1 | 8 | u64_le |
 
 The `root` field identifies the tree that owns this metadata block. For
-example, root = 5 means the FS tree, root = 2 means the extent tree
-itself.
+example, root = 5 is the FS tree and root = 2 is the extent tree itself.
 
 Total size: 9 bytes.
 
 ### SHARED_BLOCK_REF (type 182)
 
-Shared backref from a metadata extent to a parent tree block. Used when a
-tree block is shared between snapshots --- the backref points to a parent
-node rather than a root.
+Shared backref from a metadata extent to a parent tree block. It is used
+when a tree block is shared between snapshots. The backref points to a
+parent node instead of a root.
 
 | Field | Offset | Size | Description |
 |-------|--------|------|-------------|
@@ -205,8 +199,8 @@ Total size: 9 bytes.
 
 ### EXTENT_DATA_REF (type 178)
 
-Backref from a data extent to a specific file inode. This is the most
-common inline ref type for data extents.
+Backref from a data extent to a specific file inode. This is the most common
+inline ref type for data extents.
 
 | Field | Offset | Size | Description |
 |-------|--------|------|-------------|
@@ -216,11 +210,10 @@ common inline ref type for data extents.
 | `offset` | 17 | 8 | File byte offset (u64_le) |
 | `count` | 25 | 4 | Number of references (u32_le) |
 
-Note that unlike other inline ref types, `EXTENT_DATA_REF` does **not**
-have an 8-byte offset field between the type byte and the struct body.
-The struct starts immediately after the type byte. The parser in
-`disk/src/items.rs` handles this by reinterpreting the speculatively
-consumed offset bytes as the `root` field:
+Unlike other inline ref types, `EXTENT_DATA_REF` does **not** have an 8-byte
+offset field between the type byte and the struct body. The struct starts
+right after the type byte. The parser in `disk/src/items.rs` handles this by
+reinterpreting the speculatively read offset bytes as the `root` field:
 
 ```rust
 raw::BTRFS_EXTENT_DATA_REF_KEY => {
@@ -232,10 +225,10 @@ raw::BTRFS_EXTENT_DATA_REF_KEY => {
 }
 ```
 
-The `count` field represents how many times this particular
-`(root, objectid, offset)` triple references the extent. For a normal
-file with one reference, count = 1. For a file cloned via `reflink`,
-each clone adds a new `EXTENT_DATA_REF` with its own triple and count.
+The `count` field is the number of times this `(root, objectid, offset)`
+triple references the extent. For a normal file with one reference,
+count = 1. For a file cloned with `reflink`, each clone adds a new
+`EXTENT_DATA_REF` with its own triple and count.
 
 Total size: 29 bytes.
 
@@ -253,8 +246,8 @@ Total size: 13 bytes.
 
 ### EXTENT_OWNER_REF (type 172)
 
-Simple ownership reference, used with the `simple_quota` feature. Records
-which tree root owns the extent without full backref details.
+Simple ownership reference, used with the `simple_quota` feature. It records
+which tree root owns the extent, without full backref details.
 
 | Field | Offset | Size | Description |
 |-------|--------|------|-------------|
@@ -267,9 +260,9 @@ Total size: 9 bytes.
 ## Standalone Backrefs
 
 When inline backrefs do not fit inside the extent item (because the item
-would exceed the available leaf space), they are stored as separate items
-in the extent tree. Standalone backrefs use the same type codes as inline
-refs but are encoded as independent key/value pairs.
+would exceed the available leaf space), they are stored as separate items in
+the extent tree. Standalone backrefs use the same type codes as inline refs
+but are encoded as independent key-value pairs.
 
 ### Standalone TREE_BLOCK_REF
 
@@ -278,8 +271,7 @@ Key: (bytenr, TREE_BLOCK_REF, root_objectid)
       objectid = extent start    type = 176    offset = owning tree
 ```
 
-Item payload: empty (zero bytes). The backref information is entirely
-in the key.
+Item payload: empty (zero bytes). All backref information is in the key.
 
 ### Standalone SHARED_BLOCK_REF
 
@@ -308,9 +300,10 @@ fn extent_data_ref_hash(root: u64, objectid: u64, offset: u64) -> u64 {
 }
 ```
 
-This hash function uses raw CRC32C (seed = `!0`, i.e. `0xFFFFFFFF`,
-without final complement) applied independently to the root (high part)
-and objectid+offset (low part), then combined with a shift and XOR.
+This hash uses raw CRC32C (seed = `!0`, that is `0xFFFFFFFF`, without final
+complement). It is applied separately to the root (high part) and to the
+objectid and offset (low part), and the two are combined with a shift and
+XOR.
 
 Item payload (28 bytes):
 
@@ -339,14 +332,13 @@ Item payload (4 bytes):
 
 ### The refs Field
 
-The `refs` field in `btrfs_extent_item` is the declared total reference
-count for the extent. It equals the sum of all references from both
-inline and standalone backrefs.
+The `refs` field in `btrfs_extent_item` is the declared total reference count
+for the extent. It equals the sum of all references from inline and
+standalone backrefs.
 
-For `TREE_BLOCK_REF`, `SHARED_BLOCK_REF`, and `EXTENT_OWNER_REF`, each
-backref contributes 1 to the total. For `EXTENT_DATA_REF` and
-`SHARED_DATA_REF`, each backref contributes its `count` field to the
-total.
+Each `TREE_BLOCK_REF`, `SHARED_BLOCK_REF`, and `EXTENT_OWNER_REF` contributes
+1 to the total. Each `EXTENT_DATA_REF` and `SHARED_DATA_REF` contributes its
+`count` field.
 
 ### Counting Rules
 
@@ -364,8 +356,8 @@ for each standalone ref:
     otherwise:           total += 1
 ```
 
-The declared `refs` in the extent item header must equal this computed
-total. A mismatch indicates corruption.
+The declared `refs` in the extent item header must equal this total. A
+mismatch indicates corruption.
 
 ### Example: Simple File
 
@@ -384,8 +376,8 @@ Total refs: count(1) = 1. Matches declared refs.
 
 ### Example: Snapshot
 
-After taking a snapshot of the FS tree, the same extent is now referenced
-by both the original and the snapshot. The extent item is updated:
+After a snapshot of the FS tree, both the original and the snapshot
+reference the same extent. The extent item becomes:
 
 ```
 Key: (bytenr, EXTENT_ITEM, 4096)
@@ -434,11 +426,11 @@ Key: (bytenr, METADATA_ITEM, 0)    // level 0 = leaf
 
 ### The EXTENT_DATA_REF Triple
 
-Each data extent backref identifies its user by a
-`(root, objectid, offset)` triple:
+Each data extent backref identifies its user by a `(root, objectid, offset)`
+triple:
 
-- **root**: the tree objectid containing the referencing inode. For user
-  files this is the FS tree (5) or a subvolume/snapshot tree ID.
+- **root**: the objectid of the tree containing the referencing inode. For
+  user files this is the FS tree (5) or a subvolume or snapshot tree ID.
 
 - **objectid**: the inode number of the file that references the extent.
   Regular file inodes start at 257 (`BTRFS_FIRST_FREE_OBJECTID + 1`).
@@ -450,18 +442,18 @@ Each data extent backref identifies its user by a
 ### The count Field
 
 The `count` field records how many times the exact same
-`(root, objectid, offset)` triple references this extent. In normal
-operation, count = 1. It can be greater than 1 in specific scenarios
-involving log replay or certain reflink patterns.
+`(root, objectid, offset)` triple references this extent. Normally
+count = 1. It can be greater than 1 in some cases involving log replay or
+certain reflink patterns.
 
 ### Hash Computation for Standalone Keys
 
-When an `EXTENT_DATA_REF` is stored as a standalone item, the key offset
-is not the file offset but rather a hash of the full triple. This allows
-multiple data refs with different triples to be stored as separate items
-under the same extent bytenr.
+When an `EXTENT_DATA_REF` is stored as a standalone item, the key offset is
+not the file offset but a hash of the full triple. This lets several data
+refs with different triples be stored as separate items under the same
+extent bytenr.
 
-The hash function (from `disk/src/items.rs`) computes:
+The hash function in `disk/src/items.rs` computes:
 
 ```
 high = CRC32C(seed=0xFFFFFFFF, root_le_bytes)
@@ -470,9 +462,9 @@ low  = CRC32C(seed=low,        offset_le_bytes)
 hash = (high << 31) ^ low
 ```
 
-This produces a 63-bit hash (the top bit is always the MSB of the high
-CRC, shifted to bit 62). The hash is deterministic and the same function
-is used in both the kernel and userspace tools.
+This produces a 63-bit hash (the top bit is the MSB of the high CRC, shifted
+to bit 62). The hash is deterministic, and the kernel and userspace tools use
+the same function.
 
 
 ## Metadata Extent Backrefs in Detail
@@ -490,44 +482,41 @@ The `root` field is the tree's objectid:
 - 6 = csum tree
 - 7 = quota tree
 - 10 = free-space tree
-- >= 256 = subvolume/snapshot trees
+- >= 256 = subvolume and snapshot trees
 
 ### SHARED_BLOCK_REF
 
-When a tree block is shared between a subvolume and its snapshot, the
-normal `TREE_BLOCK_REF` is replaced with a `SHARED_BLOCK_REF` that
-points to the parent node. This happens because the same physical block
-cannot be "owned" by two different trees simultaneously.
+When a tree block is shared between a subvolume and its snapshot, the normal
+`TREE_BLOCK_REF` is replaced with a `SHARED_BLOCK_REF` that points to the
+parent node. This is because one physical block cannot be "owned" by two
+trees at once.
 
-The `parent` field is the logical bytenr of the tree node whose key
-pointer array includes this block. When the filesystem needs to modify
-a shared block, it performs copy-on-write: allocating a new block, copying
-the data, and updating the parent's pointer. This is how snapshots achieve
-their constant-time creation --- they share all blocks with the source
-subvolume.
+The `parent` field is the logical bytenr of the tree node whose key pointer
+array includes this block. To modify a shared block, the filesystem performs
+copy-on-write: it allocates a new block, copies the data, and updates the
+parent's pointer. This is why snapshot creation takes constant time: the
+snapshot shares all blocks with the source subvolume.
 
 ### FULL_BACKREF Flag
 
-The `FULL_BACKREF` flag in the extent item's flags field indicates that
-this metadata extent uses only shared backrefs (no direct tree backrefs).
-This typically happens for tree blocks at levels > 0 after a snapshot,
-where the ownership is ambiguous until the block is CoW'd.
+The `FULL_BACKREF` flag in the extent item's flags field means this metadata
+extent uses only shared backrefs (no direct tree backrefs). This typically
+happens for tree blocks at levels > 0 after a snapshot, where ownership is
+ambiguous until the block is CoW'd.
 
 ### Cross-Referencing with Tree Ownership
 
-`btrfs check` collects a map of `(block_address -> owning_tree)` during
-its tree walks. The owning tree for each block is determined by the
-`owner` field in the block's header (`btrfs_header`). This map is then
-cross-referenced against the extent tree's `TREE_BLOCK_REF` entries in
-both directions.
+`btrfs check` builds a map of `(block_address -> owning_tree)` during its
+tree walks. The owning tree for each block comes from the `owner` field in
+the block's header (`btrfs_header`). The map is then cross-referenced against
+the extent tree's `TREE_BLOCK_REF` entries in both directions.
 
 
 ## Block Group Items in the Extent Tree
 
-Historically, `BLOCK_GROUP_ITEM` entries are stored directly in the
-extent tree alongside extent items. With the `BLOCK_GROUP_TREE`
-compat_ro feature (default since btrfs-progs 6.x), they are moved to a
-separate tree (objectid 10).
+Historically, `BLOCK_GROUP_ITEM` entries are stored in the extent tree
+alongside extent items. With the `BLOCK_GROUP_TREE` compat_ro feature
+(default since btrfs-progs 6.x), they move to a separate tree (objectid 10).
 
 ### BLOCK_GROUP_ITEM Structure
 
@@ -544,7 +533,7 @@ Item payload (24 bytes):
 | `chunk_objectid` | 8 | 8 | `FIRST_CHUNK_TREE_OBJECTID` (256) |
 | `flags` | 16 | 8 | Type + profile flags (`DATA|DUP`, `METADATA|RAID1`, etc.) |
 
-The `used` field tracks how many bytes of the block group are currently
+The `used` field is the number of bytes in the block group currently
 allocated to extents. For a new filesystem:
 - System block group: `used` = one nodesize (the chunk tree block)
 - Metadata block group: `used` = N * nodesize (all non-chunk tree blocks)
@@ -553,10 +542,10 @@ allocated to extents. For a new filesystem:
 ### Ordering in the Extent Tree
 
 When block group items are in the extent tree, they sort among the extent
-items by key. Since `BLOCK_GROUP_ITEM` has type 192 and `EXTENT_ITEM` has
-type 168 / `METADATA_ITEM` has type 169, block group items for a given
-logical offset sort *after* any extent item at the same address (because
-key comparison is `(objectid, type, offset)` and 192 > 169).
+items by key. `BLOCK_GROUP_ITEM` has type 192, while `EXTENT_ITEM` has type
+168 and `METADATA_ITEM` has type 169. Key comparison is
+`(objectid, type, offset)` and 192 > 169, so a block group item sorts *after*
+any extent item at the same address.
 
 ### mkfs Construction
 
@@ -569,20 +558,20 @@ add_block_group_items(extent_items, cfg, layout, chunks, data_used);
 This adds entries for the system (SYSTEM flag), metadata (METADATA |
 profile flag), and data (DATA | profile flag) block groups.
 
-When the `BLOCK_GROUP_TREE` feature is enabled, these items are placed
-in a separate tree instead (`build_block_group_tree_with_used`).
+When the `BLOCK_GROUP_TREE` feature is enabled, these items go in a separate
+tree instead (`build_block_group_tree_with_used`).
 
 
 ## What btrfs check Verifies
 
-The extent tree checker (implemented in `cli/src/check/extents.rs`)
-performs several categories of verification.
+The extent tree checker in `cli/src/check/extents.rs` performs several kinds
+of verification.
 
 ### Reference Count Matching
 
-For each extent item (EXTENT_ITEM or METADATA_ITEM) and its associated
-standalone backrefs, the checker computes the total reference count from
-inline + standalone refs and compares it to the declared `refs` field:
+For each extent item (EXTENT_ITEM or METADATA_ITEM) and its standalone
+backrefs, the checker computes the total reference count from inline and
+standalone refs and compares it to the declared `refs` field:
 
 ```rust
 if state.pending_refs != state.pending_counted {
@@ -592,18 +581,18 @@ if state.pending_refs != state.pending_counted {
 }
 ```
 
-The checker processes items in key order. When it encounters a new
-EXTENT_ITEM or METADATA_ITEM, it "flushes" the previous extent (checking
-its ref count) and begins accumulating refs for the new one. Standalone
-backref items (TREE_BLOCK_REF, SHARED_BLOCK_REF, EXTENT_DATA_REF,
-SHARED_DATA_REF, EXTENT_OWNER_REF) that follow an extent item with a
-matching objectid add to the running count.
+The checker processes items in key order. On each new EXTENT_ITEM or
+METADATA_ITEM, it "flushes" the previous extent (checking its ref count) and
+starts accumulating refs for the new one. Standalone backref items
+(TREE_BLOCK_REF, SHARED_BLOCK_REF, EXTENT_DATA_REF, SHARED_DATA_REF,
+EXTENT_OWNER_REF) that follow an extent item with a matching objectid add to
+the running count.
 
 ### Extent Overlap Detection
 
-Extents in the extent tree are sorted by logical address. The checker
-tracks the end address of the previous extent and reports an error if the
-next extent starts before the previous one ends:
+Extents in the extent tree are sorted by logical address. The checker tracks
+the end address of the previous extent and reports an error if the next one
+starts before it ends:
 
 ```rust
 if length > 0 && bytenr < state.prev_end && state.prev_end > 0 {
@@ -613,20 +602,19 @@ if length > 0 && bytenr < state.prev_end && state.prev_end > 0 {
 }
 ```
 
-Note that METADATA_ITEM entries store the tree level (not the length) in
-the key offset. Since the checker does not have access to the nodesize at
-this point, it uses length = 0 for metadata items and skips overlap
-detection for them.
+METADATA_ITEM entries store the tree level, not the length, in the key
+offset. The checker has no access to the nodesize at this point, so it uses
+length = 0 for metadata items and skips overlap detection for them.
 
 ### Backref Owner Cross-Checks (Direction 1: Walk to Extent)
 
-During tree walks in earlier check phases, the checker builds a map of
-`tree_block_owners: HashMap<u64, u64>` mapping each tree block's logical
-address to the tree objectid that owns it (from the block header's
+During tree walks in earlier check phases, the checker builds
+`tree_block_owners: HashMap<u64, u64>`, which maps each tree block's logical
+address to the objectid of the tree that owns it (from the block header's
 `owner` field).
 
-After processing the extent tree, the checker verifies that every block
-encountered during walks has an extent item:
+After processing the extent tree, the checker verifies that every block seen
+during the walks has an extent item:
 
 ```rust
 if !state.extent_item_addrs.contains(&addr) {
@@ -634,7 +622,7 @@ if !state.extent_item_addrs.contains(&addr) {
 }
 ```
 
-And that the extent tree's backrefs agree with the actual owner:
+It also verifies that the extent tree's backrefs agree with the actual owner:
 
 ```rust
 if !claimed_owners.contains(&actual_owner) {
@@ -646,10 +634,9 @@ if !claimed_owners.contains(&actual_owner) {
 
 ### Backref Owner Cross-Checks (Direction 2: Extent to Walk)
 
-The checker also verifies the reverse: every `TREE_BLOCK_REF` in the
-extent tree (both inline and standalone) must correspond to a tree block
-that was actually encountered during walks and is owned by the claimed
-tree:
+The checker also verifies the reverse. Every `TREE_BLOCK_REF` in the extent
+tree (inline and standalone) must correspond to a tree block that was seen
+during the walks and is owned by the claimed tree:
 
 ```rust
 let actual = tree_block_owners.get(&addr).copied();
@@ -660,32 +647,31 @@ if actual != Some(claimed) {
 }
 ```
 
-This catches "orphan" backrefs that point to blocks that either do not
-exist or are owned by a different tree than claimed.
+This catches "orphan" backrefs that point to blocks that either do not exist
+or are owned by a different tree than claimed.
 
 ### Data Byte Accounting
 
 The checker accumulates two statistics from data extents:
 
-- **data_bytes_allocated**: the sum of `length` for all data extent items.
+- **data_bytes_allocated**: the sum of `length` over all data extent items.
   This is the total physical space reserved for data.
 
-- **data_bytes_referenced**: the sum of `length * count` for all data
-  extent references. When data is shared (via snapshots or reflinks),
+- **data_bytes_referenced**: the sum of `length * count` over all data
+  extent references. When data is shared (through snapshots or reflinks),
   referenced bytes exceed allocated bytes.
 
-For inline-only data refs (no standalone ExtentDataRef items),
-referenced bytes are computed from the inline ref count. For standalone
-refs, each `EXTENT_DATA_REF` and `SHARED_DATA_REF` item contributes
-`length * count`.
+For inline-only data refs (no standalone ExtentDataRef items), referenced
+bytes are computed from the inline ref count. For standalone refs, each
+`EXTENT_DATA_REF` and `SHARED_DATA_REF` item contributes `length * count`.
 
 
 ## Extent Item Construction in mkfs
 
 ### Metadata Extent Items
 
-For each tree block allocated during mkfs, the extent tree receives a
-metadata extent item with one inline `TREE_BLOCK_REF`:
+Each tree block allocated during mkfs gets a metadata extent item with one
+inline `TREE_BLOCK_REF`:
 
 ```rust
 fn metadata_extent_item(addr, skinny, generation, owner, nodesize) -> (Key, Vec<u8>) {
@@ -704,14 +690,14 @@ fn metadata_extent_item(addr, skinny, generation, owner, nodesize) -> (Key, Vec<
 The `extent_item()` function serializes:
 1. `btrfs_extent_item` header: refs=1, generation, flags=TREE_BLOCK
 2. For non-skinny: zero-filled `btrfs_tree_block_info` (25 bytes)
-3. Inline `TREE_BLOCK_REF`: type byte (176) + root objectid (8 bytes)
+3. Inline `TREE_BLOCK_REF`: type byte (176) and root objectid (8 bytes)
 
 Total item size: 33 bytes (skinny) or 58 bytes (non-skinny).
 
 ### Data Extent Items
 
-For each data extent written during `--rootdir` mode, the extent tree
-receives a data extent item with one inline `EXTENT_DATA_REF`:
+Each data extent written in `--rootdir` mode gets a data extent item with
+one inline `EXTENT_DATA_REF`:
 
 ```rust
 fn data_extent_item(refs, generation, root, objectid, offset, count) -> Vec<u8> {
@@ -733,10 +719,10 @@ Total item size: 53 bytes. The key is
 
 ### Self-Referential Convergence
 
-The extent tree must contain entries for its own tree blocks. But the
-number of tree blocks needed depends on how many items the tree contains,
-which depends on how many extent items there are, which depends on the
-number of tree blocks... This creates a circular dependency.
+The extent tree must contain entries for its own tree blocks. But the number
+of tree blocks it needs depends on how many items it contains, which depends
+on how many extent items there are, which in turn depends on the number of
+tree blocks. This is a circular dependency.
 
 The `--rootdir` code path solves this with a convergence loop
 (`converge_extent_tree_block_count` in `mkfs/src/mkfs.rs`):
@@ -746,40 +732,38 @@ The `--rootdir` code path solves this with a convergence loop
    entries for the extent tree's own blocks).
 3. If the trial tree's actual block count differs from the assumed count,
    update the count and repeat.
-4. The loop converges quickly (usually in 1-2 iterations) because adding
-   extent items for additional blocks only marginally increases the tree
-   size.
+4. The loop converges quickly (usually in 1-2 iterations), because extent
+   items for extra blocks only marginally increase the tree size.
 
-After convergence, the real extent tree is built with actual logical
-addresses assigned by the `BlockAllocator`.
+After convergence, the real extent tree is built with the logical addresses
+assigned by `BlockAllocator`.
 
 
 ## Extent Tree Key Ordering
 
 Items in the extent tree are sorted by the standard btrfs key comparison
-`(objectid, type, offset)`. Since `objectid` is the extent's logical
-byte address, items are effectively sorted by logical address.
+`(objectid, type, offset)`. The `objectid` is the extent's logical byte
+address, so items are effectively sorted by logical address.
 
 Within a single extent's address, the ordering is:
 
-1. `EXTENT_ITEM` or `METADATA_ITEM` (type 168 or 169) --- the extent
-   header
-2. `EXTENT_OWNER_REF` (type 172) --- if simple quotas are enabled
-3. `TREE_BLOCK_REF` (type 176) --- standalone metadata backrefs
-4. `EXTENT_DATA_REF` (type 178) --- standalone data backrefs
-5. `SHARED_BLOCK_REF` (type 182) --- standalone shared metadata backrefs
-6. `SHARED_DATA_REF` (type 184) --- standalone shared data backrefs
-7. `BLOCK_GROUP_ITEM` (type 192) --- if not using block-group tree
+1. `EXTENT_ITEM` or `METADATA_ITEM` (type 168 or 169): the extent header
+2. `EXTENT_OWNER_REF` (type 172): if simple quotas are enabled
+3. `TREE_BLOCK_REF` (type 176): standalone metadata backrefs
+4. `EXTENT_DATA_REF` (type 178): standalone data backrefs
+5. `SHARED_BLOCK_REF` (type 182): standalone shared metadata backrefs
+6. `SHARED_DATA_REF` (type 184): standalone shared data backrefs
+7. `BLOCK_GROUP_ITEM` (type 192): if the block-group tree is not in use
 
-This ordering is a natural consequence of the type field values and
-ensures that `btrfs check` can process all backrefs for an extent by
-reading items sequentially until the objectid (bytenr) changes.
+This order follows from the type field values. It lets `btrfs check` process
+all backrefs for an extent by reading items sequentially until the objectid
+(bytenr) changes.
 
 
 ## Relationship to File Extents
 
-The connection between the extent tree and actual file data flows through
-`EXTENT_DATA` items in FS trees:
+The extent tree connects to file data through `EXTENT_DATA` items in FS
+trees:
 
 ```
 FS tree: (inode, EXTENT_DATA, file_offset)
@@ -794,13 +778,12 @@ The `disk_bytenr` in the file extent item is the logical address of the
 data extent. The extent tree entry at that address records who references
 the extent and how many times.
 
-For inline file extents (small files where data is embedded directly in
-the tree leaf), there is no corresponding extent tree entry --- the data
-does not occupy a separate extent.
+Inline file extents (small files whose data is embedded in the tree leaf)
+have no extent tree entry, because the data does not occupy a separate
+extent.
 
-For hole/sparse extents (`disk_bytenr = 0`), there is similarly no extent
-tree entry. The `no-holes` feature eliminates explicit hole extent items
-entirely.
+Hole (sparse) extents (`disk_bytenr = 0`) also have no extent tree entry.
+The `no-holes` feature removes explicit hole extent items entirely.
 
 
 ## Summary of Key Formats
@@ -816,6 +799,5 @@ entirely.
 | `SHARED_DATA_REF` | `(bytenr, 184, parent)` | `shared_data_ref` (4 bytes) |
 | `BLOCK_GROUP_ITEM` | `(logical, 192, length)` | `block_group_item` (24 bytes) |
 
-All `bytenr` values are logical byte addresses. The extent tree provides
-the complete picture of space allocation and ownership across the entire
-filesystem.
+All `bytenr` values are logical byte addresses. The extent tree gives the
+complete picture of space allocation and ownership across the filesystem.

@@ -1,20 +1,20 @@
 # btrfs check: verification phases
 
-This document describes the seven phases of `btrfs check`, as implemented in the
-`cli/src/check/` module. The checker operates in read-only mode on an unmounted
-filesystem, reading the raw on-disk image through `btrfs-disk`'s `BlockReader`
-without requiring any kernel ioctls.
+This document describes the seven phases of `btrfs check`, implemented in
+`cli/src/check/`. The checker is read-only and runs on an unmounted
+filesystem. It reads the raw on-disk image through `btrfs-disk`'s
+`BlockReader` and uses no kernel ioctls.
 
 ## Overview
 
-The check command opens the filesystem image and bootstraps the chunk tree
-(superblock -> sys_chunk_array -> chunk tree -> root tree), then runs seven
-sequential verification phases:
+The check command opens the filesystem image, bootstraps the chunk tree
+(superblock -> sys_chunk_array -> chunk tree -> root tree), and then runs seven
+verification phases in order:
 
 1. Superblock mirror validation
 2. Tree structure checks (all trees)
 3. Extent tree cross-checks (reference counting and ownership)
-4. Chunk / block group / device extent cross-checks
+4. Chunk, block group, and device extent cross-checks
 5. FS tree inode consistency
 6. Checksum tree verification
 7. ROOT_REF / ROOT_BACKREF consistency
@@ -31,15 +31,15 @@ The main `CheckCommand::run` method:
    `--backup`, `--tree-root`, `--chunk-root`, `--qgroup-report`, `--subvol-extents`).
 2. Checks mount status (skippable with `--force`).
 3. Validates the superblock mirror index (0-2).
-4. Opens the filesystem via `reader::filesystem_open_mirror`, which bootstraps
+4. Opens the filesystem with `reader::filesystem_open_mirror`, which bootstraps
    chunk mapping and discovers all tree roots.
 5. Runs phases 1-7 in order.
 6. Prints summary and exits.
 
 ### Statistics tracking
 
-Throughout all phases, `CheckResults` accumulates byte counts that are printed
-in the final summary:
+Across all phases, `CheckResults` accumulates byte counts for the final
+summary:
 
 - `total_tree_bytes`: sum of nodesize for every tree block visited in phase 2.
 - `total_fs_tree_bytes`: subset of the above for FS trees (objectid 5 and >= 256).
@@ -66,7 +66,7 @@ device:
 - Mirror 1: byte offset 67108864 (64 MiB)
 - Mirror 2: byte offset 274877906944 (256 GiB)
 
-For each mirror (0 through `SUPER_MIRROR_MAX - 1`):
+For each mirror, from 0 to `SUPER_MIRROR_MAX - 1`:
 
 1. Read 4096 bytes from the mirror offset using `read_superblock_bytes_at`.
 2. Validate the superblock using `superblock_is_valid`, which checks:
@@ -74,86 +74,83 @@ For each mirror (0 through `SUPER_MIRROR_MAX - 1`):
    - The CRC32C checksum of bytes 32..4096 matches the stored checksum in
      bytes 0..4.
 
-If a mirror cannot be read (I/O error), this is only reported as an error for
-mirror 0. Mirrors 1 and 2 may legitimately be absent on small devices where the
-device is shorter than the mirror offset.
+A mirror that cannot be read (I/O error) is reported as an error only for
+mirror 0. Mirrors 1 and 2 may legitimately be absent on devices shorter than
+the mirror offset.
 
 ### Generation consistency
 
-The current implementation validates each mirror independently (magic + checksum).
-The C reference additionally checks that the generation fields across valid mirrors
-are consistent (the primary mirror should have the highest generation). This is not
-yet implemented.
+The current implementation validates each mirror's magic and checksum
+independently. The C reference also checks that the generation fields of valid
+mirrors are consistent (the primary mirror should have the highest generation).
+This is not yet implemented.
 
 ### Error variants produced
 
-- **`SuperblockInvalid { mirror, detail }`** -- reported when:
+- **`SuperblockInvalid { mirror, detail }`**: reported when:
   - A mirror has an invalid checksum or magic number.
   - Mirror 0 cannot be read at all (I/O error).
 
 ### Return value
 
-Returns the count of valid mirrors found (0-3). This value is currently not used
-by the caller but could be used for repair decisions in the future.
+Returns the number of valid mirrors (0-3). The caller does not use this value
+yet. It could inform repair decisions in the future.
 
 ## Phase 2: Tree structure
 
 **Source:** `cli/src/check/tree_structure.rs`
 
 **Purpose:** Walk every tree in the filesystem and verify per-block structural
-integrity. Collect a map of all tree block addresses and their owners for use
-in phase 3.
+integrity. Build a map of every tree block address to its owner for phase 3.
 
 ### Trees checked
 
 The phase checks:
 
-1. **Root tree** -- directly from `superblock.root`.
-2. **Chunk tree** -- directly from `superblock.chunk_root`.
-3. **All trees discovered in the root tree** -- every `(tree_id, (bytenr, gen))`
+1. **Root tree**: directly from `superblock.root`.
+2. **Chunk tree**: directly from `superblock.chunk_root`.
+3. **All trees discovered in the root tree**: every `(tree_id, (bytenr, gen))`
    pair from `open.tree_roots`. This includes the extent tree, dev tree, FS tree,
    csum tree, free-space tree, data-reloc tree, block-group tree (if present),
-   and all subvolume/snapshot trees.
+   and all subvolume and snapshot trees.
 
-Each tree is walked using `reader::tree_walk_tolerant`, which performs a depth-first
-traversal through all internal nodes and leaves, calling the visitor callback for
-each block. The `_tolerant` variant collects read errors instead of aborting,
-allowing the checker to report all problems rather than stopping at the first.
+Each tree is walked with `reader::tree_walk_tolerant`, a depth-first traversal
+of all internal nodes and leaves that calls the visitor for each block. The
+`_tolerant` variant collects read errors instead of aborting, so the checker
+reports every problem rather than stopping at the first.
 
 ### Per-block checks
 
-For every tree block (leaf or internal node), the following checks are performed:
+Every tree block (leaf or internal node) gets the following checks.
 
 #### CRC32C checksum verification
 
-The first 32 bytes of each block contain the checksum. The checker computes
+The first 32 bytes of each block hold the checksum. The checker computes
 `btrfs_csum_data(&raw[32..])` (standard CRC32C with ISO 3309 seed) and compares
-it to the stored value in `raw[0..4]`. This check is only performed when the
-superblock's `csum_type` is CRC32C; other checksum types emit a warning and
+it to the stored value in `raw[0..4]`. This check runs only when the
+superblock's `csum_type` is CRC32C. Other checksum types emit a warning and
 skip verification.
 
 #### Fsid match
 
 The block header's `fsid` field (16 bytes at offset 32) must match the
 filesystem's effective fsid. The effective fsid is `metadata_uuid` if the
-`METADATA_UUID` incompat flag is set, or `fsid` otherwise. This distinction
-matters for filesystems that have had their metadata UUID changed via
-`btrfs-tune -m`.
+`METADATA_UUID` incompat flag is set, and `fsid` otherwise. This matters for
+filesystems whose metadata UUID was changed with `btrfs-tune -m`.
 
 #### Generation bound
 
 The block header's `generation` field must not exceed the superblock's
-`generation`. A block with a higher generation than the superblock indicates
-corruption (the block was written in a transaction that was never committed,
-or the block has been corrupted).
+`generation`. A higher block generation indicates corruption: either the block
+was written in a transaction that was never committed, or the block itself is
+corrupt.
 
 #### Level consistency
 
 - Leaf blocks (items present) must have `header.level == 0`.
 - Internal nodes (key-pointer entries) must have `header.level > 0`.
 
-A mismatch indicates structural corruption where a block's type disagrees with
-its declared level.
+A mismatch means the block's type disagrees with its declared level.
 
 #### Key ordering
 
@@ -165,9 +162,9 @@ key comparison `(objectid, type, offset)`:
 - For internal nodes: consecutive key-pointers `ptrs[i-1]` and `ptrs[i]` must
   satisfy `key_less(prev, cur)`.
 
-Strictly ascending means no duplicates are allowed. The comparison function uses
-the raw type byte for the type field (via `key_type.to_raw()`), comparing the
-tuple `(objectid, type_raw, offset)` lexicographically.
+Strictly ascending means no duplicates. The comparison uses the raw type byte
+(`key_type.to_raw()`) and compares the tuple `(objectid, type_raw, offset)`
+lexicographically.
 
 ### Byte attribution
 
@@ -186,32 +183,32 @@ where 101 is the header size and 25 is the item descriptor size.
 ### Output
 
 Returns a `HashMap<u64, u64>` mapping each tree block's logical address to the
-objectid of the tree that owns it. This map is used by phase 3 for bidirectional
+objectid of the tree that owns it. Phase 3 uses this map for bidirectional
 ownership verification.
 
 ### Tree name resolution
 
-Tree names for error messages are derived from the objectid using `ObjectId`
-formatting (e.g., objectid 1 = "ROOT_TREE", objectid 5 = "FS_TREE", objectid
-256+ = the numeric subvolume ID). Names are leaked as `&'static str` since the
-set of tree names is small and bounded.
+Tree names in error messages come from `ObjectId` formatting of the objectid.
+For example, objectid 1 is "ROOT_TREE", objectid 5 is "FS_TREE", and objectids
+256 and above are the numeric subvolume ID. Names are leaked as `&'static str`
+because the set of tree names is small and bounded.
 
 ### Error variants produced
 
-- **`TreeBlockChecksumMismatch { tree, logical }`** -- CRC32C does not match.
-- **`TreeBlockBadFsid { tree, logical }`** -- header fsid does not match the
+- **`TreeBlockChecksumMismatch { tree, logical }`**: CRC32C does not match.
+- **`TreeBlockBadFsid { tree, logical }`**: header fsid does not match the
   filesystem's effective fsid.
-- **`TreeBlockBadBytenr { tree, logical, header_bytenr }`** -- the header's
+- **`TreeBlockBadBytenr { tree, logical, header_bytenr }`**: the header's
   `bytenr` field does not match the logical address where the block was read.
-  (Note: this check is performed by the block reader during parsing, not
-  directly in this phase, but the error is reported here if it occurs.)
-- **`TreeBlockBadGeneration { tree, logical, block_gen, super_gen }`** -- block
+  The block reader performs this check during parsing, not this phase, but the
+  error is reported here if it occurs.
+- **`TreeBlockBadGeneration { tree, logical, block_gen, super_gen }`**: block
   generation exceeds superblock generation.
-- **`TreeBlockBadLevel { tree, logical, detail }`** -- level/type mismatch
+- **`TreeBlockBadLevel { tree, logical, detail }`**: level and type disagree
   (leaf with non-zero level, or node with zero level).
-- **`KeyOrderViolation { tree, logical, index }`** -- key at `index` is not
+- **`KeyOrderViolation { tree, logical, index }`**: key at `index` is not
   strictly greater than the key at `index - 1`.
-- **`ReadError { logical, detail }`** -- I/O error reading a tree block.
+- **`ReadError { logical, detail }`**: I/O error reading a tree block.
 
 ## Phase 3: Extents
 
@@ -223,16 +220,16 @@ both directions.
 
 ### How it works
 
-The phase walks the extent tree leaf by leaf, processing items in key order.
-It maintains an `ExtentCheckState` that tracks the "current" extent being
-verified and accumulates statistics.
+The phase walks the extent tree leaf by leaf and processes items in key order.
+An `ExtentCheckState` tracks the extent currently being verified and
+accumulates statistics.
 
 #### Item processing
 
-Items are processed based on their key type:
+Items are processed by key type:
 
-**`EXTENT_ITEM` / `METADATA_ITEM`:** Start a new extent. The previous extent
-(if any) is flushed first. For the new extent:
+**`EXTENT_ITEM` and `METADATA_ITEM`:** Start a new extent, after flushing the
+previous one (if any). For the new extent:
 
 1. Record the bytenr in `extent_item_addrs` (for later ownership checks).
 2. Determine the extent length:
@@ -254,18 +251,18 @@ Items are processed based on their key type:
 **`TREE_BLOCK_REF`:** Standalone tree block backref. Increments `pending_counted`
 by 1. Records `key.offset` (the root objectid) in `extent_backref_owners`.
 
-**`SHARED_BLOCK_REF` / `EXTENT_OWNER_REF`:** Standalone backrefs. Each
+**`SHARED_BLOCK_REF` and `EXTENT_OWNER_REF`:** Standalone backrefs. Each
 increments `pending_counted` by 1.
 
-**`EXTENT_DATA_REF`:** Standalone data backref. Parses the item to extract the
-`count` field (number of references from this particular root/objectid/offset
-combination). Increments `pending_counted` by `count`. Adds
+**`EXTENT_DATA_REF`:** Standalone data backref. Parses the item's `count`
+field (the number of references from this root, objectid, and offset
+combination). Increments `pending_counted` by `count` and adds
 `length * count` to `data_bytes_referenced`.
 
 **`SHARED_DATA_REF`:** Same as `EXTENT_DATA_REF` but for shared (relocated)
 data references.
 
-**All other key types** (e.g., `BLOCK_GROUP_ITEM`): ignored.
+**All other key types** (such as `BLOCK_GROUP_ITEM`): ignored.
 
 #### Inline reference counting
 
@@ -273,13 +270,13 @@ The `count_inline_refs` function iterates over the `InlineRef` variants in an
 `ExtentItem`:
 
 - `TreeBlockBackref`, `SharedBlockBackref`, `ExtentOwnerRef`: count as 1 each.
-- `ExtentDataBackref`, `SharedDataBackref`: count as their embedded `count` field
-  (which may be > 1 for multiply-referenced data extents).
+- `ExtentDataBackref`, `SharedDataBackref`: count as their embedded `count` field,
+  which may be greater than 1 for data extents with multiple references.
 
 #### Flushing
 
-When a new `EXTENT_ITEM`/`METADATA_ITEM` is encountered, or at the end of the
-tree walk, `flush_pending` is called:
+`flush_pending` runs when a new `EXTENT_ITEM` or `METADATA_ITEM` is
+encountered, and at the end of the tree walk:
 
 1. Skip if no extent is pending (`pending_bytenr == 0`).
 2. For data extents where `data_bytes_referenced` is still 0 (only inline refs,
@@ -291,7 +288,7 @@ tree walk, `flush_pending` is called:
 
 #### Bidirectional ownership cross-check
 
-After the extent tree walk completes, two cross-checks are performed using the
+After the extent tree walk, two cross-checks run against the
 `tree_block_owners` map from phase 2:
 
 **Direction 1: tree block -> extent tree.** For every tree block address found
@@ -306,31 +303,31 @@ during phase 2 tree walks:
 **Direction 2: extent tree -> tree block.** For every tree block address with
 backrefs in the extent tree:
 
-- For each claimed owner root, check if the actual owner (from the phase 2 map)
-  matches. If the block was not found during phase 2 walks, or belongs to a
+- For each claimed owner root, check whether it matches the actual owner from
+  the phase 2 map. If phase 2 did not find the block, or found it in a
   different tree, report `BackrefOrphan`.
 
-Both cross-checks sort addresses before iteration for deterministic error
-ordering.
+Both cross-checks sort addresses first so errors appear in a deterministic
+order.
 
 ### Error variants produced
 
-- **`ExtentRefMismatch { bytenr, expected, found }`** -- the declared reference
+- **`ExtentRefMismatch { bytenr, expected, found }`**: the declared reference
   count in the `ExtentItem` does not match the sum of inline and standalone
   backrefs.
-- **`MissingExtentItem { bytenr }`** -- a tree block observed during phase 2
+- **`MissingExtentItem { bytenr }`**: a tree block observed during phase 2
   has no corresponding `EXTENT_ITEM` or `METADATA_ITEM` in the extent tree.
-- **`BackrefOwnerMismatch { bytenr, actual_owner, claimed_owners }`** -- the
+- **`BackrefOwnerMismatch { bytenr, actual_owner, claimed_owners }`**: the
   tree block's actual owner (from phase 2) does not appear in the extent tree's
   list of backref owners for that address.
-- **`BackrefOrphan { bytenr, claimed_owner }`** -- the extent tree claims a
+- **`BackrefOrphan { bytenr, claimed_owner }`**: the extent tree claims a
   backref for a tree that does not actually contain a block at that address.
-- **`OverlappingExtent { bytenr, length, prev_end }`** -- two data extents
-  overlap in logical address space (the start of one extent is before the end
-  of the previous).
-- **`ReadError { logical, detail }`** -- I/O error reading the extent tree.
+- **`OverlappingExtent { bytenr, length, prev_end }`**: two data extents
+  overlap in logical address space (one extent starts before the previous one
+  ends).
+- **`ReadError { logical, detail }`**: I/O error reading the extent tree.
 
-## Phase 4: Chunks / block groups / device extents
+## Phase 4: Chunks, block groups, and device extents
 
 **Source:** `cli/src/check/chunks.rs`
 
@@ -339,16 +336,16 @@ for mutual consistency.
 
 ### What it checks
 
-This phase performs three categories of cross-checks:
+This phase performs three kinds of cross-checks.
 
 #### Chunk <-> block group cross-check
 
 Every chunk in the chunk tree's `ChunkTreeCache` (built during filesystem open)
-should have a corresponding `BLOCK_GROUP_ITEM` in the extent tree (or block-group
-tree, if the `BLOCK_GROUP_TREE` compat_ro feature is enabled). And vice versa:
-every block group item should correspond to a chunk.
+should have a matching `BLOCK_GROUP_ITEM` in the extent tree, or in the
+block-group tree if the `BLOCK_GROUP_TREE` compat_ro feature is enabled.
+Conversely, every block group item should correspond to a chunk.
 
-Block groups are collected by walking either:
+Block groups are collected by walking one of:
 - The **block-group tree** if `BTRFS_FEATURE_COMPAT_RO_BLOCK_GROUP_TREE` is set
   in the superblock's `compat_ro_flags`.
 - The **extent tree** otherwise (block group items historically lived in the
@@ -365,23 +362,22 @@ Then:
 
 #### Device extent overlap detection
 
-Device extents are collected from the device tree by walking all items with key
-type `DEV_EXTENT`. Each extent is recorded as `(offset, length)` grouped by
-device ID (`key.objectid`).
+Device extents are collected from all `DEV_EXTENT` items in the device tree.
+Each is recorded as `(offset, length)`, grouped by device ID (`key.objectid`).
 
-For each device, extents are sorted by physical offset. Then consecutive pairs
-are checked: if `extents[i].offset < extents[i-1].offset + extents[i-1].length`,
+For each device, extents are sorted by physical offset and consecutive pairs
+are compared. If `extents[i].offset < extents[i-1].offset + extents[i-1].length`,
 the extents overlap and `DeviceExtentOverlap` is reported.
 
 ### Error variants produced
 
-- **`ChunkMissingBlockGroup { logical }`** -- a chunk exists in the chunk tree
+- **`ChunkMissingBlockGroup { logical }`**: a chunk exists in the chunk tree
   but no block group item was found at the same logical address.
-- **`BlockGroupMissingChunk { logical }`** -- a block group item exists but no
+- **`BlockGroupMissingChunk { logical }`**: a block group item exists but no
   chunk was found at the same logical address.
-- **`DeviceExtentOverlap { devid, offset }`** -- two device extents on the same
+- **`DeviceExtentOverlap { devid, offset }`**: two device extents on the same
   device overlap in physical address space.
-- **`ReadError { logical, detail }`** -- I/O error reading the block-group tree,
+- **`ReadError { logical, detail }`**: I/O error reading the block-group tree,
   extent tree, or device tree.
 
 ## Phase 5: FS roots
@@ -394,102 +390,98 @@ trees) and verify inode-level consistency.
 ### Which trees are checked
 
 From the `tree_roots` map (populated during filesystem open), the phase selects
-trees whose objectid is either:
-- `BTRFS_FS_TREE_OBJECTID` (5) -- the default filesystem tree.
-- `>= BTRFS_FIRST_FREE_OBJECTID` (256) -- subvolume and snapshot trees.
+trees whose objectid is one of:
+- `BTRFS_FS_TREE_OBJECTID` (5): the default filesystem tree.
+- `>= BTRFS_FIRST_FREE_OBJECTID` (256): subvolume and snapshot trees.
 
 ### Item collection
 
 For each FS tree, `collect_fs_items` walks all leaves and groups items by
 objectid (inode number). Each item is stored as a `(KeyType, key_offset,
-raw_data_bytes)` tuple. Items arrive in sorted key order due to the B-tree
-traversal, which means within an objectid group, items are sorted by
-`(key_type, offset)`.
+raw_data_bytes)` tuple. The B-tree traversal yields items in key order, so
+within an objectid group they are sorted by `(key_type, offset)`.
 
 ### Per-inode checks
 
-For each objectid group (inode), the following checks are performed:
+Each objectid group (inode) gets the following checks.
 
 #### INODE_ITEM presence
 
-The checker notes whether the objectid has an `INODE_ITEM`. If directory entries
-reference an objectid that has no `INODE_ITEM`, the entry is an orphan.
+The checker records whether the objectid has an `INODE_ITEM`. A directory entry
+that references an objectid with no `INODE_ITEM` is an orphan.
 
-Parsed from `INODE_ITEM`: nlink, size (isize), nbytes, and mode.
+The checker parses nlink, size (isize), nbytes, and mode from the `INODE_ITEM`.
 
 #### Nlink consistency
 
-The actual reference count is computed by counting entries across all
-`INODE_REF` items (via `InodeRef::parse_all`) and `INODE_EXTREF` items (via
-`InodeExtref::parse_all`) for this objectid. If the computed count differs from
+The actual reference count is the number of entries across all `INODE_REF`
+items (parsed with `InodeRef::parse_all`) and `INODE_EXTREF` items (parsed with
+`InodeExtref::parse_all`) for this objectid. If the count differs from
 `inode_item.nlink` and the inode has at least one reference, `NlinkMismatch` is
 reported.
 
 The root directory inode (objectid 256, `BTRFS_FIRST_FREE_OBJECTID`) is excluded
-from this check because it has special nlink handling in btrfs.
+because btrfs handles its nlink specially.
 
 #### File extent overlap detection
 
-For regular files, all `EXTENT_DATA` items are processed to extract
-`(file_offset, file_offset + length)` ranges:
+For regular files, each `EXTENT_DATA` item yields a
+`(file_offset, file_offset + length)` range:
 
 - **Regular extents:** length = `num_bytes` from the `FileExtentBody::Regular`
   variant.
 - **Inline extents:** length = `inline_size` from the `FileExtentBody::Inline`
   variant.
 
-Since items are in key order and `EXTENT_DATA` keys use the file offset, ranges
-are already sorted by start offset. Consecutive ranges are checked: if
-`ranges[i].start < ranges[i-1].end`, a `FileExtentOverlap` is reported.
+Items are in key order and `EXTENT_DATA` keys use the file offset, so ranges
+are already sorted by start offset. If consecutive ranges satisfy
+`ranges[i].start < ranges[i-1].end`, `FileExtentOverlap` is reported.
 
 #### Directory inode size (isize) check
 
-For directory inodes (mode & S_IFMT == S_IFDIR), the expected inode size is
-computed by summing `name_len * 2` for every `DIR_INDEX` entry belonging to
-this inode. The factor of 2 matches the btrfs convention where directory inode
-size counts each entry's name length twice (once for `DIR_ITEM`, once for
-`DIR_INDEX`).
+For directory inodes (mode & S_IFMT == S_IFDIR), the expected inode size is the
+sum of `name_len * 2` over every `DIR_INDEX` entry of the inode. The factor of 2
+matches the btrfs convention that a directory's size counts each entry's name
+length twice: once for `DIR_ITEM` and once for `DIR_INDEX`.
 
-If the inode's stored `size` field differs from this computed sum, `DirSizeWrong`
-is reported.
+If the stored `size` differs from this sum, `DirSizeWrong` is reported.
 
 #### File nbytes check
 
 For regular files and symlinks (mode & S_IFMT == S_IFREG or S_IFLNK), the
-expected `nbytes` is computed from extent items:
+expected `nbytes` is computed from the extent items:
 
 - **Inline extents:** `nbytes += data_len` (the inline payload size).
 - **Regular extents:** `nbytes += disk_num_bytes`, but only for non-prealloc
   extents. Prealloc extents (preallocated but unwritten) and hole extents
   (disk_bytenr == 0) do not contribute.
 
-If the inode's stored `nbytes` differs from the computed total, `NbytesWrong`
-is reported.
+If the stored `nbytes` differs from this total, `NbytesWrong` is reported.
 
 #### Orphan directory entries
 
-When processing `DIR_ITEM` and `DIR_INDEX` items, for each entry whose location
-key type is `INODE_ITEM` and whose target objectid is >= `BTRFS_FIRST_FREE_OBJECTID`
-(256): if the target inode has no `INODE_ITEM` anywhere in this tree,
-`DirItemOrphan` is reported. Both `DIR_ITEM` and `DIR_INDEX` entries are
-checked, so an orphan reference in either will be caught.
+For each `DIR_ITEM` and `DIR_INDEX` entry whose location key type is
+`INODE_ITEM` and whose target objectid is >= `BTRFS_FIRST_FREE_OBJECTID` (256),
+the checker looks for the target's `INODE_ITEM` in this tree. If there is none,
+`DirItemOrphan` is reported. Both entry types are checked, so an orphan
+reference in either is caught.
 
 ### Error variants produced
 
-- **`InodeMissing { tree, ino }`** -- an objectid is referenced but has no
-  `INODE_ITEM`. (Note: this is detected indirectly through `DirItemOrphan` in
-  the current implementation.)
-- **`NlinkMismatch { tree, ino, expected, found }`** -- the inode's stored
-  nlink differs from the number of `INODE_REF` + `INODE_EXTREF` entries.
-- **`FileExtentOverlap { tree, ino, offset }`** -- two file extent items for
+- **`InodeMissing { tree, ino }`**: an objectid is referenced but has no
+  `INODE_ITEM`. The current implementation detects this indirectly, through
+  `DirItemOrphan`.
+- **`NlinkMismatch { tree, ino, expected, found }`**: the inode's stored
+  nlink differs from the number of `INODE_REF` and `INODE_EXTREF` entries.
+- **`FileExtentOverlap { tree, ino, offset }`**: two file extent items for
   the same inode overlap in file offset space.
-- **`DirItemOrphan { tree, parent_ino, name }`** -- a directory entry references
+- **`DirItemOrphan { tree, parent_ino, name }`**: a directory entry references
   an inode that has no `INODE_ITEM`.
-- **`DirSizeWrong { tree, ino, expected, found }`** -- a directory inode's
+- **`DirSizeWrong { tree, ino, expected, found }`**: a directory inode's
   stored size does not match the computed sum of DIR_INDEX name lengths times 2.
-- **`NbytesWrong { tree, ino, expected, found }`** -- a file inode's stored
+- **`NbytesWrong { tree, ino, expected, found }`**: a file inode's stored
   nbytes does not match the computed sum from extent items.
-- **`ReadError { logical, detail }`** -- I/O error reading the FS tree.
+- **`ReadError { logical, detail }`**: I/O error reading the FS tree.
 
 ## Phase 6: Checksums
 
@@ -512,33 +504,33 @@ contiguous range of data sectors:
 
 #### Phase 6a: tree walk and byte counting
 
-Always performed. The phase walks the csum tree and for each `EXTENT_CSUM` item,
+Always runs. The phase walks the csum tree. For each `EXTENT_CSUM` item it
 computes `num_csums = item_data_len / csum_size` and adds `item_data_len` to
-`total_csum_bytes`. This total is reported in the final summary.
+`total_csum_bytes`, which appears in the final summary.
 
 #### Phase 6b: data verification (optional)
 
-Only performed when `--check-data-csum` is passed. Only supported for CRC32C
-checksums; other checksum types emit a warning and skip verification.
+Runs only with `--check-data-csum`, and only for CRC32C checksums. Other
+checksum types emit a warning and skip verification.
 
-For each csum item, the phase iterates over every sector:
+For each sector covered by a csum item:
 1. Compute the logical address: `item.key.offset + i * sectorsize`.
-2. Read `sectorsize` bytes from that logical address via `reader.read_data`.
+2. Read `sectorsize` bytes from that logical address with `reader.read_data`.
 3. Compute `btrfs_csum_data(&data)` (standard CRC32C).
 4. Compare to the stored checksum (extracted from the item data at offset
    `i * csum_size`).
 5. If they differ, or if the read fails, report `CsumMismatch`.
 
-The `btrfs_csum_data` function uses the standard ISO 3309 CRC32C computation
-(seed = 0xFFFFFFFF, final XOR), matching the kernel's checksum for tree blocks
-and data. This is distinct from the raw CRC32C used in send streams.
+`btrfs_csum_data` uses the standard ISO 3309 CRC32C (seed = 0xFFFFFFFF, final
+XOR), matching the kernel's checksum for tree blocks and data. This differs from
+the raw CRC32C used in send streams.
 
 ### Error variants produced
 
-- **`CsumMismatch { logical }`** -- the computed CRC32C of the data at the
+- **`CsumMismatch { logical }`**: the computed CRC32C of the data at the
   given logical address does not match the stored checksum, or the data could
   not be read.
-- **`ReadError { logical, detail }`** -- I/O error reading the csum tree itself.
+- **`ReadError { logical, detail }`**: I/O error reading the csum tree itself.
 
 ## Phase 7: Root refs
 
@@ -560,17 +552,17 @@ using two item types:
   `offset = parent_root_id`. Contains the same fields as the corresponding
   `ROOT_REF`.
 
-These items form a bidirectional link. For every `ROOT_REF` there should be a
-matching `ROOT_BACKREF`, and vice versa. The fields (dirid, sequence, name)
-should be identical between the pair.
+Together they form a bidirectional link. Every `ROOT_REF` should have a
+matching `ROOT_BACKREF`, and vice versa. The dirid, sequence, and name fields
+should be identical in both.
 
 ### What it checks
 
 The phase walks the root tree and collects all `ROOT_REF` and `ROOT_BACKREF`
-items into two maps, keyed by `(child_root_id, parent_root_id)`. Both item
-types are parsed using `RootRef::parse` (the on-disk format is identical).
+items into two maps keyed by `(child_root_id, parent_root_id)`. Both item types
+are parsed with `RootRef::parse`, since their on-disk format is identical.
 
-Then two passes are made:
+It then makes two passes.
 
 #### Forward check: every ROOT_REF has a matching ROOT_BACKREF
 
@@ -589,25 +581,26 @@ mismatch errors.
 For each `(child, parent)` pair in the back refs map:
 - If no entry exists in the forward refs map, report `RootRefMissing`.
 
-Field comparison is not repeated in this direction because the forward check
-already caught any field mismatches for pairs that exist in both maps.
+Fields are not compared again in this direction. The forward check already
+caught mismatches for pairs present in both maps.
 
 ### Error variants produced
 
-- **`RootRefMissing { child, parent }`** -- a `ROOT_BACKREF` exists for this
-  child/parent pair but no corresponding `ROOT_REF` was found.
-- **`RootBackrefMissing { child, parent }`** -- a `ROOT_REF` exists for this
-  child/parent pair but no corresponding `ROOT_BACKREF` was found.
-- **`RootRefMismatch { child, parent, detail }`** -- both `ROOT_REF` and
+- **`RootRefMissing { child, parent }`**: a `ROOT_BACKREF` exists for this
+  child and parent pair but no matching `ROOT_REF` was found.
+- **`RootBackrefMissing { child, parent }`**: a `ROOT_REF` exists for this
+  child and parent pair but no matching `ROOT_BACKREF` was found.
+- **`RootRefMismatch { child, parent, detail }`**: both `ROOT_REF` and
   `ROOT_BACKREF` exist but one of their fields (dirid, sequence, or name)
   differs. The `detail` string describes which field mismatched and shows both
   values.
-- **`ReadError { logical, detail }`** -- I/O error reading the root tree.
+- **`ReadError { logical, detail }`**: I/O error reading the root tree.
 
 ## Complete error type reference
 
-All error variants are defined in `cli/src/check/errors.rs` as the `CheckError`
-enum. Each variant implements `Display` for human-readable error messages.
+All error variants belong to the `CheckError` enum in
+`cli/src/check/errors.rs`. Each variant implements `Display` for
+human-readable messages.
 
 ### Phase 1 errors
 
@@ -623,15 +616,15 @@ enum. Each variant implements `Display` for human-readable error messages.
 | `TreeBlockBadFsid` | `tree: &'static str`, `logical: u64` | Header fsid does not match filesystem |
 | `TreeBlockBadBytenr` | `tree: &'static str`, `logical: u64`, `header_bytenr: u64` | Header bytenr disagrees with read address |
 | `TreeBlockBadGeneration` | `tree: &'static str`, `logical: u64`, `block_gen: u64`, `super_gen: u64` | Block generation exceeds superblock generation |
-| `TreeBlockBadLevel` | `tree: &'static str`, `logical: u64`, `detail: String` | Level/type mismatch (leaf with level>0 or node with level==0) |
+| `TreeBlockBadLevel` | `tree: &'static str`, `logical: u64`, `detail: String` | Level and type disagree (leaf with level>0 or node with level==0) |
 | `KeyOrderViolation` | `tree: &'static str`, `logical: u64`, `index: usize` | Key at index is not strictly greater than previous key |
 
 ### Phase 3 errors
 
 | Variant | Fields | Description |
 |---------|--------|-------------|
-| `ExtentRefMismatch` | `bytenr: u64`, `expected: u64`, `found: u64` | Declared refs != counted refs (inline + standalone) |
-| `MissingExtentItem` | `bytenr: u64` | Tree block has no extent/metadata item in extent tree |
+| `ExtentRefMismatch` | `bytenr: u64`, `expected: u64`, `found: u64` | Declared refs != counted refs (inline and standalone) |
+| `MissingExtentItem` | `bytenr: u64` | Tree block has no extent or metadata item in extent tree |
 | `BackrefOwnerMismatch` | `bytenr: u64`, `actual_owner: u64`, `claimed_owners: Vec<u64>` | Actual tree block owner not in extent tree's backref list |
 | `BackrefOrphan` | `bytenr: u64`, `claimed_owner: u64` | Extent tree claims a backref but no tree block found |
 | `OverlappingExtent` | `bytenr: u64`, `length: u64`, `prev_end: u64` | Data extent overlaps with previous extent |
@@ -694,14 +687,14 @@ If `error_count > 0`, the process exits with code 1.
 
 ## Limitations and future work
 
-The following checks from the C reference implementation are not yet implemented:
+These features of the C reference are not yet implemented:
 
-- **`--mode lowmem`** differentiation (the current implementation uses the
-  "original" mode approach of collecting all items then cross-checking).
-- **Log tree checking** (the log tree is not walked in phase 2).
-- **`--repair`** (all checking is read-only).
-- **`--backup`** / `--tree-root` / `--chunk-root`** (alternate root selection).
-- **`--init-csum-tree`** / `--init-extent-tree`** (destructive reconstruction).
+- **`--mode lowmem`** differentiation. The current implementation uses the
+  "original" mode: collect all items, then cross-check.
+- **Log tree checking.** Phase 2 does not walk the log tree.
+- **`--repair`**. All checking is read-only.
+- **`--backup`, `--tree-root`, `--chunk-root`** (alternate root selection).
+- **`--init-csum-tree`, `--init-extent-tree`** (destructive reconstruction).
 - **`--qgroup-report`** (quota group consistency checking).
 - **`--subvol-extents`** (per-subvolume extent sharing analysis).
 - **Superblock generation cross-checking** between mirror copies.

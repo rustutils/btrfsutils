@@ -1,9 +1,8 @@
 # Chunks and Block Groups
 
-This document describes the btrfs chunk and block group system: how the
-filesystem maps logical addresses to physical device locations, how space
-is organized into typed block groups, and how these structures relate to
-each other on disk.
+This document describes the btrfs chunk and block group system: how logical
+addresses map to physical device locations, how space is organized into typed
+block groups, and how these structures relate on disk.
 
 All multi-byte integers in btrfs on-disk structures are little-endian.
 
@@ -15,39 +14,39 @@ Btrfs uses two distinct address spaces:
 **Logical address space.** Every byte of allocated space in the filesystem
 has a logical address. Tree node pointers, extent references, block group
 descriptors, and file extent records all use logical addresses. The logical
-address space is a flat 64-bit namespace shared across all devices in the
-filesystem. There is no inherent relationship between a logical address and
-any particular physical device.
+address space is a flat 64-bit namespace shared by all devices in the
+filesystem. A logical address has no inherent relationship to any physical
+device.
 
-**Physical address space.** Each device has its own independent physical
-address space, starting at byte 0. Physical addresses identify actual byte
-offsets on a block device.
+**Physical address space.** Each device has its own physical address space,
+starting at byte 0. Physical addresses are actual byte offsets on a block
+device.
 
-The separation exists for several reasons:
+The two are separate for several reasons:
 
 1. **Multi-device support.** A single logical address can map to stripes on
-   multiple physical devices (RAID1, DUP, RAID0, etc.) without the upper
-   layers of the filesystem needing to know which devices are involved.
+   several physical devices (RAID1, DUP, RAID0, and so on). The upper layers
+   of the filesystem don't need to know which devices are involved.
 
-2. **Relocation.** The balance and resize operations can move data between
-   physical locations while logical addresses remain stable. Since all
-   internal pointers use logical addresses, no tree rewriting is needed
-   when physical locations change.
+2. **Relocation.** Balance and resize can move data between physical
+   locations while logical addresses stay stable. All internal pointers use
+   logical addresses, so no trees need rewriting when physical locations
+   change.
 
-3. **Redundancy profiles.** The same logical address range can have multiple
-   physical copies (DUP, RAID1) or be striped across devices (RAID0) ---
-   this is invisible to everything above the chunk layer.
+3. **Redundancy profiles.** The same logical address range can have several
+   physical copies (DUP, RAID1) or be striped across devices (RAID0). This is
+   invisible to everything above the chunk layer.
 
-The mapping between the two address spaces is maintained by three
-cooperating data structures: **chunks** (logical to physical), **device
-extents** (physical to logical), and **block groups** (space accounting).
+Three cooperating structures maintain the mapping between the two address
+spaces: **chunks** (logical to physical), **device extents** (physical to
+logical), and **block groups** (space accounting).
 
 
 ## Chunks
 
-A chunk maps a contiguous range of logical addresses to one or more
-physical locations on devices. Chunks are the fundamental unit of the
-logical-to-physical translation.
+A chunk maps a contiguous range of logical addresses to one or more physical
+locations on devices. Chunks are the basic unit of logical-to-physical
+translation.
 
 ### CHUNK_ITEM On-Disk Structure
 
@@ -103,33 +102,31 @@ To resolve a logical address to a physical location:
 
 5. For striped profiles (RAID0, RAID10, RAID5, RAID6): the stripe index
    and offset within the stripe are computed from `within`, `stripe_len`,
-   and `num_stripes`/`sub_stripes`.
+   `num_stripes`, and `sub_stripes`.
 
-The `ChunkTreeCache` in `disk/src/chunk.rs` implements this as a `BTreeMap`
-keyed by logical start address, with `resolve()` returning the physical
-offset on the first stripe (sufficient for SINGLE, DUP, and RAID1 reads).
+`ChunkTreeCache` in `disk/src/chunk.rs` implements this as a `BTreeMap` keyed
+by logical start address. Its `resolve()` returns the physical offset on the
+first stripe, which is enough for SINGLE, DUP, and RAID1 reads.
 
 ### Chunk Ownership
 
 The `owner` field in the chunk item is always `BTRFS_EXTENT_TREE_OBJECTID`
-(2). This is a historical artifact --- it does not mean the extent tree
-"owns" the chunk in any meaningful sense. The chunk tree is its own
-independent tree (tree objectid 3) with its root pointer stored directly
-in the superblock.
+(2). This is a historical artifact. It does not mean the extent tree "owns"
+the chunk in any meaningful sense. The chunk tree is an independent tree
+(tree objectid 3) whose root pointer is stored directly in the superblock.
 
 
 ## Block Groups
 
 A block group is the unit of space management in btrfs. Each block group
-corresponds to exactly one chunk and tracks how much of that chunk's space
-is used. Block groups carry type information that determines what kind of
-data can be stored in them.
+corresponds to exactly one chunk and tracks how much of that chunk's space is
+used. Its type determines what kind of data it can hold.
 
 ### BLOCK_GROUP_ITEM On-Disk Structure
 
-Block group items are stored either in the extent tree (traditional
-layout) or in the dedicated block-group tree (when the
-`BLOCK_GROUP_TREE` compat_ro feature is enabled).
+Block group items are stored in the extent tree (traditional layout), or in
+the dedicated block-group tree when the `BLOCK_GROUP_TREE` compat_ro feature is
+enabled.
 
 ```
 Key: (logical_offset, BLOCK_GROUP_ITEM, length)
@@ -146,8 +143,8 @@ The item payload is a `btrfs_block_group_item` (24 bytes):
 
 ### Type Flags
 
-The `flags` field is a bitfield combining a chunk type (what gets stored)
-and a RAID profile (how it is stored):
+The `flags` field combines a chunk type (what is stored) and a RAID profile
+(how it is stored):
 
 **Chunk type bits (mutually exclusive in practice):**
 
@@ -157,14 +154,14 @@ and a RAID profile (how it is stored):
 | SYSTEM     | 0x002  | Chunk tree blocks (needed to bootstrap reads)|
 | METADATA   | 0x004  | Tree node blocks (all trees except chunk)    |
 
-The kernel also supports `DATA|METADATA` (0x005) for the `mixed-bg`
-feature, where data and metadata share block groups.
+The kernel also supports `DATA|METADATA` (0x005) for the `mixed-bg` feature,
+in which data and metadata share block groups.
 
 **RAID profile bits:**
 
 | Flag       | Value          | Meaning                                  |
 |------------|----------------|------------------------------------------|
-| (none)     | 0              | SINGLE --- one copy, one device          |
+| (none)     | 0              | SINGLE: one copy, one device             |
 | RAID0      | 0x008          | Striped across N devices, no redundancy  |
 | RAID1      | 0x010          | Mirrored on 2 devices                   |
 | DUP        | 0x020          | Two copies on the same device            |
@@ -174,30 +171,29 @@ feature, where data and metadata share block groups.
 | RAID1C3    | 0x200          | Mirrored on 3 devices                   |
 | RAID1C4    | 0x400          | Mirrored on 4 devices                   |
 
-For example, a metadata block group using DUP has flags `0x024`
+For example, a DUP metadata block group has flags `0x024`
 (`METADATA | DUP`). A system block group with no profile bits set is
-SYSTEM|single (`0x002`).
+SYSTEM, single (`0x002`).
 
-The `BlockGroupFlags` type in `disk/src/items.rs` represents these
-flags as a `bitflags` struct with methods `type_name()` (returns
-"Data", "Metadata", "System", etc.) and `profile_name()` (returns
-"RAID1", "DUP", "single", etc.).
+The `BlockGroupFlags` type in `disk/src/items.rs` represents these flags as a
+`bitflags` struct. Its `type_name()` method returns "Data", "Metadata",
+"System", and so on. Its `profile_name()` method returns "RAID1", "DUP",
+"single", and so on.
 
 ### Block Group to Chunk Relationship
 
-Every block group has a 1:1 correspondence with a chunk. The block
-group's key `(logical_offset, BLOCK_GROUP_ITEM, length)` must match
-a chunk item's `(256, CHUNK_ITEM, logical_offset)` with matching
-`length`. The block group's `flags` must agree with the chunk item's
-`type` field.
+Block groups and chunks correspond 1:1. The block group's key
+`(logical_offset, BLOCK_GROUP_ITEM, length)` must match a chunk item's
+`(256, CHUNK_ITEM, logical_offset)` with the same `length`. The block group's
+`flags` must agree with the chunk item's `type` field.
 
-This invariant is verified by `btrfs check` (see section 8).
+`btrfs check` verifies this invariant (see [Cross-Checks](#cross-checks)).
 
 
 ## Device Extents
 
-Device extents are the inverse mapping of chunks: they record which
-ranges of physical space on each device are allocated to which chunks.
+Device extents are the inverse of chunks. They record which ranges of
+physical space on each device belong to which chunks.
 
 ### DEV_EXTENT On-Disk Structure
 
@@ -220,17 +216,17 @@ The item payload is a `btrfs_dev_extent` (48 bytes):
 
 ### Relationship to Chunks and Stripes
 
-For each stripe in a chunk item, there is a corresponding device extent.
-If a chunk at logical address L has `num_stripes` stripes, then:
+Each stripe in a chunk item has a corresponding device extent. If a chunk at
+logical address L has `num_stripes` stripes, then:
 
 - Stripe 0: `(stripe[0].devid, DEV_EXTENT, stripe[0].offset)` with
-  `chunk_offset = L` and `length = chunk.length` (for SINGLE/DUP/RAID1).
+  `chunk_offset = L` and `length = chunk.length` (for SINGLE, DUP, and RAID1).
 
-- Stripe 1 (for DUP/RAID1): `(stripe[1].devid, DEV_EXTENT,
+- Stripe 1 (for DUP and RAID1): `(stripe[1].devid, DEV_EXTENT,
   stripe[1].offset)` with `chunk_offset = L` and `length = chunk.length`.
 
 For a DUP metadata chunk on a single device, both stripes have the same
-`devid` but different physical offsets, producing two device extents on
+`devid` but different physical offsets. This produces two device extents on
 the same device.
 
 ### Device Items
@@ -270,20 +266,19 @@ in the superblock.
 
 ### Circular Dependency
 
-To read any tree, you need to resolve logical addresses to physical
-offsets, which requires the chunk tree. But the chunk tree is itself
-stored at a logical address that needs resolution. This creates a
-circular dependency.
+Reading any tree means resolving logical addresses to physical offsets, which
+requires the chunk tree. But the chunk tree itself is stored at a logical
+address that needs resolving. This is a circular dependency.
 
 ### sys_chunk_array
 
-Btrfs solves this with the `sys_chunk_array` --- a 2048-byte buffer
-embedded directly in the superblock. This array contains a subset of the
-chunk tree: specifically, the chunk items for SYSTEM-type block groups.
+Btrfs solves this with the `sys_chunk_array`, a 2048-byte buffer embedded in
+the superblock. It holds a subset of the chunk tree: the chunk items for
+SYSTEM block groups.
 
-The SYSTEM block group contains the chunk tree's root block. By parsing
-the sys_chunk_array, the filesystem driver can locate the chunk tree on
-disk without needing a chunk tree to find it.
+The SYSTEM block group contains the chunk tree's root block. By parsing the
+sys_chunk_array, the filesystem driver can locate the chunk tree on disk
+without a chunk tree.
 
 The array format is a packed sequence of `(btrfs_disk_key, btrfs_chunk)`
 pairs:
@@ -305,11 +300,11 @@ of the 2048-byte buffer are valid.
 
 ### Bootstrap Sequence
 
-The full bootstrap sequence for reading a btrfs filesystem is:
+The full bootstrap sequence for reading a btrfs filesystem:
 
 1. **Read the superblock** at the primary offset (64 KiB). Verify the
    magic number, checksum, and fsid. The superblock provides:
-   - `sys_chunk_array` + `sys_chunk_array_size`
+   - `sys_chunk_array` and `sys_chunk_array_size`
    - `chunk_root` (logical address of the chunk tree root)
    - `root` (logical address of the root tree root)
    - `nodesize`, `sectorsize`, `csum_type`
@@ -323,23 +318,22 @@ The full bootstrap sequence for reading a btrfs filesystem is:
    this step, the cache can resolve any logical address in the
    filesystem.
 
-4. **Read the root tree** starting from `root`. This tree contains
-   `ROOT_ITEM` entries for every other tree (extent, device, FS, csum,
-   free-space, etc.), providing their root block logical addresses.
+4. **Read the root tree** starting from `root`. This tree contains a
+   `ROOT_ITEM` for every other tree (extent, device, FS, csum, free-space,
+   and so on), giving the logical address of each tree's root block.
 
 5. **Read any other tree** by looking up its `ROOT_ITEM` in the root
    tree and using the `ChunkTreeCache` to resolve addresses.
 
-The `seed_from_sys_chunk_array()` function in `disk/src/chunk.rs`
-implements step 2. The `BlockReader` in `disk/src/reader.rs` orchestrates
-the full bootstrap sequence.
+`seed_from_sys_chunk_array()` in `disk/src/chunk.rs` implements step 2.
+`BlockReader` in `disk/src/reader.rs` drives the full bootstrap sequence.
 
 
 ## RAID Profiles
 
 The RAID profile determines how a chunk's logical space maps to physical
-device locations. The profile affects `num_stripes`, `sub_stripes`, and
-the interpretation of stripe entries.
+device locations. It affects `num_stripes`, `sub_stripes`, and how stripe
+entries are interpreted.
 
 ### SINGLE
 
@@ -348,8 +342,8 @@ num_stripes = 1
 sub_stripes = 0
 ```
 
-One stripe, one device. Logical offset maps 1:1 to a physical offset on
-a single device. No redundancy.
+One stripe on one device. The logical offset maps 1:1 to a physical offset
+on that device. No redundancy.
 
 ```
 Logical:   [--------chunk------]
@@ -363,9 +357,9 @@ num_stripes = 2
 sub_stripes = 0
 ```
 
-Two stripes on the **same** device at different physical offsets. Both
-stripes contain identical data. Provides protection against localized
-media errors but not device failure.
+Two stripes on the **same** device at different physical offsets, with
+identical data. This protects against localized media errors but not against
+device failure.
 
 ```
 Logical:   [--------chunk------]
@@ -445,8 +439,8 @@ num_stripes = N  (must be even, >= 4)
 sub_stripes = 2
 ```
 
-Striped mirrors: data is striped across `N/2` mirror groups, each group
-having `sub_stripes` (2) copies. Combines RAID0 throughput with RAID1
+Striped mirrors: data is striped across `N/2` mirror groups, each with
+`sub_stripes` (2) copies. This combines RAID0 throughput with RAID1
 redundancy.
 
 ### RAID5 and RAID6
@@ -456,15 +450,15 @@ RAID5: num_stripes = N, sub_stripes = 0, one parity stripe
 RAID6: num_stripes = N, sub_stripes = 0, two parity stripes
 ```
 
-Data is striped with rotating parity. RAID5 tolerates one device failure;
+Data is striped with rotating parity. RAID5 tolerates one device failure.
 RAID6 tolerates two.
 
 
 ## Allocation Sizing
 
-When creating a new filesystem (`mkfs`), the initial chunk sizes are
-computed from the total device size. The formulas, implemented in
-`mkfs/src/layout.rs` (`ChunkLayout::new`), are:
+When `mkfs` creates a new filesystem, it computes the initial chunk sizes from
+the total device size. The formulas, implemented in `ChunkLayout::new` in
+`mkfs/src/layout.rs`, are below.
 
 ### System Block Group
 
@@ -474,8 +468,8 @@ Fixed size and position:
 - Profile: always SINGLE
 - Contains: the chunk tree root block
 
-The first 1 MiB of the device is reserved. The primary superblock sits
-at offset 64 KiB within this reserved area.
+The first 1 MiB of the device is reserved. The primary superblock sits at
+offset 64 KiB inside it.
 
 ### Metadata Block Group
 
@@ -515,14 +509,14 @@ Examples:
 ### Minimum Device Size
 
 For a single-device filesystem with DUP metadata and SINGLE data, the
-minimum physical space needed is:
+minimum physical space is:
 
 ```
 1 MiB (reserved) + 4 MiB (system) + 2 * meta_size + data_size
 ```
 
-With the minimum sizes (meta = 32 MiB, data = 64 MiB), this works out to
-approximately 133 MiB. A 100 MiB device will fail with "device too small".
+With the minimum sizes (meta = 32 MiB, data = 64 MiB), this is about 133 MiB.
+A 100 MiB device fails with "device too small".
 
 ### Physical Layout Summary
 
@@ -542,20 +536,20 @@ Logical address space:
   [5M + meta_size .. 5M + meta + data)  Data chunk
 ```
 
-Note the physical space for DUP metadata is `2 * meta_size`, but the
-logical address range is only `meta_size`. Both physical stripes map to
-the same logical range.
+DUP metadata takes `2 * meta_size` of physical space, but its logical address
+range is only `meta_size`. Both physical stripes map to the same logical
+range.
 
 
 ## Cross-Checks
 
-The `btrfs check` command (implemented in `cli/src/check/chunks.rs`)
-verifies the consistency of the chunk/block-group/device-extent triad.
+`btrfs check` (in `cli/src/check/chunks.rs`) verifies that chunks, block
+groups, and device extents are consistent with each other.
 
 ### Chunk-to-Block-Group Check
 
-For every chunk in the chunk tree, there must be a matching block group
-item. The check walks the chunk tree cache and verifies that
+Every chunk in the chunk tree must have a matching block group item. The
+check walks the chunk tree cache and verifies
 `block_groups.contains_key(chunk.logical)` for each chunk.
 
 If a chunk has no corresponding block group, `btrfs check` reports:
@@ -566,9 +560,9 @@ ChunkMissingBlockGroup { logical }
 
 ### Block-Group-to-Chunk Check
 
-For every block group item (from the extent tree or block-group tree),
-there must be a matching chunk. The check verifies that
-`chunk_cache.lookup(bg_logical)` succeeds for each block group.
+Every block group item (from the extent tree or block-group tree) must have
+a matching chunk. The check verifies that `chunk_cache.lookup(bg_logical)`
+succeeds for each block group.
 
 If a block group has no corresponding chunk, `btrfs check` reports:
 
@@ -578,9 +572,9 @@ BlockGroupMissingChunk { logical }
 
 ### Device Extent Overlap Check
 
-All device extents for each device are collected from the device tree,
-sorted by physical offset, and checked for overlaps. For consecutive
-extents on the same device, the check verifies:
+The device extents of each device are collected from the device tree, sorted
+by physical offset, and checked for overlaps. For consecutive extents on the
+same device, the check verifies:
 
 ```
 extent[i].offset >= extent[i-1].offset + extent[i-1].length
@@ -594,10 +588,9 @@ DeviceExtentOverlap { devid, offset }
 
 ### Block Group Source
 
-When the `BLOCK_GROUP_TREE` compat_ro feature is enabled, block group
-items are stored in a separate tree (tree objectid 10) rather than in the
-extent tree. The check code handles both cases by selecting the
-appropriate tree root:
+When the `BLOCK_GROUP_TREE` compat_ro feature is enabled, block group items
+live in a separate tree (tree objectid 10) instead of the extent tree. The
+check code handles both cases by picking the right tree root:
 
 ```rust
 let bg_root = block_group_tree_root.unwrap_or(extent_root);
@@ -618,17 +611,16 @@ Items are sorted by key, so DEV_ITEMs (objectid 1) come before
 CHUNK_ITEMs (objectid 256).
 
 The chunk tree root pointer is stored directly in the superblock's
-`chunk_root` field --- it does not go through the root tree like other
-trees. This is because the chunk tree is needed to read the root tree
-itself.
+`chunk_root` field. Unlike other trees, it does not go through the root tree,
+because the chunk tree is needed to read the root tree itself.
 
 ### mkfs Chunk Tree Construction
 
 When `mkfs` builds the chunk tree (`build_chunk_tree` in
 `mkfs/src/mkfs.rs`), it creates:
 
-1. One `DEV_ITEM` per device, with `bytes_used` set to the sum of all
-   chunk stripes on that device.
+1. One `DEV_ITEM` per device, with `bytes_used` set to the total size of
+   all chunk stripes on that device.
 
 2. Three `CHUNK_ITEM` entries:
    - System chunk at `SYSTEM_GROUP_OFFSET` (1 MiB), size 4 MiB
@@ -636,9 +628,9 @@ When `mkfs` builds the chunk tree (`build_chunk_tree` in
      stripes
    - Data chunk after metadata, with profile-dependent stripes
 
-The system chunk item uses `sectorsize` for `io_align` and `io_width`
-(matching the kernel's bootstrap behavior), while the metadata and data
-chunks use `STRIPE_LEN` (64 KiB).
+The system chunk item uses `sectorsize` for `io_align` and `io_width`,
+matching the kernel's bootstrap behavior. The metadata and data chunks use
+`STRIPE_LEN` (64 KiB).
 
 
 ## The Device Tree
@@ -667,8 +659,8 @@ When `mkfs` builds the device tree (`build_dev_tree` in
    - Data chunk: one DEV_EXTENT per stripe
 
 All device tree items are collected, sorted by key, and written in order.
-This is necessary because items span multiple device IDs and physical
-offsets that are not naturally ordered by construction.
+Sorting is needed because the items span several device IDs and physical
+offsets, and construction does not produce them in key order.
 
 
 ## Superblock Mirrors
@@ -682,26 +674,23 @@ device:
 | 1      | 64 MiB     | 4 KiB  |
 | 2      | 256 GiB    | 4 KiB  |
 
-The formula is: mirror 0 at 65536 bytes; mirror N (N > 0) at
-`16384 << (12 * N)` bytes. Mirrors are only written if the device is
-large enough to contain them.
+Mirror 0 is at 65536 bytes. Mirror N (N > 0) is at `16384 << (12 * N)` bytes.
+A mirror is written only if the device is large enough to hold it.
 
-The superblock contains the `sys_chunk_array` bootstrap data, root
+The superblock contains the `sys_chunk_array` bootstrap data, the root
 pointers for the chunk tree and root tree, the embedded device item for
 device 1, and all filesystem-level metadata (UUID, label, feature flags,
-generation counter, `bytes_used`, etc.).
+generation counter, `bytes_used`, and so on).
 
-All three mirrors contain identical data for a given generation. On mount,
-the kernel reads all available mirrors and uses the one with the highest
-valid generation, providing resilience against corruption of the primary
-superblock.
+All three mirrors hold identical data for a given generation. On mount, the
+kernel reads all available mirrors and uses the one with the highest valid
+generation, which protects against corruption of the primary superblock.
 
 
 ## Tree Block Placement in mkfs
 
-During filesystem creation, tree blocks must be placed at specific logical
-addresses within the chunks. The `BlockLayout` struct in
-`mkfs/src/layout.rs` assigns addresses:
+During filesystem creation, tree blocks go at specific logical addresses
+within the chunks. `BlockLayout` in `mkfs/src/layout.rs` assigns them:
 
 **Chunk tree block:** placed at `SYSTEM_GROUP_OFFSET` (1 MiB) in the
 system chunk. This is the only tree block in the system block group.
@@ -722,9 +711,9 @@ nodesize:
 | `meta_logical + 96K` | Data-reloc tree |
 | `meta_logical + 112K` | Block-group tree (if enabled) |
 
-For `--rootdir` mode, where trees may require multiple blocks, the
-`BlockAllocator` hands out sequential addresses from the system and
-metadata chunks, supporting trees of arbitrary size.
+In `--rootdir` mode, trees may need multiple blocks. `BlockAllocator` hands
+out sequential addresses from the system and metadata chunks, so trees can be
+any size.
 
 System chunk bytes used = nodesize (one chunk tree block).
 Metadata chunk bytes used = `7 * nodesize` (or 8 with block-group tree).

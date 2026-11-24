@@ -1,19 +1,18 @@
 # Btrfs Transaction Infrastructure: On-Disk Format Specification
 
-This document is the sole reference for implementing the `btrfs-transaction`
+This document is the reference for implementing the `btrfs-transaction`
 crate. It describes the on-disk format, invariants, and protocols needed to
-safely modify a btrfs filesystem from userspace. 
+modify a btrfs filesystem safely from userspace.
 
 ## Tree block layout
 
-A btrfs filesystem stores its metadata in a B-tree. Each tree block (also
-called a node or extent buffer) is `nodesize` bytes (typically 16,384, but
-can be 4,096 to 65,536). Tree blocks are identified by their logical byte
-address (bytenr), which is translated to a physical device offset via the
-chunk tree.
+A btrfs filesystem stores its metadata in B-trees. Each tree block (also
+called a node or extent buffer) is `nodesize` bytes: typically 16,384, but
+anywhere from 4,096 to 65,536. A tree block is identified by its logical byte
+address (bytenr). The chunk tree translates it to a physical device offset.
 
-Every tree block begins with a 101-byte header, followed by either leaf
-items (level 0) or internal node key pointers (level > 0).
+Every tree block starts with a 101-byte header. Leaf items (level 0) or
+internal node key pointers (level > 0) follow it.
 
 ### Header (101 bytes)
 
@@ -34,7 +33,7 @@ All multi-byte integers are little-endian on disk.
 ### Key (17 bytes)
 
 Every item and pointer in the B-tree is identified by a three-part key.
-On disk this is the `btrfs_disk_key` (little-endian):
+On disk this is the little-endian `btrfs_disk_key`:
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
@@ -42,13 +41,13 @@ On disk this is the `btrfs_disk_key` (little-endian):
 | 8 | 1 | `type` | Key type discriminator (see section 7). |
 | 9 | 8 | `offset` | Type-specific secondary value (file offset, extent size, parent ID, etc.). |
 
-Keys are compared as a tuple `(objectid, type, offset)` in that order, all
-as unsigned integers. This defines the sort order within every B-tree.
+Keys compare as the tuple `(objectid, type, offset)`, in that order, all as
+unsigned integers. This is the sort order within every B-tree.
 
 ### Leaf layout (level 0)
 
-A leaf contains item descriptors that grow forward from the header, and item
-data payloads that grow backward from the end of the block. Free space is
+A leaf holds item descriptors, which grow forward from the header, and item
+data payloads, which grow backward from the end of the block. Free space is
 the gap between them.
 
 ```
@@ -180,30 +179,30 @@ The superblock is the entry point for reading a btrfs filesystem. It is a
 
 ### Fields updated on every transaction commit
 
-When committing a transaction, the following superblock fields are updated:
+A transaction commit updates these superblock fields:
 
-1. `generation` — incremented by 1.
-2. `root` — logical bytenr of the (possibly new) root tree root block.
-3. `root_level` — level of the root tree root.
-4. `chunk_root` — logical bytenr of the chunk tree root (if chunk tree
+1. `generation`: incremented by 1.
+2. `root`: logical bytenr of the (possibly new) root tree root block.
+3. `root_level`: level of the root tree root.
+4. `chunk_root`: logical bytenr of the chunk tree root (if the chunk tree
    was modified).
-5. `chunk_root_generation` — generation of the chunk tree root.
-6. `chunk_root_level` — level of the chunk tree root.
-7. `bytes_used` — updated to reflect allocations/frees.
-8. `log_root` — set to 0 after log replay, or updated if log is active.
-9. `super_roots` — one of the 4 backup root slots is written (rotating).
-10. `csum` — recomputed last, covering bytes 32..4095.
+5. `chunk_root_generation`: generation of the chunk tree root.
+6. `chunk_root_level`: level of the chunk tree root.
+7. `bytes_used`: updated to reflect allocations and frees.
+8. `log_root`: set to 0 after log replay, or updated if a log is active.
+9. `super_roots`: one of the 4 backup root slots is written (rotating).
+10. `csum`: recomputed last, covering bytes 32..4095.
 
 The commit writes the superblock to all mirrors. The superblock write is
-the atomic commit point: if power is lost before the superblock is written,
-the previous generation's state is intact because COW ensures old blocks
-are never overwritten (see section 3).
+the atomic commit point. If power is lost before it is written, the previous
+generation's state is intact, because COW never overwrites old blocks (see
+section 3).
 
 ### Backup roots (167 bytes each, 4 entries)
 
-The superblock contains 4 rotating backup root entries. On each commit, one
-slot is overwritten (cycling 0 → 1 → 2 → 3 → 0 → ...). These are used for
-recovery when the primary root pointers are corrupt.
+The superblock holds 4 rotating backup root entries. Each commit overwrites
+one slot, cycling 0 → 1 → 2 → 3 → 0 → .... They are used for recovery when
+the primary root pointers are corrupt.
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
@@ -253,7 +252,7 @@ recovery when the primary root pointers are corrupt.
 |-----|------|-----|-------------|
 | 0 | `MIXED_BACKREF` | 0x1 | Modern backreference format. |
 | 1 | `DEFAULT_SUBVOL` | 0x2 | Non-default default subvolume set. |
-| 2 | `MIXED_GROUPS` | 0x4 | Mixed data+metadata block groups. |
+| 2 | `MIXED_GROUPS` | 0x4 | Mixed data and metadata block groups. |
 | 3 | `COMPRESS_LZO` | 0x8 | LZO compression used. |
 | 4 | `COMPRESS_ZSTD` | 0x10 | ZSTD compression used. |
 | 5 | `BIG_METADATA` | 0x20 | Metadata blocks > 4 KiB (always set with modern mkfs for `nodesize` > 4096). |
@@ -273,7 +272,7 @@ recovery when the primary root pointers are corrupt.
 | Bit | Name | Hex | Description |
 |-----|------|-----|-------------|
 | 0 | `FREE_SPACE_TREE` | 0x1 | Free space tree present. |
-| 1 | `FREE_SPACE_TREE_VALID` | 0x2 | Free space tree is valid/consistent. |
+| 1 | `FREE_SPACE_TREE_VALID` | 0x2 | Free space tree is valid and consistent. |
 | 2 | `VERITY` | 0x4 | fs-verity enabled files present. |
 | 3 | `BLOCK_GROUP_TREE` | 0x8 | Separate block group tree. |
 
@@ -283,17 +282,17 @@ recovery when the primary root pointers are corrupt.
 
 ### System chunk array
 
-The `sys_chunk_array` (2,048 bytes at offset 811) contains bootstrap chunk
-entries needed to read the chunk tree itself. Format: packed sequence of
-`(btrfs_disk_key, btrfs_chunk)` pairs. The `sys_chunk_array_size` field says
-how many bytes are valid. Parsing: read key (17 bytes), then chunk header
-(48 bytes) + stripes (`num_stripes` * 32 bytes), repeat until consumed.
+The `sys_chunk_array` (2,048 bytes at offset 811) holds the bootstrap chunk
+entries needed to read the chunk tree itself. It is a packed sequence of
+`(btrfs_disk_key, btrfs_chunk)` pairs. The `sys_chunk_array_size` field gives
+the number of valid bytes. To parse it, read a key (17 bytes), then the chunk
+header (48 bytes) and its stripes (`num_stripes` * 32 bytes). Repeat until all
+valid bytes are consumed.
 
 ## Copy-on-write (COW) protocol
 
-Btrfs never modifies tree blocks in place (except when a block was already
-allocated in the current transaction). This is the fundamental mechanism
-that provides crash consistency.
+Btrfs never modifies tree blocks in place, except blocks already allocated
+in the current transaction. This is what provides crash consistency.
 
 ### COW a tree block
 
@@ -312,11 +311,11 @@ When a transaction needs to modify a tree block:
    transaction generation.
 
 5. **Update the new block's header.** Set `bytenr` to the new logical
-   address, `generation` to the current transaction generation.
+   address and `generation` to the current transaction generation.
 
-6. **Queue old block for freeing.** The old block's extent reference is
-   decremented. If its refcount reaches 0, the space is freed (but only
-   after the transaction commits, to maintain crash consistency).
+6. **Queue old block for freeing.** Decrement the old block's extent
+   reference. If its refcount reaches 0, the space is freed, but only after
+   the transaction commits, to maintain crash consistency.
 
 7. **COW cascades upward.** If the parent was not yet COWed, it must be
    COWed first (step 1 check), then updated. This cascades up to the root.
@@ -349,7 +348,7 @@ The commit point is the superblock write. Before the superblock is updated:
   to the old state of all trees.
 
 If power is lost before the superblock write completes, the filesystem
-reverts to the previous generation. No fsck needed.
+reverts to the previous generation. No fsck is needed.
 
 ## Transaction lifecycle
 
@@ -363,7 +362,8 @@ A transaction groups multiple tree modifications into a single atomic commit.
 
 ### Modify
 
-All tree modifications (insert, delete, update items) go through COW:
+All tree modifications (inserting, deleting, and updating items) go through
+COW:
 - `search_slot` descends the tree, COWing each block along the path.
 - Item operations modify the COWed leaf.
 - Reference counts are updated for allocated and freed extents.
@@ -372,8 +372,8 @@ All tree modifications (insert, delete, update items) go through COW:
 
 1. **Flush pending reference updates.** Process all queued extent reference
    changes (delayed refs, see section 5.3). This may modify the extent tree,
-   which may COW more blocks and generate more ref updates. Repeat until
-   stable (no more pending updates).
+   which may COW more blocks and generate more ref updates. Repeat until no
+   updates are pending.
 
 2. **Update root items.** For every tree whose root block changed, update
    its `root_item` in the root tree (fields: `bytenr`, `generation`,
@@ -383,11 +383,11 @@ All tree modifications (insert, delete, update items) go through COW:
    correct checksums. Each block's checksum covers bytes 32..`nodesize`.
 
 4. **Prepare superblock.** Update the superblock fields listed in section
-   2.2. Write one backup root entry (rotating through slots 0-3).
-   Recompute the superblock checksum.
+   2.2. Write one backup root entry, rotating through slots 0-3. Recompute
+   the superblock checksum.
 
-5. **Write superblock.** Write the superblock to all mirrors. Issue fsync
-   to ensure durability.
+5. **Write superblock.** Write the superblock to all mirrors, then fsync for
+   durability.
 
 ### Abort
 
@@ -397,21 +397,21 @@ remains at the previous generation.
 ## Extent tree and reference counting
 
 The extent tree (tree ID 2) tracks which logical address ranges are
-allocated and who references them. Every allocated extent (both data and
-metadata) has an entry in the extent tree.
+allocated and who references them. Every allocated extent, data or metadata,
+has an entry in the extent tree.
 
 ### Extent items
 
 There are two key types for extent records:
 
-**`EXTENT_ITEM` (type 168):** Used for data extents and (on older filesystems
-without `SKINNY_METADATA`) for tree blocks.
+**`EXTENT_ITEM` (type 168):** Used for data extents, and for tree blocks on
+older filesystems without `SKINNY_METADATA`.
 - Key: `(logical_bytenr, EXTENT_ITEM=168, size_in_bytes)`
 - Data: `extent_item` header (24 bytes), optionally `tree_block_info` (18 bytes),
   then inline backreferences.
 
-**`METADATA_ITEM` (type 169):** Used for tree blocks when `SKINNY_METADATA`
-incompat flag is set. This is the modern default.
+**`METADATA_ITEM` (type 169):** Used for tree blocks when the
+`SKINNY_METADATA` incompat flag is set. This is the modern default.
 - Key: `(logical_bytenr, METADATA_ITEM=169, tree_level)`
 - Data: `extent_item` header (24 bytes), then inline backreferences.
   No `tree_block_info` (the level is in the key offset, and the first key
@@ -438,9 +438,9 @@ Backreferences record who uses an extent. They come in two forms: inline
 (packed inside the extent item's data) and standalone (separate items in
 the extent tree).
 
-**Inline backreferences** follow the extent item header (and tree_block_info
-if present). Each inline ref has a 1-byte type followed by an 8-byte offset,
-then type-specific data:
+**Inline backreferences** follow the extent item header and, if present, the
+`tree_block_info`. Each inline ref is a 1-byte type, an 8-byte offset, and
+type-specific data:
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
@@ -458,18 +458,18 @@ The backref types:
 | 172       | `EXTENT_OWNER_REF`    | Root tree ID          | (none)        | 9 bytes           |
 
 **`TREE_BLOCK_REF` (type 176):** A tree block is referenced by a specific
-tree (identified by root ID). The `offset` field IS the root objectid.
-No additional data. Each such ref contributes 1 to the extent's refcount.
+tree, identified by root ID. The `offset` field is the root objectid. There
+is no additional data. Each such ref contributes 1 to the extent's refcount.
 
 **`SHARED_BLOCK_REF` (type 182):** A tree block is referenced by another tree
-block (identified by its bytenr) rather than by root ID. This happens
-during snapshots. The `offset` field IS the parent block's bytenr. Each
-such ref contributes 1 to the extent's refcount.
+block, identified by its bytenr, rather than by root ID. This happens with
+snapshots. The `offset` field is the parent block's bytenr. Each such ref
+contributes 1 to the extent's refcount.
 
 **`EXTENT_DATA_REF` (type 178):** A data extent is referenced by a file. The
-inline form packs the following 28 bytes immediately after the type byte
-(the 8-byte `offset` from the generic header is actually the first field
-`root` of this struct — parse carefully):
+inline form packs the following 28 bytes immediately after the type byte.
+Parse carefully: the 8-byte `offset` of the generic header is actually
+`root`, the first field of this struct.
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
@@ -481,8 +481,8 @@ inline form packs the following 28 bytes immediately after the type byte
 Each `EXTENT_DATA_REF` contributes `count` to the extent's refcount.
 
 **`SHARED_DATA_REF` (type 184):** A data extent is referenced through a shared
-tree block (snapshot). The `offset` field is the parent block bytenr.
-Additional 4 bytes:
+tree block (snapshot). The `offset` field is the parent block bytenr. It has
+4 additional bytes:
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
@@ -490,8 +490,9 @@ Additional 4 bytes:
 
 Each `SHARED_DATA_REF` contributes `count` to the extent's refcount.
 
-**Standalone backreferences:** When inline refs don't fit in the extent item
-(rare, happens with many references), they overflow to standalone items:
+**Standalone backreferences:** When inline refs don't fit in the extent item,
+which is rare and happens with many references, they overflow to standalone
+items:
 
 - `TREE_BLOCK_REF_KEY` (176): key `(extent_bytenr, 176, root_id)`, no data.
 - `SHARED_BLOCK_REF_KEY` (182): key `(extent_bytenr, 182, parent_bytenr)`, no data.
@@ -510,10 +511,10 @@ Each `SHARED_DATA_REF` contributes `count` to the extent's refcount.
 
 ### Delayed references
 
-Modifying a tree generates many reference count updates (every COWed block
-creates a new ref and removes an old ref). Processing each one immediately
-would cause excessive extent tree modifications. Instead, reference updates
-are queued and batched:
+Modifying a tree generates many reference count updates: every COWed block
+adds a new ref and removes an old one. Processing each immediately would
+cause excessive extent tree modifications. Instead, reference updates are
+queued and batched:
 
 1. When a block is COWed, queue: `+1 ref at new_bytenr`, `-1 ref at
    old_bytenr`.
@@ -547,8 +548,8 @@ extents (physical device reservations).
 
 ### Block group item (24 bytes)
 
-Stored in the extent tree (or block group tree if `BLOCK_GROUP_TREE`
-compat_ro flag is set).
+Stored in the extent tree, or in the block group tree if the
+`BLOCK_GROUP_TREE` compat_ro flag is set.
 
 Key: `(logical_offset, BLOCK_GROUP_ITEM=192, length)`
 
@@ -558,9 +559,9 @@ Key: `(logical_offset, BLOCK_GROUP_ITEM=192, length)`
 | 8 | 8 | `chunk_objectid` | Always 256 (`BTRFS_FIRST_CHUNK_TREE_OBJECTID`). |
 | 16 | 8 | `flags` | Type + RAID profile (see 6.5). |
 
-Block groups are the allocation units: when allocating an extent, the
-allocator finds a block group of the right type (DATA, METADATA, or SYSTEM)
-with enough free space.
+Block groups are the allocation units. To allocate an extent, the allocator
+finds a block group of the right type (DATA, METADATA, or SYSTEM) with enough
+free space.
 
 ### Chunk item (48 + num_stripes * 32 bytes)
 
@@ -591,8 +592,8 @@ Each stripe (32 bytes):
 
 **Chunk-to-physical resolution:** For a logical address `L` within a chunk
 starting at `chunk_start` with a single stripe at device offset `phys`:
-`physical = phys + (L - chunk_start)`. RAID profiles use more complex
-mapping; see the next section.
+`physical = phys + (L - chunk_start)`. RAID profiles use a more complex
+mapping, described in the next section.
 
 ### RAID stripe routing
 
@@ -606,7 +607,7 @@ Given a logical address `offset` inside a chunk with `stripe_len`
    stripe_offset = offset % stripe_len
    ```
 
-   `stripe_nr` is the row within the chunk; `stripe_offset` is the byte
+   `stripe_nr` is the row within the chunk. `stripe_offset` is the byte
    offset within the row.
 
 2. **Per-profile column selection** (which device index in
@@ -636,17 +637,17 @@ Given a logical address `offset` inside a chunk with `stripe_len`
 
 4. **Multi-row buffers**: a write of `len` bytes where `len >
    (stripe_len - stripe_offset)` spans multiple rows. Each row gets its
-   own column selection and per-device offset; each row carries the
-   slice of the buffer corresponding to that row's bytes.
+   own column selection and per-device offset, and carries the slice of
+   the buffer that corresponds to that row's bytes.
 
 For tree blocks, `nodesize <= stripe_len` always holds (default 16 KiB
-nodesize, 64 KiB stripe_len), so a tree block falls entirely in one row
-and never triggers buffer splitting. Buffer splitting applies only to
-data extents larger than `stripe_len - stripe_offset`.
+nodesize, 64 KiB stripe_len). A tree block therefore falls entirely in one
+row and never needs buffer splitting. Buffer splitting applies only to data
+extents larger than `stripe_len - stripe_offset`.
 
-**Reads** can pick any one column from each row's set: every stripe in
-the row carries a valid copy for mirrored profiles, and the per-row
-column is uniquely determined for striped-only profiles.
+**Reads** can pick any one column from each row's set. For mirrored
+profiles, every stripe in the row carries a valid copy. For striped-only
+profiles, the per-row column is uniquely determined.
 
 ### Device extent (48 bytes)
 
@@ -667,8 +668,8 @@ device.
 
 ### Device item (98 bytes)
 
-Stored in the chunk tree (and embedded in the superblock for the local
-device).
+Stored in the chunk tree. The superblock also embeds the item for the local
+device.
 
 Key: `(1, DEV_ITEM=216, devid)` (objectid 1 = `BTRFS_DEV_ITEMS_OBJECTID`)
 
@@ -699,16 +700,16 @@ Key: `(1, DEV_ITEM=216, devid)` (objectid 1 = `BTRFS_DEV_ITEMS_OBJECTID`)
 | 3 | `RAID0` | 0x8 | Striped. |
 | 4 | `RAID1` | 0x10 | Mirrored (2 copies). |
 | 5 | `DUP` | 0x20 | Duplicated on same device. |
-| 6 | `RAID10` | 0x40 | Striped + mirrored. |
+| 6 | `RAID10` | 0x40 | Striped and mirrored. |
 | 7 | `RAID5` | 0x80 | RAID5. |
 | 8 | `RAID6` | 0x100 | RAID6. |
 | 9 | `RAID1C3` | 0x200 | Mirrored (3 copies). |
 | 10 | `RAID1C4` | 0x400 | Mirrored (4 copies). |
 
-A block group's flags combine exactly one type (`DATA`, `SYSTEM`, `METADATA`) with
-zero or one RAID profile. If no RAID profile bit is set, the block group is
-`SINGLE` (no replication, but the virtual `SINGLE` bit 48 = 0x1000000000000
-is used in some display contexts only).
+A block group's flags combine exactly one type (`DATA`, `SYSTEM`, or
+`METADATA`) with zero or one RAID profile. If no RAID profile bit is set, the
+block group is `SINGLE` (no replication). The virtual `SINGLE` bit 48
+(0x1000000000000) appears only in some display contexts.
 
 ### Relationships between structures
 
@@ -723,9 +724,9 @@ For each allocated region of logical space:
 4. The **device item** in the chunk tree tracks total and used bytes per
    device.
 
-All four must be consistent. When allocating a new block group (rare in
-rescue operations), all four structures must be created atomically within
-one transaction.
+All four must be consistent. Allocating a new block group (rare in rescue
+operations) must create all four structures atomically within one
+transaction.
 
 ## Tree types and key reference
 
@@ -747,8 +748,8 @@ one transaction.
 | 12 | RAID stripe tree | Root tree (`ROOT_ITEM` objectid=12) |
 | 256+ | User subvolume/snapshot trees | Root tree (`ROOT_ITEM` objectid=N) |
 
-The root tree is the master index. It contains a ROOT_ITEM for every other
-tree (except itself and the chunk tree, whose roots are in the superblock).
+The root tree is the master index. It holds a `ROOT_ITEM` for every other
+tree except itself and the chunk tree, whose roots are in the superblock.
 
 ### Root item (439 bytes used, padded to 496 bytes)
 
@@ -782,10 +783,10 @@ Stored in root tree with key `(tree_id, ROOT_ITEM=132, 0)`.
 | 379 | 12 | `rtime` | Receive time. |
 | 391 | 64 | `reserved` | Zero-filled. |
 
-Fields updated when a tree's root block changes (during commit):
-- `bytenr` — new root block address.
-- `generation` and `generation_v2` — current transaction generation.
-- `level` — root block level.
+Fields updated during commit when a tree's root block changes:
+- `bytenr`: new root block address.
+- `generation` and `generation_v2`: current transaction generation.
+- `level`: root block level.
 
 ### Inode item (176 bytes)
 
@@ -879,8 +880,8 @@ Both use the same data format:
 
 Regular file content lives in `EXTENT_DATA` items in the FS tree, keyed
 `(inode#, EXTENT_DATA, file_offset)`. Each item describes a contiguous
-range of the file's logical bytes; consecutive items must cover
-non-overlapping ranges. Three extent types exist:
+range of the file's logical bytes. Consecutive items must cover
+non-overlapping ranges. There are three extent types:
 
 - `BTRFS_FILE_EXTENT_INLINE` (0): data embedded directly in the leaf.
 - `BTRFS_FILE_EXTENT_REG` (1): pointer to a separate data extent on disk.
@@ -908,12 +909,11 @@ non-overlapping ranges. Three extent types exist:
 
 ### Inline body
 
-For inline extents the bytes after the 21-byte header are the (possibly
-compressed) file data. There is no `disk_bytenr`, no extent-tree entry,
-and no csum entry: the inline payload is covered by the FS tree leaf's
-own checksum.
+For inline extents, the bytes after the 21-byte header are the file data,
+possibly compressed. There is no `disk_bytenr`, no extent tree entry, and no
+csum entry. The FS tree leaf's own checksum covers the inline payload.
 
-For LZO inline extents the embedded bytes carry an additional framing
+For LZO inline extents, the embedded bytes carry an additional framing
 header: `[4B total_len LE] [4B seg_len LE] [lzo1x compressed bytes]`,
 where `total_len` includes the 8-byte framing header itself.
 
@@ -925,20 +925,20 @@ These invariants are enforced by `btrfs check` and must hold for any
 - **Regular and prealloc extents**: `num_bytes` must be sectorsize-aligned
   and non-zero. `disk_num_bytes` must also be sectorsize-aligned.
   `num_bytes + offset <= ram_bytes`.
-- **Inline extents**: total embedded payload (compressed or not) must
-  fit in a leaf, capped at `min(nodesize - 147, sectorsize - 1)` bytes
-  on a default filesystem. The 147 = `HEADER_SIZE` (101) + `ITEM_SIZE`
-  (25) + 21-byte file-extent header. The `sectorsize - 1` cap is btrfs's
-  rule that sector-or-larger files must use a regular extent.
-- **`INODE.nbytes`**: sum of `num_bytes` for every regular/prealloc
-  extent (where `disk_bytenr > 0`) plus the inline payload length for
-  any inline extent. For non-compressed extents `num_bytes` is the
-  sector-aligned logical size, NOT the on-disk byte count. For
-  compressed extents `num_bytes` is still the sector-aligned logical
-  size — the smaller `disk_num_bytes` is not what gets summed.
-- **`INODE.size`**: the file's logical size in bytes. May be smaller
-  than the sum of `num_bytes` (the unwritten tail in the last extent
-  reads as zero up to `size`).
+- **Inline extents**: the total embedded payload, compressed or not, must
+  fit in a leaf. It is capped at `min(nodesize - 147, sectorsize - 1)` bytes
+  on a default filesystem. 147 is `HEADER_SIZE` (101) + `ITEM_SIZE` (25) +
+  the 21-byte file extent header. The `sectorsize - 1` cap comes from the
+  btrfs rule that files of a sector or larger must use a regular extent.
+- **`INODE.nbytes`**: the sum of `num_bytes` for every regular and prealloc
+  extent (where `disk_bytenr > 0`), plus the inline payload length of any
+  inline extent. For uncompressed extents, `num_bytes` is the sector-aligned
+  logical size, NOT the on-disk byte count. For compressed extents,
+  `num_bytes` is still the sector-aligned logical size. The smaller
+  `disk_num_bytes` is not what gets summed.
+- **`INODE.size`**: the file's logical size in bytes. It may be smaller
+  than the sum of `num_bytes`. The unwritten tail of the last extent reads
+  as zero up to `size`.
 
 ### LZO regular framing
 
@@ -954,31 +954,30 @@ format:
 - `total_len` is the total framed buffer size, including the 4-byte
   header.
 - After each segment, if fewer than 4 bytes remain in the current
-  sector (i.e. the next 4-byte length header would cross a sector
-  boundary), zero-pad to the next sector boundary so the next segment's
-  length header is sector-aligned.
+  sector (so the next 4-byte length header would cross a sector
+  boundary), zero-pad to the next sector boundary. This keeps the next
+  segment's length header sector-aligned.
 
-This per-sector independence lets the kernel decompress individual
-sectors without reading neighbours.
+Because sectors are independent, the kernel can decompress a single sector
+without reading its neighbours.
 
 ### Holes
 
 With the `NO_HOLES` incompat flag (default on modern filesystems), gaps
-in the `file_offset` sequence indicate holes — no `EXTENT_DATA` item is
-written for the unmapped range. Without `NO_HOLES`, hole regions are
-recorded as regular extents with `disk_bytenr == 0` and
-`disk_num_bytes == 0`.
+in the `file_offset` sequence are holes. No `EXTENT_DATA` item is written
+for the unmapped range. Without `NO_HOLES`, holes are recorded as regular
+extents with `disk_bytenr == 0` and `disk_num_bytes == 0`.
 
 ## Checksum computation
 
 ### Tree block checksums
 
 The checksum field (bytes 0..31 of the header) covers bytes 32..`nodesize`.
-For `CRC32C` (type 0), the checksum is 4 bytes stored at offset 0, with
-bytes 4..31 zero-padded.
+For `CRC32C` (type 0), the checksum is 4 bytes at offset 0, and bytes 4..31
+are zero.
 
-Computation: standard ISO 3309 `CRC32C` (initial seed 0xFFFFFFFF, final XOR
-with 0xFFFFFFFF) over the data region bytes 32..`nodesize`.
+It is computed as standard ISO 3309 `CRC32C` (initial seed 0xFFFFFFFF, final
+XOR with 0xFFFFFFFF) over bytes 32..`nodesize`.
 
 ### Superblock checksums
 
@@ -995,15 +994,14 @@ The item data is a packed array of checksums, one per sector. For
 `item_size / csum_size_for_type`. Sectors are consecutive starting at
 the key's offset (`logical_bytenr`).
 
-Computation: standard ISO 3309 `CRC32C` (the same algorithm as for tree
-blocks; initial seed `0xFFFFFFFF`, final XOR with `0xFFFFFFFF`). The
-csum input is the on-disk bytes of the data extent — for compressed
-extents, that is the compressed+sector-padded payload, NOT the
-uncompressed original.
+It is computed as standard ISO 3309 `CRC32C`, the same algorithm as for
+tree blocks (initial seed `0xFFFFFFFF`, final XOR with `0xFFFFFFFF`). The
+input is the on-disk bytes of the data extent. For compressed extents, that
+is the compressed, sector-padded payload, NOT the uncompressed original.
 
-Note this is distinct from the `raw_crc32c` (no final invert) used by
-`EXTENT_DATA_REF_KEY` hashes and by the send-stream protocol. On-disk
-csum-tree entries always use the standard variant.
+This differs from the `raw_crc32c` (no final inversion) used by
+`EXTENT_DATA_REF_KEY` hashes and by the send stream protocol. On-disk csum
+tree entries always use the standard variant.
 
 A single csum item may cover multiple consecutive sectors. The
 practical upper bound for a single item's payload is roughly
@@ -1012,8 +1010,8 @@ room for a future split. Adjacent items at sector-contiguous logical
 addresses may be merged into one larger item, but `btrfs check`
 accepts either layout.
 
-Inline extents have no csum entries — the data lives in the leaf and
-is covered by the leaf's own header checksum.
+Inline extents have no csum entries. The data lives in the leaf and is
+covered by the leaf's header checksum.
 
 `NODATASUM` extents (inode flag `BTRFS_INODE_NODATASUM`) skip csum
 computation entirely. `btrfs check` rejects csum entries for
@@ -1031,29 +1029,29 @@ low_crc  = raw_crc32c(seed=low_crc,    offset.to_le_bytes())
 hash     = (high_crc as u64) << 31 ^ (low_crc as u64)
 ```
 
-Here `raw_crc32c` means NO final XOR — the raw CRC register value. This
-can be recovered from the standard API: `raw = !standard_crc32c(data)`
-when seed is `!0`, or equivalently `raw = crc32c_with_seed(!0, data)` if
-the API exposes the seed.
+Here `raw_crc32c` means NO final XOR: the raw CRC register value. It can be
+recovered from the standard API as `raw = !standard_crc32c(data)` when the
+seed is `!0`, or equivalently as `raw = crc32c_with_seed(!0, data)` if the
+API exposes the seed.
 
 ## B-tree operations
 
-This section describes the algorithms for searching, inserting, and
-deleting items in a btrfs B-tree. These are standard B-tree algorithms
-adapted for the btrfs leaf/node layout and COW model.
+This section describes how to search, insert, and delete items in a btrfs
+B-tree. These are standard B-tree algorithms, adapted to the btrfs leaf and
+node layout and the COW model.
 
 ### Binary search within a block
 
 Given a block and a target key, find the slot:
 
-**In a leaf:** Binary search over items[0..nritems-1] comparing keys. If
-found, return (true, slot). If not found, return (false, slot) where slot
+**In a leaf:** Binary search over items[0..nritems-1], comparing keys. If
+found, return (true, slot). If not found, return (false, slot), where slot
 is the insertion point (the index of the first item with key > target).
 
-**In a node:** Binary search over ptrs[0..nritems-1] comparing keys. The
-result is the slot of the child subtree that could contain the target key.
-Specifically, find the largest slot where `ptrs[slot].key <= target`. If
-the target is less than all keys, use slot 0.
+**In a node:** Binary search over ptrs[0..nritems-1], comparing keys. The
+result is the slot of the child subtree that could contain the target key:
+the largest slot where `ptrs[slot].key <= target`. If the target is less
+than all keys, use slot 0.
 
 ### Search (search_slot)
 
@@ -1069,9 +1067,8 @@ to a leaf:
 6. If level == 0: done. If the key was found, `path.slots[0]` points to
    it. If not found, `path.slots[0]` is the insertion point.
 
-When `ins_len > 0` (insert operation), the search checks whether the target
-leaf has enough free space. If not, it triggers a leaf split before
-returning.
+When `ins_len > 0` (an insert), the search checks whether the target leaf
+has enough free space. If not, it splits the leaf before returning.
 
 ### Item insertion
 
@@ -1096,20 +1093,20 @@ Given a search path pointing to items to delete (slot, count):
 
 1. If deleting items in the middle: shift items at
    [slot+count..`nritems`-1] left by `count * 25` bytes.
-2. Shift data: move data belonging to remaining items to fill the gap
-   left by deleted items' data. Update `offset` fields accordingly.
+2. Shift data: move the remaining items' data to fill the gap left by the
+   deleted items' data. Update the `offset` fields to match.
 3. Decrement `nritems` by count.
-4. If the leaf becomes empty: remove the key pointer from the parent node
-   and free the leaf block. If the parent also becomes empty (or has only
-   one child), rebalance upward.
+4. If the leaf becomes empty, remove its key pointer from the parent node
+   and free the leaf block. If the parent also becomes empty or has only
+   one child, rebalance upward.
 
 ### Leaf split
 
 When a leaf is too full for an insertion:
 
 1. Allocate a new leaf block.
-2. Find the split point: aim for roughly half the data in each leaf.
-   The split point should be at an item boundary (never split an item).
+2. Find the split point, aiming for roughly half the data in each leaf.
+   The split point must be at an item boundary. Never split an item.
 3. Copy items [split..`nritems`-1] and their data to the new leaf.
 4. Update the original leaf's `nritems`.
 5. Insert a new key pointer in the parent node pointing to the new leaf.
@@ -1140,11 +1137,11 @@ Before splitting, try to redistribute items to a neighboring sibling:
   end of the full leaf to the start of the right sibling. Update the
   parent's key for the right sibling.
 
-This reduces tree height growth. It's an optimization, not required for
-correctness. The same applies to nodes (push key pointers to siblings).
+This slows tree height growth. It is an optimization and not required for
+correctness. The same applies to nodes, which push key pointers to siblings.
 
-After deletion, if a leaf or node is less than ~25% full, consider merging
-with a sibling. This is also optional for correctness but prevents
+After a deletion, if a leaf or node is less than ~25% full, consider merging
+it with a sibling. This is also not required for correctness, but prevents
 excessive tree bloat.
 
 ### Path advancement
@@ -1156,8 +1153,8 @@ excessive tree bloat.
 3. Walk back down, always taking slot 0, until reaching a leaf.
 4. Update the path at each level.
 
-`prev_leaf(path)`: similar but in reverse (walk up until slot > 0,
-decrement, walk down taking the last slot at each level).
+`prev_leaf(path)`: the same in reverse. Walk up until slot > 0, decrement,
+then walk down taking the last slot at each level.
 
 ## Free space management
 
@@ -1166,17 +1163,17 @@ addresses are free within each block group.
 
 ### Extent tree scanning
 
-The simplest approach: walk the extent tree within a block group's logical
-range. Allocated extents are contiguous `EXTENT_ITEM`/`METADATA_ITEM` entries.
-Gaps between them are free space. This is O(n) in the number of extents
-but works without additional infrastructure.
+The simplest approach is to walk the extent tree within a block group's
+logical range. Allocated extents are contiguous `EXTENT_ITEM` and
+`METADATA_ITEM` entries, and the gaps between them are free space. This is
+O(n) in the number of extents but needs no additional infrastructure.
 
 ### Free space tree (optional optimization)
 
 If the `FREE_SPACE_TREE` compat_ro flag is set, the free space tree (tree ID
-10) provides pre-computed free space information per block group.
+10) provides precomputed free space information per block group.
 
-For each block group, there is a `FREE_SPACE_INFO` item:
+Each block group has a `FREE_SPACE_INFO` item:
 Key: `(block_group_start, FREE_SPACE_INFO=198, block_group_length)`
 
 | Offset | Size | Field | Description |
@@ -1184,15 +1181,15 @@ Key: `(block_group_start, FREE_SPACE_INFO=198, block_group_length)`
 | 0 | 4 | `extent_count` | Number of free extents. |
 | 4 | 4 | `flags` | Bit 0: `USING_BITMAPS` (bitmap mode). |
 
-If not using bitmaps, free extents are stored as:
-Key: `(start, FREE_SPACE_EXTENT=199, length)` — no item data.
+Without bitmaps, each free extent is an item with no data:
+Key: `(start, FREE_SPACE_EXTENT=199, length)`.
 
-If using bitmaps:
-Key: `(start, FREE_SPACE_BITMAP=200, length)` — item data is a bitmap
-where each bit represents one sector (1 = free).
+With bitmaps, the item data is a bitmap where each bit represents one
+sector (1 = free):
+Key: `(start, FREE_SPACE_BITMAP=200, length)`.
 
-The free space tree must be kept in sync with the extent tree during
-transactions. When allocating or freeing extents, update both.
+Transactions must keep the free space tree in sync with the extent tree.
+Allocating or freeing an extent updates both.
 
 ### Allocation strategy
 
@@ -1219,13 +1216,13 @@ Delete all items from the UUID tree and remove its root item.
 3. Delete items in batches (walk forward, delete, repeat until tree empty).
 4. Delete the `ROOT_ITEM` for tree ID 9 from the root tree.
 5. Free all tree blocks that belonged to the UUID tree (decrement refs).
-6. Set `uuid_tree_generation` = 0 in the superblock (tells the kernel to
-   rebuild the UUID tree on next mount).
+6. Set `uuid_tree_generation` = 0 in the superblock. This tells the kernel
+   to rebuild the UUID tree on the next mount.
 7. Commit transaction.
 
 ### clear-ino-cache
 
-Remove leftover inode cache items (from the deprecated v1 inode cache).
+Remove leftover items from the deprecated v1 inode cache.
 
 1. Start transaction.
 2. For each FS tree (tree IDs 5, 256+): search for `INODE_ITEM` with
@@ -1238,16 +1235,16 @@ Remove leftover inode cache items (from the deprecated v1 inode cache).
 
 Two modes: v1 (free space inode cache) and v2 (free space tree).
 
-**v1:** Similar to clear-ino-cache — delete free space cache inodes
-(objectid = `BTRFS_FREE_SPACE_OBJECTID` = -11) from each block group.
+**v1:** Like clear-ino-cache. Delete the free space cache inodes
+(objectid = `BTRFS_FREE_SPACE_OBJECTID` = -11) of each block group.
 
-**v2:** Delete the entire free space tree (tree ID 10) like clear-uuid-tree.
-Clear the `FREE_SPACE_TREE_VALID` compat_ro flag so the kernel rebuilds it
-on next mount.
+**v2:** Delete the entire free space tree (tree ID 10), as in
+clear-uuid-tree. Clear the `FREE_SPACE_TREE_VALID` compat_ro flag so the
+kernel rebuilds it on the next mount.
 
 ### fix-device-size
 
-Correct device and superblock size fields when they're inconsistent.
+Correct device and superblock size fields when they are inconsistent.
 
 1. Start transaction.
 2. Walk the device tree to find all `DEV_EXTENT` items for each device.
@@ -1264,13 +1261,13 @@ Verify and repair data checksums using mirror redundancy.
 2. Walk the csum tree (`EXTENT_CSUM` items).
 3. For each checksummed range, read data from each available mirror.
 4. Verify each mirror's data against the stored checksum.
-5. If a checksum mismatch is found and a good mirror exists: optionally
-   update the csum item to match the good mirror's data (or rewrite the
-   data from the good mirror).
+5. If a checksum mismatch is found and a good mirror exists, optionally
+   update the csum item to match the good mirror's data, or rewrite the
+   data from the good mirror.
 6. Commit transaction.
 
-Requires: extent tree walking for backref resolution (to report which
-files are affected), multi-device I/O for reading mirrors.
+This requires extent tree walking for backref resolution (to report which
+files are affected) and multi-device I/O for reading mirrors.
 
 ### chunk-recover
 
@@ -1282,5 +1279,5 @@ Rebuild the chunk tree by scanning device surfaces for tree blocks.
 3. Rebuild the chunk tree with the recovered mappings.
 4. Commit.
 
-This is the most complex rescue operation and requires extensive device
+This is the most complex rescue operation. It needs extensive device
 scanning infrastructure beyond basic tree operations.
