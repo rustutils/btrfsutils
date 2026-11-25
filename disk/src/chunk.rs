@@ -451,7 +451,9 @@ fn plan_io(
     }
 
     let stripe_len = mapping.stripe_len;
-    debug_assert!(stripe_len > 0, "chunk stripe_len must be non-zero");
+    if stripe_len == 0 {
+        return None; // malformed chunk
+    }
 
     // Depending on the profile, only some columns of `mapping.stripes`
     // are independently addressable. SINGLE, DUP, RAID1*: 1 column (the
@@ -467,7 +469,9 @@ fn plan_io(
         }
         ChunkProfile::Raid5 | ChunkProfile::Raid6 => unreachable!(),
     };
-    debug_assert!(factor >= 1, "factor must be >= 1");
+    if factor == 0 {
+        return None; // malformed chunk
+    }
 
     let mut placements: Vec<StripePlacement> = Vec::new();
     let mut buf_offset: usize = 0;
