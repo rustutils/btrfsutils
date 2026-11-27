@@ -623,11 +623,26 @@ pub fn filesystem_open_with_cache<R: Read + Seek>(
 ///
 /// # Errors
 ///
-/// Returns an error if any tree block read fails.
+/// Returns an error if any tree block read fails or if recursion depth exceeds the limit.
 pub fn read_chunk_tree<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
 ) -> io::Result<()> {
+    read_chunk_tree_depth(reader, root_logical, 0)
+}
+
+fn read_chunk_tree_depth<R: Read + Seek>(
+    reader: &mut BlockReader<R>,
+    root_logical: u64,
+    depth: u32,
+) -> io::Result<()> {
+    if depth > MAX_TREE_DEPTH {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("tree recursion depth {depth} exceeds maximum {MAX_TREE_DEPTH}"),
+        ));
+    }
+
     let block = reader.read_tree_block(root_logical)?;
 
     match &*block {
@@ -651,7 +666,7 @@ pub fn read_chunk_tree<R: Read + Seek>(
         }
         TreeBlock::Node { ptrs, .. } => {
             for ptr in ptrs {
-                read_chunk_tree(reader, ptr.blockptr)?;
+                read_chunk_tree_depth(reader, ptr.blockptr, depth + 1)?;
             }
         }
     }
@@ -675,6 +690,9 @@ pub fn read_root_tree<R: Read + Seek>(
     Ok(tree_roots)
 }
 
+/// Maximum depth allowed during recursive tree walks to prevent stack exhaustion.
+const MAX_TREE_DEPTH: u32 = 16;
+
 /// Tree traversal order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Traversal {
@@ -688,7 +706,7 @@ pub enum Traversal {
 ///
 /// # Errors
 ///
-/// Returns an error if any tree block cannot be read.
+/// Returns an error if any tree block cannot be read or if recursion depth exceeds the limit.
 pub fn tree_walk<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
@@ -697,7 +715,7 @@ pub fn tree_walk<R: Read + Seek>(
 ) -> io::Result<()> {
     match traversal {
         Traversal::Bfs => tree_walk_bfs(reader, root_logical, visitor),
-        Traversal::Dfs => tree_walk_dfs(reader, root_logical, visitor),
+        Traversal::Dfs => tree_walk_dfs(reader, root_logical, visitor, 0),
     }
 }
 
@@ -705,13 +723,21 @@ fn tree_walk_dfs<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     logical: u64,
     visitor: &mut dyn FnMut(&TreeBlock),
+    depth: u32,
 ) -> io::Result<()> {
+    if depth > MAX_TREE_DEPTH {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("tree recursion depth {depth} exceeds maximum {MAX_TREE_DEPTH}"),
+        ));
+    }
+
     let block = reader.read_tree_block(logical)?;
     visitor(&block);
 
     if let TreeBlock::Node { ptrs, .. } = &*block {
         for ptr in ptrs {
-            tree_walk_dfs(reader, ptr.blockptr, visitor)?;
+            tree_walk_dfs(reader, ptr.blockptr, visitor, depth + 1)?;
         }
     }
 
@@ -761,7 +787,7 @@ fn tree_walk_bfs<R: Read + Seek>(
 ///
 /// # Errors
 ///
-/// Returns an error only if the root block itself cannot be read.
+/// Returns an error only if the root block itself cannot be read or if recursion depth exceeds the limit.
 pub fn tree_walk_tolerant<R: Read + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
@@ -774,7 +800,7 @@ pub fn tree_walk_tolerant<R: Read + Seek>(
 
     if let TreeBlock::Node { ptrs, .. } = &block {
         for ptr in ptrs {
-            tree_walk_tolerant_dfs(reader, ptr.blockptr, visitor, on_error);
+            tree_walk_tolerant_dfs(reader, ptr.blockptr, visitor, on_error, 1);
         }
     }
 
@@ -786,7 +812,17 @@ fn tree_walk_tolerant_dfs<R: Read + Seek>(
     logical: u64,
     visitor: &mut dyn FnMut(&[u8], &TreeBlock),
     on_error: &mut dyn FnMut(u64, &io::Error),
+    depth: u32,
 ) {
+    if depth > MAX_TREE_DEPTH {
+        let err = io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("tree recursion depth {depth} exceeds maximum {MAX_TREE_DEPTH}"),
+        );
+        on_error(logical, &err);
+        return;
+    }
+
     let buf = match reader.read_block(logical) {
         Ok(b) => b,
         Err(e) => {
@@ -799,7 +835,7 @@ fn tree_walk_tolerant_dfs<R: Read + Seek>(
 
     if let TreeBlock::Node { ptrs, .. } = &block {
         for ptr in ptrs {
-            tree_walk_tolerant_dfs(reader, ptr.blockptr, visitor, on_error);
+            tree_walk_tolerant_dfs(reader, ptr.blockptr, visitor, on_error, depth + 1);
         }
     }
 }
@@ -813,13 +849,30 @@ fn tree_walk_tolerant_dfs<R: Read + Seek>(
 ///
 /// # Errors
 ///
-/// Returns an error if the root block cannot be read or any write fails.
+/// Returns an error if the root block cannot be read, any write fails, or if recursion depth exceeds the limit.
 pub fn tree_walk_mut<R: Read + Write + Seek>(
     reader: &mut BlockReader<R>,
     root_logical: u64,
     csum_type: superblock::ChecksumType,
     visitor: &mut dyn FnMut(&mut Vec<u8>, &TreeBlock) -> bool,
 ) -> io::Result<()> {
+    tree_walk_mut_depth(reader, root_logical, csum_type, visitor, 0)
+}
+
+fn tree_walk_mut_depth<R: Read + Write + Seek>(
+    reader: &mut BlockReader<R>,
+    root_logical: u64,
+    csum_type: superblock::ChecksumType,
+    visitor: &mut dyn FnMut(&mut Vec<u8>, &TreeBlock) -> bool,
+    depth: u32,
+) -> io::Result<()> {
+    if depth > MAX_TREE_DEPTH {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("tree recursion depth {depth} exceeds maximum {MAX_TREE_DEPTH}"),
+        ));
+    }
+
     let mut buf = reader.read_block(root_logical)?;
     let block = TreeBlock::parse(&buf);
 
@@ -835,7 +888,7 @@ pub fn tree_walk_mut<R: Read + Write + Seek>(
     }
 
     for ptr in child_ptrs {
-        tree_walk_mut(reader, ptr, csum_type, visitor)?;
+        tree_walk_mut_depth(reader, ptr, csum_type, visitor, depth + 1)?;
     }
 
     Ok(())
@@ -936,7 +989,7 @@ pub fn tree_stats_collect<R: Read + Seek>(
         levels: root_level + 1,
     };
 
-    walk_stats(reader, &root_block, &mut stats, find_inline, nodesize)?;
+    walk_stats(reader, &root_block, &mut stats, find_inline, nodesize, 0)?;
     Ok(stats)
 }
 
@@ -947,7 +1000,15 @@ fn walk_stats<R: Read + Seek>(
     stats: &mut TreeStats,
     find_inline: bool,
     nodesize: u64,
+    depth: u32,
 ) -> io::Result<()> {
+    if depth > MAX_TREE_DEPTH {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("tree recursion depth {depth} exceeds maximum {MAX_TREE_DEPTH}"),
+        ));
+    }
+
     let level = block.header().level;
     let bytenr = block.header().bytenr;
 
@@ -995,7 +1056,7 @@ fn walk_stats<R: Read + Seek>(
 
             for ptr in ptrs {
                 let child = reader.read_tree_block(ptr.blockptr)?;
-                walk_stats(reader, &child, stats, find_inline, nodesize)?;
+                walk_stats(reader, &child, stats, find_inline, nodesize, depth + 1)?;
 
                 let cur = ptr.blockptr;
                 if last_block + nodesize == cur {
@@ -1037,6 +1098,22 @@ fn collect_root_items<R: Read + Seek>(
     logical: u64,
     tree_roots: &mut BTreeMap<u64, (u64, u64)>,
 ) -> io::Result<()> {
+    collect_root_items_depth(reader, logical, tree_roots, 0)
+}
+
+fn collect_root_items_depth<R: Read + Seek>(
+    reader: &mut BlockReader<R>,
+    logical: u64,
+    tree_roots: &mut BTreeMap<u64, (u64, u64)>,
+    depth: u32,
+) -> io::Result<()> {
+    if depth > MAX_TREE_DEPTH {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("tree recursion depth {depth} exceeds maximum {MAX_TREE_DEPTH}"),
+        ));
+    }
+
     let block = reader.read_tree_block(logical)?;
 
     match &*block {
@@ -1068,7 +1145,7 @@ fn collect_root_items<R: Read + Seek>(
         }
         TreeBlock::Node { ptrs, .. } => {
             for ptr in ptrs {
-                collect_root_items(reader, ptr.blockptr, tree_roots)?;
+                collect_root_items_depth(reader, ptr.blockptr, tree_roots, depth + 1)?;
             }
         }
     }
